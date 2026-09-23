@@ -39,7 +39,7 @@ public class AccountPasskeyAppService : AbpAdminAppService, IAccountPasskeyAppSe
         {
             Id = user.Id.ToString(),
             Name = user.UserName ?? user.Email ?? user.Id.ToString(),
-            DisplayName = user.Name.IsNullOrWhiteSpace() ? user.UserName : user.Name
+            DisplayName = user.Name.IsNullOrWhiteSpace() ? user.UserName ?? user.Id.ToString() : user.Name
         });
 
         return new PasskeyJsonDto { Json = json };

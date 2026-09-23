@@ -307,7 +307,7 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
 
         // 使缓存失效：host 侧写入时版本号替换会让所有租户的合并缓存条目一并作废。
         // 挂在 UoW 提交后执行，避免"版本已换、事务未提交"窗口里并发读按新版本 key 回填旧值。
-        UnitOfWorkManager.Current.OnCompleted(async () =>
+        UnitOfWorkManager.Current!.OnCompleted(async () =>
         {
             try
             {
@@ -337,7 +337,7 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
         await _languageTextRepository.DeleteAsync(CurrentTenant.Id, resourceName, cultureName, name);
 
         // 使缓存失效（同 UpdateAsync：提交后执行 + 版本号对全体租户生效）
-        UnitOfWorkManager.Current.OnCompleted(async () =>
+        UnitOfWorkManager.Current!.OnCompleted(async () =>
         {
             try
             {

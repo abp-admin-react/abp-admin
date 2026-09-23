@@ -22,7 +22,7 @@ public class GetLanguageTextsInput : PagedAndSortedResultRequestDto
     /// </summary>
     [Required]
     [StringLength(LanguageTextConsts.MaxCultureNameLength)]
-    public string? CultureName { get; set; }
+    public string CultureName { get; set; } = string.Empty;
 
     /// <summary>
     /// 基准文化对照（BaseValue 列），可选；含父文化回退，不传则 BaseValue 为 null。

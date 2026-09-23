@@ -251,7 +251,7 @@ public class ScheduledJobScheduler : DomainService, IScheduledJobScheduler
         Guid scheduledJobId,
         string jobName,
         bool success,
-        string message,
+        string? message,
         CancellationToken cancellationToken)
     {
         if (!triggeredByUserId.HasValue)

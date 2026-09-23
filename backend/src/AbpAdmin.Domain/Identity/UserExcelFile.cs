@@ -17,7 +17,7 @@ public class UserExcelFile : CreationAuditedEntity<Guid>, IMultiTenant
 
     public virtual Guid? TenantId { get; protected set; }
 
-    public virtual string FileName { get; protected set; }
+    public virtual string FileName { get; protected set; } = default!;
 
     protected UserExcelFile()
     {

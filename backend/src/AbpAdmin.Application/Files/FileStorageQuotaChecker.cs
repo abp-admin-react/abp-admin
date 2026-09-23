@@ -34,7 +34,7 @@ namespace AbpAdmin.Files;
 /// </summary>
 public class FileStorageQuotaChecker : ISingletonDependency
 {
-    private static readonly ConcurrentDictionary<Guid?, SemaphoreSlim> TenantGates = new();
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> TenantGates = new();
 
     private readonly IServiceScopeFactory _scopeFactory;
 

@@ -185,7 +185,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
     /// 批量获取用户双因素认证状态。Volo 开源版用户列表契约（IdentityUserDto）不含
     /// twoFactorEnabled 字段，列表页用它页级补齐——缺失时 2FA 列恒显示「否」、开关恒发 true
     /// （六透镜审查 function-High）。
-    /// ABP 动态 API 路由：GET /api/app/identity-user-admin/two-factor-statuses?userIds=...&userIds=...
+    /// ABP 动态 API 路由：GET /api/app/identity-user-admin/two-factor-statuses?userIds=...&amp;userIds=...
     ///（约定路由剥离 Get 前缀，注释按实际路由标注）
     /// </summary>
     public virtual async Task<List<UserTwoFactorStatusDto>> GetTwoFactorStatusesAsync(GetUserTwoFactorStatusesInput input)
@@ -354,7 +354,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
         var extension = Path.GetExtension(file.FileName ?? string.Empty);
         if (extension.Equals(".xls", StringComparison.OrdinalIgnoreCase))
         {
-            throw new UserFriendlyException(L["UserImport:UnsupportedFormat", file.FileName]);
+            throw new UserFriendlyException(L["UserImport:UnsupportedFormat", file.FileName!]);
         }
 
         if (extension.Equals(".csv", StringComparison.OrdinalIgnoreCase))

@@ -124,7 +124,7 @@ public class DataDictionaryViewAppService : AbpAdminAppService, IDataDictionaryV
         await _dataDictionaryManager.CreateAsync(dict);
 
         // 提交后再回读：新实体处于 Added 状态，对 SaveChanges 前的 SQL 查询不可见
-        await CurrentUnitOfWork.SaveChangesAsync();
+        await CurrentUnitOfWork!.SaveChangesAsync();
 
         return await GetAsync(input.Code)
             ?? throw new BusinessException(AbpAdminDomainErrorCodes.DataDictionaries.DictionaryNotFound)
@@ -168,7 +168,7 @@ public class DataDictionaryViewAppService : AbpAdminAppService, IDataDictionaryV
         if (invalidTag != null)
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.DataDictionaries.InvalidTagType)
-                .WithData("TagType", invalidTag.TagType);
+                .WithData("TagType", invalidTag.TagType!);
         }
 
         var duplicateCode = input.Items
@@ -229,7 +229,7 @@ public class DataDictionaryViewAppService : AbpAdminAppService, IDataDictionaryV
 
         // 提交后再回读：新插入的 meta 行处于 Added 状态，对 SaveChanges 前的 SQL 查询不可见，
         // 不提交会让返回视图里"本次新增项"的 TagType/Order 是脏值
-        await CurrentUnitOfWork.SaveChangesAsync();
+        await CurrentUnitOfWork!.SaveChangesAsync();
 
         return await GetAsync(dictionaryCode)
             ?? throw new BusinessException(AbpAdminDomainErrorCodes.DataDictionaries.DictionaryNotFound)

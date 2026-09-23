@@ -406,7 +406,7 @@ public class MenuManager : DomainService, ITransientDependency
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.Tenants.TenantMenuCleanupWrongTenantContext)
                 .WithData("ExpectedTenantId", tenantId)
-                .WithData("CurrentTenantId", CurrentTenant.Id);
+                .WithData("CurrentTenantId", CurrentTenant.Id?.ToString() ?? "null");
         }
 
         ClearSeededCheckCache(tenantId);

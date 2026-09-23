@@ -172,7 +172,7 @@ public class AccountLinkAppService : AbpAdminAppService, IAccountLinkAppService
 
         return await _tokenExchanger.ExchangeAsync(
             targetUserId,
-            AccessTokenProvider.GetAccessToken(),
+            AccessTokenProvider.GetAccessToken()!,
             CurrentUser.FindClaimValue("client_id"),
             CurrentTenant.Id,
             GetRequestAbortedOrNone());

@@ -355,7 +355,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
         {
             // 租户名经 ITenantNormalizer 归一化后再查（TenantStore 按 NormalizedName 精确匹配；
             // 走框架归一化点而非手写 ToUpperInvariant，与 by-name 端点共用同一策略）
-            var tenant = await _tenantStore.FindAsync(_tenantNormalizer.NormalizeName(input.TenantName));
+            var tenant = await _tenantStore.FindAsync(_tenantNormalizer.NormalizeName(input.TenantName)!);
             if (tenant == null || !tenant.IsActive)
             {
                 throw new BusinessException(AbpAdminDomainErrorCodes.Account.InvalidMagicLink);
@@ -600,7 +600,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
 
         // 直接返回 Exchanger 构造好的 DTO（round4 审查 R1：原字段逐一拷贝的中间映射已删）
         return await _tokenExchanger.ExchangeAsync(
-            AccessTokenProvider.GetAccessToken(),
+            AccessTokenProvider.GetAccessToken()!,
             extraParameters,
             CurrentUser.FindClaimValue("client_id"),
             cancellationToken);

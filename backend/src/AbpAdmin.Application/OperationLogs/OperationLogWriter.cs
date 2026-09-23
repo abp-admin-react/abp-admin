@@ -91,9 +91,11 @@ public class OperationLogWriter : IOperationLogWriter, ITransientDependency
                 new OperationLog(
                     _guidGenerator.Create(),
                     // Type/SubType 同样要截断：SubType 是模板渲染产物（如 "删除 {{file.fileName}}"），
-                    // 长度不可控，超限会让实体构造器抛异常、整条日志在 catch 里静默消失
-                    Normalize(entry.Type, OperationLogConsts.MaxTypeLength),
-                    Normalize(entry.SubType, OperationLogConsts.MaxSubTypeLength),
+                    // 长度不可控，超限会让实体构造器抛异常、整条日志在 catch 里静默消失。
+                    // 必填字段经 RequiredOrUnknown 兜底：Normalize 对 null/empty 原样放行，
+                    // 而实体构造器 NotNullOrWhiteSpace 对 null/空白都抛异常，仅 ?? 挡不住空串/纯空白
+                    RequiredOrUnknown(entry.Type, OperationLogConsts.MaxTypeLength),
+                    RequiredOrUnknown(entry.SubType, OperationLogConsts.MaxSubTypeLength),
                     _currentUser.Id,
                     _currentUser.UserName,
                     _currentTenant.Id,
@@ -152,5 +154,15 @@ public class OperationLogWriter : IOperationLogWriter, ITransientDependency
         }
 
         return new string(normalized, 0, length);
+    }
+
+    /// <summary>
+    /// 必填字段的兜底：实体构造器 NotNullOrWhiteSpace 对 null/空串/纯空白都抛异常，
+    /// 任一形态漏过都会让整条日志在 catch 里静默消失——统一落为占位值保住记录。
+    /// </summary>
+    private static string RequiredOrUnknown(string? value, int maxLength)
+    {
+        var normalized = Normalize(value, maxLength);
+        return string.IsNullOrWhiteSpace(normalized) ? "unknown" : normalized;
     }
 }

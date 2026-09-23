@@ -255,7 +255,7 @@ public class AuditLogAppService : AbpAdminAppService, IAuditLogAppService
             {
                 TenantId = CurrentTenant.Id,
                 UserId = CurrentUser.GetId(),
-                Email = CurrentUser.Email,
+                Email = CurrentUser.Email ?? string.Empty,
                 Filter = input
             });
         return AuditLogExportResultDto.Queued();
@@ -279,7 +279,7 @@ public class AuditLogAppService : AbpAdminAppService, IAuditLogAppService
         if (!SortingWhitelist.IsValid(input.Sorting, EntityChangeSortableFields))
         {
             throw new AbpValidationException(
-                L["AbpAdmin:InvalidSorting", input.Sorting]);
+                L["AbpAdmin:InvalidSorting", input.Sorting ?? string.Empty]);
         }
 
         var count = await _auditLogRepository.GetEntityChangeCountAsync(
@@ -424,7 +424,7 @@ public class AuditLogAppService : AbpAdminAppService, IAuditLogAppService
         }
 
         throw new AbpValidationException(
-            L["AbpAdmin:InvalidSorting", sorting]);
+            L["AbpAdmin:InvalidSorting", sorting ?? string.Empty]);
     }
 
     private static AuditLogDto Map(AuditLog log, bool includeDetails = false)

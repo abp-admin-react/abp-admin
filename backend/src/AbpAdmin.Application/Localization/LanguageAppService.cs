@@ -116,7 +116,7 @@ public class LanguageAppService : ApplicationService, ILanguageAppService
     /// </summary>
     private void ClearLanguageListCacheAfterCommit()
     {
-        UnitOfWorkManager.Current.OnCompleted(async () =>
+        UnitOfWorkManager.Current!.OnCompleted(async () =>
         {
             try
             {

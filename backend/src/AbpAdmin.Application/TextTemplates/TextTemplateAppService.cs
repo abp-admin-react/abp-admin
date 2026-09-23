@@ -42,7 +42,7 @@ public class TextTemplateAppService : AbpAdminAppService, ITextTemplateAppServic
             result.Add(new TextTemplateDto
             {
                 Name = definition.Name,
-                DisplayName = definition.DisplayName?.Localize(StringLocalizerFactory),
+                DisplayName = definition.DisplayName?.Localize(StringLocalizerFactory)?.Value,
                 IsLayout = definition.IsLayout,
                 Layout = definition.Layout,
                 IsSandboxed = IsSandboxedEngine(definition.RenderEngine)
@@ -171,7 +171,7 @@ public class TextTemplateAppService : AbpAdminAppService, ITextTemplateAppServic
     /// </summary>
     private void InvalidateCacheOnCompleted(string templateName)
     {
-        UnitOfWorkManager.Current.OnCompleted(async () =>
+        UnitOfWorkManager.Current!.OnCompleted(async () =>
         {
             try
             {

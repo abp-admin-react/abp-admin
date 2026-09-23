@@ -141,6 +141,6 @@ public class OperationLogAppService : AbpAdminAppService, IOperationLogAppServic
         }
 
         throw new AbpValidationException(
-            L["AbpAdmin:InvalidSorting", sorting]);
+            L["AbpAdmin:InvalidSorting", sorting ?? string.Empty]);
     }
 }
