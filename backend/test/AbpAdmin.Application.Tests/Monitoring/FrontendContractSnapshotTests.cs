@@ -65,6 +65,11 @@ public class FrontendContractSnapshotTests
         {
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+
+            // 行尾固定 LF：序列化默认用 Environment.NewLine（Windows 上是 CRLF），而仓库
+            // .gitattributes 强制 LF——编码规范化后快照文件是 LF、比较串是 CRLF，全文比对
+            // 永远失败（与本测试要抓的契约变更无关的假红）。写入与比较两端都归一到 LF。
+            NewLine = "\n",
         });
 
         if (Environment.GetEnvironmentVariable("FRONTEND_CONTRACT_SNAPSHOT_UPDATE") == "1")
@@ -83,7 +88,8 @@ public class FrontendContractSnapshotTests
                 + "并把 frontend-contract-shapes.json 一并提交。");
         }
 
-        var expected = File.ReadAllText(SnapshotPath);
+        // 读端再归一一次：即使有人绕过 .gitattributes 在磁盘上留下 CRLF 也不误报
+        var expected = File.ReadAllText(SnapshotPath).Replace("\r\n", "\n");
         if (expected != json)
         {
             Assert.Fail(
