@@ -27,5 +27,7 @@
         <Project Path="test/AbpAdmin.HttpApi.Client.ConsoleTestApp/AbpAdmin.HttpApi.Client.ConsoleTestApp.csproj" />
         <!-- T5：存储基础设施测试(单测 + 真库集成) -->
         <Project Path="test/AbpAdmin.Storage.Tests/AbpAdmin.Storage.Tests.csproj" />
+        <!-- 自包含业务模块样板的测试：随模块复制，下游改名后继承全部用例 -->
+        <Project Path="test/AbpAdmin.Biz.Template.Tests/AbpAdmin.Biz.Template.Tests.csproj" />
     </Folder>
 </Solution>

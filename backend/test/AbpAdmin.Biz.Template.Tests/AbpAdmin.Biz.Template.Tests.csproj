@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin.Biz.Template</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 被测模块本体：模板模块的测试随模块走，下游复制模块时把本工程一并复制即可继承全部用例 -->
+    <ProjectReference Include="..\..\src\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
+    <ProjectReference Include="..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.EntityFrameworkCore.Sqlite" />
+    <!-- xunit/Shouldly 经 TestBase 传递（与 Application.Tests 同款）；TestSdk 必须直接引用，
+         否则不生成 testhost.runtimeconfig，dotnet test 静默无运行 -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+  </ItemGroup>
+
+</Project>
