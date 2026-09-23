@@ -121,6 +121,8 @@ export function fromSettingString(
     case SettingUiComponentTypes.Checkbox:
       return value.toLowerCase() === 'true';
     case SettingUiComponentTypes.Number: {
+      // 空串要先拦：Number('') === 0，不拦会把"清空"变成"0"渲染出来并被保存回写
+      if (value.trim() === '') return undefined;
       const n = Number(value);
       return Number.isNaN(n) ? undefined : n;
     }

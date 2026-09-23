@@ -10,7 +10,7 @@ import {
 } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Space, Tooltip } from 'antd';
 import { useAccess } from '@umijs/max';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   fromSettingString,
   getSettingGroup2,
@@ -67,6 +67,14 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
     }
     return values;
   }, [settingInfos]);
+
+  // antd 的 initialValues 只在表单 mount 时生效；保存/重置后 onChanged 触发外层重载，
+  // group 换了新数据但 form 实例不变——不回灌的话界面停在旧值，再点保存会把旧值写回去。
+  // 回灌语义 = 以服务端真值为准：本分组的数据重载由本分组保存/重置触发；此外挂载和
+  // 权限态变化也会触发外层整体重载（同样回灌服务端真值）。方向始终朝服务端收敛，不会丢服务端数据。
+  useEffect(() => {
+    form.setFieldsValue(initialValues);
+  }, [form, initialValues]);
 
   const renderField = (info: API.SettingInfo) => {
     if (!info.name) return null;
