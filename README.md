@@ -119,7 +119,13 @@ pnpm start                                             # http://localhost:8000
 
 框架迁移循环(`AbpAdminDbMigrationService`)自动枚举所有 `IAbpAdminDbSchemaMigrator` 实现,模块迁移器显式注册一行即被扫到——**业务建表不产生任何框架仓库改动**。
 
-约定:模块内不建跨上下文外键/导航(跨模块用 Id + 应用层组合);权限 Provider 与本地化资源随模块自持,不写进框架集中文件。
+配置按三层落位(样板模块内三层都有带注释的实例,照着扩):
+
+1. 基础设施配置(连接串/Redis/端口)只进宿主 `appsettings.json`——框架配置唯一来源,业务模块只读不写
+2. 模块部署期配置(换环境要变、改完要重启:第三方密钥、业务开关)放模块内 `Configuration/`——强类型 Options + 模块自带 JSON,Content 复制随模块走,宿主零改动;宿主同名节/secrets/环境变量可覆盖
+3. 运行期业务参数(管理员日常调)用模块自带 `SettingDefinitionProvider`——设置页可改、免重启,存储复用框架 SettingManagement,不建参数表;设置页 Tab 按 Group1 动态生成,模块自带分组不改前端。**必须 `WithProviders("G","D")` 双声明**:G 钉住 host 保存/重置的写路由(不声明会落 T 层导致值搁浅),D 保住默认值读链(不声明无存储值时读到 null)——且 reset 的层清理按声明过滤,详见样板模块注释
+
+约定:模块内不建跨上下文外键/导航(跨模块用 Id + 应用层组合);权限 Provider 与本地化资源随模块自持,不写进框架集中文件。凭证类敏感值不进模块 JSON 基线(随源码入库),走 secrets 文件或环境变量。
 
 ### B. 小功能(几张表)→ 轻模块
 
