@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\common.props" />
+  <Import Project="..\..\..\..\common.props" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
+    <ProjectReference Include="..\..\AbpAdmin.Biz.Template.csproj" />
   </ItemGroup>
 
   <!-- dotnet ef 以本程序集为 startup-project 时需要 Design 包（EFCore 项目中为 PrivateAssets，不传递） -->

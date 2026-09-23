@@ -71,8 +71,8 @@
     <!-- 自包含业务模块样板（模块+双提供程序迁移程序集须随宿主进 bin）。
          新增业务模块：加这三行引用 + AbpAdminHttpApiHostModule 的 DependsOn 一行，其余全在模块内 -->
     <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
-    <ProjectReference Include="..\AbpAdmin.Biz.Template.Migrations.Sqlite\AbpAdmin.Biz.Template.Migrations.Sqlite.csproj" />
-    <ProjectReference Include="..\AbpAdmin.Biz.Template.Migrations.PostgreSql\AbpAdmin.Biz.Template.Migrations.PostgreSql.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Biz.Template\migrations\Sqlite\AbpAdmin.Biz.Template.Migrations.Sqlite.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Biz.Template\migrations\PostgreSql\AbpAdmin.Biz.Template.Migrations.PostgreSql.csproj" />
   </ItemGroup>
 
   <ItemGroup>
