@@ -75,7 +75,7 @@ pnpm start                                             # http://localhost:8000
 
 - 开发环境 Host 启动时会自动判断并执行待应用的迁移(`Database:AutoMigrateOnStartup`,默认 true);显式跑 DbMigrator / 生产环境(置 false)走迁移器。
 - 一次性初始化可执行 `./backend/etc/scripts/initialize-solution.ps1`(编译 + install-libs + 迁移)。
-- 新增迁移:`dotnet ef migrations add Xxx --project backend/src/AbpAdmin.EntityFrameworkCore --startup-project backend/src/AbpAdmin.DbMigrator`,之后再跑一次 Migrator。
+- 改框架表:在 `backend/src/AbpAdmin.EntityFrameworkCore/Sql/postgresql` 与 `Sql/sqlite` 各追加一个新的 `.sql`,再跑一次 Migrator。业务表改 `AbpAdmin.Biz.Template/Sql` 下对应目录。已执行过的脚本不要改。
 
 ### 配置单一来源
 
@@ -109,13 +109,13 @@ pnpm start                                             # http://localhost:8000
 
 ### A. 子系统级业务 → 复制 `AbpAdmin.Biz.Template` 样板模块(推荐)
 
-`AbpAdmin.Biz.Template` 是自包含业务模块样板:实体/DTO/服务/权限/本地化/DbContext/双提供程序迁移全部在模块内,自带迁移 History 表(`__BizTemplateMigrations`),与宿主迁移"两本账"互不干扰。
+`AbpAdmin.Biz.Template` 是自包含业务模块样板:实体/DTO/服务/权限/本地化/DbContext 全部在这一个工程里。建表不走 EF 迁移工程,而是模块内两份 SQL(`Sql/postgresql`、`Sql/sqlite`),由 `BizTemplateDbSchemaMigrator` 按 `Database:Provider` 执行,并记到 `__BizTemplateMigrations`,与宿主迁移"两本账"互不干扰。
 
 新增业务三步:
 
-1. 复制 `AbpAdmin.Biz.Template*` 三个工程,替换 `BizTemplate` 词根(工程名/目录/RootNamespace/常量)
-2. 生成迁移:在 `backend/src` 下分别对两个迁移工程执行 `dotnet ef migrations add Xxx`(工厂注释含完整命令)
-3. 宿主接线:`AbpAdmin.HttpApi.Host` 与 `AbpAdmin.DbMigrator` 各加 csproj 引用三行 + `DependsOn` 一行
+1. 复制 `AbpAdmin.Biz.Template` 这一个工程,替换 `BizTemplate` 词根(工程名/目录/RootNamespace/常量)
+2. 改表时在 `Sql/postgresql` 与 `Sql/sqlite` 各追加一个按序号命名的 `.sql`(例如 `002_add_column.sql`),不要改已经执行过的脚本
+3. 宿主接线:`AbpAdmin.HttpApi.Host` 与 `AbpAdmin.DbMigrator` 各加一行 csproj 引用 + `DependsOn` 一行
 
 框架迁移循环(`AbpAdminDbMigrationService`)自动枚举所有 `IAbpAdminDbSchemaMigrator` 实现,模块迁移器显式注册一行即被扫到——**业务建表不产生任何框架仓库改动**。
 
