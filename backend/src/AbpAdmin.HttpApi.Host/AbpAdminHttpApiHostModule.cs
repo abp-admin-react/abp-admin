@@ -132,6 +132,18 @@ public class AbpAdminHttpApiHostModule : AbpModule
             });
         });
 
+        // Reference token(官方机制):access/refresh token 变为不透明串,以 OpenIddictTokens
+        // 表为真源逐请求校验——用户被删、换库、主动吊销后旧 token 立即 401,
+        // 不再有自包含 JWT"幽灵身份续命到过期"的问题(MCP 实测:换库后旧 token 仍被接受)。
+        // 代价:每次请求多一次库内 token 查询;OpenIddict 过期清理任务负责瘦身。
+        // 注意:token 格式属于签发(服务)侧配置,必须配在 OpenIddictServerBuilder,
+        // 配到 AddValidation 里只影响校验侧、不改变签发格式。
+        PreConfigure<OpenIddictServerBuilder>(builder =>
+        {
+            builder.UseReferenceAccessTokens();
+            builder.UseReferenceRefreshTokens();
+        });
+
         // 账号切换：客户端带 prompt=select_account 发起授权时，
         // ABP AuthorizeController 跳到该页让用户选"继续当前账号 / 换账号登录"
         PreConfigure<AbpOpenIddictAspNetCoreOptions>(options =>
