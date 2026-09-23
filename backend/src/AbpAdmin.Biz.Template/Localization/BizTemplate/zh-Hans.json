@@ -7,6 +7,11 @@
     "Permission:Update": "编辑",
     "Permission:Delete": "删除",
     "Menu:BizTemplate": "业务模板",
-    "Menu:BizProjects": "项目列表"
+    "Menu:BizProjects": "项目列表",
+
+    "BizTemplate": "业务模板",
+    "DisplayName:BizTemplate.Project.MaxProjectsPerUser": "单用户项目数上限",
+    "Description:BizTemplate.Project.MaxProjectsPerUser": "单个用户可创建的项目数量上限，0 表示不限制。在设置页修改后立即生效，无需重启。",
+    "BizProject:QuotaExceeded": "创建失败：您名下的项目数已达上限（{0}）。可联系管理员调整上限，或清理不需要的项目。"
   }
 }

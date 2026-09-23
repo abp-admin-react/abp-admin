@@ -7,6 +7,11 @@
     "Permission:Update": "Update",
     "Permission:Delete": "Delete",
     "Menu:BizTemplate": "Biz Template",
-    "Menu:BizProjects": "Projects"
+    "Menu:BizProjects": "Projects",
+
+    "BizTemplate": "Biz Template",
+    "DisplayName:BizTemplate.Project.MaxProjectsPerUser": "Max projects per user",
+    "Description:BizTemplate.Project.MaxProjectsPerUser": "Maximum number of projects a single user can create. 0 means unlimited. Changes made on the settings page take effect immediately, no restart needed.",
+    "BizProject:QuotaExceeded": "Create failed: you have reached your project limit ({0}). Ask an administrator to raise the limit, or clean up unused projects."
   }
 }

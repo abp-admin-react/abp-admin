@@ -1,0 +1,21 @@
+{
+  // ── 配置三层约定 · 第②层：模块部署期配置 ──────────────────────────────
+  // 本文件是模块自有配置「基线」，随模块工程走（csproj 以 Content 复制到宿主 / DbMigrator
+  // 输出目录的 Configuration\ 下，模块运行时从自己的输出目录读取）。
+  // 宿主 appsettings.json 永远不写业务节（第①层纪律）——不配任何覆盖通道时本文件即最终生效值。
+  //
+  // 覆盖通道（全部可选，按优先级递增，经宿主 IConfiguration 同名节汇入）：
+  //   1. 宿主 appsettings.json 加 "BizTemplate" 节（一般不用，会碰框架文件）
+  //   2. appsettings.secrets.json（不入库，适合凭证类敏感值）
+  //   3. 环境变量：BizTemplate__MaxPageSize=200（生产/CI 首选）
+  //
+  // 注意：凭证类敏感值不要写进本文件（随源码入库）；管理员日常要调的参数不在这里——
+  // 那是第③层 Settings（Settings/BizTemplateSettingDefinitionProvider.cs），设置页可改、免重启。
+  // 复制模块改名时：根节名与 BizTemplateOptions.SectionName 一起换词根。
+  "BizTemplate": {
+    // 列表查询单页上限（GetListAsync 钳制用，防深分页）
+    "MaxPageSize": 100,
+    // 首次迁移是否写入模块样例数据（生产置 false）
+    "SeedSampleData": true
+  }
+}

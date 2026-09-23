@@ -6,6 +6,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <RootNamespace>AbpAdmin.Biz.Template</RootNamespace>
+    <!-- 嵌入资源走 manifest（与框架 Domain.Shared 一致）：不开启时 ABP 按点分回退把
+         Localization/BizTemplate/*.json 映射到 /AbpAdmin/Biz/...，本地化贡献者按
+         /Localization/BizTemplate 查询永远落空——设置页显示名、业务异常文案全部退化为裸键 -->
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,11 +23,27 @@
     <PackageReference Include="Volo.Abp.Authorization" />
     <PackageReference Include="Volo.Abp.Localization" />
     <PackageReference Include="Volo.Abp.VirtualFileSystem" />
+    <!-- 第③层（运行期参数）：SettingDefinitionProvider/SettingProvider 在 Volo.Abp.Settings，
+         随 Volo.Abp.SettingManagement.Domain 进来；EasyAbp.Abp.SettingUi 提供设置页 UI 元数据常量。
+         模块直接用到的包显式引用（CPM 统一版本），存储复用框架 SettingManagement，不引多余的包 -->
+    <PackageReference Include="Volo.Abp.SettingManagement.Domain" />
+    <PackageReference Include="EasyAbp.Abp.SettingUi.Domain" />
+    <!-- 嵌入清单生成任务依赖此包（缺它则 GenerateEmbeddedFilesManifest 静默不生效） -->
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Localization\BizTemplate\*.json" />
     <EmbeddedResource Include="Sql\**\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 第②层（部署期配置）：模块自带 JSON 随程序集复制到宿主/DbMigrator 输出目录的 Configuration\ 下，
+         模块运行时从自己的输出目录读取（BizTemplateModule 里绑定）——配置自持，宿主工程零改动 -->
+    <Content Include="Configuration\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>
