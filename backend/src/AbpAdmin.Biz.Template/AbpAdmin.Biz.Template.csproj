@@ -13,13 +13,6 @@
     <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
-  <!-- migrations/ 下是两个独立编译的迁移程序集子工程（EF Core 每提供程序需要一个迁移程序集，
-       无法并入本程序集），从本工程默认 glob 排除，防止迁移源码被重复编译进模块主程序集 -->
-  <ItemGroup>
-    <Compile Remove="migrations\**" />
-    <EmbeddedResource Remove="migrations\**" />
-  </ItemGroup>
-
   <ItemGroup>
     <PackageReference Include="Volo.Abp.Ddd.Application" />
     <PackageReference Include="Volo.Abp.AspNetCore.Mvc" />
@@ -30,6 +23,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Localization\BizTemplate\*.json" />
+    <EmbeddedResource Include="Sql\**\*.sql" />
   </ItemGroup>
 
 </Project>

@@ -5,7 +5,7 @@ namespace AbpAdmin.Biz.Template.Entities;
 
 /// <summary>
 /// 样例聚合根：演示业务模块实体的自包含写法。
-/// 约束：模块内的表只归本模块的迁移所有，不建跨上下文外键/导航，
+/// 约束：模块内的表只归本模块的 SQL 脚本所有，不建跨上下文外键/导航，
 /// 跨模块关联用 Id + 应用层组合（需要租户隔离的实体加 IMultiTenant）。
 /// </summary>
 public class BizProject : AuditedAggregateRoot<Guid>

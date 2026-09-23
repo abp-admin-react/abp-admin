@@ -18,12 +18,7 @@ public class BizTemplateConsts
     public const int MaxNameLength = 128;
 
     public const int MaxDescriptionLength = 2048;
-}
 
-/// <summary>本模块双提供程序迁移程序集名（与框架 AbpAdminMigrationsAssemblies 同一约定）</summary>
-public static class BizTemplateMigrationsAssemblies
-{
-    public const string PostgreSql = "AbpAdmin.Biz.Template.Migrations.PostgreSql";
-
-    public const string Sqlite = "AbpAdmin.Biz.Template.Migrations.Sqlite";
+    /// <summary>本模块脚本执行记录，与框架 EF 的 __EFMigrationsHistory 分开。</summary>
+    public const string SchemaHistoryTable = "__BizTemplateMigrations";
 }
