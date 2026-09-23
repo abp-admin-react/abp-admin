@@ -105,16 +105,25 @@ pnpm start                                             # http://localhost:8000
 
 ## 新增一个业务模块(标准流程)
 
-按 ABP 官方 BookStore 教程的约定走,几乎零配置:
+业务代码**物理隔离**是本模板升级顺滑的前提。按业务量级二选一:
 
-1. **Domain.Shared**:枚举、常量(`XxxConsts`,含表前缀)、本地化资源 JSON
-2. **Domain**:按功能建文件夹(如 `Domain/Xxx/`),实体继承 `AggregateRoot<Guid>` / `AuditedAggregateRoot<Guid>`;需要自定义查询时定义 `IXxxRepository` 接口
-3. **EntityFrameworkCore**:实体映射配置(本项目集中在 `EntityFrameworkCore/Configs/`,每个实体一个配置类,DbContext 统一调用)+ `dotnet ef migrations add`
-4. **Application.Contracts**:DTO(带验证特性)+ `IXxxAppService` 接口(简单 CRUD 直接继承 `ICrudAppService`)
-5. **Application**:实现 `XxxAppService`(CRUD 继承 `CrudAppService`,注入 `IRepository<T, Guid>`);配置对象映射
-6. **权限**:在 `Application.Contracts/Permissions/AbpAdminPermissionDefinitionProvider` 定义权限,服务方法加 `[Authorize(XxxPermissions.Xxx.Default)]`
-7. **验证**:无需手写 Controller——Auto API 自动暴露为 REST 接口,Swagger 直接验证
-8. **前端**:`web/src/pages/` 建页面,`web/config/routes.ts` 挂路由(菜单权限随 ABP 权限走)
+### A. 子系统级业务 → 复制 `AbpAdmin.Biz.Template` 样板模块(推荐)
+
+`AbpAdmin.Biz.Template` 是自包含业务模块样板:实体/DTO/服务/权限/本地化/DbContext/双提供程序迁移全部在模块内,自带迁移 History 表(`__BizTemplateMigrations`),与宿主迁移"两本账"互不干扰。
+
+新增业务三步:
+
+1. 复制 `AbpAdmin.Biz.Template*` 三个工程,替换 `BizTemplate` 词根(工程名/目录/RootNamespace/常量)
+2. 生成迁移:在 `backend/src` 下分别对两个迁移工程执行 `dotnet ef migrations add Xxx`(工厂注释含完整命令)
+3. 宿主接线:`AbpAdmin.HttpApi.Host` 与 `AbpAdmin.DbMigrator` 各加 csproj 引用三行 + `DependsOn` 一行
+
+框架迁移循环(`AbpAdminDbMigrationService`)自动枚举所有 `IAbpAdminDbSchemaMigrator` 实现,模块迁移器显式注册一行即被扫到——**业务建表不产生任何框架仓库改动**。
+
+约定:模块内不建跨上下文外键/导航(跨模块用 Id + 应用层组合);权限 Provider 与本地化资源随模块自持,不写进框架集中文件。
+
+### B. 小功能(几张表)→ 轻模块
+
+直接按层追加:实体进 `Domain/Xxx/`、常量进 `Domain.Shared/Xxx/`、映射配置进 `EFCore/Configs/Xxx/`、迁移追加——全是追加式改动,merge 冲突可控。判据:预计产生 3 个以上非追加式框架文件改动,或有独立生命周期诉求(后台任务/独立配置),就用 A。
 
 参考:[ABP 分层模板文档](https://abp.io/docs/latest/solution-templates/layered-web-application) · [BookStore 教程](https://abp.io/docs/latest/tutorials/book-store/part-1)
 

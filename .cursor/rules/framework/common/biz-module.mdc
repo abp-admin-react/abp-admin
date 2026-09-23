@@ -1,0 +1,37 @@
+---
+description: "业务模块规约 - 自包含模块样板(AbpAdmin.Biz.Template)的边界、内含与接线契约"
+globs:
+  - "**/Biz.*/**/*.cs"
+  - "**/AbpAdmin.Biz.*/**/*.cs"
+alwaysApply: false
+---
+
+# 业务模块规约(自包含模块样板)
+
+> 样板:`backend/src/AbpAdmin.Biz.Template` —— 新增子系统级业务 = 复制三个工程改名,替换 `BizTemplate` 词根。
+
+## 边界(升级顺滑的前提)
+
+- 业务代码只进模块工程,禁止散装修改框架层(Domain/Application/EFCore/Host 的框架部分)
+- 框架修复回上游主仓库提交,派生项目 merge upstream 跟随
+- 小功能(几张表、无独立生命周期)可走"轻模块":按层追加(Domain/Xxx、Domain.Shared/Xxx、EFCore/Configs/Xxx、迁移追加),保持追加式改动
+
+## 模块内含(样板已固化)
+
+- 模块类 `XxxModule`:[DependsOn] `AbpAdminEntityFrameworkCoreModule` + `AbpAspNetCoreMvcModule` + `AbpAuthorizationModule` + `AbpLocalizationModule`
+- 自带 `XxxDbContext`:`[ConnectionStringName("Default")]` 同库多上下文;`AddDefaultRepositories`
+- 自带双提供程序迁移程序集(Sqlite/PostgreSql 各持基线),History 表 `__XxxMigrations` **独立记账**——与宿主 `__EFMigrationsHistory` 两本账
+- 迁移器:实现 `IAbpAdminDbSchemaMigrator` 并在模块内 **显式 `AddTransient` 注册**——框架 `AbpAdminDbMigrationService` 循环自动枚举所有实现,勿依赖约定暴露
+- 权限 Provider、本地化资源、种子贡献者(`IDataSeedContributor`,幂等)随模块自持
+
+## 硬约束
+
+- 不建跨上下文外键/导航;跨模块关联用 Id + 应用层组合查询
+- 模块表前缀自持(样板用 "Biz"),不侵占框架 "App" 前缀
+- 迁移只在模块自己的迁移工程内生成(`dotnet ef` 命令见各设计期工厂注释),禁止把业务迁移加进框架迁移程序集
+
+## 宿主接线契约(唯一的框架仓库改动)
+
+- `AbpAdmin.HttpApi.Host`:csproj 三行引用(模块 + 双迁移程序集)+ `AbpAdminHttpApiHostModule` 的 `DependsOn` 一行
+- `AbpAdmin.DbMigrator`:同上(迁移器随模块加载被自动枚举)
+- 上述改动全部是追加式,merge 上游时冲突可秒解
