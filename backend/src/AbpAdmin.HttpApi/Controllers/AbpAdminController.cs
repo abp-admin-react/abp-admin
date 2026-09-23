@@ -1,4 +1,4 @@
-﻿using AbpAdmin.Localization;
+using AbpAdmin.Localization;
 using Volo.Abp.AspNetCore.Mvc;
 
 namespace AbpAdmin.Controllers;

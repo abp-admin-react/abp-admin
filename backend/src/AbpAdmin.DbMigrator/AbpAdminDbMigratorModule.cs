@@ -1,4 +1,4 @@
-﻿using AbpAdmin.Biz.Template;
+using AbpAdmin.Biz.Template;
 using AbpAdmin.EntityFrameworkCore;
 using Volo.Abp.Autofac;
 using Volo.Abp.Modularity;

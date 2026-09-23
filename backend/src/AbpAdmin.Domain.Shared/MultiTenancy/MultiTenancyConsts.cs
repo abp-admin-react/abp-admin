@@ -1,4 +1,4 @@
-﻿namespace AbpAdmin.MultiTenancy;
+namespace AbpAdmin.MultiTenancy;
 
 public static class MultiTenancyConsts
 {

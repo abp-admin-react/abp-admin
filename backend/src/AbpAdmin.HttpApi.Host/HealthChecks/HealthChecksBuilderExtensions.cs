@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using AbpAdmin.ClickHouse;
 using AbpAdmin.Elasticsearch;
 using HealthChecks.UI.Client;

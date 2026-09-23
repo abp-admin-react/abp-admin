@@ -1,4 +1,4 @@
-﻿using Volo.Abp.GlobalFeatures;
+using Volo.Abp.GlobalFeatures;
 using Volo.Abp.Threading;
 
 namespace AbpAdmin;

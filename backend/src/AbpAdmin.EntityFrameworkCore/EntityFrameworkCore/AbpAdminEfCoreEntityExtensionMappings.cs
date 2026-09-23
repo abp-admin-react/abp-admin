@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore;
 using AbpAdmin.Tenants;
 using Volo.Abp.AuditLogging;

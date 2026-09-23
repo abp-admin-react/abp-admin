@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Localization;
+using Microsoft.Extensions.Localization;
 using AbpAdmin.Localization;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Ui.Branding;
