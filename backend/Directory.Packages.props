@@ -63,6 +63,7 @@
     <PackageVersion Include="Volo.Abp.AspNetCore.Mvc" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.Ddd.Application" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.Localization" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Mapperly" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.FeatureManagement.Application" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.FeatureManagement.Application.Contracts" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.FeatureManagement.Domain" Version="$(AbpVersion)" />
@@ -142,8 +143,6 @@
     <PackageVersion Include="Volo.Abp.Studio.Client.AspNetCore" Version="$(AbpStudioVersion)" />
 
     <!-- Microsoft -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="$(MicrosoftVersion)" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="$(MicrosoftVersion)" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="$(MicrosoftVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="$(MicrosoftVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftVersion)" />

@@ -297,9 +297,10 @@ public class AbpAdminDbContext :
         // IdentityUserManager 校验重名，check-then-insert 在并发下双双通过，
         // 同租户同用户名可落库多条（SQLite 库实测 5 连发创建出 2-3 条）。
         // ABP 原生 UserNameIndex 是全局唯一、与「多租户同名 admin」设计冲突，
-        // 这里补租户维度的复合唯一索引作为数据库侧最后防线；
-        // Host 行（TenantId=NULL）在 SQLite 唯一索引里 NULL 互不相等、不受复合索引保护，
-        // 由迁移里的表达式部分唯一索引（COALESCE）兜底。
+        // 这里补租户维度的复合唯一索引削弱并发窗口；
+        // Host 行（TenantId=NULL）在 SQLite 唯一索引里 NULL 互不相等、也不受该复合索引保护——
+        // 数据库侧对 Host 行没有唯一兜底（历史上 EF 迁移与新 Sql 基线都未建 COALESCE 部分唯一索引），
+        // Host 并发重名目前仅靠应用层 IdentityUserManager 校验，靠后置审计发现重复。
         builder.Entity<Volo.Abp.Identity.IdentityUser>(b =>
         {
             b.HasIndex(nameof(Volo.Abp.Identity.IdentityUser.TenantId), nameof(Volo.Abp.Identity.IdentityUser.NormalizedUserName))

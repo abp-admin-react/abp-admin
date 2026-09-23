@@ -134,27 +134,23 @@ public static class BookEfCoreQueryableExtensions
 }
 ```
 
-## Migration Commands
+## Schema 变更（版本化 Sql 脚本，不用 dotnet ef migrations）
+
+本仓库已弃用 EF Core 迁移：`EmbeddedSqlScriptMigrator` 按文件名 Ordinal 序执行程序集内
+`Sql/{provider}/*.sql` 嵌入脚本，History 表记账（框架 `__EFMigrationsHistory`、业务模块
+`__BizTemplateMigrations` 两本账）。
 
 ```bash
-# Navigate to EF Core project
-cd src/MyProject.EntityFrameworkCore
+# 改表 = 追加编号脚本（在 Sql/postgresql/ 与 Sql/sqlite/ 各写一份，DDL 用 IF NOT EXISTS 幂等）
+# 框架表：backend/src/AbpAdmin.EntityFrameworkCore/Sql/<provider>/
+# 业务表：业务模块自己的 Sql/<provider>/（不碰框架基线）
 
-# Add migration
-dotnet ef migrations add MigrationName
-
-# Apply migration (choose one):
-dotnet run --project ../MyProject.DbMigrator   # Recommended - also seeds data
-dotnet ef database update  # EF Core command only
-
-# Remove last migration (if not applied)
-dotnet ef migrations remove
-
-# Generate SQL script
-dotnet ef migrations script
+dotnet run --project backend/src/AbpAdmin.DbMigrator   # 迁移 + 种子
 ```
 
-> **Note**: ABP templates include `IDesignTimeDbContextFactory` in the EF Core project, so `-s` (startup project) parameter is not needed.
+> **契约**：编号零填充递增（002_、010_……Ordinal 序，100_ 排在 20_ 前）；已应用脚本不可
+> 改名/删除（文件名即 History 记账键）；不要写触发器/存储过程（语句按分号切分，
+> BEGIN…END 体不支持）；单条语句不要内嵌事务控制（每脚本一事务，失败整体回滚为「未应用」）。
 
 ## Module Configuration
 

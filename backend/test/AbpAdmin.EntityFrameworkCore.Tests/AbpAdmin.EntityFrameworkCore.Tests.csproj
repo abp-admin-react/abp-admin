@@ -14,6 +14,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- EmbeddedSqlScriptMigrator 契约测试脚本（顺序锚点/故意失败回滚），仅本测试程序集嵌入 -->
+    <EmbeddedResource Include="Sql\**\*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Volo.Abp.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
   </ItemGroup>

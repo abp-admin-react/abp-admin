@@ -36,17 +36,18 @@ ABP 官方 Layered 模板的 **Host + 独立 SPA 变体**(以 `HttpApi.Host` 承
 
 ```
 ├── backend/                              # 后端解决方案(.NET;VS 打开 backend/AbpAdmin.slnx)
-│   ├── src/                              # 9 个项目
+│   ├── src/                              # 10 个项目
 │   │   ├── AbpAdmin.Domain.Shared        # 常量 / 枚举 / 本地化资源(依赖链根)
 │   │   ├── AbpAdmin.Domain               # 实体 / 领域服务 / 仓储接口
 │   │   ├── AbpAdmin.Application.Contracts # 应用服务接口 + DTO + 权限定义
 │   │   ├── AbpAdmin.Application          # 应用服务实现
-│   │   ├── AbpAdmin.EntityFrameworkCore  # DbContext / 仓储实现 / 迁移
+│   │   ├── AbpAdmin.EntityFrameworkCore  # DbContext / 仓储实现 / Sql 脚本迁移
+│   │   ├── AbpAdmin.Biz.Template         # 自包含业务模块样板(复制改名即新业务)
 │   │   ├── AbpAdmin.HttpApi              # 少量定制 Controller(Auto API 为主)
 │   │   ├── AbpAdmin.HttpApi.Client       # C# 动态客户端代理
 │   │   ├── AbpAdmin.HttpApi.Host         # API / OIDC 宿主
-│   │   └── AbpAdmin.DbMigrator           # 建库 / 迁移 / 种子数据
-│   ├── test/                             # 6 个测试项目(TestBase、Domain/Application/EFCore.Tests 等)
+│   │   └── AbpAdmin.DbMigrator           # 建库 / 脚本迁移 / 种子数据
+│   ├── test/                             # 9 个测试项目(含随模块复制的 AbpAdmin.Biz.Template.Tests)
 │   └── etc/                              # nginx / quartz / 初始化脚本 / ip2region
 ├── web/                                  # 前端(Ant Design Pro v6 · Umi Max · pnpm)
 └── docs/                                 # 设计文档与测试记录

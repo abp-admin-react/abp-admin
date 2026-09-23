@@ -10,6 +10,7 @@ using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Authorization;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Localization;
+using Volo.Abp.Mapperly;
 using Volo.Abp.Modularity;
 using Volo.Abp.VirtualFileSystem;
 
@@ -21,7 +22,9 @@ namespace AbpAdmin.Biz.Template;
 /// 宿主接线是 csproj 引用 + 一行 DependsOn；DbMigrator 同样只引用本工程。
 /// 框架迁移循环与宿主启动待办检查会自动枚举模块的 IAbpAdminDbSchemaMigrator（MigrateAsync / HasPendingAsync），
 /// 按 Database:Provider 执行对应脚本。
-/// 新增业务：复制本工程改名，替换 BizTemplate 词根即可。
+/// 新增业务：复制本工程改名。改名清单（全部词根一个不落，漏一处即静默冲突）：
+/// ① BizTemplate——模块/类/资源/SectionName/History 表 __BizTemplateMigrations；
+/// ② Biz——表前缀（BizTemplateConsts.DbTablePrefix）；③ BizProject(s)——实体/表名/本地化键 Menu:BizProjects。
 ///
 /// 模块配置按三层落位（对应实现都带注释，照着扩）：
 /// ① 基础设施配置（连接串/Redis/端口）——只属于宿主 appsettings.json（框架配置唯一来源），模块只读不写；
@@ -38,7 +41,8 @@ namespace AbpAdmin.Biz.Template;
     typeof(AbpAdminEntityFrameworkCoreModule), // EF 基建 + IAbpAdminDbSchemaMigrator 约定接口
     typeof(AbpAspNetCoreMvcModule),            // Auto API：ConventionalControllers
     typeof(AbpAuthorizationModule),            // 权限定义
-    typeof(AbpLocalizationModule)
+    typeof(AbpLocalizationModule),
+    typeof(AbpMapperlyModule)                  // Mappers/ 的 MapperBase 映射（此前靠传递加载，不随模块自持）
 )]
 public class AbpAdminBizTemplateModule : AbpModule
 {

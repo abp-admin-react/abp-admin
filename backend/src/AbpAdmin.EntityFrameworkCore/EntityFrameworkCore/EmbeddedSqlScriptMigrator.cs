@@ -21,9 +21,15 @@ namespace AbpAdmin.EntityFrameworkCore;
 /// 1) 资源经 csproj 的 <c>EmbeddedResource Include="Sql\**\*.sql"</c> 嵌入，目录必须与 providerFolder 同名（postgresql/sqlite）；
 /// 2) 追加脚本用零填充编号（002_、010_……），Ordinal 序下 100_ 会排在 20_ 之前；
 /// 3) 已应用的脚本不可改名/删除——Id 是唯一的记账键；
-/// 4) 语句按分号切分（引号/注释内的分号不切，见 <see cref="SplitStatements"/>），单条语句不要内嵌事务控制。
+/// 4) 语句按分号切分（引号/注释内的分号不切，见 <see cref="SplitStatements"/>），单条语句不要内嵌事务控制；
+/// 5) 不支持 CREATE TRIGGER / BEGIN…END 块体（体内分号会被切开）、嵌套块注释与 E'' 反斜杠转义——
+///    触发器/函数体请用 dollar-quote（$func$…$func$，PG）整体包住，或改由应用层执行。
 /// 幂等语义：每个脚本的语句与其记账行在同一事务内提交——任一语句失败整体回滚为「未应用」，重跑从零执行该脚本。
-/// 注意 <see cref="HasPendingAsync"/> 只读不建表：History 表不存在会抛错，宿主/调用方视为「需要迁移」。
+/// 并发语义：记账行 INSERT 带 ON CONFLICT DO NOTHING（PG/SQLite 同语法）——DbMigrator 与宿主
+/// AutoMigrate 同时首启时后到者不撞记账主键，DDL 由 IF NOT EXISTS 幂等兜底，两边收敛一致。
+/// 注意 <see cref="HasPendingAsync"/> 只读不建表：History 表不存在会抛 SqliteException（no such table），
+/// 宿主/调用方统一视为「需要迁移」。SQLite 边界：对缺失的库文件 HasPending 会顺手创建空文件
+///（随后的缺表异常照常抛出，语义不受影响）；内存库（Mode=Memory）无此副作用。
 /// </summary>
 public static class EmbeddedSqlScriptMigrator
 {
@@ -119,8 +125,7 @@ public static class EmbeddedSqlScriptMigrator
             await ExecuteAsync(connection, transaction, statement);
         }
 
-        await InsertHistoryAsync(connection, transaction, historyTable, script.Id);
-    }
+        await InsertHistoryAsync(connection, transaction, historyTable, script.Id);    }
 
     private static List<SqlScript> LoadScripts(Assembly assembly, string providerFolder)
     {
@@ -168,12 +173,18 @@ public static class EmbeddedSqlScriptMigrator
                 """;
         }
 
-        return $"""
-            CREATE TABLE IF NOT EXISTS "{historyTable}" (
-                "MigrationId" TEXT NOT NULL CONSTRAINT "PK_{historyTable}" PRIMARY KEY,
-                "ProductVersion" TEXT NOT NULL
-            )
-            """;
+        if (providerFolder == AbpAdminDatabaseProvider.ScriptFolderSqlite)
+        {
+            return $"""
+                CREATE TABLE IF NOT EXISTS "{historyTable}" (
+                    "MigrationId" TEXT NOT NULL CONSTRAINT "PK_{historyTable}" PRIMARY KEY,
+                    "ProductVersion" TEXT NOT NULL
+                )
+                """;
+        }
+
+        // 防呆：方言判别失败必须炸而不是静默按 SQLite 建账（第三个 provider 接入时在此补分支）
+        throw new InvalidOperationException($"未知的脚本目录 {providerFolder}，无法判定 History 表方言。");
     }
 
     private static async Task<HashSet<string>> ReadAppliedAsync(
@@ -203,8 +214,12 @@ public static class EmbeddedSqlScriptMigrator
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
+        // ON CONFLICT DO NOTHING（PG 9.5+ / SQLite 3.24+ 同语法）：并发迁移（DbMigrator 与宿主
+        // AutoMigrate 同时首启）时后到者不因记账主键撞车把整脚本回滚——DDL 已由 IF NOT EXISTS
+        // 幂等兜底，记账行由先到者写入，两个进程的账本最终收敛一致
         command.CommandText = $"""
             INSERT INTO "{historyTable}" ("MigrationId", "ProductVersion") VALUES (@id, @ver)
+            ON CONFLICT ("MigrationId") DO NOTHING
             """;
 
         var id = command.CreateParameter();
@@ -232,6 +247,8 @@ public static class EmbeddedSqlScriptMigrator
     /// 引号感知的语句切分：仅切分「引号与注释之外」的分号，并剥除注释。
     /// 支持：-- 行注释、块注释、'字符串'（'' 转义）、"标识符"（"" 转义）、$tag$ 美元引号（PG 函数体）。
     /// $ 后非合法标识符（如 $1 位置参数）不视为美元引号开头，按普通字符处理。
+    /// 已知边界（脚本契约第 5 条）：BEGIN…END 块体（触发器/函数）内的分号会被切开、块注释不嵌套、
+    /// E'' 反斜杠转义不识别——此类构造不要出现在脚本里。
     /// </summary>
     private static IEnumerable<string> SplitStatements(string sql)
     {

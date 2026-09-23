@@ -108,17 +108,15 @@ public class BookRepository : EfCoreRepository<MyDbContext, Book, Guid>, IBookRe
 }
 ```
 
-### 5. Run Migration
+### 5. Schema 变更（Sql 脚本，不用 dotnet ef migrations）
 ```bash
-cd src/MyProject.EntityFrameworkCore
+# 改表 = 追加版本化 Sql 脚本：Sql/postgresql/ 与 Sql/sqlite/ 各写一份
+# 框架表：backend/src/AbpAdmin.EntityFrameworkCore/Sql/<provider>/；业务表：业务模块自己的 Sql/<provider>/
+# 编号零填充递增（002_、010_……Ordinal 序执行）；已应用脚本不可改名/删除（文件名即 History 记账键）
+# 全量 IF NOT EXISTS 幂等；不要在脚本里写触发器/存储过程（语句切分器按分号切，BEGIN..END 体不支持）
 
-# Add migration
-dotnet ef migrations add Added_Book
-
-# Apply migration (choose one):
-dotnet run --project ../MyProject.DbMigrator   # Recommended - also seeds data
-# OR
-dotnet ef database update  # EF Core command only
+dotnet run --project backend/src/AbpAdmin.DbMigrator   # 迁移 + 种子
+# 宿主启动也会按 HasPendingAsync 自动迁移（Database:AutoMigrateOnStartup，默认 true）
 ```
 
 ### 6. Application.Contracts
@@ -270,11 +268,10 @@ public class BookAppService_Tests : MyProjectApplicationTestBase
 dotnet build
 ```
 
-### Run Migrations
+### Run Schema Migration（Sql 脚本）
 ```bash
-cd src/MyProject.EntityFrameworkCore
-dotnet ef migrations add MigrationName
-dotnet run --project ../MyProject.DbMigrator  # Apply migration + seed data
+# 改表 = 在 Sql/{postgresql,sqlite}/ 追加编号脚本（详见 ef-core.mdc 的 Schema 变更一节）
+dotnet run --project backend/src/AbpAdmin.DbMigrator  # 迁移 + 种子
 ```
 
 ### Generate Angular Proxies

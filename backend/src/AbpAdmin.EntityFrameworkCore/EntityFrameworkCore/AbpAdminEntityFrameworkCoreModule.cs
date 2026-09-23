@@ -56,7 +56,7 @@ public class AbpAdminEntityFrameworkCoreModule : AbpModule
         if (AbpAdminDatabaseProvider.IsPostgreSql(context.Services.GetConfiguration()))
         {
             // Npgsql 6+ 默认把 timestamp 按 timestamptz（UTC）处理；ABP 实体沿用本地 DateTime 语义，
-            // 打开官方文档推荐的兼容开关，避免存量 timestamp 列读写偏移。与 AbpAdminDbContextFactory 保持一致。
+            // 打开官方文档推荐的兼容开关，避免存量 timestamp 列读写偏移。与各设计期/测试工厂保持一致。
             AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
         }
     }

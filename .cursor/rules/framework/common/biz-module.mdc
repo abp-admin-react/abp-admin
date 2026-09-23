@@ -8,7 +8,8 @@ alwaysApply: false
 
 # 业务模块规约(自包含模块样板)
 
-> 样板:`backend/src/AbpAdmin.Biz.Template` —— 新增子系统级业务 = 复制一个工程改名,替换 `BizTemplate` 词根。
+> 样板:`backend/src/AbpAdmin.Biz.Template` —— 新增子系统级业务 = 复制一个工程改名。
+> **改名清单(全部词根一个不落,漏一处即静默冲突)**:① `BizTemplate`——模块/类/资源/SectionName/History 表 `__BizTemplateMigrations`;② `Biz`——表前缀(`XxxConsts.DbTablePrefix`);③ `BizProject(s)`——实体/表名/本地化键 `Menu:BizProjects`。
 
 ## 边界(升级顺滑的前提)
 

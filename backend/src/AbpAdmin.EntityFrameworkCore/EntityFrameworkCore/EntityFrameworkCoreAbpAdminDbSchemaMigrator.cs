@@ -167,6 +167,15 @@ public class EntityFrameworkCoreAbpAdminDbSchemaMigrator
             return;
         }
 
+        // 脚本是 PG 方言（tables_postgres.sql），且本方法硬编码 NpgsqlConnection——
+        // SQLite 部署误开该开关时明确拒绝，而不是跑到驱动层才报出难懂的连接错误
+        if (!AbpAdminDatabaseProvider.IsPostgreSql(configuration))
+        {
+            throw new InvalidOperationException(
+                "Quartz:UsePersistentStore=true 目前仅支持 PostgreSQL（tables_postgres.sql 为 PG 方言）；" +
+                "SQLite 部署请关闭该开关或自行提供 Sqlite 建表脚本。");
+        }
+
         var currentTenant = _serviceProvider.GetRequiredService<ICurrentTenant>();
         if (currentTenant.Id.HasValue)
         {
