@@ -1,4 +1,4 @@
-﻿using AbpAdmin.EntityFrameworkCore;
+using AbpAdmin.EntityFrameworkCore;
 using Xunit;
 
 namespace AbpAdmin.EntityFrameworkCore;

@@ -1,4 +1,4 @@
-﻿namespace AbpAdmin;
+namespace AbpAdmin;
 
 public static class AbpAdminTestConsts
 {
