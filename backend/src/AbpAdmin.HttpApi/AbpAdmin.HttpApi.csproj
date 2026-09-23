@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin</RootNamespace>
+    <!-- 生成 XML 注释文档供宿主 Swagger IncludeXmlComments（glob AbpAdmin*.xml）使用；
+         1591 抑制"缺少 XML 注释"警告。控制器 <summary> 是 swagger.json 端点描述的唯一来源，
+         漏开的话前端 openapi 生成物全是"此处后端没有提供注释"占位 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 只依赖 Contracts + Domain（ABP 分层：HttpApi 不引用 Application）。
+         同步导出经 Contracts 的 IAuditLogExcelBuilder 走到 Application 实现（运行时经 DI） -->
+    <ProjectReference Include="..\AbpAdmin.Application.Contracts\AbpAdmin.Application.Contracts.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Domain\AbpAdmin.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.PermissionManagement.HttpApi" />
+    <PackageReference Include="Volo.Abp.FeatureManagement.HttpApi" />
+    <PackageReference Include="Volo.Abp.SettingManagement.HttpApi" />
+    <PackageReference Include="Volo.Abp.BlobStoring" />
+    <PackageReference Include="Volo.Abp.Authorization" />
+    <PackageReference Include="MiniExcel" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.Identity.HttpApi" />
+    <PackageReference Include="Volo.Abp.Account.HttpApi" />
+    <PackageReference Include="Volo.Abp.TenantManagement.HttpApi" />
+    <PackageReference Include="EasyAbp.FileManagement.HttpApi" />
+    <PackageReference Include="EasyAbp.Abp.SettingUi.HttpApi" />
+    <!-- T3.5 -->
+    <PackageReference Include="EasyAbp.NotificationService.HttpApi" />
+    <!-- T4.7 PaymentService。不引 .Web -->
+    <PackageReference Include="EasyAbp.PaymentService.HttpApi" />
+    <PackageReference Include="EasyAbp.PaymentService.Prepayment.HttpApi" />
+    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.HttpApi" />
+  </ItemGroup>
+
+</Project>

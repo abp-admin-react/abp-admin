@@ -1,0 +1,101 @@
+@page
+@using AbpAdmin.Localization
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Volo.Abp.AspNetCore.Mvc.UI.Theming
+@model AbpAdmin.Pages.Account.TwoFactorVerificationModel
+@inject IHtmlLocalizer<AbpAdminResource> L
+@inject IThemeManager ThemeManager
+
+@{
+    Layout = ThemeManager.CurrentTheme.GetAccountLayout();
+}
+
+<div class="card mt-3 shadow-sm rounded">
+    <div class="card-body p-5">
+        <h4>@L["TwoFactorVerificationTitle"]</h4>
+        <p class="text-muted">
+            @if (Model.IsAuthenticator)
+            {
+                @L["TwoFactorVerificationAuthenticatorDescription"]
+            }
+            else if (Model.Provider == "Email")
+            {
+                @L["TwoFactorVerificationEmailDescription"]
+            }
+            else
+            {
+                @L["TwoFactorVerificationPhoneDescription"]
+            }
+        </p>
+
+        @if (Model.Providers.Count > 1)
+        {
+            <form method="get" class="mb-3">
+                <input type="hidden" asp-for="ReturnUrl" />
+                <input type="hidden" asp-for="ReturnUrlHash" />
+                <input type="hidden" asp-for="RememberMe" />
+                <label class="form-label">验证方式</label>
+                <select asp-for="Provider" class="form-select" onchange="this.form.submit()">
+                    @foreach (var provider in Model.Providers)
+                    {
+                        <option value="@provider">@provider</option>
+                    }
+                </select>
+            </form>
+        }
+
+        @if (!Model.IsAuthenticator)
+        {
+            <form method="post" asp-page-handler="SendCode" asp-route-returnUrl="@Model.ReturnUrl" asp-route-returnUrlHash="@Model.ReturnUrlHash" asp-route-rememberMe="@Model.RememberMe">
+                <input type="hidden" asp-for="Provider" />
+                <div class="d-grid gap-2 mb-3">
+                    @if (Model.CodeSent)
+                    {
+                        <abp-button type="submit" button-type="Secondary">@L["ResendTwoFactorCode"]</abp-button>
+                    }
+                    else
+                    {
+                        <abp-button type="submit" button-type="Secondary">@L["SendTwoFactorCode"]</abp-button>
+                    }
+                </div>
+            </form>
+        }
+
+        <form method="post" asp-page-handler="Verify" asp-route-returnUrl="@Model.ReturnUrl" asp-route-returnUrlHash="@Model.ReturnUrlHash" asp-route-rememberMe="@Model.RememberMe">
+            <input type="hidden" asp-for="Provider" />
+            <div class="mb-3">
+                <label asp-for="Code" class="form-label">@L["TwoFactorCode"]</label>
+                <input asp-for="Code" class="form-control" autocomplete="one-time-code" maxlength="8" />
+                <span asp-validation-for="Code" class="text-danger"></span>
+            </div>
+            <div class="form-check mb-3">
+                <input asp-for="RememberBrowser" class="form-check-input" />
+                <label asp-for="RememberBrowser" class="form-check-label">@L["RememberThisBrowser"]</label>
+            </div>
+            <div class="d-grid gap-2">
+                <abp-button type="submit" button-type="Primary" class="btn-lg">@L["Verify"]</abp-button>
+            </div>
+        </form>
+
+        <div class="mt-3">
+            <a data-bs-toggle="collapse" href="#recoveryCodeCollapse" role="button" aria-expanded="false" aria-controls="recoveryCodeCollapse">@L["UseRecoveryCode"]</a>
+        </div>
+        <div class="collapse mt-2" id="recoveryCodeCollapse">
+            <form method="post" asp-page-handler="VerifyWithRecoveryCode" asp-route-returnUrl="@Model.ReturnUrl" asp-route-returnUrlHash="@Model.ReturnUrlHash" asp-route-rememberMe="@Model.RememberMe">
+                <div class="mb-3">
+                    <label asp-for="RecoveryCode" class="form-label">@L["RecoveryCode"]</label>
+                    <input asp-for="RecoveryCode" class="form-control" autocomplete="off" />
+                </div>
+                <div class="d-grid gap-2">
+                    <abp-button type="submit" button-type="Primary">@L["Verify"]</abp-button>
+                </div>
+                <p class="text-muted mt-2 mb-0"><small>@L["RecoveryCodeHint"]</small></p>
+            </form>
+        </div>
+
+        <div class="mt-3">
+            <a href="@Url.Page("./Login", new { returnUrl = Model.ReturnUrl, returnUrlHash = Model.ReturnUrlHash })">@L["BackToLogin"]</a>
+        </div>
+    </div>
+</div>

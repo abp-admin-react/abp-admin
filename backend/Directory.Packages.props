@@ -1,0 +1,270 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+
+    <AbpVersion>10.6.1</AbpVersion>
+    <!-- LeptonXLite 主题走独立版本号，不要改成 AbpVersion -->
+    <AbpLeptonXLiteVersion>5.6.1</AbpLeptonXLiteVersion>
+    <AbpStudioVersion>3.0.10</AbpStudioVersion>
+    <MicrosoftVersion>10.0.9</MicrosoftVersion>
+    <SerilogAspNetCoreVersion>9.0.0</SerilogAspNetCoreVersion>
+    <HealthChecksVersion>9.0.0</HealthChecksVersion>
+
+    <EasyAbpFileManagementVersion>5.12.0</EasyAbpFileManagementVersion>
+    <EasyAbpSettingUiVersion>2.10.0</EasyAbpSettingUiVersion>
+    <EasyAbpDataDictionaryVersion>1.21.0</EasyAbpDataDictionaryVersion>
+    <EasyAbpNotificationServiceVersion>3.9.0</EasyAbpNotificationServiceVersion>
+    <EasyAbpSmsVersion>1.21.0</EasyAbpSmsVersion>
+    <!-- EasyAbp.Abp.Sms.TencentCloud 1.21.0 依赖的底层包底线是 1.27.0（还原实测），故单独一个变量 -->
+    <EasyAbpTencentCloudVersion>1.27.0</EasyAbpTencentCloudVersion>
+    <EasyAbpBlobStoringTencentCloudVersion>1.20.0</EasyAbpBlobStoringTencentCloudVersion>
+    <EasyAbpVerificationCodeVersion>1.18.0</EasyAbpVerificationCodeVersion>
+    <EasyAbpPaymentServiceVersion>2.21.0</EasyAbpPaymentServiceVersion>
+    <EasyAbpWeChatVersion>3.11.0</EasyAbpWeChatVersion>
+    <MiniExcelVersion>1.45.0</MiniExcelVersion>
+    <IP2RegionNetVersion>3.0.2</IP2RegionNetVersion>
+    <ClosedXMLVersion>0.105.0</ClosedXMLVersion>
+    <!-- ES/ClickHouse 辅助存储（官方 .NET 客户端，ABP 框架无对应集成包） -->
+    <ElasticClientsVersion>9.5.2</ElasticClientsVersion>
+    <ElasticSerilogSinksVersion>9.0.0</ElasticSerilogSinksVersion>
+    <ClickHouseDriverVersion>1.4.0</ClickHouseDriverVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ABP 框架与官方免费模块 -->
+    <PackageVersion Include="Volo.Abp.Autofac" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TestBase" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Auditing" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Authorization" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs.Abstractions" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs.Domain" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.AuditLogging.Domain" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.AuditLogging.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.AuditLogging.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BlobStoring" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Database.Domain" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Database.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Database.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.FileSystem" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Aliyun" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Aws" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Minio" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Caching" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Caching.StackExchangeRedis" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.DistributedLocking" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Emailing" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.EntityFrameworkCore.Sqlite" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.EntityFrameworkCore.PostgreSql" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Application" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Application.Contracts" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Domain" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.HttpApi" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.HttpApi.Client" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.GlobalFeatures" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Identity.Application" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Identity.Application.Contracts" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Identity.Domain" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Identity.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Identity.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Identity.HttpApi" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Identity.HttpApi.Client" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Account.Application" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Account.Application.Contracts" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Account.HttpApi" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Account.HttpApi.Client" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Account.Web.OpenIddict" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.OpenIddict.Domain" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.OpenIddict.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.OpenIddict.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Application" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Application.Contracts" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.Identity" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.OpenIddict" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.HttpApi" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.HttpApi.Client" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.Application" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.Application.Contracts" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.Domain" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.HttpApi" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.HttpApi.Client" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Application" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Application.Contracts" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Domain" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Domain.Shared" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.EntityFrameworkCore" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.HttpApi" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.HttpApi.Client" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.TextTemplating.Scriban" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.VirtualFileSystem" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Core" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.MultiTenancy" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Serilog" Version="$(AbpVersion)" />
+    <!-- T3.2 SignalR 实时推送 -->
+    <PackageVersion Include="Volo.Abp.AspNetCore.SignalR" Version="$(AbpVersion)" />
+    <!-- T3.3 cron 定时作业：Quartz 只替换 worker 调度器，一次性队列作业继续走 EF 存储。
+         Volo.Abp.Quartz 给 Domain 层引用（IScheduler / CronExpression 类型）；
+         Volo.Abp.BackgroundWorkers.Quartz 只在 Host 引用（起调度器是宿主级基础设施）。
+         不为 Quartz 本体写 PackageVersion（保持传递依赖，同 T3.1 SkiaSharp 的理由）。 -->
+    <PackageVersion Include="Volo.Abp.Quartz" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.BackgroundWorkers.Quartz" Version="$(AbpVersion)" />
+    <!-- Volo.Abp.Quartz 不带 SystemTextJson 序列化器，必须显式加；版本与其传递依赖的 Quartz 3.15.0 对齐 -->
+    <PackageVersion Include="Quartz.Serialization.SystemTextJson" Version="3.15.0" />
+    <PackageVersion Include="Volo.Abp.Swashbuckle" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Http.Client.IdentityModel" Version="$(AbpVersion)" />
+    <!-- T3.1 图片处理：选 SkiaSharp provider（SkiaSharp 本体 MIT）；
+         不用 Volo.Abp.Imaging.ImageSharp（SixLabors.ImageSharp 3.x 是 Split License，闭源商业交付有风险）。
+         SkiaSharp 本体保持传递依赖，不写 PackageVersion（TransitivePinning 会把它提升为直接依赖）。 -->
+    <PackageVersion Include="Volo.Abp.Imaging.Abstractions" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Imaging.SkiaSharp" Version="$(AbpVersion)" />
+    <!-- Linux 原生库（自带 fontconfig 依赖的版本），只在最终宿主进程引用 -->
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="3.119.0" />
+    <!-- T3.1 magic bytes 校验（MIT），包装为 IImageContentValidator -->
+    <PackageVersion Include="FileSignatures" Version="7.3.0" />
+
+    <!-- LeptonXLite 主题（独立版本号） -->
+    <PackageVersion Include="Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite" Version="$(AbpLeptonXLiteVersion)" />
+
+    <!-- ABP Studio -->
+    <PackageVersion Include="Volo.Abp.Studio.Client.AspNetCore" Version="$(AbpStudioVersion)" />
+
+    <!-- Microsoft -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.FileProviders.Embedded" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation" Version="$(MicrosoftVersion)" />
+    <!-- T3.2 SignalR Redis backplane（多实例推送；版本跟 ASP.NET Core 主线 $(MicrosoftVersion) 走） -->
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <!-- T2.8：租户连接串校验端点直接建 ADO 连接（版本与传递依赖对齐） -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <PackageVersion Include="Npgsql" Version="10.0.0" />
+
+    <!-- Serilog -->
+    <PackageVersion Include="Serilog.AspNetCore" Version="$(SerilogAspNetCoreVersion)" />
+    <PackageVersion Include="Serilog.Sinks.Async" Version="2.1.0" />
+    <!-- T5 ES/ClickHouse 辅助存储 -->
+    <PackageVersion Include="Elastic.Clients.Elasticsearch" Version="$(ElasticClientsVersion)" />
+    <PackageVersion Include="Elastic.Serilog.Sinks" Version="$(ElasticSerilogSinksVersion)" />
+    <PackageVersion Include="ClickHouse.Driver" Version="$(ClickHouseDriverVersion)" />
+
+    <!-- HealthChecks -->
+    <PackageVersion Include="AspNetCore.HealthChecks.UI" Version="$(HealthChecksVersion)" />
+    <PackageVersion Include="AspNetCore.HealthChecks.UI.Client" Version="$(HealthChecksVersion)" />
+    <PackageVersion Include="AspNetCore.HealthChecks.UI.InMemory.Storage" Version="$(HealthChecksVersion)" />
+
+    <!-- 其他第三方 -->
+    <PackageVersion Include="KubernetesClient" Version="18.0.5" />
+    <PackageVersion Include="IdentityModel" Version="7.0.0" />
+    <PackageVersion Include="DistributedLock.Redis" Version="1.1.0" />
+    <!-- 出站 HTTP 统一客户端（HttpAgent，非 Furion 本体、独立包）：声明式接口 + 请求构建器，
+         底层仍走 IHttpClientFactory，命名客户端/Handler 定制全兼容。原生 net10.0 目标。 -->
+    <PackageVersion Include="HttpAgent" Version="2.2.0" />
+
+    <!-- 测试 -->
+    <PackageVersion Include="NSubstitute" Version="5.3.0" />
+    <PackageVersion Include="NSubstitute.Analyzers.CSharp" Version="1.0.17" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.extensibility.execution" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+
+    <!-- EasyAbp（后续批次使用，先定义版本变量） -->
+    <PackageVersion Include="EasyAbp.FileManagement.Domain.Shared" Version="$(EasyAbpFileManagementVersion)" />
+    <PackageVersion Include="EasyAbp.FileManagement.Domain" Version="$(EasyAbpFileManagementVersion)" />
+    <PackageVersion Include="EasyAbp.FileManagement.Application.Contracts" Version="$(EasyAbpFileManagementVersion)" />
+    <PackageVersion Include="EasyAbp.FileManagement.Application" Version="$(EasyAbpFileManagementVersion)" />
+    <PackageVersion Include="EasyAbp.FileManagement.HttpApi" Version="$(EasyAbpFileManagementVersion)" />
+    <PackageVersion Include="EasyAbp.FileManagement.HttpApi.Client" Version="$(EasyAbpFileManagementVersion)" />
+    <PackageVersion Include="EasyAbp.FileManagement.EntityFrameworkCore" Version="$(EasyAbpFileManagementVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.SettingUi.Domain.Shared" Version="$(EasyAbpSettingUiVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.SettingUi.Domain" Version="$(EasyAbpSettingUiVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.SettingUi.Application.Contracts" Version="$(EasyAbpSettingUiVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.SettingUi.Application" Version="$(EasyAbpSettingUiVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.SettingUi.HttpApi" Version="$(EasyAbpSettingUiVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.SettingUi.HttpApi.Client" Version="$(EasyAbpSettingUiVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.VerificationCode" Version="$(EasyAbpVerificationCodeVersion)" />
+    <!-- T3.4 数据字典。注意有一个非标准分层的 Application.Contracts.Shared 包（权限常量在其中）。
+         模块 Application/HttpApi 包已不引用：其端点（全量替换、无静态结构锁）整体下线，
+         字典管理面由 AbpAdmin 自己的 DataDictionaryViewAppService 承载 -->
+    <PackageVersion Include="EasyAbp.Abp.DataDictionary.Domain.Shared" Version="$(EasyAbpDataDictionaryVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.DataDictionary.Domain" Version="$(EasyAbpDataDictionaryVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.DataDictionary.Application.Contracts.Shared" Version="$(EasyAbpDataDictionaryVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.DataDictionary.Application.Contracts" Version="$(EasyAbpDataDictionaryVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.DataDictionary.EntityFrameworkCore" Version="$(EasyAbpDataDictionaryVersion)" />
+    <!-- T3.5 通知服务。明确不引：.Web（MVC UI）、.Provider.PrivateMessaging（用户间私信，范围外）、
+         .Provider.WeChatOfficial（本轮不做）、.HttpApi.Client（前端走生成客户端）。
+         两个 Provider.*.Abstractions 是 ETO 所在包（Dispatcher 直接构造其类型，显式固定版本）。 -->
+    <PackageVersion Include="EasyAbp.NotificationService.Domain.Shared" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.Domain" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.Application.Contracts" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.Application" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.EntityFrameworkCore" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.HttpApi" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.Provider.Mailing" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.Provider.Mailing.Abstractions" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.Provider.Sms" Version="$(EasyAbpNotificationServiceVersion)" />
+    <PackageVersion Include="EasyAbp.NotificationService.Provider.Sms.Abstractions" Version="$(EasyAbpNotificationServiceVersion)" />
+    <!-- T3.5 ABP 发送抽象与实现 -->
+    <PackageVersion Include="Volo.Abp.Sms" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.MailKit" Version="$(AbpVersion)" />
+    <!-- T3.5 短信厂商。包 ID 注意：腾讯云是 EasyAbp.Abp.Sms.TencentCloud（不是 Abp.TencentCloud.Sms），
+         阿里云是 EasyAbp.Abp.Aliyun.Sms（Aliyun 在中间）。
+         EasyAbp.Abp.TencentCloud.Sms/.Common 与 EasyAbp.Abp.Aliyun.Common 是底层包：
+         厂商凭据设置项在包装包里未加密（1.21.0 实测），所以我们直接引用底层包、自写带加密设置的 sender。 -->
+    <PackageVersion Include="EasyAbp.Abp.Sms.TencentCloud" Version="$(EasyAbpSmsVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.TencentCloud.Sms" Version="$(EasyAbpTencentCloudVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.TencentCloud.Common" Version="$(EasyAbpTencentCloudVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.Aliyun.Sms" Version="$(EasyAbpSmsVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.Aliyun.Common" Version="$(EasyAbpSmsVersion)" />
+    <PackageVersion Include="MiniExcel" Version="$(MiniExcelVersion)" />
+    <!-- IP 归属地离线库（Apache-2.0，xdb 全量进内存后查询线程安全） -->
+    <PackageVersion Include="IP2Region.Net" Version="$(IP2RegionNetVersion)" />
+    <!-- 仅用于生成带数据验证（下拉框）的导入模板；读写主链路仍是 MiniExcel -->
+    <PackageVersion Include="ClosedXML" Version="$(ClosedXMLVersion)" />
+    <!-- 缓存监控：取宿主依赖链的最高下限（DistributedLock.Redis 要 2.7.33，微软缓存包要 2.7.27），
+         避免 NU1109 降级冲突 -->
+    <PackageVersion Include="StackExchange.Redis" Version="2.7.33" />
+
+    <!-- T2.7 / T4.5: 外部登录 OAuth providers -->
+    <PackageVersion Include="AspNet.Security.OAuth.GitHub" Version="10.0.0" />
+    <PackageVersion Include="AspNet.Security.OAuth.Weixin" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.Google" Version="$(MicrosoftVersion)" />
+
+    <!-- T4.7 EasyAbp.PaymentService 2.21.0：核心 + 预存款 + 微信支付。明确不引 .Web MVC。 -->
+    <PackageVersion Include="EasyAbp.PaymentService.Domain.Shared" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Domain" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Application.Contracts" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Application" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.EntityFrameworkCore" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.HttpApi" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.Domain.Shared" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.Domain" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.Application.Contracts" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.Application" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.EntityFrameworkCore" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.HttpApi" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.Domain.Shared" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.Domain" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.Application.Contracts" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.Application" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.EntityFrameworkCore" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.HttpApi" Version="$(EasyAbpPaymentServiceVersion)" />
+    <PackageVersion Include="EasyAbp.Abp.WeChat.Pay" Version="$(EasyAbpWeChatVersion)" />
+  </ItemGroup>
+</Project>

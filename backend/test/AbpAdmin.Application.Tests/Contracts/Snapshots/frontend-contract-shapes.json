@@ -1,0 +1,145 @@
+{
+  "AbpAdmin.Monitoring.CacheMonitorInfoDto": {
+    "kind": "dto",
+    "properties": {
+      "Backend": {
+        "type": "string",
+        "nullable": false
+      },
+      "ConnectionError": {
+        "type": "string",
+        "nullable": true
+      },
+      "KeyPrefix": {
+        "type": "string",
+        "nullable": false
+      },
+      "MaxMemoryBytes": {
+        "type": "long?",
+        "nullable": true
+      },
+      "RedisVersion": {
+        "type": "string",
+        "nullable": true
+      },
+      "TotalKeys": {
+        "type": "long?",
+        "nullable": true
+      },
+      "UsedMemoryBytes": {
+        "type": "long?",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Monitoring.DiskInfoDto": {
+    "kind": "dto",
+    "properties": {
+      "DriveFormat": {
+        "type": "string",
+        "nullable": false
+      },
+      "FreeBytes": {
+        "type": "long",
+        "nullable": false
+      },
+      "Name": {
+        "type": "string",
+        "nullable": false
+      },
+      "TotalBytes": {
+        "type": "long",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Monitoring.ServerMonitorDto": {
+    "kind": "dto",
+    "properties": {
+      "Disks": {
+        "type": "List\u003CDiskInfoDto\u003E",
+        "nullable": false
+      },
+      "DotNetVersion": {
+        "type": "string",
+        "nullable": false
+      },
+      "GcHeapSizeBytes": {
+        "type": "long",
+        "nullable": false
+      },
+      "GcTotalMemoryLimitBytes": {
+        "type": "long",
+        "nullable": false
+      },
+      "Gen0Collections": {
+        "type": "int",
+        "nullable": false
+      },
+      "Gen1Collections": {
+        "type": "int",
+        "nullable": false
+      },
+      "Gen2Collections": {
+        "type": "int",
+        "nullable": false
+      },
+      "IsServerGc": {
+        "type": "bool",
+        "nullable": false
+      },
+      "MachineName": {
+        "type": "string",
+        "nullable": false
+      },
+      "OsArchitecture": {
+        "type": "string",
+        "nullable": false
+      },
+      "OsDescription": {
+        "type": "string",
+        "nullable": false
+      },
+      "PrivateMemoryBytes": {
+        "type": "long",
+        "nullable": false
+      },
+      "ProcessArchitecture": {
+        "type": "string",
+        "nullable": false
+      },
+      "ProcessCpuUsagePercent": {
+        "type": "double?",
+        "nullable": true
+      },
+      "ProcessorCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "ProcessStartTimeUtc": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "ThreadCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "ThreadPoolAvailableWorkerThreads": {
+        "type": "int",
+        "nullable": false
+      },
+      "ThreadPoolMinWorkerThreads": {
+        "type": "int",
+        "nullable": false
+      },
+      "UptimeSeconds": {
+        "type": "long",
+        "nullable": false
+      },
+      "WorkingSetBytes": {
+        "type": "long",
+        "nullable": false
+      }
+    }
+  }
+}

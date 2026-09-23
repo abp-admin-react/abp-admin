@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- T5 存储基础设施测试:ClickHouse/、Elasticsearch/ 为零依赖单测(常绿);
+         Storage/ 为真库集成测试(RequiresEnvFact 环境变量门控,未配置显示 Skipped)。
+         目录约定:后续第三存储接入时单测按 store 加目录,集成测试同入 Storage/。 -->
+    <ProjectReference Include="..\..\src\AbpAdmin.Elasticsearch\AbpAdmin.Elasticsearch.csproj" />
+    <ProjectReference Include="..\..\src\AbpAdmin.ClickHouse\AbpAdmin.ClickHouse.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+</Project>

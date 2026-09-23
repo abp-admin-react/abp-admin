@@ -1,0 +1,47 @@
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Volo.Abp.Account.Localization
+@model AbpAdmin.Pages.Account.IAccountCaptchaPageModel
+@inject IHtmlLocalizer<AccountResource> CaptchaLocal
+
+@* Turnstile 与图形验证码的共用渲染分部：标记 + 内联脚本随分部走，页面无需各自维护 *@
+@if (Model.CaptchaProvider == "Turnstile" && !string.IsNullOrWhiteSpace(Model.CaptchaSiteKey))
+{
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    <div class="mb-3">
+        <div class="cf-turnstile" data-sitekey="@Model.CaptchaSiteKey"></div>
+    </div>
+}
+@if (Model.CaptchaProvider == "Image")
+{
+    <div class="mb-3">
+        <label class="form-label" for="CaptchaCode">@CaptchaLocal["Captcha"]</label>
+        <div class="input-group">
+            <input id="CaptchaCode" name="CaptchaCode" class="form-control" autocomplete="off"
+                   maxlength="4" placeholder="@CaptchaLocal["Captcha"]" />
+            <img id="CaptchaImage" alt="captcha" title="Refresh"
+                 style="height:38px;cursor:pointer;border:1px solid #ced4da;border-radius:.375rem" />
+        </div>
+        <input type="hidden" id="CaptchaId" name="CaptchaId" />
+    </div>
+    <script>
+        async function abpRefreshImageCaptcha() {
+            const response = await fetch('/api/app/captcha-image');
+            if (!response.ok) { return; }
+            const dto = await response.json();
+            document.getElementById('CaptchaImage').src = dto.imageDataUrl;
+            document.getElementById('CaptchaId').value = dto.id;
+            document.getElementById('CaptchaCode').value = '';
+        }
+        // Login 页 Passkey 表单同步验证码状态用；其它页面没有这些隐藏域，空实现安全跳过
+        function abpSyncImageCaptchaToPasskey() {
+            const id = document.getElementById('CaptchaId');
+            const code = document.getElementById('CaptchaCode');
+            const passkeyId = document.getElementById('PasskeyCaptchaId');
+            const passkeyCode = document.getElementById('PasskeyCaptchaCode');
+            if (id && passkeyId) { passkeyId.value = id.value; }
+            if (code && passkeyCode) { passkeyCode.value = code.value; }
+        }
+        document.getElementById('CaptchaImage')?.addEventListener('click', abpRefreshImageCaptcha);
+        abpRefreshImageCaptcha();
+    </script>
+}

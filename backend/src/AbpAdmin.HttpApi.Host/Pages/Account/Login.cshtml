@@ -1,0 +1,163 @@
+@page
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Microsoft.Extensions.Localization
+@using Volo.Abp.Account.Localization
+@using Volo.Abp.Account.Settings
+@using Volo.Abp.Account.Web.Pages.Account;
+@using Volo.Abp.AspNetCore.Mvc.UI.Theming;
+@using Volo.Abp.Identity;
+@using Volo.Abp.Settings
+@model AbpAdmin.Pages.Account.AbpAdminLoginModel
+@inject IHtmlLocalizer<AccountResource> L
+@inject IStringLocalizer<AbpAdmin.Localization.AbpAdminResource> LA
+@inject IThemeManager ThemeManager
+@inject Volo.Abp.Settings.ISettingProvider SettingProvider
+
+@{
+    Layout = ThemeManager.CurrentTheme.GetAccountLayout();
+}
+
+@section scripts
+    {
+    <abp-script-bundle name="@typeof(LoginModel).FullName">
+        <abp-script src="/Pages/Account/Login.js" />
+    </abp-script-bundle>
+    <script>
+        async function abpPasskeyLogin() {
+            const optionsResponse = await fetch('/api/app/account-passkey/assertion-options', { credentials: 'include' });
+            if (!optionsResponse.ok) {
+                alert('无法获取 Passkey 挑战');
+                return;
+            }
+            const payload = await optionsResponse.json();
+            const publicKey = JSON.parse(payload.json || payload.Json);
+            function b64ToBuf(value) {
+                const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+                const binary = atob(normalized);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                return bytes.buffer;
+            }
+            function bufToB64(buffer) {
+                const bytes = new Uint8Array(buffer);
+                let binary = '';
+                bytes.forEach((b) => binary += String.fromCharCode(b));
+                return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+            }
+            publicKey.challenge = b64ToBuf(publicKey.challenge);
+            if (publicKey.allowCredentials) {
+                publicKey.allowCredentials = publicKey.allowCredentials.map((c) => ({ ...c, id: b64ToBuf(c.id) }));
+            }
+            const cred = await navigator.credentials.get({ publicKey });
+            const response = cred.response;
+            const assertion = {
+                id: cred.id,
+                rawId: bufToB64(cred.rawId),
+                type: cred.type,
+                response: {
+                    clientDataJSON: bufToB64(response.clientDataJSON),
+                    authenticatorData: bufToB64(response.authenticatorData),
+                    signature: bufToB64(response.signature),
+                    userHandle: response.userHandle ? bufToB64(response.userHandle) : null
+                }
+            };
+            document.getElementById('PasskeyCredentialJson').value = JSON.stringify(assertion);
+            const turnstile = document.querySelector('[name="cf-turnstile-response"]');
+            const passkeyTurnstile = document.getElementById('PasskeyTurnstileToken');
+            if (turnstile && passkeyTurnstile) {
+                passkeyTurnstile.value = turnstile.value;
+            }
+            // 图形验证码模式下由 _AccountCaptcha 分部定义该函数；Turnstile/关闭模式不存在，
+            // 必须经 window 取属性（裸标识符在未声明时会抛 ReferenceError 中断提交）
+            window.abpSyncImageCaptchaToPasskey?.();
+            document.getElementById('passkey-form').submit();
+        }
+    </script>
+}
+
+@if (Model.ShowRequireMigrateSeedMessage)
+{
+    <div class="alert alert-danger">
+        <h4 class="alert-heading">@L["RequireMigrateSeedTitle"]</h4>
+        <p>@L["RequireMigrateSeedMessage"]</p>
+    </div>
+}
+
+<div class="card mt-3 shadow-sm rounded">
+    <div class="card-body p-5">
+        <h4>@L["Login"]</h4>
+        @if (await SettingProvider.IsTrueAsync(AccountSettingNames.IsSelfRegistrationEnabled))
+        {
+            <strong>
+                @L["AreYouANewUser"]
+                <a href="@Url.Page("./Register", new {returnUrl = Model.ReturnUrl, returnUrlHash = Model.ReturnUrlHash})" class="text-decoration-none">@L["Register"]</a>
+            </strong>
+        }
+        @if (Model.EnableLocalLogin)
+        {
+            <form method="post" class="mt-4">
+                <div class="mb-3">
+                    <label asp-for="LoginInput.UserNameOrEmailAddress" class="form-label"></label>
+                    <input asp-for="LoginInput.UserNameOrEmailAddress" class="form-control" />
+                    <span asp-validation-for="LoginInput.UserNameOrEmailAddress" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="LoginInput.Password" class="form-label"></label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" autocomplete="new-password" maxlength="@IdentityUserConsts.MaxPasswordLength" asp-for="LoginInput.Password" />
+                        <button class="btn btn-secondary" type="button" id="PasswordVisibilityButton"><i class="fa fa-eye-slash" aria-hidden="true"></i></button>
+                    </div>
+                    <span asp-validation-for="LoginInput.Password"></span>
+                </div>
+                <abp-row>
+                    <abp-column>
+                        <abp-input asp-for="LoginInput.RememberMe" class="mb-4" />
+                    </abp-column>
+                    <abp-column class="text-end">
+                        <a href="@Url.Page("./ForgotPassword", new {returnUrl = Model.ReturnUrl, returnUrlHash = Model.ReturnUrlHash})">@L["ForgotPassword"]</a>
+                    </abp-column>
+                </abp-row>
+                <partial name="_AccountCaptcha" model="Model" />
+                <div class="d-grid gap-2">
+                    <abp-button type="submit" button-type="Primary" name="Action" value="Login" class="btn-lg mt-3">@L["Login"]</abp-button>
+                    @if (Model.ShowCancelButton)
+                    {
+                        <abp-button type="submit" button-type="Secondary" formnovalidate="formnovalidate" name="Action" value="Cancel" class="btn-lg mt-3">@L["Cancel"]</abp-button>
+                    }
+                </div>
+            </form>
+            <form method="post" asp-page-handler="Passkey" class="d-grid gap-2 mt-2" id="passkey-form">
+                <input type="hidden" asp-for="PasskeyCredentialJson" id="PasskeyCredentialJson" />
+                <input type="hidden" asp-for="ReturnUrl" />
+                <input type="hidden" asp-for="ReturnUrlHash" />
+                <input type="hidden" name="cf-turnstile-response" id="PasskeyTurnstileToken" />
+                <input type="hidden" name="CaptchaId" id="PasskeyCaptchaId" />
+                <input type="hidden" name="CaptchaCode" id="PasskeyCaptchaCode" />
+                <button type="button" class="btn btn-outline-secondary btn-lg" onclick="abpPasskeyLogin()">使用 Passkey 登录</button>
+            </form>
+        }
+
+        @if (Model.VisibleExternalProviders.Any())
+        {
+            <div class="mt-2">
+                <h5>@L["OrLoginWith"]</h5>
+                <form asp-page="./Login" asp-page-handler="ExternalLogin" asp-route-returnUrl="@Model.ReturnUrl" asp-route-returnUrlHash="@Model.ReturnUrlHash" method="post">
+                    @foreach (var provider in Model.VisibleExternalProviders)
+                    {
+                        <button type="submit" class="btn btn-primary m-1" name="provider" value="@provider.AuthenticationScheme" title="@L["LogInUsingYourProviderAccount", provider.DisplayName]">@provider.DisplayName</button>
+                    }
+                </form>
+            </div>
+        }
+
+        @if (!Model.EnableLocalLogin && !Model.VisibleExternalProviders.Any())
+        {
+            <div class="alert alert-warning">
+                <strong>@L["InvalidLoginRequest"]</strong>
+                @L["ThereAreNoLoginSchemesConfiguredForThisClient"]
+            </div>
+        }
+
+    </div>
+</div>

@@ -1,0 +1,84 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
+    <RootNamespace>AbpAdmin</RootNamespace>
+    <PreserveCompilationReferences>true</PreserveCompilationReferences>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(RunConfiguration)' == 'AbpAdmin.HttpApi.Host' " />
+
+  <ItemGroup>
+    <PackageReference Include="AspNetCore.HealthChecks.UI" />
+    <PackageReference Include="KubernetesClient"/>
+    <PackageReference Include="IdentityModel" />
+    <PackageReference Include="AspNetCore.HealthChecks.UI.Client" />
+    <PackageReference Include="AspNetCore.HealthChecks.UI.InMemory.Storage" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Async" />
+    <!-- T5：ES 官方 Serilog Sink（运行日志进 ES）；业务客户端走 AbpAdmin.Elasticsearch 项目引用 -->
+    <PackageReference Include="Elastic.Serilog.Sinks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.AspNetCore.MultiTenancy" />
+    <PackageReference Include="Volo.Abp.Autofac" />
+    <PackageReference Include="Volo.Abp.AspNetCore.Serilog" />
+    <PackageReference Include="Volo.Abp.Swashbuckle" />
+    <PackageReference Include="Volo.Abp.Caching.StackExchangeRedis" />
+    <PackageReference Include="Volo.Abp.DistributedLocking" />
+    <PackageReference Include="DistributedLock.Redis" />
+    <!-- T3.2 SignalR 实时推送 + Redis backplane -->
+    <PackageReference Include="Volo.Abp.AspNetCore.SignalR" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
+    <!-- T3.3 cron 定时作业：worker 调度器换 Quartz（一次性队列作业不受影响）。
+         序列化器包 Volo.Abp.Quartz 不带，必须显式引。 -->
+    <PackageReference Include="Volo.Abp.BackgroundWorkers.Quartz" />
+    <PackageReference Include="Quartz.Serialization.SystemTextJson" />
+    <!-- T3.1：SkiaSharp 的 Linux 原生库只需在最终宿主进程存在（Windows/macOS 原生资产由 SkiaSharp 包自带） -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.Account.Web.OpenIddict" />
+    <!-- T2.7 / T4.5: 外部登录 OAuth providers -->
+    <PackageReference Include="AspNet.Security.OAuth.GitHub" />
+    <PackageReference Include="AspNet.Security.OAuth.Weixin" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AbpAdmin.Application\AbpAdmin.Application.csproj" />
+    <ProjectReference Include="..\AbpAdmin.HttpApi\AbpAdmin.HttpApi.csproj" />
+    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+    <!-- 双提供程序迁移程序集（按 Database:Provider 运行时择一使用），须随宿主进 bin -->
+    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore.Sqlite\AbpAdmin.EntityFrameworkCore.Sqlite.csproj" />
+    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore.PostgreSql\AbpAdmin.EntityFrameworkCore.PostgreSql.csproj" />
+    <!-- T5：ES/ClickHouse 辅助存储模块（宿主级基础设施，DbMigrator 不感知） -->
+    <ProjectReference Include="..\AbpAdmin.Elasticsearch\AbpAdmin.Elasticsearch.csproj" />
+    <ProjectReference Include="..\AbpAdmin.ClickHouse\AbpAdmin.ClickHouse.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.Studio.Client.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Logs\**" />
+    <Content Remove="Logs\**" />
+    <EmbeddedResource Remove="Logs\**" />
+    <None Remove="Logs\**" />
+  </ItemGroup>
+
+</Project>

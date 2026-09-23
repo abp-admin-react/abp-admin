@@ -1,0 +1,26 @@
+---
+description: AbpAdmin 前端业务边界：OIDC、权限、路由，禁止覆盖自研目录
+globs: web/{src,config}/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# ABP 管理端约定
+
+权限来自 `GET /api/abp/application-configuration` 的 `auth.grantedPolicies`，在 `src/access.ts` 映射成 `canManageXxx`，路由 `access` 字段控制菜单。不要改回 Pro 模板的 `currentUser.access === 'admin'`。
+
+## 改配置看这些文件
+
+- 后端地址：`config/proxy.ts`（开发代理）
+- OIDC：`src/abp/env.ts`（`authority` / `clientId` / `scope`）
+- 路由菜单：`config/routes.ts` + `src/locales/*/menu.ts`
+- 请求：`src/requestErrorConfig.ts` 的 `request`（`@umijs/max`）
+
+## 不要覆盖
+
+- `src/abp/**`
+- Identity / 租户 / 设置等自研页（`src/pages/identity`、`tenants`、`settings` 等）
+- `config/proxy.ts` 的目标、`src/abp/env.ts`、`access.ts` 里的 ABP 权限
+
+新增页面：`src/pages/<name>/index.tsx`，在 `routes.ts` 注册，需要时加 i18n。页面私有逻辑放同目录 `service.ts`。
+
+登录走 OpenIddict 授权码，账号是后端种子 `admin` / `1q2w3E*`，不是 Pro Mock 的 `ant.design`。

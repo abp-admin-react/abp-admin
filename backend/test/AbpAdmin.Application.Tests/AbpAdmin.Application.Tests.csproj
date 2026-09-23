@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AbpAdmin.Application\AbpAdmin.Application.csproj" />
+    <!-- T2.1：导出下载端点的跨用户 403 语义测试需要手动构造 AuditLogExportController -->
+    <ProjectReference Include="..\..\src\AbpAdmin.HttpApi\AbpAdmin.HttpApi.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Domain.Tests\AbpAdmin.Domain.Tests.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+  </ItemGroup>
+
+</Project>

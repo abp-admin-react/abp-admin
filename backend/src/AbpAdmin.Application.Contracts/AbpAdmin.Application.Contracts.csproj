@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin</RootNamespace>
+    <!-- 生成 XML 注释文档供 Swagger IncludeXmlComments 使用；1591 抑制“缺少 XML 注释”警告 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AbpAdmin.Domain.Shared\AbpAdmin.Domain.Shared.csproj" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.PermissionManagement.Application.Contracts" />
+    <PackageReference Include="Volo.Abp.FeatureManagement.Application.Contracts" />
+    <PackageReference Include="Volo.Abp.SettingManagement.Application.Contracts" />
+    <PackageReference Include="Volo.Abp.Identity.Application.Contracts" />
+    <PackageReference Include="Volo.Abp.Account.Application.Contracts" />
+    <PackageReference Include="Volo.Abp.TenantManagement.Application.Contracts" />
+    <PackageReference Include="EasyAbp.FileManagement.Application.Contracts" />
+    <PackageReference Include="EasyAbp.Abp.SettingUi.Application.Contracts" />
+    <!-- T3.4：Contracts.Shared 是模块特有的非标准分层（DataDictionaryPermissions 权限常量在其中），
+         不能省略——AbpDataDictionaryApplicationContractsModule 只传递依赖 Contracts 包本身 -->
+    <PackageReference Include="EasyAbp.Abp.DataDictionary.Application.Contracts.Shared" />
+    <PackageReference Include="EasyAbp.Abp.DataDictionary.Application.Contracts" />
+    <!-- T3.5：NotificationServicePermissions 权限常量在该包中 -->
+    <PackageReference Include="EasyAbp.NotificationService.Application.Contracts" />
+    <!-- T4.7 PaymentService -->
+    <PackageReference Include="EasyAbp.PaymentService.Application.Contracts" />
+    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Application.Contracts" />
+    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.Application.Contracts" />
+    <!-- T2.6：UserImportRowDto 的 [ExcelColumnName] 列名特性（导入模板表头与解析共用 UserImportColumnNames 常量） -->
+    <PackageReference Include="MiniExcel" />
+  </ItemGroup>
+
+</Project>

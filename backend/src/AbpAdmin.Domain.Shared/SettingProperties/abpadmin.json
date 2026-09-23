@@ -1,0 +1,58 @@
+{
+  "Abp.Identity.Password.ForceUsersToPeriodicallyChangePassword": {
+    "Group1": "Identity",
+    "Group2": "Password",
+    "Type": "checkbox"
+  },
+  "Abp.Identity.Password.PasswordChangePeriodDays": {
+    "Group1": "Identity",
+    "Group2": "Password",
+    "Type": "number"
+  },
+  "AbpAdmin.Account.PasswordlessLoginMode": {
+    "Group1": "Account",
+    "Group2": "Login",
+    "Type": "select",
+    "Options": "OtpAndMagicLink|MagicLinkOnly|OtpOnly"
+  },
+  "AbpAdmin.Account.PasswordlessLoginTokenLifetimeSeconds": {
+    "Group1": "Account",
+    "Group2": "Login",
+    "Type": "number"
+  },
+  "AbpAdmin.Account.PreventEmailEnumeration": {
+    "Group1": "Account",
+    "Group2": "Security",
+    "Type": "checkbox"
+  },
+  "AbpAdmin.Account.ExternalLogin.GitHub.Enabled": {
+    "Group1": "Account",
+    "Group2": "ExternalLogin",
+    "Type": "checkbox"
+  },
+  "AbpAdmin.Account.ExternalLogin.GitHub.ClientId": {
+    "Group1": "Account",
+    "Group2": "ExternalLogin",
+    "Type": "text"
+  },
+  "AbpAdmin.Account.ExternalLogin.GitHub.ClientSecret": {
+    "Group1": "Account",
+    "Group2": "ExternalLogin",
+    "Type": "text"
+  },
+  "AbpAdmin.Account.ExternalLogin.Microsoft.Enabled": {
+    "Group1": "Account",
+    "Group2": "ExternalLogin",
+    "Type": "checkbox"
+  },
+  "AbpAdmin.Account.ExternalLogin.Microsoft.ClientId": {
+    "Group1": "Account",
+    "Group2": "ExternalLogin",
+    "Type": "text"
+  },
+  "AbpAdmin.Account.ExternalLogin.Microsoft.ClientSecret": {
+    "Group1": "Account",
+    "Group2": "ExternalLogin",
+    "Type": "text"
+  }
+}

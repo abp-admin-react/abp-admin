@@ -1,0 +1,115 @@
+---
+description: "HttpAgent outbound HTTP client conventions - declarative interfaces, named HttpClient binding, tolerant converters, and 2.2.0 gotchas verified in this repo. Applies only to outbound-HTTP code paths"
+globs:
+  - "**/I*Api.cs"                # HttpAgent 声明式接口（现 2 个：IConnectTokenApi / ITurnstileSiteVerifyApi）
+  - "**/HttpRemote/**"           # 容错转换器等基础设施（TolerantJsonContentConverter）
+  - "**/*HttpRemote*.cs"         # HttpRemoteConfigurator
+  - "**/HttpStubs/**"            # RecordingHttpHandler 测试替身
+  - "**/*TokenExchanger*.cs"     # token 换取消费方（OpenIddict/Impersonation/LinkedAccount/Passwordless）
+  - "**/*Turnstile*.cs"          # Turnstile 校验链（接口 + 校验器）
+  - "**/Crawling/**"             # 规划中的爬虫模块（创建目录后自动生效）
+alwaysApply: false
+---
+
+# HttpAgent 出站 HTTP 约定
+
+> **完整 API 文档（本地全文）**: `docs/httpagent-llms-full.txt`（约 843KB，官方 llms-full.txt 快照 2026-09-22，
+> 对齐 2.2.0；升级 HttpAgent 版本后刷新：`curl -sL https://http.furion.net/llms-full.txt -o docs/httpagent-llms-full.txt`，
+> http→https 有 301，必须 `-L`）；**官网**: https://http.furion.net/docs/
+> NuGet 包是独立的 `HttpAgent`（**不是** Furion 框架本体），版本锁定在 `backend/Directory.Packages.props`。
+
+## 何时用哪个出站 HTTP 方案
+
+| 场景 | 方案 |
+|---|---|
+| 调第三方/外部 API（含回环调自身 token 端点） | HttpAgent 声明式接口（`IHttpDeclarative`） |
+| 一次性/流式请求（SSE、大文件下载） | HttpAgent 请求构建器（`IHttpRemoteService` + `HttpRequestBuilder`） |
+| EasyAbp 体系内（阿里云 requester 等签名生态） | 保留 `IHttpClientFactory`，不迁 |
+| C# 客户端消费本系统 API | ABP 动态客户端代理（`AddHttpClientProxies`），与 HttpAgent 无关 |
+
+## 已建立的声明式接口模式（参照 `IConnectTokenApi` / `ITurnstileSiteVerifyApi`）
+
+```csharp
+// 1) 接口：绑定命名 HttpClient（注册点跟随消费方，不在 HttpRemoteConfigurator 里跨层注册）
+[HttpClientName("AuthServerTokenExchange")]   // 命名客户端注册处设 BaseAddress/Timeout/SSL
+public interface IConnectTokenApi : IHttpDeclarative
+{
+    [Post("connect/token")]                   // 相对地址不带前导斜杠（见坑 1b）
+    Task<HttpRemoteResult<ConnectTokenEndpointResponse>> ExchangeAsync(
+        [FormUrlEncodedBody] Dictionary<string, string> form,   // 表单；JSON 体用 [JsonBody]/[Body("application/json")]
+        [Header(AliasAs = "Authorization")] string? authorization = null,  // null 时 HttpAgent 跳过该头
+        CancellationToken cancellationToken = default);         // 冻结参数类型自动绑定
+}
+
+// 2) 注册：消费方所在模块 ConfigureServices 里
+context.Services.AddHttpRemote(builder =>
+{
+    builder.AddHttpDeclarative<IConnectTokenApi>();
+    // TResult 是自定义 DTO 时必须挂容错转换器（见下坑 2）
+    builder.AddHttpContentConverters(() => new IHttpContentConverter[]
+    {
+        new TolerantJsonContentConverter<ConnectTokenEndpointResponse>()   // 在 AbpAdmin.Domain/HttpRemote/
+    });
+});
+```
+
+- `AddHttpRemote` 可在多个模块各调一次（Domain 的 `HttpRemoteConfigurator` + Application 模块），已由
+  `HostServiceGraphValidationTests` + 集成测试锚定安全。
+- 非 2xx **默认不抛异常**（`EnsureSuccessStatusCode` 是显式 opt-in）：返回 `HttpRemoteResult<T>`，
+  调用方判 `IsSuccessStatusCode` 再读 `Result`，网络/超时异常仍会抛出。
+
+## 2.2.0 实测坑与官方文档核对结论（已对照 docs/httpagent-llms-full.txt 全文核实）
+
+1. **`[[key]]` 配置占位符默认不解析——文档有说明但藏在 3.28/6.16 章**：占位符需显式启用
+   `AddHttpRemote(...).ConfigureOptions(options => options.Configuration = <IConfiguration>)`（5.26 基地址页
+   只写"支持配置参数"未提前置条件）。**本项目不启用它**，基地址一律在命名 HttpClient 注册处设置
+   `AddHttpClient(name, c => c.BaseAddress = new Uri(authority.TrimEnd('/') + "/"))`（文档 5.26 的"全局配置"
+   推荐路径，也是 ABP 生态标准做法；且不引入全局占位符替换的意外生效面）。若爬虫等场景要用
+   `[[...]]`，先启用 options.Configuration 并注意它对 URL/Header/Cookie 所有占位符全局生效。
+   1b. **相对地址不带前导斜杠**：`[Post("connect/token")]` 而非 `"/connect/token"`——RFC 3986 里带前导
+   斜杠是绝对路径引用，会丢弃 BaseAddress 的路径部分（Authority=https://host/auth 时拼成
+   https://host/connect/token 丢掉 /auth）；不带斜杠则与 BaseAddress（尾斜杠）合并保留路径，
+   两种 Authority 形态都与字符串拼接 `authority.TrimEnd('/') + "/connect/token"` 等价。
+2. **默认内容转换器对非 JSON 响应体（网关错误页、纯文本 5xx）直接抛 `JsonException`，且丢状态码——
+   文档空白**（6.8 只写转换方式不写失败行为，2.10 只列网络异常）。自定义 DTO 返回必须注册
+   `TolerantJsonContentConverter<T>`（解析失败返回 null，状态码保留，调用方可回落
+   `"HTTP {(int)result.StatusCode}"`）。自定义转换器优先生效的官方机制见 6.9："工厂按最后新增的
+   转换器开始查找"。备选路径：异常抛出后 `ex.GetResponseMessage()` 扩展可取回响应（2.10）。
+3. **非 2xx 默认不抛异常**——与文档一致（3.43/5.19：`EnsureSuccessStatusCode` 是显式 opt-in）。
+   返回 `HttpRemoteResult<T>` 判 `IsSuccessStatusCode` 再读 `Result`；网络/超时异常仍会抛出。
+4. `HttpRemoteResult<T>` 持有 `HttpResponseMessage`，调用侧用 `using var result = await ...` 释放。
+
+## 官方有、本项目暂未用的能力（爬虫模块候选）
+
+- `[SimulateBrowser(IsMobile = true)]`：声明式接口/方法级浏览器 UA 伪装（5.20）
+- `RateLimitedStream`（6.67）：令牌桶下载限速包装流，爬虫抓大文件直接可用
+- `options.FallbackBaseAddress`（6.16）：相对地址的兜底基地址（未配 BaseAddress 的命名客户端）
+- `options.RequestBuilderConfigurator`（6.16）：全局统一请求构建器配置（如统一加默认头）
+- `options.JsonSerializerOptions` / 客户端级 `AddHttpClient(name).ConfigureOptions(...)`（6.11）
+- 全局默认超时/UA 等也可走 6.17"统一配置 HttpClient 客户端"的 `ConfigureHttpClientDefaults`
+
+## 测试模式（参照 `RecordingHttpHandler`）
+
+出站 HTTP 的测试替身挂在**命名 HttpClient 主处理器位**（测试模块晚于生产模块注册，覆盖生效），
+入队 `(HttpStatusCode, body)` canned 响应 + `RecordedRequests` 断言请求形状（URL/表单/Authorization 头），
+不真实外呼。测试配置里 `AuthServer:Authority` 指向假域名（`AbpAdmin.TestBase/appsettings.json`）。
+
+## 官方文档地图（全文按章节号在 `docs/httpagent-llms-full.txt` 内检索）
+
+| 章节 | 内容 |
+|---|---|
+| 1 开始上手 | 概述、安装（Furion 已内置）、与 Refit（纯声明式）/RestSharp（流畅式）对比、更新日志（启用文档里未见过的能力前先核对） |
+| 2 快速入门 | 28 个场景案例：抓取网页 2.27、SSE 2.13、压测 2.11、Access Token 自动管理 2.22、调用配额 2.23、HttpRemoteResult 2.25 |
+| 3 请求构建器 | 3.1-3.84 全量能力：各类内容体 3.8-3.17、命名客户端/池化 3.31/3.36、响应转换器 3.35、EnsureSuccess 3.43、认证 3.44-3.47、浏览器伪装 3.50、状态码分发 3.51、标准请求头 3.55、异常抑制 3.61、断言 3.64-3.65、包络解包 3.66、重定向钩子 3.69、Mock 3.78 |
+| 4 多部分表单 | 4.1-4.26 上传：各来源文件 4.10-4.19、OSS 要求移除 part Content-Type 的坑 4.23 |
+| 5 声明式请求 | 5.1-5.43：返回值类型 5.6、multipart 5.17、参数验证 5.30、接口继承复用 5.38、冻结参数 5.39、预检请求 5.40 |
+| 6 进阶指南 | 内容处理器 6.1-6.6、内容转换器体系 6.7-6.13、下载/上传 builder 6.21-6.26、SSE/WS/长轮询 6.29-6.37、HttpContext 转发 6.38-6.45、HttpClient 深度配置 6.49-6.66、限速流 6.67、HttpRemoteOptions 6.16 |
+| 7 应用案例 | Clay 流变对象 7.2、Blazor WASM 7.3 |
+| 8 常见问题 | 忽略 SSL 8.2、请求挂起排查 8.3、强制 IPv4/6 8.4、重定向 8.5、解压/乱码 8.12、JSON 序列化 8.13、关 traceparent 8.14、并行批量 8.17、AddHttpRemote 二义性 8.20 |
+
+## 现状清单（迁移基准）
+
+- 已迁：`IConnectTokenApi`（OpenIddictTokenExchanger + ImpersonationTokenExchanger 共用）、
+  `ITurnstileSiteVerifyApi`（TurnstileCaptchaValidator）
+- 保留 IHttpClientFactory：`SettingBasedAliyunApiRequester`（EasyAbp 签名生态）
+- 规划中：爬虫模块（Crawling）将复用声明式接口 + `TolerantJsonContentConverter` + `[SimulateBrowser]`

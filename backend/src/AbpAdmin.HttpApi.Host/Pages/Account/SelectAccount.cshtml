@@ -1,0 +1,28 @@
+@page
+@using AbpAdmin.Localization
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Volo.Abp.AspNetCore.Mvc.UI.Theming
+@model AbpAdmin.Pages.Account.SelectAccountModel
+@inject IHtmlLocalizer<AbpAdminResource> L
+@inject IThemeManager ThemeManager
+@{
+    Layout = ThemeManager.CurrentTheme.GetAccountLayout();
+}
+<div class="card mt-3 shadow-sm rounded">
+    <div class="card-body p-4" style="max-width: 420px; margin: 0 auto;">
+        <h4 class="mb-3 text-center">@L["SelectAccount:Title"]</h4>
+        <p class="text-center text-muted mb-4">
+            @L["SelectAccount:CurrentUser"]: <strong>@Model.CurrentUserName</strong>
+            @if (!string.IsNullOrEmpty(Model.CurrentUserEmail))
+            {
+                <text>（@Model.CurrentUserEmail）</text>
+            }
+        </p>
+        <form method="post" asp-route-RedirectUri="@Model.RedirectUri">
+            <div class="d-grid gap-2">
+                <button type="submit" name="action" value="Continue" class="btn btn-primary btn-lg">@L["SelectAccount:Continue"]</button>
+                <button type="submit" name="action" value="Switch" class="btn btn-secondary btn-lg">@L["SelectAccount:Switch"]</button>
+            </div>
+        </form>
+    </div>
+</div>

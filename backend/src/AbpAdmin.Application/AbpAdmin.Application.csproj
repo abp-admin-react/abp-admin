@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin</RootNamespace>
+    <!-- 生成 XML 注释文档供 Swagger IncludeXmlComments 使用；1591 抑制“缺少 XML 注释”警告 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AbpAdmin.Domain\AbpAdmin.Domain.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Application.Contracts\AbpAdmin.Application.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- T3.1：ProfileAvatarAppService 需要 IHttpContextAccessor 设置头像响应的 Cache-Control/ETag。
+         走框架引用而不是 Microsoft.AspNetCore.Http.Abstractions 包（.NET Core 3+ 的官方方式）。 -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.PermissionManagement.Application" />
+    <PackageReference Include="Volo.Abp.FeatureManagement.Application" />
+    <PackageReference Include="Volo.Abp.SettingManagement.Application" />
+    <PackageReference Include="Volo.Abp.Account.Application" />
+    <PackageReference Include="Volo.Abp.Identity.Application" />
+    <PackageReference Include="Volo.Abp.TenantManagement.Application" />
+    <PackageReference Include="Volo.Abp.BlobStoring" />
+    <PackageReference Include="Volo.Abp.TextTemplating.Scriban" />
+    <PackageReference Include="Volo.Abp.VirtualFileSystem" />
+    <PackageReference Include="Volo.Abp.BackgroundJobs" />
+    <PackageReference Include="EasyAbp.FileManagement.Application" />
+    <PackageReference Include="EasyAbp.Abp.SettingUi.Application" />
+    <!-- 只用模块 Contracts（权限定义）；模块 Application 已随其 HttpApi 端点下线一并移除，
+         字典管理面由 AbpAdmin 自己的 DataDictionaryViewAppService 承载 -->
+    <PackageReference Include="EasyAbp.Abp.DataDictionary.Application.Contracts" />
+    <!-- T3.5 -->
+    <PackageReference Include="EasyAbp.NotificationService.Application" />
+    <!-- T4.7 PaymentService。不引 .Web -->
+    <PackageReference Include="EasyAbp.PaymentService.Application" />
+    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Application" />
+    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.Application" />
+    <!-- T3.5：Dispatcher 直接构造 ETO（门面隔离点，见 INotificationDispatcher 注释） -->
+    <PackageReference Include="EasyAbp.NotificationService.Provider.Mailing.Abstractions" />
+    <PackageReference Include="EasyAbp.NotificationService.Provider.Sms.Abstractions" />
+    <PackageReference Include="MiniExcel" />
+    <PackageReference Include="ClosedXML" />
+    <!-- T2.8：租户连接串校验端点按 Database:Provider 直接建 ADO 连接 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Npgsql" />
+    <!-- 缓存监控：SCAN/取值/删除直连 Redis（与宿主缓存共用同一配置键，独立多路复用器） -->
+    <PackageReference Include="StackExchange.Redis" />
+    <!-- T2.9 的 IHttpClientFactory（GenerateAccessToken 调 /connect/token）由上面的
+         FrameworkReference Microsoft.AspNetCore.App 提供，不再单独引 Microsoft.Extensions.Http -->
+    <!-- /connect/token 交换改走 HttpAgent 声明式接口（IConnectTokenApi，底层仍是上面的命名 HttpClient） -->
+    <PackageReference Include="HttpAgent" />
+  </ItemGroup>
+
+</Project>

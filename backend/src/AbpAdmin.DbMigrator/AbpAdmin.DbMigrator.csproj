@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Async" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.Autofac" />
+    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+    <!-- 双提供程序迁移程序集（按 Database:Provider 运行时择一使用），须随宿主进 bin -->
+    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore.Sqlite\AbpAdmin.EntityFrameworkCore.Sqlite.csproj" />
+    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore.PostgreSql\AbpAdmin.EntityFrameworkCore.PostgreSql.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Application.Contracts\AbpAdmin.Application.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Logs\**" />
+    <Content Remove="Logs\**" />
+
+    <EmbeddedResource Remove="Logs\**" />
+    <None Remove="Logs\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="appsettings.json" />
+    <Content Include="appsettings.json">
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <!-- 凭证不再放本项目：共享 appsettings.secrets.json 由 HttpApi.Host 持有，DbMigrator 经配置链读取 -->
+    <!-- T3.3：Quartz QRTZ_ 建表脚本（官方幂等化版），Quartz:UsePersistentStore=true 时由
+         EntityFrameworkCoreAbpAdminDbSchemaMigrator 在 EF 迁移后执行 -->
+    <None Include="..\..\etc\quartz\tables_postgres.sql" Link="quartz\tables_postgres.sql">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

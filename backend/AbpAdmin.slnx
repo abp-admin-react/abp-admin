@@ -1,0 +1,32 @@
+<Solution>
+    <Configurations>
+        <Platform Name="Any CPU" />
+    </Configurations>
+    <Folder Name="/src/">
+        <Project Path="src/AbpAdmin.Domain/AbpAdmin.Domain.csproj" />
+        <Project Path="src/AbpAdmin.Application/AbpAdmin.Application.csproj" />
+        <Project Path="src/AbpAdmin.EntityFrameworkCore/AbpAdmin.EntityFrameworkCore.csproj" />
+        <!-- 双提供程序迁移程序集：每库一个基线迁移，按 Database:Provider 择一使用 -->
+        <Project Path="src/AbpAdmin.EntityFrameworkCore.Sqlite/AbpAdmin.EntityFrameworkCore.Sqlite.csproj" />
+        <Project Path="src/AbpAdmin.EntityFrameworkCore.PostgreSql/AbpAdmin.EntityFrameworkCore.PostgreSql.csproj" />
+        <Project Path="src/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj" />
+        <Project Path="src/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts.csproj" />
+        <Project Path="src/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj" />
+        <Project Path="src/AbpAdmin.HttpApi.Client/AbpAdmin.HttpApi.Client.csproj" />
+        <Project Path="src/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj" />
+        <Project Path="src/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj" />
+        <!-- T5：ES/ClickHouse 辅助存储 -->
+        <Project Path="src/AbpAdmin.Elasticsearch/AbpAdmin.Elasticsearch.csproj" />
+        <Project Path="src/AbpAdmin.ClickHouse/AbpAdmin.ClickHouse.csproj" />
+    </Folder>
+    <Folder Name="/test/">
+        <Project Path="test/AbpAdmin.Application.Tests/AbpAdmin.Application.Tests.csproj" />
+        <Project Path="test/AbpAdmin.EntityFrameworkCore.Tests/AbpAdmin.EntityFrameworkCore.Tests.csproj" />
+        <Project Path="test/AbpAdmin.HttpApi.Host.Tests/AbpAdmin.HttpApi.Host.Tests.csproj" />
+        <Project Path="test/AbpAdmin.TestBase/AbpAdmin.TestBase.csproj" />
+        <Project Path="test/AbpAdmin.Domain.Tests/AbpAdmin.Domain.Tests.csproj" />
+        <Project Path="test/AbpAdmin.HttpApi.Client.ConsoleTestApp/AbpAdmin.HttpApi.Client.ConsoleTestApp.csproj" />
+        <!-- T5：存储基础设施测试(单测 + 真库集成) -->
+        <Project Path="test/AbpAdmin.Storage.Tests/AbpAdmin.Storage.Tests.csproj" />
+    </Folder>
+</Solution>

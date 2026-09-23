@@ -1,0 +1,26 @@
+---
+description: 写 antd 组件前必须查官方 MCP/CLI，禁止凭记忆猜 API
+globs: "**/web/**/*.{ts,tsx,less,css}"
+alwaysApply: false
+---
+
+# Ant Design For Agents
+
+antd API 可能与训练数据不一致。写组件前先查，不要猜。官方说明：https://ant.design/docs/react/for-agents-cn
+
+## 优先用 MCP `antd`
+
+配置在 `web/.cursor/mcp.json` 与仓库根 `.cursor/mcp.json`。写代码前：
+
+1. `antd_info` 查 Props / 是否废弃
+2. `antd_demo` 取可运行示例再改
+3. 样式用 `antd_semantic` / `antd_token`，不要硬编码颜色
+4. 提交前走 `antd_lint` 或 `pnpm exec antd lint ./src`
+
+MCP 不可用时：在 `web/` 执行 `pnpm exec antd info Button --format json`。
+
+## 约定
+
+- 从 `antd`、`@ant-design/pro-components` 引入，对应当前 **antd 6**
+- 布局用 Tailwind；主题用 antd-style `createStyles`；组件局部用 CSS Modules
+- 不要使用已废弃的 `visible`、旧 Form API、moment

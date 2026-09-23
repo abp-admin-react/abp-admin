@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AbpAdmin.Domain.Shared\AbpAdmin.Domain.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.Emailing" />
+    <PackageReference Include="IP2Region.Net" />
+    <PackageReference Include="Volo.Abp.Caching" />
+    <PackageReference Include="Volo.Abp.PermissionManagement.Domain.Identity" />
+    <PackageReference Include="Volo.Abp.PermissionManagement.Domain.OpenIddict" />
+    <PackageReference Include="Volo.Abp.BackgroundJobs.Domain" />
+    <PackageReference Include="Volo.Abp.AuditLogging.Domain" />
+    <PackageReference Include="Volo.Abp.FeatureManagement.Domain" />
+    <PackageReference Include="Volo.Abp.SettingManagement.Domain" />
+    <PackageReference Include="Volo.Abp.BlobStoring.Database.Domain" />
+    <PackageReference Include="Volo.Abp.BlobStoring.FileSystem" />
+    <PackageReference Include="Volo.Abp.BlobStoring.Aliyun" />
+    <PackageReference Include="Volo.Abp.BlobStoring.Aws" />
+    <PackageReference Include="Volo.Abp.BlobStoring.Minio" />
+    <PackageReference Include="EasyAbp.FileManagement.Domain" />
+    <PackageReference Include="EasyAbp.Abp.SettingUi.Domain" />
+    <PackageReference Include="EasyAbp.Abp.DataDictionary.Domain" />
+    <!-- T3.5 通知服务核心 + 邮件/短信 provider（.Web 与 PrivateMessaging 不引，见规格） -->
+    <PackageReference Include="EasyAbp.NotificationService.Domain" />
+    <PackageReference Include="EasyAbp.NotificationService.Provider.Mailing" />
+    <PackageReference Include="EasyAbp.NotificationService.Provider.Sms" />
+    <!-- T3.5 发送抽象与 MailKit 实现 -->
+    <PackageReference Include="Volo.Abp.Sms" />
+    <PackageReference Include="Volo.Abp.MailKit" />
+    <!-- T3.5 短信厂商。EasyAbp.Abp.Sms.TencentCloud 包装包按规格引用但其模块不加载
+         （它的凭据设置项未加密，见 AbpAdminDomainModule 注释）；实际用的是底层
+         TencentCloud.Sms/Common 的请求类型。阿里云包不实现 ISmsSender，需自写适配器。 -->
+    <PackageReference Include="EasyAbp.Abp.Sms.TencentCloud" />
+    <PackageReference Include="EasyAbp.Abp.TencentCloud.Sms" />
+    <PackageReference Include="EasyAbp.Abp.TencentCloud.Common" />
+    <PackageReference Include="EasyAbp.Abp.Aliyun.Sms" />
+    <PackageReference Include="EasyAbp.Abp.Aliyun.Common" />
+    <!-- T3.1：图片压缩/缩放（SkiaSharp provider）+ magic bytes 校验（FileSignatures） -->
+    <PackageReference Include="Volo.Abp.Imaging.SkiaSharp" />
+    <PackageReference Include="FileSignatures" />
+    <!-- T3.3：Domain 层需要 Quartz 的类型（IScheduler / TriggerKey / CronExpression）。
+         只引包不加模块依赖——调度器（AbpBackgroundWorkersQuartzModule）只在 Host 装配。 -->
+    <PackageReference Include="Volo.Abp.Quartz" />
+    <!-- T4.4 Turnstile：IHttpClientFactory -->
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <!-- 出站 HTTP 声明式客户端（HttpAgent）：Turnstile siteverify 等第三方端点走声明式接口；
+         命名 HttpClient 注册仍在 CachingAndTenancyConfigurator（注册跟随消费方）。 -->
+    <PackageReference Include="HttpAgent" />
+    <!-- T4.7 PaymentService -->
+    <PackageReference Include="EasyAbp.PaymentService.Domain" />
+    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Domain" />
+    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.Domain" />
+    <PackageReference Include="EasyAbp.Abp.WeChat.Pay" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.OpenIddict.Domain" />
+    <PackageReference Include="Volo.Abp.Identity.Domain" />
+    <PackageReference Include="Volo.Abp.TenantManagement.Domain" />
+  </ItemGroup>
+
+</Project>

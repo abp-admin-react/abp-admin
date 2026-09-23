@@ -1,0 +1,24 @@
+---
+description: AbpAdmin 前端技术栈与命令（pnpm / Umi Max / Pro v6）
+globs: web/**/*
+alwaysApply: false
+---
+
+# Web 技术栈
+
+本仓库前端在 `web/`。只用 **Cursor**，不用 Claude Code。包管理只用 **pnpm**（`web/pnpm-lock.yaml`），禁止 npm / yarn。
+
+## 命令（在 `web/` 下）
+
+- 开发：`pnpm start` 或 `pnpm dev`（无 Mock，代理到 https://localhost:44395）
+- 构建 / 检查：`pnpm build`、`pnpm lint`、`pnpm tsc`、`pnpm test`
+- antd：`pnpm exec antd info Button`；提交前 `pnpm exec antd lint ./src`
+
+## 禁止
+
+- 不要改 `src/services/ant-design-pro/` 与 `src/services/abpadmin/`（历史生成物，已冻结，见 web/AGENTS.md 服务层约定；生成器已退役）
+- 不要跑 `pnpm simple`（不可逆）
+- 不要引入 ESLint / Prettier（只用 Biome）
+- 不要单独升级 `@utoo/pack`
+
+栈：React 19、antd 6、Umi Max 4、ProComponents 3。导入用 `@umijs/max`，不要 `from 'umi'`。
