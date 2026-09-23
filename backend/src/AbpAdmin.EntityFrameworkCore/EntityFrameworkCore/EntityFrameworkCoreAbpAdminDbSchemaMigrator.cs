@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -12,6 +11,14 @@ using Volo.Abp.MultiTenancy;
 
 namespace AbpAdmin.EntityFrameworkCore;
 
+/// <summary>
+/// 框架库 schema 迁移器（IAbpAdminDbSchemaMigrator 实现，被迁移循环自动枚举）。三步：
+/// ① EnsureHostDatabaseExistsAsync——PG 库缺失时经维护库自动建库；
+/// ② EmbeddedSqlScriptMigrator.ApplyAsync——按 Database:Provider 执行本工程
+///    <c>Sql/postgresql</c> / <c>Sql/sqlite</c> 建表脚本，在 <c>__EFMigrationsHistory</c> 记账；
+/// ③ EnsureQuartzTablesAsync——按开关确保 QRTZ_ 表（仅 host 库）。
+/// <see cref="HasPendingAsync"/> 供宿主启动检查：脚本是否都已记入 History 表。
+/// </summary>
 public class EntityFrameworkCoreAbpAdminDbSchemaMigrator
     : IAbpAdminDbSchemaMigrator, ITransientDependency
 {
@@ -32,21 +39,40 @@ public class EntityFrameworkCoreAbpAdminDbSchemaMigrator
 
         await EnsureHostDatabaseExistsAsync();
 
-        await _serviceProvider
-            .GetRequiredService<AbpAdminDbContext>()
-            .Database
-            .MigrateAsync();
+        await EmbeddedSqlScriptMigrator.ApplyAsync(
+            _serviceProvider.GetRequiredService<AbpAdminDbContext>(),
+            GetScriptFolder(),
+            EmbeddedSqlScriptMigrator.FrameworkHistoryTable,
+            typeof(EntityFrameworkCoreAbpAdminDbSchemaMigrator).Assembly,
+            _serviceProvider.GetRequiredService<ILogger<EntityFrameworkCoreAbpAdminDbSchemaMigrator>>(),
+            "框架库");
 
-        // T3.3 第 3 步：EF 迁移之后、数据种子之前确保 QRTZ_ 表存在。
-        // 不混进 EF 迁移——QRTZ_ schema 归 Quartz 上游所有，DDL 随上游版本变化。
+        // T3.3 第 3 步：建表脚本之后、数据种子之前确保 QRTZ_ 表存在。
+        // 不混进建表脚本——QRTZ_ schema 归 Quartz 上游所有，DDL 随上游版本变化。
         await EnsureQuartzTablesAsync();
+    }
+
+    public async Task<bool> HasPendingAsync()
+    {
+        return await EmbeddedSqlScriptMigrator.HasPendingAsync(
+            _serviceProvider.GetRequiredService<AbpAdminDbContext>(),
+            GetScriptFolder(),
+            EmbeddedSqlScriptMigrator.FrameworkHistoryTable,
+            typeof(EntityFrameworkCoreAbpAdminDbSchemaMigrator).Assembly);
+    }
+
+    // 提供程序判定唯一入口：脚本目录名与 csproj 的 Sql\<目录> 嵌入约定绑定
+    private string GetScriptFolder()
+    {
+        var configuration = _serviceProvider.GetRequiredService<IConfiguration>();
+        return AbpAdminDatabaseProvider.GetScriptFolder(configuration);
     }
 
     /// <summary>
     /// 全自动建库（仅宿主库）：目标库不存在时按当前提供程序自动创建。
     /// SQLite 由驱动自动建库文件，无需处理；PostgreSQL 通过连接串同源的维护库 postgres
     /// 执行 CREATE DATABASE，要求登录角色具备 CREATEDB 权限且 pg_hba 放行 postgres 库。
-    /// 检测不到（维护库连不上）时降级为警告，交由后续 EF 迁移以原生错误暴露真实原因。
+    /// 检测不到（维护库连不上）时降级为警告，交由后续建表脚本以原生错误暴露真实原因。
     /// </summary>
     private async Task EnsureHostDatabaseExistsAsync()
     {
@@ -73,6 +99,13 @@ public class EntityFrameworkCoreAbpAdminDbSchemaMigrator
         }
 
         var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        if (string.IsNullOrWhiteSpace(builder.Database))
+        {
+            // 与 TenantDatabaseCreator 同一守卫：缺库名时明确失败，优于 AddWithValue(null) 查不到、
+            // 再被下方 catch 折叠成"跳过自动建库"的误导性警告
+            throw new ArgumentException("PostgreSQL 'Default' 连接串缺少 'Database'，无法自动建库。");
+        }
+
         var targetDatabase = builder.Database;
         builder.Database = "postgres";
 

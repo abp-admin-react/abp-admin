@@ -15,7 +15,7 @@ namespace AbpAdmin.EntityFrameworkCore;
 /// <see cref="ITenantDatabaseCreator"/> 的实现：按 Database:Provider（AbpAdminDatabaseProvider）
 /// 建独立租户库，租户库与 host 同 DBMS（连接串管理界面的语义约定）。
 /// - PostgreSql：连维护库 postgres 查 pg_database，缺失则 CREATE DATABASE；
-/// - Sqlite：确保文件父目录存在，开/关一次连接创建空库文件（空文件也满足 EF 迁移前提）；
+/// - Sqlite：确保文件父目录存在，开/关一次连接创建空库文件（空文件由迁移器补 schema）；
 /// - 其余 provider 抛 NotSupportedException（与 AbpAdminDatabaseProvider 的支持面一致）。
 /// 日志契约：新建库/文件记 Information（带库名/路径，不含凭据）；已存在走 ensure 常态分支
 /// 记 Debug——上游 handler 的「Ensuring... / ensured and migrated」配这里的明细定位实际动作。
@@ -107,10 +107,10 @@ public class TenantDatabaseCreator : ITenantDatabaseCreator, ITransientDependenc
             return;
         }
 
-        // Microsoft.Data.Sqlite 在首次打开连接时创建空库文件；schema 由后续 EF 迁移填充
+        // Microsoft.Data.Sqlite 在首次打开连接时创建空库文件；schema 由后续建表脚本迁移器填充
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
 
-        Logger.LogInformation("SQLite tenant database file {Path} created (empty; schema comes from EF migrations).", fullPath);
+        Logger.LogInformation("SQLite tenant database file {Path} created (empty; schema comes from the SQL script migrators).", fullPath);
     }
 }

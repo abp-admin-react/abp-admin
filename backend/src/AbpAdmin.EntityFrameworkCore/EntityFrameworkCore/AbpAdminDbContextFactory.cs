@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
@@ -7,8 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL;
 
 namespace AbpAdmin.EntityFrameworkCore;
 
-/* This class is needed for EF Core console commands
- * (like Add-Migration and Update-Database commands) */
+/* 设计期构造 DbContext。运行时建表以本工程 Sql/postgresql 与 Sql/sqlite 为准，不再生成 EF 迁移。 */
 public class AbpAdminDbContextFactory : IDesignTimeDbContextFactory<AbpAdminDbContext>
 {
     public AbpAdminDbContext CreateDbContext(string[] args)

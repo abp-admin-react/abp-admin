@@ -84,18 +84,15 @@ public class AbpAdminEntityFrameworkCoreModule : AbpModule
 
         Configure<AbpDbContextOptions>(options =>
         {
-            /* 数据库提供程序主切换点：读 Database:Provider 配置（单一来源见 HttpApi.Host/appsettings.json），
-             * 分支选择 Npgsql / Sqlite，并各自指向专属迁移程序集。
-             * 迁移架构（详见 AbpAdminMigrationsAssemblies）：SQLite 与 PostgreSQL 各持一个基线迁移程序集，
-             * 运行时按本开关择一——MigrateAsync 只会在所选程序集内查找/应用迁移，两库互不干扰。
-             * EF 设计时（dotnet ef）走 AbpAdminDbContextFactory；生成迁移的命令见各迁移项目内工厂注释。 */
+            /* 数据库提供程序主切换点：读 Database:Provider 配置（单一来源见 HttpApi.Host/appsettings.json）。
+             * 建表不走 EF 迁移程序集，由 EntityFrameworkCoreAbpAdminDbSchemaMigrator 执行本工程 Sql/ 下的脚本。 */
             if (usePostgreSql)
             {
-                options.UseNpgsql(npgsql => npgsql.MigrationsAssembly(AbpAdminMigrationsAssemblies.PostgreSql));
+                options.UseNpgsql();
             }
             else
             {
-                options.UseSqlite(sqlite => sqlite.MigrationsAssembly(AbpAdminMigrationsAssemblies.Sqlite));
+                options.UseSqlite();
             }
         });
 

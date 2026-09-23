@@ -12,7 +12,7 @@ public class FileManagementFileConfig : IEntityTypeConfiguration<EasyAbp.FileMan
     {
         // 配额 SUM（FileStorageQuotaChecker 按 TenantId + FileType 聚合 RegularFile 的 ByteSize）
         // 每次上传都会触发，十万级文件量下无索引会全表扫描。模块自带的映射没有这组索引，这里补上。
-        // 注意：仅改模型不会改已有库，需由主控生成并应用一次迁移（dotnet-ef migrations add）。
+        // 注意：仅改模型不会改已有库，需在 Sql/postgresql 与 Sql/sqlite 各追加一份脚本。
         b.HasIndex(x => new { x.TenantId, x.FileType });
     }
 }

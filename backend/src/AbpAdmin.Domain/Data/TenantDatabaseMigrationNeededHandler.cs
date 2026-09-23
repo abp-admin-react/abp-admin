@@ -15,7 +15,7 @@ namespace AbpAdmin.Data;
 /// <summary>
 /// 收到 <see cref="TenantDatabaseMigrationNeededEto"/> 后：建独立租户库（若缺）→ 迁移 schema。
 /// 与 DbMigrator 的逐租户迁移同一机制（IAbpAdminDbSchemaMigrator 在当前租户上下文里
-/// 解析该租户的连接串跑 EF 迁移），幂等、可重跑。
+/// 解析该租户的连接串跑建表脚本迁移），幂等、可重跑。
 ///
 /// 范围决策（有意为之，勿"补全"）：
 /// - 只处理默认连接串——主业务 DbContext（[ConnectionStringName("Default")]）的落点；
@@ -24,7 +24,7 @@ namespace AbpAdmin.Data;
 /// - 不 drop 库：删租户不删库（见 TenantDeletedResourceCleanupHandler）。
 ///
 /// [UnitOfWork(IsDisabled = true)]：分布式事件在提交方的 UoW 完成阶段投递，禁用后
-/// 租户读取走显式的新 UoW（读到已提交连接串），EF 迁移则完全脱离 UoW——与 DbMigrator
+/// 租户读取走显式的新 UoW（读到已提交连接串），建表迁移则完全脱离 UoW——与 DbMigrator
 /// 运行条件一致。
 ///
 /// 已知取舍（当前部署形态）：项目未接外部 MQ，IDistributedEventBus 回落

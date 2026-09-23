@@ -43,7 +43,7 @@ public class AbpAdminDbMigrationService : ITransientDependency
     // 注意（问题9 修复）：模板遗留的 AddInitialMigrationIfNotExist/AddInitialMigration
     // （运行期调 abp CLI create-migration-and-run-migrator）已删除——生产 DbMigrator 不应携带
     // 开发机专属的建迁移路径，且其 catch (Exception) { return false; } 会静默吞错。
-    // 初始迁移由开发者手动执行 dotnet ef migrations add 生成。
+    // 框架与业务建表都是各工程 Sql/ 下的脚本，由迁移器按 History 表执行。
     public async Task MigrateAsync()
     {
         Logger.LogInformation("Started database migrations...");
