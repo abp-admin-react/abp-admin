@@ -310,3 +310,14 @@ AbpAdmin.db.backup*
 .zcode/
 # FileEmlEmailSender 开发环境落盘的邮件产物（运行时输出，勿入库）
 backend/src/AbpAdmin.HttpApi.Host/App_Data/
+
+# 模板通用补充（公开主仓库对外适用）：跨平台杂项 / 前端本地产物 / 环境变量
+.DS_Store
+.pnpm-store/
+[Ll]ogs/
+coverage/
+*.pem
+*.key
+.env
+.env.*
+!.env.example
