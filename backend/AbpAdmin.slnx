@@ -6,14 +6,8 @@
         <Project Path="src/AbpAdmin.Domain/AbpAdmin.Domain.csproj" />
         <Project Path="src/AbpAdmin.Application/AbpAdmin.Application.csproj" />
         <Project Path="src/AbpAdmin.EntityFrameworkCore/AbpAdmin.EntityFrameworkCore.csproj" />
-        <!-- 双提供程序迁移程序集：每库一个基线迁移，按 Database:Provider 择一使用 -->
-        <Project Path="src/AbpAdmin.EntityFrameworkCore.Sqlite/AbpAdmin.EntityFrameworkCore.Sqlite.csproj" />
-        <Project Path="src/AbpAdmin.EntityFrameworkCore.PostgreSql/AbpAdmin.EntityFrameworkCore.PostgreSql.csproj" />
-        <!-- 自包含业务模块样板：实体/服务/权限/本地化/DbContext/迁移全在模块内，
-             新增业务=复制模块改名；宿主接线仅 csproj 引用 + DependsOn 一行 -->
+        <!-- 自包含业务模块样板：一个工程，PostgreSQL / SQLite 脚本在模块 Sql/ 下 -->
         <Project Path="src/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj" />
-        <Project Path="src/AbpAdmin.Biz.Template/migrations/Sqlite/AbpAdmin.Biz.Template.Migrations.Sqlite.csproj" />
-        <Project Path="src/AbpAdmin.Biz.Template/migrations/PostgreSql/AbpAdmin.Biz.Template.Migrations.PostgreSql.csproj" />
         <Project Path="src/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj" />
         <Project Path="src/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts.csproj" />
         <Project Path="src/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj" />

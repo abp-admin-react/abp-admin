@@ -27,23 +27,24 @@ public class Program
         {
             Log.Information("Starting AbpAdmin.HttpApi.Host.");
             var builder = WebApplication.CreateBuilder(args);
+            // secrets 追加在环境变量之后会压过 env（ABP AddAppSettingsSecretsJson 的顺序问题）。
+            // 这里再补一次 env 源置于链尾：生产/CI 环境变量（如 ConnectionStrings__Default）优先级最高，
+            // 与本仓库"生产配置走环境变量注入"的约定一致。本项目的 appsettings.json 也是
+            // DbMigrator 的共享配置源（数据库相关配置只维护在这里，DbMigrator 自动跟随）。
+            // （builder.Configuration 与 Host.ConfigureAppConfiguration 操作同一 ConfigurationManager，
+            // 此处直接追加到链尾，均在 ABP 模块初始化读配置之前生效。）
+            builder.Configuration.AddJsonFile("appsettings.secrets.json", optional: true, reloadOnChange: false);
+            builder.Configuration.AddEnvironmentVariables();
+
             // 相对路径 SQLite 连接串按 cwd 解析，从仓库根运行会在仓库外静默建库；
-            // 以仓库根（AbpAdmin.slnx）为锚改写为绝对路径，须在模块初始化读取连接串之前
+            // 以仓库根（AbpAdmin.slnx）为锚改写为绝对路径，须在模块初始化读取连接串之前，
+            // 且必须在上面 secrets/env 源注册之后——归一化要看到它们提供的连接串
             if (AbpAdminDbPathNormalizer.TryNormalize(builder.Configuration, out var dbPath))
             {
                 Log.Information("SQLite connection normalized to {DbPath}", dbPath);
             }
 
             builder.Host
-                .ConfigureAppConfiguration((hosting, cfg) =>
-                {
-                    // secrets 追加在环境变量之后会压过 env（ABP AddAppSettingsSecretsJson 的顺序问题）。
-                    // 这里再补一次 env 源置于链尾：生产/CI 环境变量（如 ConnectionStrings__Default）优先级最高，
-                    // 与本仓库"生产配置走环境变量注入"的约定一致。本项目的 appsettings.json 也是
-                    // DbMigrator 的共享配置源（数据库相关配置只维护在这里，DbMigrator 自动跟随）。
-                    cfg.AddJsonFile("appsettings.secrets.json", optional: true, reloadOnChange: false);
-                    cfg.AddEnvironmentVariables();
-                })
                 .UseAutofac()
                 .UseSerilog((context, services, loggerConfiguration) =>
                 {

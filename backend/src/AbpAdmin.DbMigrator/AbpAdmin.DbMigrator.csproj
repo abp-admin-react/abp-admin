@@ -17,14 +17,9 @@
   <ItemGroup>
     <PackageReference Include="Volo.Abp.Autofac" />
     <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
-    <!-- 双提供程序迁移程序集（按 Database:Provider 运行时择一使用），须随宿主进 bin -->
-    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore.Sqlite\AbpAdmin.EntityFrameworkCore.Sqlite.csproj" />
-    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore.PostgreSql\AbpAdmin.EntityFrameworkCore.PostgreSql.csproj" />
     <ProjectReference Include="..\AbpAdmin.Application.Contracts\AbpAdmin.Application.Contracts.csproj" />
     <!-- 业务模块：引用后其 IAbpAdminDbSchemaMigrator 实现进入容器，被迁移循环自动枚举 -->
     <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
-    <ProjectReference Include="..\AbpAdmin.Biz.Template\migrations\Sqlite\AbpAdmin.Biz.Template.Migrations.Sqlite.csproj" />
-    <ProjectReference Include="..\AbpAdmin.Biz.Template\migrations\PostgreSql\AbpAdmin.Biz.Template.Migrations.PostgreSql.csproj" />
   </ItemGroup>
 
   <ItemGroup>

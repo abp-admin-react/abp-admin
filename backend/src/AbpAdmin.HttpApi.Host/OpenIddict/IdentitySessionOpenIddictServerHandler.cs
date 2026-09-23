@@ -70,7 +70,7 @@ public class IdentitySessionOpenIddictServerHandler : IOpenIddictServerHandler<P
         var device = IdentitySessionDeviceResolver.Resolve(
             context.Transaction.Request?.GetParameter(IdentitySessionDeviceResolver.DeviceParameterName)?.ToString());
 
-        IdentitySession session;
+        IdentitySession? session;
         if (existingSessionId.IsNullOrWhiteSpace())
         {
             // 全新登录：建立新会话并执行防并发登录策略

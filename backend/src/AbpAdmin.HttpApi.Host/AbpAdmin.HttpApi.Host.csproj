@@ -62,17 +62,11 @@
     <ProjectReference Include="..\AbpAdmin.Application\AbpAdmin.Application.csproj" />
     <ProjectReference Include="..\AbpAdmin.HttpApi\AbpAdmin.HttpApi.csproj" />
     <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
-    <!-- 双提供程序迁移程序集（按 Database:Provider 运行时择一使用），须随宿主进 bin -->
-    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore.Sqlite\AbpAdmin.EntityFrameworkCore.Sqlite.csproj" />
-    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore.PostgreSql\AbpAdmin.EntityFrameworkCore.PostgreSql.csproj" />
     <!-- T5：ES/ClickHouse 辅助存储模块（宿主级基础设施，DbMigrator 不感知） -->
     <ProjectReference Include="..\AbpAdmin.Elasticsearch\AbpAdmin.Elasticsearch.csproj" />
     <ProjectReference Include="..\AbpAdmin.ClickHouse\AbpAdmin.ClickHouse.csproj" />
-    <!-- 自包含业务模块样板（模块+双提供程序迁移程序集须随宿主进 bin）。
-         新增业务模块：加这三行引用 + AbpAdminHttpApiHostModule 的 DependsOn 一行，其余全在模块内 -->
+    <!-- 自包含业务模块样板。新增业务模块：加这一行引用 + AbpAdminHttpApiHostModule 的 DependsOn 一行 -->
     <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
-    <ProjectReference Include="..\AbpAdmin.Biz.Template\migrations\Sqlite\AbpAdmin.Biz.Template.Migrations.Sqlite.csproj" />
-    <ProjectReference Include="..\AbpAdmin.Biz.Template\migrations\PostgreSql\AbpAdmin.Biz.Template.Migrations.PostgreSql.csproj" />
   </ItemGroup>
 
   <ItemGroup>
