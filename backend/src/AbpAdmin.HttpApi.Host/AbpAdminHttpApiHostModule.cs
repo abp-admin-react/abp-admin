@@ -874,59 +874,75 @@ public class AbpAdminHttpApiHostModule : AbpModule
     }
 
 
+    public override async Task OnPreApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        // 空库首启的关键顺序：ABP 先跑完所有模块的 Pre-Init，再跑各模块的 OnApplicationInitialization——
+        // OpenIddict Token 清理、动态权限/设置/特性存储都在框架模块的初始化阶段查库，若等到本模块的
+        // OnApplicationInitialization 才迁移，这些初始化器会在空库上撞 no such table。迁移必须放在 Pre-Init。
+        await MigrateSchemaIfConfiguredAsync(context);
+    }
+
+    // 全自动建表（开关 Database:AutoMigrateOnStartup，默认开）：启动时枚举全部 IAbpAdminDbSchemaMigrator
+    // 逐个询问脚本是否都已记入 History 表（框架库 + 各业务模块，宿主无需感知具体模块——
+    // 与迁移执行路径同一约定，新模块按「引用 + DependsOn」接线即自动纳入检查）。
+    // 缺脚本才执行迁移+种子。库不可读（数据库不存在、History 表还没有）时检查会抛错，
+    // 视为需要迁移，走完整流程（含自动建库）。
+    // 生产多实例部署若担心启动竞争，可用环境变量 Database__AutoMigrateOnStartup=false 关闭，改由 DbMigrator 负责。
+    private async Task MigrateSchemaIfConfiguredAsync(ApplicationInitializationContext context)
+    {
+        var autoMigrate = context.ServiceProvider.GetRequiredService<IConfiguration>()
+            .GetValue<bool>("Database:AutoMigrateOnStartup");
+        if (!autoMigrate)
+        {
+            return;
+        }
+
+        using (var scope = context.ServiceProvider.CreateScope())
+        {
+            bool needsMigration;
+            try
+            {
+                var schemaMigrators = scope.ServiceProvider
+                    .GetServices<IAbpAdminDbSchemaMigrator>();
+                needsMigration = false;
+                foreach (var schemaMigrator in schemaMigrators)
+                {
+                    if (await schemaMigrator.HasPendingAsync())
+                    {
+                        needsMigration = true;
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // 检查失败 ≠ 无需迁移：吞掉原因会让运维只看到后续迁移的报错，找不到真因
+                context.ServiceProvider.GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
+                    .LogWarning(ex, "迁移待办检查失败（库不可读或 History 表缺失），视为需要迁移，走完整迁移流程");
+                needsMigration = true;
+            }
+
+            if (needsMigration)
+            {
+                await scope.ServiceProvider
+                    .GetRequiredService<AbpAdminDbMigrationService>()
+                    .MigrateAsync();
+            }
+            else
+            {
+                context.ServiceProvider.GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
+                    .LogInformation("数据库 schema 已就绪（SQL 脚本均已应用），跳过自动迁移");
+            }
+        }
+    }
+
     public override async Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
         var app = context.GetApplicationBuilder();
         var env = context.GetEnvironment();
 
-        // 全自动建表（开关 Database:AutoMigrateOnStartup，默认开）：启动时枚举全部 IAbpAdminDbSchemaMigrator
-        // 逐个询问脚本是否都已记入 History 表（框架库 + 各业务模块，宿主无需感知具体模块——
-        // 与迁移执行路径同一约定，新模块按「引用 + DependsOn」接线即自动纳入检查）。
-        // 缺脚本才执行迁移+种子。库不可读（数据库不存在、History 表还没有）时检查会抛错，
-        // 视为需要迁移，走完整流程（含自动建库）。
-        // 生产多实例部署若担心启动竞争，可用环境变量 Database__AutoMigrateOnStartup=false 关闭，改由 DbMigrator 负责。
-        var autoMigrate = context.ServiceProvider.GetRequiredService<IConfiguration>()
-            .GetValue<bool>("Database:AutoMigrateOnStartup");
-        if (autoMigrate)
-        {
-            using (var scope = context.ServiceProvider.CreateScope())
-            {
-                bool needsMigration;
-                try
-                {
-                    var schemaMigrators = scope.ServiceProvider
-                        .GetServices<IAbpAdminDbSchemaMigrator>();
-                    needsMigration = false;
-                    foreach (var schemaMigrator in schemaMigrators)
-                    {
-                        if (await schemaMigrator.HasPendingAsync())
-                        {
-                            needsMigration = true;
-                            break;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // 检查失败 ≠ 无需迁移：吞掉原因会让运维只看到后续迁移的报错，找不到真因
-                    context.ServiceProvider.GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
-                        .LogWarning(ex, "迁移待办检查失败（库不可读或 History 表缺失），视为需要迁移，走完整迁移流程");
-                    needsMigration = true;
-                }
-
-                if (needsMigration)
-                {
-                    await scope.ServiceProvider
-                        .GetRequiredService<AbpAdminDbMigrationService>()
-                        .MigrateAsync();
-                }
-                else
-                {
-                    context.ServiceProvider.GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
-                        .LogInformation("数据库 schema 已就绪（SQL 脚本均已应用），跳过自动迁移");
-                }
-            }
-        }
+        // 全自动建表已前移到 OnPreApplicationInitializationAsync（见 MigrateSchemaIfConfiguredAsync）——
+        // 空库首启时必须先于框架模块的初始化器（Token 清理/动态存储查库）完成建表。
 
         // 脱敏 converter 无法从 DI 拿请求级服务，经静态门引用单例（fail-closed：未设置则一律脱敏）
         MaskingPermissionGate.Current = context.ServiceProvider.GetRequiredService<MaskingPermissionGate>();
