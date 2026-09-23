@@ -208,7 +208,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         result.SucceededCount.ShouldBe(0);
         result.FailedCount.ShouldBe(1);
         result.Errors.Count.ShouldBe(1);
-        result.Errors[0].ErrorMessage.ShouldContain(_localizer["UserImport:UserNameRequired", 1].Value);
+        result.Errors[0].ErrorMessage!.ShouldContain(_localizer["UserImport:UserNameRequired", 1].Value);
         result.FailureReportId.ShouldNotBeNull();
     }
 
@@ -238,7 +238,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         result.SucceededCount.ShouldBe(0);
         result.FailedCount.ShouldBe(1);
         result.Errors.Count.ShouldBe(1);
-        result.Errors[0].ErrorMessage.ShouldContain(_localizer["UserImport:EmailRequired", 1].Value);
+        result.Errors[0].ErrorMessage!.ShouldContain(_localizer["UserImport:EmailRequired", 1].Value);
     }
 
     [Fact]
@@ -269,7 +269,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         result.SucceededCount.ShouldBe(0);
         result.FailedCount.ShouldBe(1);
         result.Errors.Count.ShouldBe(1);
-        result.Errors[0].ErrorMessage.ShouldContain(_localizer["UserImport:DuplicatedUserName", 1, "import-test-dup"].Value);
+        result.Errors[0].ErrorMessage!.ShouldContain(_localizer["UserImport:DuplicatedUserName", 1, "import-test-dup"].Value);
 
         // Cleanup
         await CleanupTestUserAsync(existingUserId);
@@ -303,7 +303,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         result.SucceededCount.ShouldBe(0);
         result.FailedCount.ShouldBe(1);
         result.Errors.Count.ShouldBe(1);
-        result.Errors[0].ErrorMessage.ShouldContain(_localizer["UserImport:DuplicatedEmail", 1, "import-dup2@test.com"].Value);
+        result.Errors[0].ErrorMessage!.ShouldContain(_localizer["UserImport:DuplicatedEmail", 1, "import-dup2@test.com"].Value);
 
         // Cleanup
         await CleanupTestUserAsync(existingUserId);
@@ -336,7 +336,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         result.SucceededCount.ShouldBe(0);
         result.FailedCount.ShouldBe(1);
         result.Errors.Count.ShouldBe(1);
-        result.Errors[0].ErrorMessage.ShouldContain(_localizer["UserImport:PasswordRequiredForLocalUser", 1].Value);
+        result.Errors[0].ErrorMessage!.ShouldContain(_localizer["UserImport:PasswordRequiredForLocalUser", 1].Value);
     }
 
     [Fact]
@@ -403,7 +403,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         result.SucceededCount.ShouldBe(0);
         result.FailedCount.ShouldBe(1);
         result.Errors.Count.ShouldBe(1);
-        result.Errors[0].ErrorMessage.ShouldContain(_localizer["UserImport:RoleNotFound", 1, "NonExistentRole"].Value);
+        result.Errors[0].ErrorMessage!.ShouldContain(_localizer["UserImport:RoleNotFound", 1, "NonExistentRole"].Value);
     }
 
     [Fact]
@@ -673,7 +673,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         foreach (var name in new[] { "syn-yes", "syn-true", "syn-one", "syn-empty", "syn-no" })
         {
             var user = await _userManager.FindByNameAsync($"{name}-{suffix}");
-            await CleanupTestUserAsync(user.Id);
+            await CleanupTestUserAsync(user!.Id);
         }
     }
 
@@ -696,7 +696,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         var result = await _identityUserAdminAppService.ImportAsync(new RemoteStreamContent(stream, "test.xlsx"));
 
         result.FailedCount.ShouldBe(1);
-        result.Errors[0].ErrorMessage.ShouldContain(
+        result.Errors[0].ErrorMessage!.ShouldContain(
             _localizer["UserImport:InvalidBoolean", 1, UserImportColumnNames.IsActive, "maybe"].Value);
     }
 
@@ -751,7 +751,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
 
             var row = rows.Single(x => x[UserExportColumnNames.UserName]?.ToString() == userName);
             row[UserExportColumnNames.Email]?.ToString().ShouldBe($"{userName}@test.com");
-            row[UserExportColumnNames.OrganizationUnits]?.ToString().ShouldContain(ou.DisplayName);
+            row[UserExportColumnNames.OrganizationUnits]!.ToString()!.ShouldContain(ou.DisplayName);
         }
         finally
         {

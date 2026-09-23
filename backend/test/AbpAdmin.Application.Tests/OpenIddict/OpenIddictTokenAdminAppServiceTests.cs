@@ -107,7 +107,7 @@ public abstract class OpenIddictTokenAdminAppServiceTests<TStartupModule> : AbpA
         await _appService.RevokeTokenAsync(token.Id); // 二次吊销不抛异常
 
         var after = await _tokenRepository.FindAsync(token.Id);
-        after.Status.ShouldBe(OpenIddictConstants.Statuses.Revoked);
+        after!.Status.ShouldBe(OpenIddictConstants.Statuses.Revoked);
     }
 
     [Fact]

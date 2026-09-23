@@ -34,7 +34,7 @@ public class ClickHouseWriterIntegrationTests
         var options = new AbpAdminClickHouseOptions
         {
             IsEnabled = true,
-            ConnectionString = Environment.GetEnvironmentVariable("ABPADMIN_TEST_CLICKHOUSE_CONN"),
+            ConnectionString = Environment.GetEnvironmentVariable("ABPADMIN_TEST_CLICKHOUSE_CONN")!,
             CollectedEventsTable = "default.collected_events_it",
             MaxBatchSize = 100,
         };

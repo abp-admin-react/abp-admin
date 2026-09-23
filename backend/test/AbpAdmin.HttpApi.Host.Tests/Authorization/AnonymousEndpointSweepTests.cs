@@ -78,6 +78,9 @@ public class AnonymousEndpointSweepTests
             new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = $"Data Source={isolatedDb}",
+                // 隔离前提是 SQLite 副本：provider 必须一并钉住——appsettings 出厂默认是 PostgreSql，
+                // 本机若靠 appsettings.secrets.json 切回 Sqlite，测试就会因机器配置不同而飘红
+                ["Database:Provider"] = "Sqlite",
             },
             useAutofac: true);
         var app = builder.Build();
@@ -89,6 +92,19 @@ public class AnonymousEndpointSweepTests
 
     /// <summary>一个匿名端点的判定面：路由模板 + 显示名（控制器动作/页面的全名）。</summary>
     private sealed record EndpointInfo(string Template, string DisplayName);
+
+    /// <summary>与 PreLoginRazorPagesConvention.AnonymousPageRoutes 同源的页面路径清单。</summary>
+    /// （声明须先于 AllowedAnonymousAreas：后者初始化器里的 lambda 引用本字段，
+    /// 声明顺序靠后会被编译器流分析判为"可能未初始化"（CS8602）。）
+    private static readonly HashSet<string> PreLoginPages =
+    [
+        "Account/Login", "Account/LoginWith2fa", "Account/LoginWithRecoveryCode",
+        "Account/TwoFactorVerification", "Account/Lockout",
+        "Account/ForgotPassword", "Account/ForgotPasswordConfirmation",
+        "Account/Register", "Account/RegisterConfirmation", "Account/ConfirmEmail",
+        "Account/LinkLogin", "Account/LinkLoginCallback",
+        "Account/Logout", "Account/LoggedOut", "Account/AccessDenied",
+    ];
 
     /// <summary>
     /// 显式匿名白名单。每条都要写清"为什么它匿名是安全的"——
@@ -156,17 +172,6 @@ public class AnonymousEndpointSweepTests
                  || e.DisplayName.StartsWith("AbpAdmin.Controllers.GdprDownloadController.DownloadAsync", StringComparison.Ordinal)
                  || e.DisplayName.StartsWith("AbpAdmin.Files.FileShareAppService.DownloadByTokenAsync", StringComparison.Ordinal)
                  || e.DisplayName.StartsWith("AbpAdmin.Gdpr.GdprRequestAppService.DownloadAsync", StringComparison.Ordinal)),
-    ];
-
-    /// <summary>与 PreLoginRazorPagesConvention.AnonymousPageRoutes 同源的页面路径清单。</summary>
-    private static readonly HashSet<string> PreLoginPages =
-    [
-        "Account/Login", "Account/LoginWith2fa", "Account/LoginWithRecoveryCode",
-        "Account/TwoFactorVerification", "Account/Lockout",
-        "Account/ForgotPassword", "Account/ForgotPasswordConfirmation",
-        "Account/Register", "Account/RegisterConfirmation", "Account/ConfirmEmail",
-        "Account/LinkLogin", "Account/LinkLoginCallback",
-        "Account/Logout", "Account/LoggedOut", "Account/AccessDenied",
     ];
 
     /// <summary>

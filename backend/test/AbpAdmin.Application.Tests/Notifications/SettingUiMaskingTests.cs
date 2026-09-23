@@ -179,20 +179,20 @@ public abstract class SettingUiMaskingTests<TStartupModule> : AbpAdminApplicatio
         setEntry.SubType.ShouldBe("保存设置值");
         setEntry.Success.ShouldBeTrue();
         // Extra 记的是还原后的设置名（Abp.X.Y），不是表单键（Setting_Abp_X_Y）
-        setEntry.Extra.ShouldContain("AbpAdmin.Account.PreventEmailEnumeration");
-        setEntry.Extra.ShouldNotContain("Setting_");
-        setEntry.Extra.ShouldNotContain("AbpAdmin.Sms.Aliyun.AccessKeySecret");
+        setEntry.Extra!.ShouldContain("AbpAdmin.Account.PreventEmailEnumeration");
+        setEntry.Extra!.ShouldNotContain("Setting_");
+        setEntry.Extra!.ShouldNotContain("AbpAdmin.Sms.Aliyun.AccessKeySecret");
 
         var resetEntry = recorder.Entries[1];
         resetEntry.SubType.ShouldBe("重置设置值");
         resetEntry.Success.ShouldBeTrue();
-        resetEntry.Extra.ShouldContain(AbpAdminSettings.Sms.TencentCloudSecretKey);
+        resetEntry.Extra!.ShouldContain(AbpAdminSettings.Sms.TencentCloudSecretKey);
 
         // 密钥值永不落库：任何字段都不得含真实提交值
         foreach (var entry in recorder.Entries)
         {
-            entry.Extra.ShouldNotContain("new-secret");
-            entry.Action.ShouldNotContain("new-secret");
+            entry.Extra!.ShouldNotContain("new-secret");
+            entry.Action!.ShouldNotContain("new-secret");
         }
     }
 }

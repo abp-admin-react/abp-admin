@@ -32,9 +32,9 @@ public abstract class AuditLogHandlingTests<TStartupModule> : AuditLogTestBase<T
     {
         return await WithUnitOfWorkAsync(async () =>
         {
-            var log = await _auditLogRepository.FindAsync(logId);
+            var log = (await _auditLogRepository.FindAsync(logId))!;
             return (
-                log!.GetProperty<DateTime?>(AuditLogHandleConsts.HandledAtPropertyName),
+                log.GetProperty<DateTime?>(AuditLogHandleConsts.HandledAtPropertyName),
                 log.GetProperty<string>(AuditLogHandleConsts.HandledByNamePropertyName),
                 log.GetProperty<string>(AuditLogHandleConsts.HandledNotePropertyName));
         });

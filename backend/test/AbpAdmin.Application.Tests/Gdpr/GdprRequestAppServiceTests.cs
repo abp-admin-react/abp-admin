@@ -424,7 +424,7 @@ public abstract class GdprRequestAppServiceTests<TStartupModule> : AbpAdminAppli
         var second = CaptureBusinessExceptionAsync(_gdprRequestAppService.DownloadAsync(requestId, token));
         await Task.WhenAll(first, second);
 
-        var codes = new[] { first.Result?.Code, second.Result?.Code }
+        var codes = new[] { (await first)?.Code, (await second)?.Code }
             .Where(c => c != null).OrderBy(c => c).ToList();
 
         // 一个成功（无异常 → 无错误码），另一个 InvalidDownloadToken

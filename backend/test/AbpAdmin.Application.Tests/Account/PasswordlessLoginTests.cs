@@ -118,7 +118,7 @@ public abstract class PasswordlessLoginTests<TStartupModule> : AbpAdminApplicati
         var second = _passwordlessLoginManager.ValidateAndConsumeAsync(email, credentials.Code, null);
         await Task.WhenAll(first, second);
 
-        var results = new[] { first.Result, second.Result };
+        var results = new[] { await first, await second };
         results.Count(r => r != null).ShouldBe(1, "并发重放同一验证码时恰好只能成功一次");
         results.Single(r => r != null)!.Email.ShouldBe(email);
     }

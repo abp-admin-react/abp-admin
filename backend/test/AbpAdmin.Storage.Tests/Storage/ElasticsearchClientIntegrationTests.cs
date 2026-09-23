@@ -28,7 +28,7 @@ public class ElasticsearchClientIntegrationTests
     public async Task Client_Should_Ping_And_Index_Document()
     {
         var client = new ElasticsearchClient(new ElasticsearchClientSettings(
-                new Uri(Environment.GetEnvironmentVariable("ABPADMIN_TEST_ES_URL")))
+                new Uri(Environment.GetEnvironmentVariable("ABPADMIN_TEST_ES_URL")!))
             .Authentication(new BasicAuthentication(
                 Environment.GetEnvironmentVariable("ABPADMIN_TEST_ES_USER") ?? string.Empty,
                 Environment.GetEnvironmentVariable("ABPADMIN_TEST_ES_PASS") ?? string.Empty)));

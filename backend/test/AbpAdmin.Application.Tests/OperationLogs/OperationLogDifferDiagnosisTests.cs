@@ -24,9 +24,9 @@ public class OperationLogDifferDiagnosisTests
 
         var result = OperationLogDiffer.Diff(old, @new);
 
-        result.ShouldContain("【岗位名称】旧名 → 新名");
-        result.ShouldContain("【显示顺序】1 → 2");
-        result.ShouldNotContain("(空)");
+        result!.ShouldContain("【岗位名称】旧名 → 新名");
+        result!.ShouldContain("【显示顺序】1 → 2");
+        result!.ShouldNotContain("(空)");
     }
 
     [Fact]
@@ -35,6 +35,6 @@ public class OperationLogDifferDiagnosisTests
         var old = new Snapshot();
         var @new = new UpdatePostDto { Name = "新名", Code = "BROWSER1", SortOrder = 1, Status = 0 };
 
-        OperationLogDiffer.Diff(old, @new).ShouldContain("旧名 → 新名");
+        OperationLogDiffer.Diff(old, @new)!.ShouldContain("旧名 → 新名");
     }
 }
