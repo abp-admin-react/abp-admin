@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -5,6 +6,7 @@ using AbpAdmin.Settings;
 using EasyAbp.Abp.SettingUi;
 using Shouldly;
 using Volo.Abp.Modularity;
+using Volo.Abp.MultiTenancy;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.Settings;
 using Xunit;
@@ -193,6 +195,66 @@ public abstract class SettingUiMaskingTests<TStartupModule> : AbpAdminApplicatio
         {
             entry.Extra!.ShouldNotContain("new-secret");
             entry.Action!.ShouldNotContain("new-secret");
+        }
+    }
+
+    [Fact]
+    public async Task Host_Reset_Should_Clear_Tenant_Null_Key_Row()
+    {
+        // host 侧管理页（EasyAbp 保存路由）把保存写到 T 层且 ProviderKey 为空——
+        // ResetSettingValuesAsync 的 host 分支必须同步清掉这一层，否则"重置为默认值"
+        // 后读链（TenantSettingValueProvider 对 host 读 null key 行）仍命中旧值。
+        // 修复前本用例红：T(null) 行残留，读回 "stale" 而不是定义默认值。
+        await WithUnitOfWorkAsync(async () =>
+            await _settingManager.SetAsync(
+                AbpAdminSettings.System.SiteTitle, "stale",
+                TenantSettingValueProvider.ProviderName, null));
+
+        try
+        {
+            await WithUnitOfWorkAsync(async () =>
+                await _settingUiAppService.ResetSettingValuesAsync(
+                    [AbpAdminSettings.System.SiteTitle]));
+
+            var value = await WithUnitOfWorkAsync(async () =>
+                await _settingProvider.GetOrNullAsync(AbpAdminSettings.System.SiteTitle));
+            value.ShouldBe("AbpAdmin"); // 回落 System 域定义默认值
+        }
+        finally
+        {
+            await WithUnitOfWorkAsync(async () =>
+                await _settingManager.SetAsync(
+                    AbpAdminSettings.System.SiteTitle, null,
+                    TenantSettingValueProvider.ProviderName, null));
+        }
+    }
+
+    [Fact]
+    public async Task Tenant_Reset_Should_Not_Wipe_Global_Layer()
+    {
+        // 租户管理员的"重置为默认值"只清自己能写到的层（U + 本租户 T），
+        // 不得抹掉 host 写入的 G 层默认——这是 host/tenant 重置范围的隔离钉。
+        await WithUnitOfWorkAsync(async () =>
+            await _settingManager.SetGlobalAsync(AbpAdminSettings.System.SiteTitle, "global-value"));
+
+        try
+        {
+            var currentTenant = GetRequiredService<ICurrentTenant>();
+            using (currentTenant.Change(Guid.NewGuid()))
+            {
+                await WithUnitOfWorkAsync(async () =>
+                    await _settingUiAppService.ResetSettingValuesAsync(
+                        [AbpAdminSettings.System.SiteTitle]));
+            }
+
+            var value = await WithUnitOfWorkAsync(async () =>
+                await _settingProvider.GetOrNullAsync(AbpAdminSettings.System.SiteTitle));
+            value.ShouldBe("global-value"); // G 层完好，读链回落命中它
+        }
+        finally
+        {
+            await WithUnitOfWorkAsync(async () =>
+                await _settingManager.SetGlobalAsync(AbpAdminSettings.System.SiteTitle, null));
         }
     }
 }

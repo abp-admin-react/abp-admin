@@ -151,11 +151,18 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
     }
 
     /// <summary>
-    /// 显式重置：逐层清除当前上下文能写到的全部覆盖（U → T → G，按上下文裁剪），
-    /// 让设置回到默认值。基类实现只对 ShouldManageAsGlobal 路由出的"单一条链"调
-    /// SetAsync(name, null)——当值实际存放在其他层时清不掉（典型：host 上下文
-    /// ManageGlobalSettingsOnHostSide=false 时保存写 T 层，而运维经 SetGlobalAsync
-    /// 写的 G 层值永远清不到；反之亦然）。
+    /// 显式重置：按设置声明（definition.Providers）过滤后，逐层清除当前上下文能写到的
+    /// 全部覆盖（U → T(own)/T(null) → G），让设置回到默认值。
+    /// 基类实现只对 ShouldManageAsGlobal 路由出的"单一条链"调 SetAsync(name, null)——
+    /// 当值实际存放在其他层时清不掉（典型：host 上下文 ManageGlobalSettingsOnHostSide=false
+    /// 时保存写 T 层，而运维经 SetGlobalAsync 写的 G 层值永远清不到；反之亦然）。
+    /// 两处特殊处理：
+    /// ① 层合法性过滤：ABP SettingManager.SetAsync 会校验 definition.Providers 必须包含
+    ///    目标 provider（如 WithProviders("G") 的设置清 U 层直接抛 AbpException → 重置 500），
+    ///    所以每层清除前先按声明过滤，未声明 Providers 的设置保持全层清的历史口径；
+    /// ② host 的 G 层写回定义默认值而非清空：ABP SettingManagementStore 对清空（null 值）
+    ///    只删/置空 DB 行、读端缓存条目不失效，实测重置后设置页与业务读在缓存存续期内
+    ///    长期返回旧值；写默认值则行与缓存同步更新，读立即回落（语义等价：G 显式默认 = 未覆盖）。
     /// </summary>
     [Authorize(AbpAdminPermissions.SettingUi.Update)]
     public override async Task ResetSettingValuesAsync(List<string> settingNames)
@@ -174,13 +181,22 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
 
             // SetAsync(name, null, provider, key) 在 SettingManager 内部走 ClearAsync 分支：
             // 加密项（Encrypt(null)=null）同样删除覆盖行，不需要特殊处理。
-            if (CurrentUser.IsAuthenticated)
+            //
+            // 【层合法性】ABP SettingManager.SetAsync 会校验 definition.Providers 必须包含
+            // 目标 provider——WithProviders("G") 的设置（模块钉 G 层的写读自洽口径）遇到
+            // 盲清 U/T 会抛 AbpException 让整个重置 500。所以每层清除前先按声明过滤：
+            // 声明了Providers 的只清声明内允许且上下文可达的层；未声明（空）的按全层清
+            //（框架 System/Sms 等域的历史口径，既有测试依赖）。
+            bool Allows(string provider) =>
+                definition.Providers.Count == 0 || definition.Providers.Contains(provider);
+
+            if (CurrentUser.IsAuthenticated && Allows(UserSettingValueProvider.ProviderName))
             {
                 await _settingManager.SetAsync(
                     definition.Name, null, UserSettingValueProvider.ProviderName, CurrentUser.Id!.ToString());
             }
 
-            if (CurrentTenant.IsAvailable)
+            if (CurrentTenant.IsAvailable && Allows(TenantSettingValueProvider.ProviderName))
             {
                 await _settingManager.SetAsync(
                     definition.Name, null, TenantSettingValueProvider.ProviderName, CurrentTenant.Id!.ToString());
@@ -189,8 +205,23 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
             // 全局层只允许 host 上下文清：租户管理员的重置不应抹掉全局默认
             if (!CurrentTenant.IsAvailable)
             {
-                await _settingManager.SetAsync(
-                    definition.Name, null, GlobalSettingValueProvider.ProviderName, null);
+                // host 侧管理页（EasyAbp 路由）对未声明 Providers 的设置会把保存写到
+                // T 层且 ProviderKey 为空（AbpSettings 实测行：ProviderName='T', Key=NULL），
+                // 而读链会命中它——重置须同步清掉这一层，否则设置页与业务读取仍是旧值。
+                if (Allows(TenantSettingValueProvider.ProviderName))
+                {
+                    await _settingManager.SetAsync(
+                        definition.Name, null, TenantSettingValueProvider.ProviderName, null);
+                }
+
+                // G 层写回定义默认值，而不是 SetAsync(name, null)：ABP SettingManagementStore
+                // 对清空（null 值）只删/置空 DB 行、读端缓存条目不失效（实测 reset 后设置页
+                // 与业务读在缓存存续期内长期返回旧值）；写默认值则行与缓存同步更新，读立即
+                // 回落默认。语义等价（G 层显式默认值 = 未覆盖）。
+                if (Allows(GlobalSettingValueProvider.ProviderName))
+                {
+                    await _settingManager.SetGlobalAsync(definition.Name, definition.DefaultValue);
+                }
             }
         }
 
