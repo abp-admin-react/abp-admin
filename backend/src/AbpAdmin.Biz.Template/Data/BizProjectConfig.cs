@@ -17,5 +17,8 @@ public class BizProjectConfig : IEntityTypeConfiguration<BizProject>
         b.Property(x => x.Name).IsRequired().HasMaxLength(BizTemplateConsts.MaxNameLength);
         b.Property(x => x.Description).HasMaxLength(BizTemplateConsts.MaxDescriptionLength);
         b.HasIndex(x => x.IsActive);
+        // 配额检查（BizProjectAppService.CreateAsync 的 CountAsync(CreatorId)）走此索引，
+        // 避免随表增长退化为全表扫描；DDL 见 Sql/*/002_biz_projects_creatorid_index.sql
+        b.HasIndex(x => x.CreatorId);
     }
 }
