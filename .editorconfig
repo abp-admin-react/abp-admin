@@ -1,2 +1,13 @@
+# 告知编辑器这是根配置文件，停止向上层父目录继续寻找 .editorconfig
+root = true
+
+# 1. 全局通用规则（放在最前作为基准）
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+
+# 2. 特定文件的覆盖规则（放在靠后位置）
 [*.csproj]
+indent_style = space
 indent_size = 2
