@@ -1,0 +1,12 @@
+{
+  "culture": "zh-Hans",
+  "texts": {
+    "Permission:BizTemplate": "业务模板模块",
+    "Permission:Projects": "项目管理",
+    "Permission:Create": "新建",
+    "Permission:Update": "编辑",
+    "Permission:Delete": "删除",
+    "Menu:BizTemplate": "业务模板",
+    "Menu:BizProjects": "项目列表"
+  }
+}

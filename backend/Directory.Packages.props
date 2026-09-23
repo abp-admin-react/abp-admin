@@ -59,6 +59,10 @@
     <PackageVersion Include="Volo.Abp.Emailing" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.EntityFrameworkCore.Sqlite" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.EntityFrameworkCore.PostgreSql" Version="$(AbpVersion)" />
+    <!-- 自包含业务模块样板（AbpAdmin.Biz.Template）新增直引包；此前仅作传递依赖存在 -->
+    <PackageVersion Include="Volo.Abp.AspNetCore.Mvc" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Ddd.Application" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.Localization" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.FeatureManagement.Application" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.FeatureManagement.Application.Contracts" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.FeatureManagement.Domain" Version="$(AbpVersion)" />

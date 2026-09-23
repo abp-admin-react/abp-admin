@@ -1,0 +1,12 @@
+{
+  "culture": "en",
+  "texts": {
+    "Permission:BizTemplate": "Biz Template",
+    "Permission:Projects": "Project management",
+    "Permission:Create": "Create",
+    "Permission:Update": "Update",
+    "Permission:Delete": "Delete",
+    "Menu:BizTemplate": "Biz Template",
+    "Menu:BizProjects": "Projects"
+  }
+}

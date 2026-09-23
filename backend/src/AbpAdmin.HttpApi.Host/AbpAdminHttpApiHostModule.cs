@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using OpenIddict.Server.AspNetCore;
 using AbpAdmin.EntityFrameworkCore;
+using AbpAdmin.Biz.Template;
 using AbpAdmin.Files;
 using AbpAdmin.MultiTenancy;
 using AbpAdmin.HealthChecks;
@@ -99,6 +100,8 @@ namespace AbpAdmin;
     typeof(AbpAspNetCoreMultiTenancyModule),
     typeof(AbpAdminApplicationModule),
     typeof(AbpAdminEntityFrameworkCoreModule),
+    // 业务模块挂接点：每新增一个业务模块加一行（Auto API/权限/本地化随模块自动生效）
+    typeof(AbpAdminBizTemplateModule),
     typeof(AbpCachingStackExchangeRedisModule),
     typeof(AbpAccountWebOpenIddictModule),
     typeof(AbpSwashbuckleModule),

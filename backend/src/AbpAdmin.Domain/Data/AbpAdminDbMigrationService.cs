@@ -113,6 +113,8 @@ public class AbpAdminDbMigrationService : ITransientDependency
 
         foreach (var migrator in _dbSchemaMigrators)
         {
+            // 记录参与迁移的每个实现：宿主上下文 + 各业务模块迁移器（IAbpAdminDbSchemaMigrator 约定）
+            Logger.LogInformation($"Running schema migrator: {migrator.GetType().FullName}");
             await migrator.MigrateAsync();
         }
     }
