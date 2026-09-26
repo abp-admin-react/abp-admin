@@ -8,8 +8,8 @@ import {
   ProFormSelect,
   ProFormText,
 } from '@ant-design/pro-components';
-import { App, Button, Popconfirm, Space, Tooltip } from 'antd';
 import { useAccess } from '@umijs/max';
+import { App, Button, Popconfirm, Space, Tooltip } from 'antd';
 import React, { useEffect, useMemo } from 'react';
 import {
   fromSettingString,
@@ -126,6 +126,8 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
     }
   };
 
+  // 按组提交：payload 只含本分组的 settingInfos（表单值经 toSettingString 转回服务端字符串），
+  // 其它分组不受影响；无 name 的条目跳过，不进 payload
   const handleFinish = async (values: Record<string, unknown>) => {
     setSaving(true);
     try {

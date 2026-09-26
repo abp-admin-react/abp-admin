@@ -14,31 +14,44 @@ vi.mock('@/services/abpadmin/settingUi', () => ({
   putApiSettingUiSetSettingValues: vi.fn(),
 }));
 
-const { fromSettingString, toSettingString, SettingUiComponentTypes } = await import(
-  './settingUi'
-);
+const { fromSettingString, toSettingString, SettingUiComponentTypes } =
+  await import('./settingUi');
 
 describe('fromSettingString', () => {
   it('空串/纯空白数字值应转 undefined（而不是 0）', () => {
-    expect(fromSettingString('', SettingUiComponentTypes.Number)).toBeUndefined();
-    expect(fromSettingString('  ', SettingUiComponentTypes.Number)).toBeUndefined();
+    expect(
+      fromSettingString('', SettingUiComponentTypes.Number),
+    ).toBeUndefined();
+    expect(
+      fromSettingString('  ', SettingUiComponentTypes.Number),
+    ).toBeUndefined();
   });
 
   it('非数字数字值应转 undefined，合法数字正常转换', () => {
-    expect(fromSettingString('abc', SettingUiComponentTypes.Number)).toBeUndefined();
+    expect(
+      fromSettingString('abc', SettingUiComponentTypes.Number),
+    ).toBeUndefined();
     expect(fromSettingString('42', SettingUiComponentTypes.Number)).toBe(42);
     // 合法存储的 "0" 仍渲染为 0——与"清空"区分
     expect(fromSettingString('0', SettingUiComponentTypes.Number)).toBe(0);
   });
 
   it('checkbox 按布尔转换', () => {
-    expect(fromSettingString('true', SettingUiComponentTypes.Checkbox)).toBe(true);
-    expect(fromSettingString('False', SettingUiComponentTypes.Checkbox)).toBe(false);
+    expect(fromSettingString('true', SettingUiComponentTypes.Checkbox)).toBe(
+      true,
+    );
+    expect(fromSettingString('False', SettingUiComponentTypes.Checkbox)).toBe(
+      false,
+    );
   });
 
   it('text 原样透传，undefined/null 输入返回 undefined', () => {
-    expect(fromSettingString('plain', SettingUiComponentTypes.Text)).toBe('plain');
-    expect(fromSettingString(undefined, SettingUiComponentTypes.Text)).toBeUndefined();
+    expect(fromSettingString('plain', SettingUiComponentTypes.Text)).toBe(
+      'plain',
+    );
+    expect(
+      fromSettingString(undefined, SettingUiComponentTypes.Text),
+    ).toBeUndefined();
   });
 });
 
@@ -52,7 +65,14 @@ describe('toSettingString', () => {
   });
 
   it('往返：合法数字与布尔应稳定', () => {
-    expect(fromSettingString(toSettingString(7), SettingUiComponentTypes.Number)).toBe(7);
-    expect(fromSettingString(toSettingString(true), SettingUiComponentTypes.Checkbox)).toBe(true);
+    expect(
+      fromSettingString(toSettingString(7), SettingUiComponentTypes.Number),
+    ).toBe(7);
+    expect(
+      fromSettingString(
+        toSettingString(true),
+        SettingUiComponentTypes.Checkbox,
+      ),
+    ).toBe(true);
   });
 });

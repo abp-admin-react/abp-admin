@@ -78,6 +78,7 @@ export async function getNotifications(params: {
 }) {
   const maxResultCount = params.pageSize ?? 10;
   const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
+  // 生成客户端走 PascalCase 参数（ABP 模型绑定口径）；空串/缺省归一为 undefined，查询串不出现
   return getApiAppNotificationManagement({
     SkipCount: skipCount,
     MaxResultCount: maxResultCount,
@@ -91,8 +92,11 @@ export async function getNotifications(params: {
   }) as Promise<{ items?: NotificationListItem[]; totalCount?: number }>;
 }
 
+/** 单条通知详情（含重试链 attempts）：生成客户端返回宽泛结构，这里断言成页面契约。 */
 export async function getNotificationDetail(id: string) {
-  return getApiAppNotificationManagementId({ id }) as Promise<NotificationDetail>;
+  return getApiAppNotificationManagementId({
+    id,
+  }) as Promise<NotificationDetail>;
 }
 
 export async function retryNotification(id: string) {

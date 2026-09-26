@@ -103,9 +103,7 @@ describe('ServerMonitorPage', () => {
     const { default: Page } = await import('./index');
     renderPage(<Page />);
 
-    expect(
-      await screen.findByText('无权限查看服务监控。'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('无权限查看服务监控。')).toBeInTheDocument();
     expect(getServerMonitor).not.toHaveBeenCalled();
   });
 });

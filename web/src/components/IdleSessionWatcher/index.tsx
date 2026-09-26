@@ -26,14 +26,21 @@ const IdleSessionWatcher: React.FC = () => {
   const { message } = App.useApp();
   const { initialState } = useModel('@@initialState');
   const minutes = Number(
-    initialState?.settingValues?.['AbpAdmin.Account.IdleSessionTimeoutMinutes'] ??
-      0,
+    initialState?.settingValues?.[
+      'AbpAdmin.Account.IdleSessionTimeoutMinutes'
+    ] ?? 0,
   );
   const timerRef = useRef<number | undefined>(undefined);
   const lastWriteRef = useRef(0);
 
   useEffect(() => {
-    if (!initialState?.currentUser?.userid || !Number.isFinite(minutes) || minutes <= 0) {
+    // 三重闸门：未登录不启用；设置值是非法数字串→NaN 不启用；0/缺失
+    // （Number(undefined ?? 0) === 0）= 功能显式关闭
+    if (
+      !initialState?.currentUser?.userid ||
+      !Number.isFinite(minutes) ||
+      minutes <= 0
+    ) {
       return undefined;
     }
 
@@ -52,6 +59,8 @@ const IdleSessionWatcher: React.FC = () => {
       return Date.now();
     };
 
+    // 以 fromTs 为基准重装登出定时器；remain 夹到 0：基准时间已超期时立即触发登出，
+    // 而不是给 setTimeout 传负数（会当作 0，行为一样，但语义要写明是有意的）
     const arm = (fromTs: number) => {
       if (timerRef.current) {
         window.clearTimeout(timerRef.current);

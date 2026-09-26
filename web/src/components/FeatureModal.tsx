@@ -7,9 +7,9 @@ import {
 import { App, Button, Popconfirm } from 'antd';
 import React, { useState } from 'react';
 import {
+  deleteFeatures,
   type FeatureDto,
   type FeatureGroup,
-  deleteFeatures,
   getFeatures,
   updateFeatures,
 } from '@/abp/features';
@@ -22,6 +22,10 @@ type FeatureModalProps = {
   onClose: () => void;
 };
 
+/**
+ * 按开关渲染的判定：值类型名含 Toggle，或当前值本身就是 'true'/'false' 字符串。
+ * 后者兜底：provider 未声明 valueType 的纯布尔功能也能正确渲染成 Switch。
+ */
 function isToggle(feature: FeatureDto) {
   const typeName = feature.valueType?.name || '';
   return (
@@ -72,6 +76,7 @@ const FeatureModal: React.FC<FeatureModalProps> = ({
         return values;
       }}
       onFinish={async (values) => {
+        // 功能值端点只收字符串：Switch 的布尔值序列化回 'true'/'false'，其余 String() 兜底
         const features = Object.entries(values).map(([name, value]) => ({
           name,
           value:
