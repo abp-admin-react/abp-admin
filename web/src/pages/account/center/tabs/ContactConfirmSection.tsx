@@ -5,20 +5,25 @@ import {
   confirmPhoneNumber,
   getMyProfile,
   getTwoFactorStatus,
+  type ProfileDto,
   sendEmailConfirmationCode,
   sendPhoneNumberConfirmationCode,
-  type ProfileDto,
   type TwoFactorStatusDto,
 } from '@/abp/account';
 import { useAsyncData } from '@/hooks/useAsyncData';
 
+/** 邮箱/手机两条确认通道各自独立的状态：输入码 + 互不阻塞的两个请求位 */
 type ChannelState = {
   code: string;
   sending: boolean;
   confirming: boolean;
 };
 
-const initialChannel: ChannelState = { code: '', sending: false, confirming: false };
+const initialChannel: ChannelState = {
+  code: '',
+  sending: false,
+  confirming: false,
+};
 
 /**
  * 联系方式确认面板：改邮箱/手机号保存后，确认状态会被后端重置为未确认
@@ -39,8 +44,10 @@ const ContactConfirmSection: React.FC<{ refreshKey?: number }> = ({
     ]);
     return { profile, status };
   });
-  const [emailChannel, setEmailChannel] = useState<ChannelState>(initialChannel);
-  const [phoneChannel, setPhoneChannel] = useState<ChannelState>(initialChannel);
+  const [emailChannel, setEmailChannel] =
+    useState<ChannelState>(initialChannel);
+  const [phoneChannel, setPhoneChannel] =
+    useState<ChannelState>(initialChannel);
 
   useEffect(() => {
     if (refreshKey > 0) {
@@ -105,17 +112,42 @@ const ContactConfirmSection: React.FC<{ refreshKey?: number }> = ({
   );
 
   const sendEmailCode = () =>
-    runSend('email', profile?.email, sendEmailConfirmationCode, '确认码已发送，请查收邮箱');
+    runSend(
+      'email',
+      profile?.email,
+      sendEmailConfirmationCode,
+      '确认码已发送，请查收邮箱',
+    );
   const submitEmailCode = () =>
-    runConfirm('email', profile?.email, emailChannel.code, confirmEmail, '邮箱已确认');
+    runConfirm(
+      'email',
+      profile?.email,
+      emailChannel.code,
+      confirmEmail,
+      '邮箱已确认',
+    );
   const sendPhoneCode = () =>
-    runSend('phone', profile?.phoneNumber, sendPhoneNumberConfirmationCode, '确认码已发送，请查收短信');
+    runSend(
+      'phone',
+      profile?.phoneNumber,
+      sendPhoneNumberConfirmationCode,
+      '确认码已发送，请查收短信',
+    );
   const submitPhoneCode = () =>
-    runConfirm('phone', profile?.phoneNumber, phoneChannel.code, confirmPhoneNumber, '手机号已确认');
+    runConfirm(
+      'phone',
+      profile?.phoneNumber,
+      phoneChannel.code,
+      confirmPhoneNumber,
+      '手机号已确认',
+    );
 
-  // 严格 === false：status 尚未加载（undefined）时不得把未知当未确认
+  // 操作区（发码/确认输入框）只在严格 === false 时出现：status 尚未加载（undefined）
+  // 不得把未知当未确认而诱导重复确认。徽标是另一档：confirmed 非 true（含未加载）都显示
+  // 「未确认」——保守提示，但不给操作入口
   const emailUnconfirmed = status?.emailConfirmed === false && !!profile?.email;
-  const phoneUnconfirmed = status?.phoneNumberConfirmed === false && !!profile?.phoneNumber;
+  const phoneUnconfirmed =
+    status?.phoneNumberConfirmed === false && !!profile?.phoneNumber;
   const hasAnythingToShow = !!profile?.email || !!profile?.phoneNumber;
 
   if (!hasAnythingToShow) {

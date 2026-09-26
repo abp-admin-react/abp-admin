@@ -1,4 +1,13 @@
-import { App, Button, Input, Modal, Space, Switch, Tag, Typography } from 'antd';
+import {
+  App,
+  Button,
+  Input,
+  Modal,
+  Space,
+  Switch,
+  Tag,
+  Typography,
+} from 'antd';
 import React, { useState } from 'react';
 import {
   getTwoFactorStatus,
@@ -68,6 +77,8 @@ const SecuritySettingsTab: React.FC = () => {
     }
   };
 
+  // 启用前提：至少邮箱或手机号之一已确认——否则登录验证码无处可发（后端同样校验）。
+  // 已启用状态不受此限制（disabled 条件带 !twoFactorEnabled），关闭走验证码弹窗
   const canEnable = status?.emailConfirmed || status?.phoneNumberConfirmed;
 
   return (

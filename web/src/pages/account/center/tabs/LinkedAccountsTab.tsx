@@ -1,25 +1,44 @@
-import { App, Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
+import {
+  App,
+  Button,
+  Form,
+  Input,
+  Modal,
+  Space,
+  Table,
+  Typography,
+} from 'antd';
 import React, { useState } from 'react';
-import { applyImpersonatedTokens } from '@/abp/oidc';
 import {
   getLinkedAccounts,
+  type LinkedAccountDto,
   linkAccount,
   switchToLinkedAccount,
   unlinkAccount,
-  type LinkedAccountDto,
 } from '@/abp/accountLink';
+import { applyImpersonatedTokens } from '@/abp/oidc';
 import { useAsyncData } from '@/hooks/useAsyncData';
 
+/**
+ * 从 OpenId 错误信封取服务端消息（response.data.error.message），
+ * 取不到或不是非空字符串时退回调用方给的 fallback。
+ * 只用于 skipErrorHandler 放行进来的原始 axios 错误。
+ */
 const extractErrorMessage = (error: unknown, fallback: string) => {
-  const detail = (error as { response?: { data?: { error?: { message?: unknown } } } })
-    ?.response?.data?.error?.message;
+  const detail = (
+    error as { response?: { data?: { error?: { message?: unknown } } } }
+  )?.response?.data?.error?.message;
   return typeof detail === 'string' && detail ? detail : fallback;
 };
 
 /** Linked Accounts 页签：绑定同租户的其他账号（密码确认），并在账号间切换（对标 ABP Pro） */
 const LinkedAccountsTab: React.FC = () => {
   const { message, modal } = App.useApp();
-  const { data: items, loading, refresh } = useAsyncData(async () => {
+  const {
+    data: items,
+    loading,
+    refresh,
+  } = useAsyncData(async () => {
     const result = await getLinkedAccounts();
     return result ?? [];
   });
@@ -41,7 +60,9 @@ const LinkedAccountsTab: React.FC = () => {
       form.resetFields();
       await refresh();
     } catch (error) {
-      message.error(extractErrorMessage(error, '关联失败：账号不存在、已停用或密码错误'));
+      message.error(
+        extractErrorMessage(error, '关联失败：账号不存在、已停用或密码错误'),
+      );
     } finally {
       setLinking(false);
     }
@@ -50,11 +71,14 @@ const LinkedAccountsTab: React.FC = () => {
   const handleSwitch = async (record: LinkedAccountDto) => {
     modal.confirm({
       title: `切换到 ${record.userName}？`,
-      content: '切换后将以该账号身份操作系统（等同该账号的一次正常登录），当前页面会刷新。',
+      content:
+        '切换后将以该账号身份操作系统（等同该账号的一次正常登录），当前页面会刷新。',
       okText: '切换',
       onOk: async () => {
         setSwitchingId(record.linkId);
         try {
+          // 换发目标账号完整令牌并重建本地会话，整页刷新让全部内存态按新身份重置；
+          // 失败只提示，当前会话不受影响
           const result = await switchToLinkedAccount(record.linkId);
           await applyImpersonatedTokens(result);
           message.success(`已切换到 ${record.userName}，正在刷新…`);
@@ -112,7 +136,11 @@ const LinkedAccountsTab: React.FC = () => {
                 >
                   切换到此账号
                 </Button>
-                <Button size="small" danger onClick={() => handleUnlink(record)}>
+                <Button
+                  size="small"
+                  danger
+                  onClick={() => handleUnlink(record)}
+                >
                   解除关联
                 </Button>
               </Space>
@@ -121,6 +149,7 @@ const LinkedAccountsTab: React.FC = () => {
         ]}
       />
 
+      {/* destroyOnHidden：关闭即销毁表单，对方密码不残留在受控输入里 */}
       <Modal
         title="关联其他账号"
         open={linkModalOpen}
@@ -141,7 +170,9 @@ const LinkedAccountsTab: React.FC = () => {
           <Form.Item
             name="password"
             label="对方账号密码"
-            rules={[{ required: true, message: '请输入对方账号密码以确认身份' }]}
+            rules={[
+              { required: true, message: '请输入对方账号密码以确认身份' },
+            ]}
           >
             <Input.Password
               placeholder="用于证明该账号归你所有"
