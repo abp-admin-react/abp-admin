@@ -6,7 +6,6 @@ import {
   type ProColumns,
   ProFormText,
   ProFormTextArea,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { App, Button, Popconfirm, Space, Tag, Tree } from 'antd';
@@ -23,6 +22,8 @@ import {
   updatePackageMenuSelection,
   updateTenantPackage,
 } from '@/abp/tenantPackages';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
+import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 
 type EditTarget = { mode: 'create' } | { mode: 'edit'; row: TenantPackageDto };
 
@@ -67,7 +68,7 @@ const TenantPackagePage: React.FC = () => {
   };
 
   const columns: ProColumns<TenantPackageDto>[] = [
-    { title: '套餐名', dataIndex: 'name' },
+    { title: '套餐名', dataIndex: 'name', ...textFilter('按套餐名筛选') },
     { title: '菜单数', dataIndex: 'menuCount', width: 90 },
     { title: '备注', dataIndex: 'remark', ellipsis: true },
     {
@@ -108,16 +109,20 @@ const TenantPackagePage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<TenantPackageDto>
+      <AutoHeightProTable<TenantPackageDto>
         rowKey="id"
         headerTitle="租户套餐"
         actionRef={actionRef}
         columns={columns}
-        request={async (params) => {
-          const res = await getTenantPackages(params);
+        request={async (params, _sorter, filter) => {
+          const res = await getTenantPackages({
+            current: params.current,
+            pageSize: params.pageSize,
+            filter: firstFilterValue(filter, 'name'),
+          });
           return { data: res.items, total: res.totalCount, success: true };
         }}
-        search={{ labelWidth: 'auto' }}
+        search={false}
         pagination={{ defaultPageSize: 10 }}
         toolBarRender={() =>
           [

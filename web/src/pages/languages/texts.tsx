@@ -1,8 +1,19 @@
 import { RollbackOutlined, SaveOutlined } from '@ant-design/icons';
 import { PageContainer, ProTable } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { Button, Input, message, Popconfirm, Select, Space, Switch, Tooltip } from 'antd';
+import {
+  Button,
+  Input,
+  message,
+  Popconfirm,
+  Select,
+  Space,
+  Switch,
+  Tooltip,
+} from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
+import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 import { getApiAppLanguage } from '@/services/abpadmin/language';
 import {
   getApiAppLanguageText,
@@ -16,7 +27,9 @@ const LanguageTextsPage: React.FC = () => {
   const [languages, setLanguages] = useState<API.LanguageDto[]>([]);
   const [baseCulture, setBaseCulture] = useState<string | undefined>(undefined);
   // 目标文化：Pro 同款由页面默认选中（第二个启用语言，否则第一个），不放进搜索表单
-  const [targetCulture, setTargetCulture] = useState<string | undefined>(undefined);
+  const [targetCulture, setTargetCulture] = useState<string | undefined>(
+    undefined,
+  );
   const [editingKey, setEditingKey] = useState<string>('');
   const [editingValue, setEditingValue] = useState<string>('');
   const [onlyEmpty, setOnlyEmpty] = useState(false);
@@ -45,7 +58,10 @@ const LanguageTextsPage: React.FC = () => {
         const enabled = res.items?.filter((x) => x.isEnabled) || [];
         setLanguages(enabled);
         setBaseCulture((current) => current ?? enabled[0]?.cultureName);
-        setTargetCulture((current) => current ?? enabled[1]?.cultureName ?? enabled[0]?.cultureName);
+        setTargetCulture(
+          (current) =>
+            current ?? enabled[1]?.cultureName ?? enabled[0]?.cultureName,
+        );
         if (!enabled.length) {
           message.warning('没有启用的语言，无法浏览本地化文本');
         }
@@ -117,7 +133,7 @@ const LanguageTextsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable
+      <AutoHeightProTable
         actionRef={tableRef}
         rowKey={(record) =>
           `${record.resourceName}-${record.cultureName}-${record.name}`
@@ -126,24 +142,17 @@ const LanguageTextsPage: React.FC = () => {
           {
             title: '资源',
             dataIndex: 'resourceName',
-            valueType: 'select',
-            // 不选（可清空）= 跨全部注册资源列出（后端合并静态基线 + 覆盖行）
-            fieldProps: { allowClear: true, placeholder: '全部资源' },
-            valueEnum: resourceNames.reduce(
-              (acc, name) => {
-                acc[name] = { text: name };
-                return acc;
-              },
-              {} as Record<string, { text: string }>,
-            ),
+            // 单选：页面按首值下发
+            filterMultiple: false,
+            filters: resourceNames.map((name) => ({ text: name, value: name })),
           },
           {
             title: 'Key',
             dataIndex: 'name',
             ellipsis: true,
-            // 该搜索框喂给后端 Filter（key 或生效值、大小写不敏感）——
+            // 该筛选喂给后端 Filter（key 或生效值、大小写不敏感）——
             // 标题叫"Key"，placeholder 必须说清也匹配值，否则口径误导
-            fieldProps: { placeholder: '按 Key 或生效值模糊搜索' },
+            ...textFilter('按 Key 或生效值模糊搜索'),
           },
           {
             title: '基准语言',
@@ -156,9 +165,7 @@ const LanguageTextsPage: React.FC = () => {
                 return <span style={{ color: '#999' }}>—</span>;
               }
               return (
-                record.baseValue || (
-                  <span style={{ color: '#999' }}>(空)</span>
-                )
+                record.baseValue || <span style={{ color: '#999' }}>(空)</span>
               );
             },
           },
@@ -276,7 +283,7 @@ const LanguageTextsPage: React.FC = () => {
             </Space>
           ),
         }}
-        request={async (params) => {
+        request={async (params, _sorter, filter) => {
           // 目标文化走工具栏状态（必选，默认选中启用语言），不进搜索表单；
           // 资源可空 = 跨全部注册资源（后端合并静态基线 + 覆盖行）。
           // 语言列表未就绪时先回空页，避免带空目标文化打出 400（就绪后由 effect 重载）
@@ -284,10 +291,10 @@ const LanguageTextsPage: React.FC = () => {
             return { data: [], total: 0, success: true };
           }
           const result = await getApiAppLanguageText({
-            ResourceName: params.resourceName,
+            ResourceName: firstFilterValue(filter, 'resourceName'),
             CultureName: targetCulture,
             BaseCultureName: baseCulture,
-            Filter: params.name,
+            Filter: firstFilterValue(filter, 'name'),
             OnlyEmpty: onlyEmpty,
             SkipCount: ((params.current ?? 1) - 1) * (params.pageSize ?? 10),
             MaxResultCount: params.pageSize ?? 10,
@@ -298,9 +305,7 @@ const LanguageTextsPage: React.FC = () => {
             success: true,
           };
         }}
-        search={{
-          labelWidth: 'auto',
-        }}
+        search={false}
         pagination={{
           pageSize: 20,
         }}

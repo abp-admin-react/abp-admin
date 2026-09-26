@@ -4,7 +4,6 @@ import {
   PageContainer,
   type ProColumns,
   ProFormSelect,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { App, Button, Popconfirm } from 'antd';
@@ -16,6 +15,8 @@ import {
   revokeAllSessionsByUser,
   revokeSession,
 } from '@/abp/identityAdmin';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
+import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 
 const SessionsPage: React.FC = () => {
   const actionRef = useRef<ActionType>(undefined);
@@ -29,19 +30,11 @@ const SessionsPage: React.FC = () => {
       dataIndex: 'userId',
       copyable: true,
       ellipsis: true,
-      // 非法 GUID 会被后端绑定拒绝（400 报错而非空结果）：前端先行校验
-      fieldProps: {
-        rules: [
-          {
-            pattern:
-              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-            message: '请输入有效的用户 Id（GUID）',
-          },
-        ],
-      },
+      // 非法 GUID 会被后端绑定拒绝（400）：改在 request 里校验并提示
+      ...textFilter('用户 Id（GUID）'),
     },
-    { title: '设备', dataIndex: 'device' },
-    { title: '客户端', dataIndex: 'clientId' },
+    { title: '设备', dataIndex: 'device', ...textFilter() },
+    { title: '客户端', dataIndex: 'clientId', ...textFilter() },
     {
       title: '会话 Id',
       dataIndex: 'sessionId',
@@ -89,18 +82,30 @@ const SessionsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<IdentitySessionDto>
+      <AutoHeightProTable<IdentitySessionDto>
         rowKey="id"
         actionRef={actionRef}
         columns={columns}
-        search={{ labelWidth: 'auto' }}
-        request={async (params) => {
+        search={false}
+        request={async (params, _sorter, filter) => {
+          const userId = firstFilterValue(filter, 'userId');
+          // 非法 GUID 会被后端绑定拒绝（400 报错而非空结果）：前端拦截并明确提示，
+          // 避免用户把「输入错误」误读成「无会话」
+          if (
+            userId &&
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+              userId,
+            )
+          ) {
+            message.warning('请输入有效的用户 Id（GUID）');
+            return { data: [], total: 0, success: true };
+          }
           const result = await getSessions({
             current: params.current,
             pageSize: params.pageSize,
-            userId: params.userId,
-            device: params.device,
-            clientId: params.clientId,
+            userId,
+            device: firstFilterValue(filter, 'device'),
+            clientId: firstFilterValue(filter, 'clientId'),
           });
           return {
             data: result.items,

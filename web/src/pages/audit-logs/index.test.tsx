@@ -7,11 +7,13 @@ import * as proModules from '@/abp/proModules';
 // 权限可变的 mock：默认有导出权限，单个用例可覆盖
 let mockAccess: Record<string, boolean> = { canExportAuditLogs: true };
 
+// 页面支持 ?correlationId= 跨日志串联入口：mock 可变，供深链用例切换
+let mockSearchParams = new URLSearchParams();
+
 vi.mock('@umijs/max', () => ({
   useAccess: () => mockAccess,
   useNavigate: () => vi.fn(),
-  // 页面支持 ?correlationId= 跨日志串联入口，测试环境给空查询串
-  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  useSearchParams: () => [mockSearchParams, vi.fn()],
 }));
 
 // Mock 服务层：页面与 EntityChangeHistoryDrawer 都从这里取数
@@ -41,7 +43,14 @@ vi.mock('./EntityChangeHistoryDrawer', () => ({
 
 // Mock ProComponents：保留语义化 testid，便于断言
 let capturedAuditRequest:
-  | ((params: Record<string, unknown>) => Promise<unknown>)
+  | ((
+      params: Record<string, unknown>,
+      sorter?: unknown,
+      filter?: Record<string, unknown[]>,
+    ) => Promise<unknown>)
+  | undefined;
+let capturedAuditOnChange:
+  | ((pagination: unknown, filters: Record<string, unknown[]>) => void)
   | undefined;
 
 vi.mock('@ant-design/pro-components', () => ({
@@ -49,18 +58,12 @@ vi.mock('@ant-design/pro-components', () => ({
     <div data-testid="page-container">{children}</div>
   ),
   ProDescriptions: () => <div data-testid="pro-descriptions" />,
-  ProTable: ({ columns, toolbar, request, formRef }: any) => {
-    // 捕获 request 供筛选转换用例直接驱动（ProTable select 值恒为字符串）
+  ProTable: ({ columns, toolbar, request, onChange }: any) => {
+    // 捕获 request / onChange 供筛选与导出用例直接驱动（列头筛选流程）
     capturedAuditRequest = request;
-    // 模拟 ProTable 挂载即请求数据。搜索表单值只通过 formRef prop 暴露
-    // （actionRef.current 上没有 formRef 成员——这是 pro-components v3 的真实行为，
-    // 页面代码也只应从 formRef prop 拿筛选值），mock 不再凭空提供 actionRef.formRef。
+    capturedAuditOnChange = onChange;
+    // 模拟 ProTable 挂载即请求数据（列头筛选值经 request 第三参 filter 传入）
     request?.({ current: 1, pageSize: 10 }, {}, {});
-    if (formRef) {
-      formRef.current = {
-        getFieldsValue: () => ({ httpMethod: 'GET', url: '/api/test' }),
-      };
-    }
     return (
       <div data-testid="pro-table">
         <div data-testid="table-columns">
@@ -79,6 +82,7 @@ vi.mock('@ant-design/pro-components', () => ({
 describe('AuditLogsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSearchParams = new URLSearchParams();
     mockAccess = { canExportAuditLogs: true };
     vi.mocked(proModules.getAuditLogs).mockResolvedValue({
       items: [],
@@ -105,13 +109,13 @@ describe('AuditLogsPage', () => {
     render(<Page />);
     await waitFor(() => expect(capturedAuditRequest).toBeDefined());
 
-    // select 选中的是字符串 'true' → 服务层收到布尔 true
-    await capturedAuditRequest?.({
-      current: 1,
-      pageSize: 10,
-      unhandledErrorOnly: 'true',
-      correlationId: 'corr-abc',
-    });
+    // 列头筛选择的值以数组形式经 request 第三参 filter 传入（字符串 'true' → 布尔 true）。
+    // 注意键是列的 dataIndex：「仅未处理错误」筛选挂在处理状态列（isHandled）上
+    await capturedAuditRequest?.(
+      { current: 1, pageSize: 10 },
+      {},
+      { isHandled: ['true'], correlationId: ['corr-abc'] },
+    );
     expect(proModules.getAuditLogs).toHaveBeenLastCalledWith(
       expect.objectContaining({
         unhandledErrorOnly: true,
@@ -119,19 +123,37 @@ describe('AuditLogsPage', () => {
       }),
     );
 
-    // 清空筛选（undefined）→ 不携带该参数（不回落到 URL 初始值）
-    await capturedAuditRequest?.({
-      current: 1,
-      pageSize: 10,
-      unhandledErrorOnly: undefined,
-      correlationId: undefined,
-    });
+    // 「是否异常」筛选挂在状态列（httpStatusCode）上：字符串三态 → 布尔
+    await capturedAuditRequest?.(
+      { current: 1, pageSize: 10 },
+      {},
+      { httpStatusCode: ['true'] },
+    );
+    expect(proModules.getAuditLogs).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hasException: true }),
+    );
+
+    // 清空筛选（filter 无该键）→ 不携带该参数（不回落到 URL 初始值）
+    await capturedAuditRequest?.({ current: 1, pageSize: 10 }, {}, {});
     expect(proModules.getAuditLogs).toHaveBeenLastCalledWith(
       expect.objectContaining({
         unhandledErrorOnly: undefined,
         correlationId: undefined,
       }),
     );
+  });
+
+  it('深链 ?correlationId= 预填关联 ID 列头筛选（受控初值，清空不粘）', async () => {
+    mockSearchParams = new URLSearchParams('?correlationId=corr-9');
+    const { default: Page } = await import('./index');
+    render(<Page />);
+
+    // 受控初值作用于请求：挂载请求应带 CorrelationId（首请求 filter 非空）
+    await waitFor(() => {
+      expect(proModules.getAuditLogs).toHaveBeenCalledWith(
+        expect.objectContaining({ correlationId: 'corr-9' }),
+      );
+    });
   });
 
   it('无导出权限时按钮隐藏', async () => {
@@ -157,17 +179,31 @@ describe('AuditLogsPage', () => {
     const { default: Page } = await import('./index');
     render(<Page />);
 
+    // 模拟列头筛选：受控 onChange 更新页面 filters 状态，导出读同一份状态。
+    // 「关联 ID」「仅未处理错误」「是否异常」同口径作用于导出（同步与异步链路）
+    capturedAuditOnChange?.(
+      {},
+      {
+        httpMethod: ['GET'],
+        url: ['/api/test'],
+        correlationId: ['corr-1'],
+        isHandled: ['true'],
+        httpStatusCode: ['true'],
+      },
+    );
     fireEvent.click(await screen.findByText('导出 Excel'));
 
     await waitFor(() => {
-      // 正确的接口：exportAuditLogs；正确的参数：ProTable 搜索表单的当前筛选条件
+      // 正确的接口：exportAuditLogs；正确的参数：列头筛选的当前筛选条件
       expect(proModules.exportAuditLogs).toHaveBeenCalledWith({
         httpMethod: 'GET',
         url: '/api/test',
+        correlationId: 'corr-1',
+        unhandledErrorOnly: true,
         userName: undefined,
         startTime: undefined,
         endTime: undefined,
-        hasException: undefined,
+        hasException: true,
       });
     });
     await waitFor(() => {

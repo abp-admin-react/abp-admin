@@ -3,8 +3,6 @@ import {
   type ActionType,
   PageContainer,
   type ProColumns,
-  type ProFormInstance,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess, useModel } from '@umijs/max';
 import { App, Button, Modal, Popconfirm, Table, Tag, Upload } from 'antd';
@@ -25,13 +23,16 @@ import {
   isUserLocked,
   lockUser,
   requireChangePasswordOnNextLogin,
-  type UserImportResultDto,
   setUserTwoFactorEnabled,
+  type UserImportResultDto,
   unlockUser,
 } from '@/abp/identity';
 import { applyImpersonatedTokens } from '@/abp/oidc';
+import { sorterToAbpSorting } from '@/abp/sorting';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import ClaimModal from '@/components/ClaimModal';
 import PermissionModal from '@/components/PermissionModal';
+import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 import { ResetPasswordForm, UserForm } from './components/UserForms';
 
 /**
@@ -53,7 +54,6 @@ const UsersPage: React.FC = () => {
   const [importResult, setImportResult] = useState<UserImportResultDto>();
   const [importModalOpen, setImportModalOpen] = useState(false);
   // 搜索表单引用：导出时读取当前 filter（与列表 request 的 filter: params.userName 同一来源）
-  const searchFormRef = useRef<ProFormInstance>(undefined);
 
   useEffect(() => {
     getAllRoles()
@@ -62,11 +62,9 @@ const UsersPage: React.FC = () => {
   }, []);
 
   const handleExport = async () => {
-    // 导出内容与分流阈值必须同一 filter：表单值可能比上次列表请求新（改了条件未点查询），
-    // 故用当前 filter 现查 total 再分流（window.open 不会抛异常，不能靠“失败再回退”）
-    const filter = searchFormRef.current?.getFieldsValue()?.userName as
-      | string
-      | undefined;
+    // 导出内容与分流阈值必须同一 filter：与列表共用受控列头筛选状态，
+    // 并用当前 filter 现查 total 再分流（window.open 不会抛异常，不能靠“失败再回退”）
+    const filter = userNameFilter;
     try {
       const { totalCount } = await getUsers({
         current: 1,
@@ -110,13 +108,33 @@ const UsersPage: React.FC = () => {
     return false; // 阻止 Upload 默认上传行为
   };
 
+  // 列头筛选受控状态：导出与列表同口径（导出读同一份状态）
+  const [filters, setFilters] = useState<Record<string, React.Key[] | null>>(
+    {},
+  );
+  const userNameFilter = firstFilterValue(filters, 'userName');
+
   const columns: ProColumns<IdentityUserDto>[] = [
-    { title: '用户名', dataIndex: 'userName' },
-    { title: '邮箱', dataIndex: 'email', search: false },
-    { title: '姓名', dataIndex: 'name', search: false },
+    {
+      title: '用户名',
+      dataIndex: 'userName',
+      width: 160,
+      sorter: 'UserName',
+      filteredValue: filters.userName,
+      ...textFilter('按用户名筛选'),
+    },
+    {
+      title: '邮箱',
+      dataIndex: 'email',
+      width: 220,
+      search: false,
+      sorter: 'Email',
+    },
+    { title: '姓名', dataIndex: 'name', width: 120, search: false },
     {
       title: '邮箱已确认',
       dataIndex: 'emailConfirmed',
+      width: 110,
       search: false,
       render: (_, record) =>
         record.emailConfirmed ? <Tag color="green">是</Tag> : <Tag>否</Tag>,
@@ -124,17 +142,20 @@ const UsersPage: React.FC = () => {
     {
       title: '启用',
       dataIndex: 'isActive',
+      width: 90,
       search: false,
       valueEnum: { true: { text: '是' }, false: { text: '否' } },
     },
     {
       title: '冻结',
+      width: 90,
       search: false,
       render: (_, record) => (isUserLocked(record) ? '是' : '否'),
     },
     {
       title: '双因素',
       dataIndex: 'twoFactorEnabled',
+      width: 100,
       search: false,
       render: (_, record) =>
         record.twoFactorEnabled ? <Tag color="blue">是</Tag> : <Tag>否</Tag>,
@@ -142,13 +163,16 @@ const UsersPage: React.FC = () => {
     {
       title: '失败次数',
       dataIndex: 'accessFailedCount',
+      width: 100,
       search: false,
     },
     {
       title: '创建时间',
       dataIndex: 'creationTime',
+      width: 170,
       search: false,
       valueType: 'dateTime',
+      sorter: 'CreationTime',
     },
     {
       title: '操作',
@@ -241,9 +265,14 @@ const UsersPage: React.FC = () => {
                   : '启用前请确认该用户至少有一个已确认的邮箱或手机号，否则登录时无法接收验证码。'
               }
               onConfirm={async () => {
-                await setUserTwoFactorEnabled(record.id, !record.twoFactorEnabled);
+                await setUserTwoFactorEnabled(
+                  record.id,
+                  !record.twoFactorEnabled,
+                );
                 message.success(
-                  record.twoFactorEnabled ? '已禁用双因素认证' : '已启用双因素认证',
+                  record.twoFactorEnabled
+                    ? '已禁用双因素认证'
+                    : '已启用双因素认证',
                 );
                 actionRef.current?.reload();
               }}
@@ -271,17 +300,20 @@ const UsersPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<IdentityUserDto>
+      <AutoHeightProTable<IdentityUserDto>
         rowKey="id"
         actionRef={actionRef}
-        formRef={searchFormRef}
         columns={columns}
-        search={{ labelWidth: 'auto' }}
-        request={async (params) => {
+        search={false}
+        onChange={(_pagination, nextFilters) => {
+          setFilters(nextFilters as Record<string, React.Key[] | null>);
+        }}
+        request={async (params, sorter) => {
           const result = await getUsers({
             current: params.current,
             pageSize: params.pageSize,
-            filter: params.userName,
+            filter: userNameFilter,
+            sorting: sorterToAbpSorting(sorter),
           });
           const items = result.items ?? [];
           // Volo 用户列表契约不含 twoFactorEnabled：页级批量补齐，

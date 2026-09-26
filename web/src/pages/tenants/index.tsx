@@ -5,7 +5,6 @@ import {
   type ProColumns,
   ProFormSelect,
   ProFormText,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess, useModel } from '@umijs/max';
 import { App, Button, Popconfirm, Tag } from 'antd';
@@ -13,7 +12,9 @@ import React, { useRef, useState } from 'react';
 import { applyTenantPackage } from '@/abp/tenantPackages';
 import { createTenant, deleteTenant, getTenants } from '@/abp/tenants';
 import type { CreateTenantInput, TenantDto } from '@/abp/types';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import FeatureModal from '@/components/FeatureModal';
+import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 import { useDictionary } from '@/hooks/useDictionary';
 import ConnectionStringDrawer from './ConnectionStringDrawer';
 import ApplyPackageModal from './components/ApplyPackageModal';
@@ -122,6 +123,7 @@ const TenantsPage: React.FC = () => {
     {
       title: '名称',
       dataIndex: 'name',
+      ...textFilter('按租户名称筛选'),
     },
     {
       title: 'Id',
@@ -197,16 +199,16 @@ const TenantsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<TenantDto>
+      <AutoHeightProTable<TenantDto>
         rowKey="id"
         actionRef={actionRef}
         columns={columns}
-        search={{ labelWidth: 'auto' }}
-        request={async (params) => {
+        search={false}
+        request={async (params, _sorter, filter) => {
           const result = await getTenants({
             current: params.current,
             pageSize: params.pageSize,
-            filter: params.name,
+            filter: firstFilterValue(filter, 'name'),
           });
           return {
             data: result.items,

@@ -1,12 +1,8 @@
 import { DownloadOutlined } from '@ant-design/icons';
-import {
-  PageContainer,
-  ProDescriptions,
-  type ProFormInstance,
-  ProTable,
-} from '@ant-design/pro-components';
+import { PageContainer, ProDescriptions } from '@ant-design/pro-components';
 import { useAccess, useSearchParams } from '@umijs/max';
 import { Button, Drawer, Input, Modal, message, Tag, Tooltip } from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import React, { useRef, useState } from 'react';
 import {
   exportAuditLogs,
@@ -15,9 +11,16 @@ import {
   markAuditLogHandled,
   unmarkAuditLogHandled,
 } from '@/abp/proModules';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import CorrelationIdText from '@/components/CorrelationIdText';
-import { toDayEnd, toDayStart } from '@/utils/format';
+import {
+  dateRangeFilter,
+  enumFilters,
+  firstFilterValue,
+  textFilter,
+} from '@/components/tableColumnFilters';
 import { dictionaryRequest } from '@/utils/dictionary';
+import { toDayEnd, toDayStart } from '@/utils/format';
 import { changeTypeText } from './changeType';
 import PropertyChangesTable from './components/PropertyChangesTable';
 import EntityChangeHistoryDrawer from './EntityChangeHistoryDrawer';
@@ -27,14 +30,15 @@ const formatHandledAt = (value?: string | null) =>
 
 // dateRange 只给到日期（YYYY-MM-DD）：补齐到整天边界，避免结束日整段被排除（共享工具 toDayStart/toDayEnd）
 const splitExecutionTimeRange = (
-  range?: string[],
+  range?: unknown[] | null,
 ): { startTime?: string; endTime?: string } => {
-  if (range?.length !== 2) {
+  if (!range || range.length !== 2 || !range.every(dayjs.isDayjs)) {
     return {};
   }
+  const [start, end] = range as [Dayjs, Dayjs];
   return {
-    startTime: toDayStart(range[0]),
-    endTime: toDayEnd(range[1]),
+    startTime: toDayStart(start.format('YYYY-MM-DD')),
+    endTime: toDayEnd(end.format('YYYY-MM-DD')),
   };
 };
 
@@ -51,15 +55,39 @@ const AuditLogsPage: React.FC = () => {
   }>({ open: false });
   const [exporting, setExporting] = useState(false);
   const tableRef = useRef<any>(null);
-  // ProTable 的搜索表单实例：actionRef.current 上没有 formRef 成员
-  // （pro-components v3 的 ActionType 只有 reload/fullScreen 等），
-  // 必须用 formRef prop 拿到表单引用，否则导出永远读不到当前筛选条件。
-  const formRef = useRef<ProFormInstance>(undefined);
   const access = useAccess();
   // 支持从操作日志详情跳转过来（?correlationId=xxx 串联同一次请求的两类日志）
   const [searchParams] = useSearchParams();
-  // 只作表单初始值：用户清空筛选后不应被 URL 初始值粘住（审查修复）
+  // 只作受控筛选的初始值：用户清空筛选后不应被 URL 初始值粘住（审查修复）。
+  // 列头筛选走官网「可控的筛选」模式（columns.filteredValue + onChange）：
+  // 导出与列表同口径，直接读这份状态。
   const initialCorrelationId = searchParams.get('correlationId') ?? undefined;
+  const [filters, setFilters] = useState<Record<string, React.Key[] | null>>(
+    initialCorrelationId ? { correlationId: [initialCorrelationId] } : {},
+  );
+
+  // 「方法」筛选选项来自数据字典（异步），落到列头 filters 需要同步数组
+  const [methodFilters, setMethodFilters] = useState<
+    { text: string; value: string }[]
+  >([]);
+  React.useEffect(() => {
+    let alive = true;
+    dictionaryRequest('AuditLogHttpMethod')()
+      .then((options) => {
+        if (alive) {
+          setMethodFilters(
+            options.map((o) => ({ text: o.label, value: String(o.value) })),
+          );
+        }
+      })
+      .catch(() => {
+        // 失败要可见：静默吞掉会让「方法」筛选菜单永远为空
+        if (alive) message.error('加载方法筛选选项失败');
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 「标记已处理」弹窗目标行与备注
   const [handleTarget, setHandleTarget] = useState<any>();
@@ -133,20 +161,19 @@ const AuditLogsPage: React.FC = () => {
   const handleExport = async () => {
     setExporting(true);
     try {
-      // 从 ProTable 搜索表单获取当前筛选条件
-      const formValues = formRef.current?.getFieldsValue?.() ?? {};
-      const timeRange = splitExecutionTimeRange(formValues.executionTimeRange);
+      // 从列头筛选的受控状态取当前筛选条件（与列表同口径）
+      const timeRange = splitExecutionTimeRange(filters.executionTime);
       const result = await exportAuditLogs({
-        httpMethod: formValues.httpMethod,
-        url: formValues.url,
+        httpMethod: firstFilterValue(filters, 'httpMethod'),
+        url: firstFilterValue(filters, 'url'),
         // 导出与列表同口径：关联 ID 与「仅未处理错误」筛选同样作用于导出（同步与异步链路）
-        correlationId: formValues.correlationId,
+        correlationId: firstFilterValue(filters, 'correlationId'),
         unhandledErrorOnly:
-          formValues.unhandledErrorOnly === 'true' || undefined,
-        userName: formValues.userName,
+          firstFilterValue(filters, 'isHandled') === 'true' || undefined,
+        userName: firstFilterValue(filters, 'userName'),
         startTime: timeRange.startTime,
         endTime: timeRange.endTime,
-        hasException: parseTriBool(formValues.hasException),
+        hasException: parseTriBool(firstFilterValue(filters, 'httpStatusCode')),
       });
 
       if (result.isQueued) {
@@ -175,72 +202,75 @@ const AuditLogsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable
+      <AutoHeightProTable
         actionRef={tableRef}
-        formRef={formRef}
         rowKey="id"
-        form={{
-          initialValues: { correlationId: initialCorrelationId },
-        }}
+        search={false}
         columns={[
           {
             title: '时间',
             dataIndex: 'executionTime',
             valueType: 'dateTime',
-            search: false,
+            filteredValue: filters.executionTime as React.Key[] | undefined,
+            ...dateRangeFilter(),
           },
           {
-            title: '时间范围',
-            dataIndex: 'executionTimeRange',
-            hideInTable: true,
-            valueType: 'dateRange',
-            fieldProps: { placeholder: ['开始日期', '结束日期'] },
+            title: '用户',
+            dataIndex: 'userName',
+            filteredValue: filters.userName as React.Key[] | undefined,
+            ...textFilter(),
           },
-          { title: '用户', dataIndex: 'userName' },
           {
             title: '方法',
             dataIndex: 'httpMethod',
-            // T3.4：筛选下拉读数据字典（AuditLogHttpMethod），不再靠手输文本
-            valueType: 'select',
-            request: dictionaryRequest('AuditLogHttpMethod'),
+            // T3.4：筛选下拉读数据字典（AuditLogHttpMethod），不再靠手输文本；
+            // 单选：页面按首值下发，多选两项会静默只按第一项过滤
+            filterMultiple: false,
+            filters: methodFilters,
+            filteredValue: filters.httpMethod as React.Key[] | undefined,
           },
-          { title: 'URL', dataIndex: 'url', ellipsis: true },
-          { title: '状态', dataIndex: 'httpStatusCode', search: false },
           {
-            title: '是否异常',
-            dataIndex: 'hasException',
-            hideInTable: true,
-            valueType: 'select',
-            fieldProps: {
-              options: [
-                { label: '有异常', value: 'true' },
-                { label: '无异常', value: 'false' },
-              ],
-            },
+            title: 'URL',
+            dataIndex: 'url',
+            ellipsis: true,
+            filteredValue: filters.url as React.Key[] | undefined,
+            ...textFilter('按 URL 筛选'),
+          },
+          {
+            title: '状态',
+            dataIndex: 'httpStatusCode',
+            // 「是否异常」筛选挂在状态列：两者同属请求结果维度
+            filterMultiple: false,
+            filters: enumFilters({ 有异常: 'true', 无异常: 'false' }),
+            filteredValue: filters.httpStatusCode as React.Key[] | undefined,
           },
           {
             title: '关联 ID',
             dataIndex: 'correlationId',
-            hideInTable: true,
-            fieldProps: { placeholder: '与操作日志串联的关联 ID' },
-          },
-          {
-            title: '仅未处理错误',
-            dataIndex: 'unhandledErrorOnly',
-            hideInTable: true,
-            valueType: 'select',
-            fieldProps: {
-              options: [{ label: '是（错误认领工作流）', value: 'true' }],
-            },
+            width: 130,
+            copyable: true,
+            ellipsis: true,
+            filteredValue: filters.correlationId as React.Key[] | undefined,
+            ...textFilter('与操作日志串联的关联 ID'),
+            render: (_, record) => (
+              <CorrelationIdText
+                value={record.correlationId}
+                linkTo="/administration/operation-logs"
+                linkText="查关联操作日志"
+              />
+            ),
           },
           {
             title: '处理状态',
             dataIndex: 'isHandled',
             width: 110,
-            search: false,
+            // 「仅未处理错误」筛选挂在处理状态列（错误认领工作流口径）
+            filterMultiple: false,
+            filters: enumFilters({ 仅未处理错误: 'true' }),
+            filteredValue: filters.isHandled as React.Key[] | undefined,
             render: renderHandleState,
           },
-          { title: '耗时(ms)', dataIndex: 'executionDuration', search: false },
+          { title: '耗时(ms)', dataIndex: 'executionDuration' },
           {
             title: '操作',
             valueType: 'option',
@@ -288,28 +318,35 @@ const AuditLogsPage: React.FC = () => {
               ]
             : [],
         }}
-        request={async (params) => {
-          const timeRange = splitExecutionTimeRange(
-            params.executionTimeRange as string[] | undefined,
-          );
+        request={async (params, _sorter, filter) => {
+          const f = (filter ?? {}) as Record<string, unknown[] | undefined>;
+          // 列头受控筛选是单一事实源；第三参 f 在挂载/未交互时不含
+          // filterDropdown 列（ProTable 初值只收配了 filters 的列），
+          // 故 f 缺失时回退受控状态——深链初值才能作用于首请求
+          const read = (key: string): string | undefined =>
+            firstFilterValue(f, key) ?? firstFilterValue(filters, key);
+          const timeRange = splitExecutionTimeRange(f.executionTime);
           const result = await getAuditLogs({
             current: params.current,
             pageSize: params.pageSize,
-            httpMethod: params.httpMethod,
-            url: params.url,
-            userName: params.userName,
-            correlationId: params.correlationId,
+            httpMethod: read('httpMethod'),
+            url: read('url'),
+            userName: read('userName'),
+            correlationId: read('correlationId'),
             unhandledErrorOnly:
-              params.unhandledErrorOnly === 'true' || undefined,
+              firstFilterValue(f, 'isHandled') === 'true' || undefined,
             startTime: timeRange.startTime,
             endTime: timeRange.endTime,
-            hasException: parseTriBool(params.hasException),
+            hasException: parseTriBool(firstFilterValue(f, 'httpStatusCode')),
           });
           return {
             data: result.items,
             total: result.totalCount,
             success: true,
           };
+        }}
+        onChange={(_pagination, nextFilters) => {
+          setFilters(nextFilters as Record<string, React.Key[] | null>);
         }}
       />
       <Drawer
@@ -370,12 +407,14 @@ const AuditLogsPage: React.FC = () => {
             },
           ]}
         />
-        <ProTable
+        <AutoHeightProTable
           headerTitle="调用"
           rowKey={(row) =>
             `${row.serviceName}-${row.methodName}-${row.executionDuration}`
           }
           search={false}
+          /* 抽屉内嵌套布局，不撑满视口 */
+          fillViewport={false}
           pagination={false}
           dataSource={detail?.actions || []}
           columns={[
@@ -384,12 +423,14 @@ const AuditLogsPage: React.FC = () => {
             { title: '耗时(ms)', dataIndex: 'executionDuration', width: 120 },
           ]}
         />
-        <ProTable
+        <AutoHeightProTable
           headerTitle="实体变更"
           rowKey={(row) =>
             `${row.entityTypeFullName}-${row.entityId}-${row.changeType}`
           }
           search={false}
+          /* 抽屉内嵌套布局，不撑满视口 */
+          fillViewport={false}
           pagination={false}
           dataSource={detail?.entityChanges || []}
           columns={[

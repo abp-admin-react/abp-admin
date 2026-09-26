@@ -1,11 +1,9 @@
-import {
-  type ActionType,
-  PageContainer,
-  ProTable,
-} from '@ant-design/pro-components';
+import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { Alert, Button, Input, Modal, message, Popconfirm, Select } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
+import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 import { getApiAppLanguage } from '@/services/abpadmin/language';
 import {
   getApiAppTextTemplate,
@@ -110,15 +108,25 @@ const TextTemplatesPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<TextTemplate>
+      <AutoHeightProTable<TextTemplate>
         rowKey="name"
         actionRef={actionRef}
-        // 列表过滤走后端（filter 参数：按名称/显示名模糊匹配）
-        search={{ labelWidth: 'auto', defaultColsNumber: 1 }}
+        // 列表过滤走后端（filter 参数：按名称/显示名模糊匹配），筛选 UI 在列头
+        search={false}
         loading={loading}
         columns={[
-          { title: '名称', dataIndex: 'name', width: 300 },
-          { title: '显示名', dataIndex: 'displayName', ellipsis: true },
+          {
+            title: '名称',
+            dataIndex: 'name',
+            width: 300,
+            ...textFilter('按模板名称筛选'),
+          },
+          {
+            title: '显示名',
+            dataIndex: 'displayName',
+            ellipsis: true,
+            ...textFilter('按显示名筛选'),
+          },
           {
             title: '布局',
             dataIndex: 'isLayout',
@@ -156,10 +164,12 @@ const TextTemplatesPage: React.FC = () => {
             ],
           },
         ]}
-        request={async (params) => {
+        request={async (params, _sorter, filter) => {
           // 生成的客户端已带类型化参数对象（getApiAppTextTemplateParams），filter 直接透传
           const items = await getApiAppTextTemplate({
-            filter: params.name || params.displayName,
+            filter:
+              firstFilterValue(filter, 'name') ||
+              firstFilterValue(filter, 'displayName'),
           });
           return { data: items, total: items.length, success: true };
         }}

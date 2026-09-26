@@ -1,13 +1,18 @@
-import {
-  PageContainer,
-  ProDescriptions,
-  ProTable,
-} from '@ant-design/pro-components';
+import { PageContainer, ProDescriptions } from '@ant-design/pro-components';
 import { useSearchParams } from '@umijs/max';
 import { Drawer, Tag, Typography } from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import React, { useState } from 'react';
 import { getOperationLogs, type OperationLogDto } from '@/abp/operationLogs';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import CorrelationIdText from '@/components/CorrelationIdText';
+import {
+  dateRangeFilter,
+  enumFilters,
+  firstFilterValue,
+  textFilter,
+} from '@/components/tableColumnFilters';
+import { toDayEnd, toDayStart } from '@/utils/format';
 
 const formatExtra = (extra?: string | null) => {
   if (!extra) {
@@ -29,71 +34,62 @@ const OperationLogsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<OperationLogDto>
+      <AutoHeightProTable<OperationLogDto>
         rowKey="id"
-        form={{
-          initialValues: { correlationId: initialCorrelationId },
-        }}
+        search={false}
         columns={[
           {
             title: '时间',
             dataIndex: 'executionTime',
             valueType: 'dateTime',
             width: 160,
-            search: false,
+            ...dateRangeFilter(),
           },
-          {
-            title: '时间范围',
-            dataIndex: 'dateTimeRange',
-            valueType: 'dateTimeRange',
-            hideInTable: true,
-            search: {
-              transform: (value: string[]) => ({
-                StartTime: value?.[0],
-                EndTime: value?.[1],
-              }),
-            },
-          },
-          { title: '用户', dataIndex: 'userName', width: 120, search: false },
-          { title: '模块', dataIndex: 'type', width: 100 },
-          { title: '操作', dataIndex: 'subType', width: 130 },
+          { title: '用户', dataIndex: 'userName', width: 120 },
+          { title: '模块', dataIndex: 'type', width: 100, ...textFilter() },
+          { title: '操作', dataIndex: 'subType', width: 130, ...textFilter() },
           {
             title: '业务编号',
             dataIndex: 'bizId',
             width: 120,
             copyable: true,
             ellipsis: true,
-            search: false,
           },
           {
-            title: '内容',
-            dataIndex: 'filter',
-            hideInTable: true,
-            fieldProps: { placeholder: '匹配操作名/内容/业务编号/用户名' },
-          },
-          {
-            title: '关联 ID',
-            dataIndex: 'correlationId',
-            hideInTable: true,
-            fieldProps: { placeholder: '与审计日志串联的关联 ID' },
-          },
-          {
+            // 原「内容」搜索字段：后端整表匹配（操作名/内容/业务编号/用户名），
+            // 挂在明细列头，placeholder 说清口径
             title: '明细',
             dataIndex: 'action',
             ellipsis: true,
-            search: false,
+            ...textFilter('匹配操作名/内容/业务编号/用户名'),
+          },
+          {
+            // 关联 ID 原为隐藏搜索字段 + URL 深链；落为可见列 + 列头筛选，
+            // defaultFilteredValue 作非受控初始值：用户清空后不被 URL 初始值粘住。
+            // 服务端筛选标记由 textFilter 工厂携带（见 tableColumnFilters）
+            title: '关联 ID',
+            dataIndex: 'correlationId',
+            width: 130,
+            copyable: true,
+            ellipsis: true,
+            defaultFilteredValue: initialCorrelationId
+              ? [initialCorrelationId]
+              : undefined,
+            ...textFilter('与审计日志串联的关联 ID'),
+            render: (_, record) => (
+              <CorrelationIdText
+                value={record.correlationId}
+                linkTo="/administration/audit-logs"
+                linkText="查关联审计日志"
+              />
+            ),
           },
           {
             title: '结果',
             dataIndex: 'success',
             width: 80,
-            valueType: 'select',
-            fieldProps: {
-              options: [
-                { label: '成功', value: 'true' },
-                { label: '失败', value: 'false' },
-              ],
-            },
+            filterMultiple: false,
+            filters: enumFilters({ 成功: 'true', 失败: 'false' }),
             render: (_, record) =>
               record.success ? (
                 <Tag color="success">成功</Tag>
@@ -105,7 +101,6 @@ const OperationLogsPage: React.FC = () => {
             title: '耗时',
             dataIndex: 'duration',
             width: 80,
-            search: false,
             render: (_, record) => `${record.duration} ms`,
           },
           {
@@ -119,24 +114,30 @@ const OperationLogsPage: React.FC = () => {
             ],
           },
         ]}
-        request={async (params) => {
+        request={async (params, _sorter, filter) => {
+          const f = (filter ?? {}) as Record<string, unknown[] | undefined>;
+          // 纯日期 RangePicker 的结束日是 00:00:00，后端为 <= 精确比较：
+          // 补齐到整天边界，避免结束日整段被排除（共享 toDayStart/toDayEnd 约定）
+          const range = f.executionTime ?? [];
+          const start = dayjs.isDayjs(range[0])
+            ? (range[0] as Dayjs).format('YYYY-MM-DD')
+            : undefined;
+          const end = dayjs.isDayjs(range[1])
+            ? (range[1] as Dayjs).format('YYYY-MM-DD')
+            : undefined;
           const result = await getOperationLogs({
             current: params.current,
             pageSize: params.pageSize,
-            Filter: params.filter,
-            Type: params.type,
-            SubType: params.subType,
+            Filter: firstFilterValue(f, 'action'),
+            Type: firstFilterValue(f, 'type'),
+            SubType: firstFilterValue(f, 'subType'),
             Success:
-              params.success === undefined || params.success === null
+              firstFilterValue(f, 'success') === undefined
                 ? undefined
-                : params.success === 'true',
-            CorrelationId: params.correlationId,
-            StartTime: (params as Record<string, unknown>).StartTime as
-              | string
-              | undefined,
-            EndTime: (params as Record<string, unknown>).EndTime as
-              | string
-              | undefined,
+                : firstFilterValue(f, 'success') === 'true',
+            CorrelationId: firstFilterValue(f, 'correlationId'),
+            StartTime: toDayStart(start),
+            EndTime: toDayEnd(end),
           });
           return {
             data: result.items,

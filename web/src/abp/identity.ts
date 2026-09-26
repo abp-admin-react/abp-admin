@@ -54,6 +54,8 @@ export async function getUsers(params: {
   current?: number;
   pageSize?: number;
   filter?: string;
+  /** ABP 排序串（如 "UserName desc"），由列头 sorter 经 sorterToAbpSorting 生成 */
+  sorting?: string;
 }) {
   const maxResultCount = params.pageSize ?? 10;
   const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
@@ -61,6 +63,7 @@ export async function getUsers(params: {
     method: 'GET',
     params: {
       Filter: params.filter,
+      Sorting: params.sorting,
       SkipCount: skipCount,
       MaxResultCount: maxResultCount,
     },
@@ -103,6 +106,8 @@ export async function getRoles(params: {
   current?: number;
   pageSize?: number;
   filter?: string;
+  /** ABP 排序串（如 "Name asc"），由列头 sorter 经 sorterToAbpSorting 生成 */
+  sorting?: string;
 }) {
   const maxResultCount = params.pageSize ?? 10;
   const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
@@ -110,6 +115,7 @@ export async function getRoles(params: {
     method: 'GET',
     params: {
       Filter: params.filter,
+      Sorting: params.sorting,
       SkipCount: skipCount,
       MaxResultCount: maxResultCount,
     },
@@ -187,7 +193,9 @@ export async function getTwoFactorStatuses(
   userIds: string[],
 ): Promise<UserTwoFactorStatusDto[]> {
   // ABP 约定路由会剥掉 Get 前缀：GetTwoFactorStatusesAsync → GET two-factor-statuses
-  const query = userIds.map((id) => `userIds=${encodeURIComponent(id)}`).join('&');
+  const query = userIds
+    .map((id) => `userIds=${encodeURIComponent(id)}`)
+    .join('&');
   return request<UserTwoFactorStatusDto[]>(
     `/api/app/identity-user-admin/two-factor-statuses?${query}`,
     { method: 'GET' },
