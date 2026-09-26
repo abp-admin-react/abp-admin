@@ -17,7 +17,6 @@ public static class MenuTemplateDefinition
     /// </summary>
     public static List<MenuDefinition> All => new()
     {
-        new("welcome", null, MenuTypeEnum.Menu, "欢迎", "welcome", "/welcome", "smile", 10),
         new("administration", null, MenuTypeEnum.Catalog, "管理", "administration", "/administration", "appstore", 20),
         new("saas", "administration", MenuTypeEnum.Catalog, "SaaS", "saas", "/administration/saas", null, 10),
         new("saas-tenants", "saas", MenuTypeEnum.Menu, "租户", "tenants", "/administration/saas/tenants", null, 10, "AbpTenantManagement.Tenants"),

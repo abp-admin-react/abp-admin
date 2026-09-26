@@ -1,5 +1,4 @@
 export default {
-  'menu.welcome': 'Welcome',
   'menu.more-blocks': 'More Blocks',
   'menu.home': 'Home',
   'menu.admin': 'Admin',
@@ -78,7 +77,7 @@ export default {
   'menu.administration.localization.language-texts': 'Language Texts',
   'menu.administration.text-templates': 'Text templates',
   'menu.administration.audit-logs': 'Audit logs',
-'menu.administration.operation-logs': 'Operation logs',
+  'menu.administration.operation-logs': 'Operation logs',
   'menu.administration.files': 'Files',
   'menu.administration.payments': 'Payments',
   'menu.administration.menus': 'Menus',

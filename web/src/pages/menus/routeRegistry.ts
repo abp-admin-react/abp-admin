@@ -9,7 +9,6 @@ export type RouteRegistryItem = {
 };
 
 export const routeRegistry: RouteRegistryItem[] = [
-  { path: '/welcome', label: '欢迎' },
   { path: '/administration/saas/tenants', label: 'SaaS / 租户' },
   { path: '/administration/saas/editions', label: 'SaaS / 版本' },
   { path: '/administration/saas/tenant-packages', label: 'SaaS / 租户套餐' },
@@ -33,7 +32,10 @@ export const routeRegistry: RouteRegistryItem[] = [
     label: 'OpenIddict / 应用程序',
   },
   { path: '/administration/openiddict/scopes', label: 'OpenIddict / 范围' },
-  { path: '/administration/openiddict/token-management', label: 'OpenIddict / 令牌管理' },
+  {
+    path: '/administration/openiddict/token-management',
+    label: 'OpenIddict / 令牌管理',
+  },
   { path: '/administration/features', label: '功能管理' },
   {
     path: '/administration/localization/languages',

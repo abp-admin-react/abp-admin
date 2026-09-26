@@ -1,5 +1,4 @@
 export default {
-  'menu.welcome': '欢迎',
   'menu.more-blocks': '更多区块',
   'menu.home': '首页',
   'menu.admin': '管理页',
@@ -78,7 +77,7 @@ export default {
   'menu.administration.localization.language-texts': '本地化文本',
   'menu.administration.text-templates': '文本模板',
   'menu.administration.audit-logs': '审计日志',
-'menu.administration.operation-logs': '操作日志',
+  'menu.administration.operation-logs': '操作日志',
   'menu.administration.files': '文件管理',
   'menu.administration.payments': '支付',
   'menu.administration.menus': '菜单管理',

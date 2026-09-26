@@ -1,5 +1,4 @@
 export default {
-  'menu.welcome': 'স্বাগতম',
   'menu.more-blocks': 'আরও ব্লক',
   'menu.home': 'নীড়',
   'menu.admin': 'অ্যাডমিন',

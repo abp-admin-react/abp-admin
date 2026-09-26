@@ -36,12 +36,6 @@ export default [
     component: './tenant-not-found',
   },
   {
-    path: '/welcome',
-    name: 'welcome',
-    icon: 'smile',
-    component: './Welcome',
-  },
-  {
     path: '/administration',
     name: 'administration',
     icon: 'appstore',
@@ -306,7 +300,7 @@ export default [
   },
   {
     path: '/',
-    redirect: '/welcome',
+    redirect: '/administration',
   },
   {
     // 历史路径兼容：旧菜单层级下的地址重定向到新层级
