@@ -22,9 +22,7 @@ import type { AbpCurrentTenant } from '@/abp/types';
 import {
   AvatarDropdown,
   CookieConsent,
-  DocLink,
   ErrorBoundary,
-  Footer,
   IdleSessionWatcher,
   ImpersonationBanner,
   LangDropdown,
@@ -89,10 +87,16 @@ function toMenuData(
     });
 }
 
-/** ABP 当前用户：在模板 CurrentUser 基础上补充 ABP 专有的 userName/roles */
-export type AppCurrentUser = API.CurrentUser & {
+/** ABP 当前用户：getApplicationConfiguration 映射产物（模板 API.CurrentUser 已随
+ * 脚手架演示层删除，此处自持字段清单——以 app.tsx 的 mapped 赋值为准） */
+export type AppCurrentUser = {
+  name?: string;
+  userid?: string;
+  email?: string;
   userName?: string;
   roles?: string[];
+  access?: 'admin' | 'user';
+  avatar?: string;
 };
 
 export type AppInitialState = {
@@ -254,7 +258,6 @@ export const layout: RunTimeLayoutConfig = ({
         ),
         // T3.5：通知铃铛（所有登录用户可见；数据源是"我的通知"端点，不依赖 Manage 权限）
         loggedIn && <NotificationBell key="notification" />,
-        <DocLink key="doc" />,
         <VersionDropdown key="version" />,
         localeEnabled && <LangDropdown key="lang" />,
       ].filter(Boolean);
@@ -267,7 +270,6 @@ export const layout: RunTimeLayoutConfig = ({
         <AvatarDropdown>{avatarChildren}</AvatarDropdown>
       ),
     },
-    footerRender: () => <Footer />,
     onPageChange: () => {
       const { location } = history;
       if (initialState?.tenantMissing) {

@@ -7,7 +7,6 @@ import {
   sendTwoFactorCode,
   verifyTwoFactorCode,
 } from '@/abp/account';
-import { Footer } from '@/components';
 import Settings from '../../../../config/defaultSettings';
 
 const useStyles = createStyles(() => ({
@@ -176,7 +175,6 @@ const TwoFactorVerification: React.FC = () => {
           </Space>
         </Card>
       </div>
-      <Footer />
     </div>
   );
 };

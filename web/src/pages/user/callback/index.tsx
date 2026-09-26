@@ -13,7 +13,9 @@ const Callback: React.FC = () => {
         sessionStorage.removeItem('abp.redirect');
         // 双保险：login 侧已过滤，这里再校验一次（防其它入口写入 sessionStorage）
         const redirect =
-          raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/welcome';
+          raw && raw.startsWith('/') && !raw.startsWith('//')
+            ? raw
+            : '/administration';
         window.location.replace(redirect);
       })
       .catch((err: Error) => {

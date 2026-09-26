@@ -1,10 +1,12 @@
+import type { AppCurrentUser } from './app';
+
 /**
  * @see https://umijs.org/docs/max/access#access
  * */
 export default function access(
   initialState:
     | {
-        currentUser?: API.CurrentUser;
+        currentUser?: AppCurrentUser;
         grantedPolicies?: Record<string, boolean>;
         currentTenant?: { isAvailable?: boolean };
       }

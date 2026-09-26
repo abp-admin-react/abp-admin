@@ -90,3 +90,20 @@ ol {
     }
   }
 }
+
+/* ===== 页头密度优化 =====
+ * 面包屑末层即页面标题（放大为原 heading-title 样式），
+ * 独立的标题行（.ant-page-header-heading）整行隐藏，省一行高度。
+ * 各页面的标题行右侧按钮（extra）已挪进各自表格工具栏 / 卡片 extra。 */
+.ant-pro-page-container-warp-page-header .ant-page-header-heading {
+  display: none;
+}
+
+.ant-pro-page-container-warp-page-header
+  .ant-breadcrumb-item:last-child
+  span {
+  font-size: var(--ant-font-size-heading, 20px);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ant-color-text-heading, rgba(0, 0, 0, 0.88));
+}

@@ -1,4 +1,3 @@
-// @ts-ignore
 import { startMock } from '@@/requestRecordMock';
 import { TestBrowser } from '@@/testBrowser';
 import { fireEvent, render } from '@testing-library/react';

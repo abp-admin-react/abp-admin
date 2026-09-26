@@ -67,7 +67,7 @@ const ForceChangePasswordPage: React.FC = () => {
   };
 
   return (
-    <PageContainer title="修改密码">
+    <PageContainer>
       <Card style={{ maxWidth: 480, margin: '0 auto' }}>
         {reason && (
           <p style={{ marginBottom: 24, color: '#faad14' }}>{reason}</p>

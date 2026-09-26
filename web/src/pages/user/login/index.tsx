@@ -1,14 +1,5 @@
 import { Helmet, history } from '@umijs/max';
-import {
-  Alert,
-  App,
-  Button,
-  Card,
-  Input,
-  Space,
-  Spin,
-  Typography,
-} from 'antd';
+import { Alert, App, Button, Card, Input, Space, Spin, Typography } from 'antd';
 import { createStyles } from 'antd-style';
 import React, { useEffect, useRef, useState } from 'react';
 import { loginWithMagicLink } from '@/abp/account';
@@ -22,7 +13,6 @@ import {
   isSubdomainTenantMode,
   setStoredTenant,
 } from '@/abp/tenant';
-import { Footer } from '@/components';
 import Settings from '../../../../config/defaultSettings';
 
 const useStyles = createStyles(({ token }) => ({
@@ -60,9 +50,11 @@ const Login: React.FC = () => {
   // 邮件链接形如 /user/login?magicLinkToken=...&email=...[&tenant=...]，
   // 检测到参数即进入落地状态机：自动解析租户 → 服务端消费凭据换令牌 → 建立会话跳转。
   // 链接失效时展示兜底验证码输入（邮件正文同时含 6 位 OTP，与链接共享一次性凭据记录）。
-  const [magic, setMagic] = useState<
-    { email: string; token: string; tenantName?: string } | null
-  >(null);
+  const [magic, setMagic] = useState<{
+    email: string;
+    token: string;
+    tenantName?: string;
+  } | null>(null);
   const [magicWorking, setMagicWorking] = useState(false);
   const [magicError, setMagicError] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState('');
@@ -101,7 +93,7 @@ const Login: React.FC = () => {
   ) => {
     await applyTokensForNewSession(result);
     message.success('登录成功，正在进入系统…');
-    window.location.replace('/welcome');
+    window.location.replace('/administration');
   };
 
   const consumeMagicLink = async (
@@ -119,7 +111,10 @@ const Login: React.FC = () => {
           setMagicError('链接对应的租户不存在或未启用');
           return;
         }
-        setStoredTenant({ id: result.tenantId, name: result.name || tenantName });
+        setStoredTenant({
+          id: result.tenantId,
+          name: result.name || tenantName,
+        });
       }
       const result = await loginWithMagicLink({
         email,
@@ -242,10 +237,19 @@ const Login: React.FC = () => {
                 </Typography.Text>
               </Space>
             ) : (
-              <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-                <Alert type="error" showIcon message={magicError ?? '登录链接无效或已过期'} />
+              <Space
+                orientation="vertical"
+                size="middle"
+                style={{ width: '100%' }}
+              >
+                <Alert
+                  type="error"
+                  showIcon
+                  message={magicError ?? '登录链接无效或已过期'}
+                />
                 <Typography.Text type="secondary">
-                  邮件里还有 6 位验证码？输入后可直接登录（与链接共用一次有效凭据）：
+                  邮件里还有 6
+                  位验证码？输入后可直接登录（与链接共用一次有效凭据）：
                 </Typography.Text>
                 <Input
                   placeholder="6 位验证码"
@@ -272,7 +276,6 @@ const Login: React.FC = () => {
             )}
           </Card>
         </div>
-        <Footer />
       </div>
     );
   }
@@ -327,7 +330,6 @@ const Login: React.FC = () => {
           </Space>
         </Card>
       </div>
-      <Footer />
     </div>
   );
 };

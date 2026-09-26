@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockReplace = vi.fn();
 const mockHistory = {
   location: {
-    pathname: '/welcome',
+    pathname: '/administration',
     search: '',
     hash: '',
   },
@@ -42,9 +42,7 @@ vi.mock('@/abp/subdomain', () => ({
 vi.mock('@/components', () => ({
   AvatarDropdown: () => null,
   CookieConsent: () => null,
-  DocLink: () => null,
   ErrorBoundary: ({ children }: any) => children,
-  Footer: () => null,
   ImpersonationBanner: () => null,
   LangDropdown: () => null,
   OfflineBanner: () => null,
@@ -115,7 +113,7 @@ describe('app getInitialState', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockHistory.location = {
-      pathname: '/welcome',
+      pathname: '/administration',
       search: '',
       hash: '',
     };

@@ -8,7 +8,7 @@ describe('access', () => {
         userid: '1',
         name: 'Admin User',
         avatar: 'https://example.com/avatar.png',
-        access: 'admin',
+        access: 'admin' as const,
       },
       grantedPolicies: { 'AbpIdentity.Users': true },
     };
@@ -24,7 +24,7 @@ describe('access', () => {
         userid: '2',
         name: 'Regular User',
         avatar: 'https://example.com/avatar.png',
-        access: 'user',
+        access: 'user' as const,
       },
     };
 
