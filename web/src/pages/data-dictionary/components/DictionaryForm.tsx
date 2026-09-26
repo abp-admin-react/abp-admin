@@ -6,8 +6,12 @@ import {
 import { App } from 'antd';
 import type React from 'react';
 import { queryClient } from '@/queryClient';
-import { createDataDictionary, getDataDictionaryByCode, saveDataDictionaryItems } from '../service';
 import type { DataDictionaryListItem } from '../service';
+import {
+  createDataDictionary,
+  getDataDictionaryByCode,
+  saveDataDictionaryItems,
+} from '../service';
 
 interface DictionaryFormProps {
   title: string;
@@ -62,7 +66,9 @@ const DictionaryForm: React.FC<DictionaryFormProps> = ({
               })),
             });
             // 与字典项编辑器同一份缓存契约：显示名/描述变了要让全站字典消费方失效
-            await queryClient.invalidateQueries({ queryKey: ['data-dictionary'] });
+            await queryClient.invalidateQueries({
+              queryKey: ['data-dictionary'],
+            });
             message.success('已保存');
           } else {
             // 创建一律是非静态字典（IsStatic 不开放给 API，静态字典只能由代码定义）
@@ -77,9 +83,12 @@ const DictionaryForm: React.FC<DictionaryFormProps> = ({
           return true;
         } catch (e) {
           // 服务端校验失败（静态结构锁/编码重复/超长等）必须可见：
-          // 吞掉异常时弹窗只是不关闭，用户不知道保存没发生
+          // 吞掉异常时弹窗只是不关闭，用户不知道保存没发生。
+          // return false = 阻止 ModalForm 自动关闭，表单值留在输入框里可改后重提
           message.error(
-            e instanceof Error && e.message ? e.message : '保存失败，请检查输入后重试',
+            e instanceof Error && e.message
+              ? e.message
+              : '保存失败，请检查输入后重试',
           );
           return false;
         }

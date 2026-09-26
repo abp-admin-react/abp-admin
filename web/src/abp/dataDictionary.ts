@@ -38,21 +38,31 @@ export async function getDataDictionaryByCode(code: string) {
   return getApiAppDataDictionaryViewCode({ code });
 }
 
-/** 字典分页列表（管理页左列）。服务端按 Code 排序，需要 DataDictionary.Default 权限。 */
+/**
+ * 字典分页列表（管理页左列）。服务端按 Code 排序，需要 DataDictionary.Default 权限。
+ * 分页参数在此换算成 ABP 口径：current/pageSize → skipCount/maxResultCount（0 起计、按条数跳过）。
+ * 响应做 null 兜底：items/totalCount 缺失时归一为 []/0，调用方无需再判空。
+ */
 export async function getDataDictionaries(params: {
   current?: number;
   pageSize?: number;
 }): Promise<{ items: DataDictionaryListItem[]; totalCount: number }> {
   const maxResultCount = params.pageSize ?? 20;
   const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
-  const result = await request<{ totalCount: number; items: DataDictionaryListItem[] }>(
-    '/api/app/data-dictionary-view',
-    { method: 'GET', params: { skipCount, maxResultCount } },
-  );
+  const result = await request<{
+    totalCount: number;
+    items: DataDictionaryListItem[];
+  }>('/api/app/data-dictionary-view', {
+    method: 'GET',
+    params: { skipCount, maxResultCount },
+  });
   return { items: result.items ?? [], totalCount: result.totalCount ?? 0 };
 }
 
-/** 创建非静态字典（静态字典只能由代码定义，API 不开放 IsStatic），返回创建后的合并视图。 */
+/**
+ * 创建非静态字典（静态字典只能由代码定义，API 不开放 IsStatic），返回创建后的合并视图。
+ * 响应原样透传，不做 getDataDictionaries 那样的 null 兜底；code 在请求体里，不经 URL。
+ */
 export async function createDataDictionary(input: {
   code: string;
   displayText: string;
@@ -64,7 +74,10 @@ export async function createDataDictionary(input: {
   });
 }
 
-/** 删除字典（按编码；静态字典被服务端拒绝，非静态字典的展示元数据随删）。 */
+/**
+ * 删除字典（按编码；静态字典被服务端拒绝，非静态字典的展示元数据随删）。
+ * code 拼进路径段，先 encodeURIComponent——编码合法字符集比 URL 路径段安全集宽。
+ */
 export async function deleteDataDictionary(code: string) {
   return request(`/api/app/data-dictionary-view/${encodeURIComponent(code)}`, {
     method: 'DELETE',
@@ -79,7 +92,11 @@ export async function deleteDataDictionary(code: string) {
  */
 export async function saveDataDictionaryItems(
   dictionaryCode: string,
-  input: { displayText: string; description?: string | null; items: DataDictionaryItemSaveInput[] },
+  input: {
+    displayText: string;
+    description?: string | null;
+    items: DataDictionaryItemSaveInput[];
+  },
 ) {
   // null 归一为 undefined：生成类型把可空字段声明为 `?: string`，null 直接传会过不了 tsc
   return putApiAppDataDictionaryViewDictionaryCodeItems(

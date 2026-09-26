@@ -11,7 +11,12 @@ import type { DataDictionaryListItem } from './service';
  * 静态字典有服务端结构锁），不分页、不做增量 diff。
  */
 export default function DataDictionaryPage() {
-  const [selected, setSelected] = useState<DataDictionaryListItem | undefined>();
+  // 当前选中字典（详情区数据源）；listVersion 是左列刷新版本号：
+  // 右侧保存成功后递增，经 ProTable params 传给 DictionaryList 触发重新 request，
+  // 让左列拿到改名后的 displayText（左列数据不走全局缓存，只能靠重查刷新）。
+  const [selected, setSelected] = useState<
+    DataDictionaryListItem | undefined
+  >();
   const [listVersion, setListVersion] = useState(0);
 
   return (
@@ -26,6 +31,7 @@ export default function DataDictionaryPage() {
         </ProCard>
         <ProCard ghost>
           {selected ? (
+            /* key=id：切换字典时整个编辑器重挂，未保存的行编辑与内部状态一并丢弃 */
             <DictionaryItemEditor
               key={selected.id}
               dictionary={selected}

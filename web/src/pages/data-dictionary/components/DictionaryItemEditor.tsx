@@ -1,16 +1,13 @@
 import { EditableProTable, type ProColumns } from '@ant-design/pro-components';
 import { useQuery } from '@tanstack/react-query';
+import { useModel } from '@umijs/max';
 import { Alert, App, Button, Tag } from 'antd';
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import { useModel } from '@umijs/max';
 import { dictionaryQueryKey } from '@/hooks/useDictionary';
 import { queryClient } from '@/queryClient';
-import {
-  getDataDictionaryByCode,
-  saveDataDictionaryItems,
-} from '../service';
 import type { DataDictionaryListItem } from '../service';
+import { getDataDictionaryByCode, saveDataDictionaryItems } from '../service';
 
 interface EditableItem {
   // EditableProTable 的行 key 必须在编辑过程中保持稳定。
@@ -48,20 +45,25 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
   // 的 extraProperties.dataDictionaryTagTypes 下发，见 DataDictionaryTagTypesContributor），
   // 前端不再硬编码副本
   const { initialState } = useModel('@@initialState');
-  const tagTypeOptions = (initialState?.dataDictionaryTagTypes ?? []).map((v) => ({
-    label: v,
-    value: v,
-  }));
+  const tagTypeOptions = (initialState?.dataDictionaryTagTypes ?? []).map(
+    (v) => ({
+      label: v,
+      value: v,
+    }),
+  );
   const [items, setItems] = useState<EditableItem[]>([]);
   const [editableKeys, setEditableKeys] = useState<React.Key[]>([]);
   const [saving, setSaving] = useState(false);
 
+  // 合并视图查询：enabled 卡住空 code——上级行保证挂载时必有 code，这里只做防御
   const viewQuery = useQuery({
     queryKey: dictionaryQueryKey(dictionary.code ?? ''),
     queryFn: () => getDataDictionaryByCode(dictionary.code ?? ''),
     enabled: !!dictionary.code,
   });
 
+  // 服务端 → 本地可编辑副本的单向同步：查询成功/换字典重挂时整表重置。
+  // 之后表格以本地 items 为编辑对象，保存成功会失效字典缓存触发重查，进而走这里重置。
   useEffect(() => {
     setItems(
       (viewQuery.data?.items ?? []).map((it) => ({
@@ -199,6 +201,7 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
         value={items}
         onChange={(next) => setItems([...next])}
         pagination={false}
+        // 静态字典不允许新增项（与服务端结构锁一致），直接关掉行创建器
         recordCreatorProps={
           isStaticDict
             ? false

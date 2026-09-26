@@ -146,6 +146,7 @@ describe('DataDictionaryPage', () => {
       items: [genderDict, customDict],
       totalCount: 2,
     } as never);
+    // 按 code 分流两个夹具：Gender=静态字典（项不可删、编码不可改），CustomerLevel=非静态
     vi.mocked(service.getDataDictionaryByCode).mockImplementation(
       (code: string) =>
         Promise.resolve(
@@ -178,9 +179,7 @@ describe('DataDictionaryPage', () => {
               },
         ) as never,
     );
-    vi.mocked(service.saveDataDictionaryItems).mockResolvedValue(
-      {} as never,
-    );
+    vi.mocked(service.saveDataDictionaryItems).mockResolvedValue({} as never);
   });
 
   it('挂载即请求字典列表', async () => {

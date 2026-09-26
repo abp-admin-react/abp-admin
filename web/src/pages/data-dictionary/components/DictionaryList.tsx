@@ -8,8 +8,8 @@ import { App, Button, Popconfirm, Tag } from 'antd';
 import type React from 'react';
 import { useRef } from 'react';
 import { queryClient } from '@/queryClient';
-import { deleteDataDictionary, getDataDictionaries } from '../service';
 import type { DataDictionaryListItem } from '../service';
+import { deleteDataDictionary, getDataDictionaries } from '../service';
 import DictionaryForm from './DictionaryForm';
 
 interface DictionaryListProps {
@@ -63,13 +63,17 @@ const DictionaryList: React.FC<DictionaryListProps> = ({
               try {
                 await deleteDataDictionary(record.code ?? '');
                 // 该字典的合并视图缓存（useDictionary / dictionaryRequest 共用）一并失效
-                await queryClient.invalidateQueries({ queryKey: ['data-dictionary'] });
+                await queryClient.invalidateQueries({
+                  queryKey: ['data-dictionary'],
+                });
                 message.success('已删除');
                 actionRef.current?.reload();
               } catch (e) {
                 // 服务端拒绝（静态结构锁等）必须可见，与表单/编辑器的错误呈现契约一致
                 message.error(
-                  e instanceof Error && e.message ? e.message : '删除失败，请重试',
+                  e instanceof Error && e.message
+                    ? e.message
+                    : '删除失败，请重试',
                 );
               }
             }}
@@ -88,6 +92,7 @@ const DictionaryList: React.FC<DictionaryListProps> = ({
       actionRef={actionRef}
       columns={columns}
       search={false}
+      // params 变化会让 ProTable 重新执行 request：父组件用递增 version 驱动左列重查
       params={{ version }}
       pagination={{ pageSize: 100, hideOnSinglePage: true }}
       request={async (params) => {
