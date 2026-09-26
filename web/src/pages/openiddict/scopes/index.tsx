@@ -4,7 +4,6 @@ import {
   PageContainer,
   ProFormText,
   ProFormTextArea,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { App, Button, Popconfirm } from 'antd';
@@ -16,6 +15,7 @@ import {
   type OpenIddictScopeDto,
   updateOpenIddictScope,
 } from '@/abp/openIddictApplications';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 
 type ScopeFormValues = {
   name: string;
@@ -40,7 +40,7 @@ const ScopesPage: React.FC = () => {
   const actionRef = useRef<ActionType>(undefined);
   return (
     <PageContainer>
-      <ProTable<OpenIddictScopeDto>
+      <AutoHeightProTable<OpenIddictScopeDto>
         rowKey="id"
         actionRef={actionRef}
         search={false}

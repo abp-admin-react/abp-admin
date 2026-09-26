@@ -91,16 +91,24 @@ const ServerMonitorPage: React.FC = () => {
       : 0;
 
   return (
-    <PageContainer
-      extra={[
-        <Button key="refresh" type="primary" loading={loading} onClick={load}>
-          刷新
-        </Button>,
-      ]}
-    >
+    <PageContainer>
       <Row gutter={[16, 16]}>
         <Col span={24}>
-          <Card title="机器 / 运行时" loading={!info}>
+          <Card
+            title="机器 / 运行时"
+            loading={!info}
+            /* 页头标题行已全局隐藏，刷新挪到首卡片 extra */
+            extra={
+              <Button
+                key="refresh"
+                type="primary"
+                loading={loading}
+                onClick={load}
+              >
+                刷新
+              </Button>
+            }
+          >
             {info && (
               <Descriptions column={{ xs: 1, sm: 2, md: 3 }} size="small">
                 <Descriptions.Item label="机器名">
@@ -208,10 +216,7 @@ const ServerMonitorPage: React.FC = () => {
             {info && (
               <Row gutter={16}>
                 <Col span={8}>
-                  <Statistic
-                    title="托管线程数"
-                    value={info.threadCount}
-                  />
+                  <Statistic title="托管线程数" value={info.threadCount} />
                 </Col>
                 <Col span={8}>
                   <Statistic

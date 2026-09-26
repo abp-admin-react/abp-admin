@@ -4,7 +4,6 @@ import {
   PageContainer,
   ProFormText,
   ProFormTextArea,
-  ProTable,
 } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Tag } from 'antd';
 import React, { useRef } from 'react';
@@ -15,6 +14,7 @@ import {
   getBackgroundJobs,
   retryBackgroundJob,
 } from '@/abp/proModules';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 
 /** ProTable select 的 valueEnum 布尔会被序列化成字符串，统一在这里还原。 */
 const toBool = (v: unknown): boolean | undefined =>
@@ -30,7 +30,7 @@ const BackgroundJobsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable
+      <AutoHeightProTable
         rowKey="id"
         actionRef={actionRef}
         columns={[

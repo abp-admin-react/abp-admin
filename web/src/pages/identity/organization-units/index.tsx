@@ -20,8 +20,8 @@ import {
   getOrganizationUnitMembers,
   getOrganizationUnitRoles,
   getOrganizationUnits,
-  type OrganizationUnitDto,
   moveOrganizationUnit,
+  type OrganizationUnitDto,
   removeOrganizationUnitMember,
   removeOrganizationUnitRole,
   updateOrganizationUnit,
@@ -46,9 +46,7 @@ const OrganizationUnitsPage: React.FC = () => {
 
   const treeData = useMemo(
     () =>
-      units
-        .filter((item) => !item.parentId)
-        .map((root) => toNode(root, units)),
+      units.filter((item) => !item.parentId).map((root) => toNode(root, units)),
     [units],
   );
 
@@ -63,12 +61,14 @@ const OrganizationUnitsPage: React.FC = () => {
       selected.id,
       ...collectDescendantIds(selected, units),
     ]);
-    return units
-      .filter((item) => !item.parentId)
-      .map((root) => toNode(root, units, excluded))
-      // 选中根节点自身时 toNode 返回 null（排除自己）——根层不滤掉会让
-      // TreeSelect 拿到 [null, ...] 渲染崩溃（六透镜第二轮 function-High）
-      .filter(Boolean);
+    return (
+      units
+        .filter((item) => !item.parentId)
+        .map((root) => toNode(root, units, excluded))
+        // 选中根节点自身时 toNode 返回 null（排除自己）——根层不滤掉会让
+        // TreeSelect 拿到 [null, ...] 渲染崩溃（六透镜第二轮 function-High）
+        .filter(Boolean)
+    );
   }, [selected, units]);
 
   return (

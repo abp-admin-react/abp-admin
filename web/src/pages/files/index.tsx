@@ -5,12 +5,12 @@ import {
   PageContainer,
   ProCard,
   ProFormText,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess, useIntl } from '@umijs/max';
 import { App, Button, Image, Upload } from 'antd';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { getFileListWithThumbnails } from '@/abp/imaging';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
   createDirectory,
   FILE_CONTAINER_NAME,
@@ -114,10 +114,12 @@ const FilesPage: React.FC = () => {
           )}
           headerBordered
         >
-          <ProTable<FileRow>
+          <AutoHeightProTable<FileRow>
             rowKey="id"
             actionRef={actionRef}
             search={false}
+            /* 目录树 + 列表的多面板嵌套布局，不撑满视口，保留拖拽列宽与防撑破 */
+            fillViewport={false}
             params={{ parentId: currentDirId }}
             columns={columns}
             request={async (params) => {

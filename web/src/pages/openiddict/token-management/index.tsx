@@ -6,11 +6,10 @@ import {
   type ProColumns,
   ProFormSelect,
   ProFormText,
-  ProTable,
   QueryFilter,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm, Tabs, Tag, theme } from 'antd';
+import { App, Button, Popconfirm, Space, Tabs, Tag, theme } from 'antd';
 import React, { useRef, useState } from 'react';
 import { getOpenIddictApplications } from '@/abp/openIddictApplications';
 import {
@@ -23,6 +22,7 @@ import {
   revokeOpenIddictToken,
   revokeOpenIddictTokensBySubject,
 } from '@/abp/openIddictTokens';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 
 const STATUS_COLORS: Record<string, string> = {
   valid: 'success',
@@ -184,36 +184,39 @@ const TokenManagement: React.FC = () => {
     </QueryFilter>
   );
 
+  /** 页头标题行已全局隐藏，页面级操作挂在 Tabs 页签栏右侧（两个 tab 共用） */
+  const tabExtra = (
+    <Space>
+      {access.canRevokeTokens ? (
+        <Button
+          key="by-subject"
+          icon={<StopOutlined />}
+          onClick={() => setRevokeOpen(true)}
+        >
+          按用户吊销
+        </Button>
+      ) : null}
+      {access.canPruneTokens ? (
+        <Popconfirm
+          key="prune"
+          title="清理全部过期令牌与授权？"
+          onConfirm={async () => {
+            const result = await pruneOpenIddictTokens();
+            message.success(
+              `已清理 ${result.prunedTokens} 个令牌、${result.prunedAuthorizations} 个授权`,
+            );
+            tokenTableRef.current?.reload();
+            authTableRef.current?.reload();
+          }}
+        >
+          <Button icon={<ClearOutlined />}>清理过期</Button>
+        </Popconfirm>
+      ) : null}
+    </Space>
+  );
+
   return (
-    <PageContainer
-      extra={[
-        access.canRevokeTokens ? (
-          <Button
-            key="by-subject"
-            icon={<StopOutlined />}
-            onClick={() => setRevokeOpen(true)}
-          >
-            按用户吊销
-          </Button>
-        ) : null,
-        access.canPruneTokens ? (
-          <Popconfirm
-            key="prune"
-            title="清理全部过期令牌与授权？"
-            onConfirm={async () => {
-              const result = await pruneOpenIddictTokens();
-              message.success(
-                `已清理 ${result.prunedTokens} 个令牌、${result.prunedAuthorizations} 个授权`,
-              );
-              tokenTableRef.current?.reload();
-              authTableRef.current?.reload();
-            }}
-          >
-            <Button icon={<ClearOutlined />}>清理过期</Button>
-          </Popconfirm>
-        ) : null,
-      ].filter(Boolean)}
-    >
+    <PageContainer>
       {/* 校验失败返回 false 保持弹窗开启，不会像 modal.confirm 那样被直接关掉 */}
       <ModalForm<{ subject: string }>
         title="按用户吊销全部令牌"
@@ -246,6 +249,7 @@ const TokenManagement: React.FC = () => {
         />
       </ModalForm>
       <Tabs
+        tabBarExtraContent={tabExtra}
         items={[
           {
             key: 'tokens',
@@ -253,7 +257,7 @@ const TokenManagement: React.FC = () => {
             children: (
               <>
                 {sharedFilter}
-                <ProTable<OpenIddictTokenDto>
+                <AutoHeightProTable<OpenIddictTokenDto>
                   rowKey="id"
                   actionRef={tokenTableRef}
                   columns={tokenColumns}
@@ -280,7 +284,7 @@ const TokenManagement: React.FC = () => {
             children: (
               <>
                 {sharedFilter}
-                <ProTable<OpenIddictAuthorizationDto>
+                <AutoHeightProTable<OpenIddictAuthorizationDto>
                   rowKey="id"
                   actionRef={authTableRef}
                   columns={authColumns}

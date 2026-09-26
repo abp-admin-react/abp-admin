@@ -2,10 +2,10 @@ import {
   type ActionType,
   PageContainer,
   ProCard,
-  ProTable,
 } from '@ant-design/pro-components';
 import { App, Button, Descriptions, Drawer, Popconfirm } from 'antd';
 import React, { useRef, useState } from 'react';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import type {
   PaymentDto,
   PrepaymentAccountDto,
@@ -44,7 +44,7 @@ const PaymentsPage: React.FC = () => {
               key: 'payments',
               label: '支付单',
               children: (
-                <ProTable<PaymentDto>
+                <AutoHeightProTable<PaymentDto>
                   rowKey="id"
                   actionRef={paymentRef}
                   search={false}
@@ -143,7 +143,7 @@ const PaymentsPage: React.FC = () => {
               key: 'prepayment',
               label: '预存款',
               children: (
-                <ProTable<PrepaymentAccountDto>
+                <AutoHeightProTable<PrepaymentAccountDto>
                   rowKey="id"
                   actionRef={accountRef}
                   search={false}
@@ -232,7 +232,7 @@ const AccountTransactions: React.FC<{ accountId: string }> = ({
   accountId,
 }) => {
   return (
-    <ProTable<PrepaymentTransactionDto>
+    <AutoHeightProTable<PrepaymentTransactionDto>
       rowKey="id"
       search={false}
       pagination={{ pageSize: 8 }}

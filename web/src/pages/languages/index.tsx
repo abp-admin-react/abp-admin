@@ -5,11 +5,11 @@ import {
   ProFormSelect,
   ProFormSwitch,
   ProFormText,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { Button, message, Popconfirm, Tag } from 'antd';
 import React, { useRef, useState } from 'react';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
   deleteApiAppLanguageId,
   getApiAppLanguage,
@@ -99,7 +99,7 @@ const LanguagesPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable
+      <AutoHeightProTable
         actionRef={tableRef}
         rowKey="id"
         columns={[

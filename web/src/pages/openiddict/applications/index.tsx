@@ -1,8 +1,4 @@
-import {
-  type ActionType,
-  PageContainer,
-  ProTable,
-} from '@ant-design/pro-components';
+import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { App, Button, Popconfirm } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
@@ -13,6 +9,7 @@ import {
   type OpenIddictApplicationDto,
   type OpenIddictScopeLookupDto,
 } from '@/abp/openIddictApplications';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import PermissionModal from '@/components/PermissionModal';
 import AppFormModal from './components/AppFormModal';
 import GenerateTokenModal from './components/GenerateTokenModal';
@@ -101,7 +98,7 @@ const ApplicationsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<OpenIddictApplicationDto>
+      <AutoHeightProTable<OpenIddictApplicationDto>
         rowKey="id"
         actionRef={actionRef}
         search={false}

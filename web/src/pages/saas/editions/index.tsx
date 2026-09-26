@@ -5,11 +5,10 @@ import {
   type ProColumns,
   ProFormSelect,
   ProFormText,
-  ProTable,
 } from '@ant-design/pro-components';
+import { useAccess } from '@umijs/max';
 import { Alert, App, Button } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
-import { useAccess } from '@umijs/max';
 import {
   createEdition,
   deleteEdition,
@@ -18,6 +17,7 @@ import {
   getEditionTenantCount,
   updateEdition,
 } from '@/abp/proModules';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import FeatureModal from '@/components/FeatureModal';
 
 type EditionItem = { id: string; displayName: string };
@@ -70,7 +70,7 @@ const EditionsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<EditionItem>
+      <AutoHeightProTable<EditionItem>
         rowKey="id"
         actionRef={actionRef}
         search={false}

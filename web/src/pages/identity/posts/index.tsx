@@ -7,10 +7,18 @@ import {
   ProFormSelect,
   ProFormText,
   ProFormTextArea,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Drawer, Input, Popconfirm, Select, Space, Tag } from 'antd';
+import {
+  App,
+  Button,
+  Drawer,
+  Input,
+  Popconfirm,
+  Select,
+  Space,
+  Tag,
+} from 'antd';
 import React, { useRef, useState } from 'react';
 import { getUsers } from '@/abp/identity';
 import {
@@ -19,10 +27,11 @@ import {
   deletePost,
   getPostMembers,
   getPosts,
+  type PostDto,
   removePostMember,
   updatePost,
-  type PostDto,
 } from '@/abp/proModules';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 
 type PostFormValues = {
   name: string;
@@ -107,7 +116,7 @@ const PostsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<PostDto>
+      <AutoHeightProTable<PostDto>
         rowKey="id"
         actionRef={actionRef}
         columns={columns}
@@ -173,9 +182,23 @@ const PostFormFields: React.FC = () => (
       rules={[{ required: true, max: 64 }]}
       placeholder="如：HR"
     />
-    <ProFormDigit name="sortOrder" label="显示顺序" min={0} fieldProps={{ precision: 0 }} />
-    <ProFormSelect name="status" label="状态" options={statusOptions} initialValue={0} />
-    <ProFormTextArea name="remark" label="备注" fieldProps={{ maxLength: 512, showCount: true }} />
+    <ProFormDigit
+      name="sortOrder"
+      label="显示顺序"
+      min={0}
+      fieldProps={{ precision: 0 }}
+    />
+    <ProFormSelect
+      name="status"
+      label="状态"
+      options={statusOptions}
+      initialValue={0}
+    />
+    <ProFormTextArea
+      name="remark"
+      label="备注"
+      fieldProps={{ maxLength: 512, showCount: true }}
+    />
   </>
 );
 
@@ -201,7 +224,10 @@ const PostMembersDrawer: React.FC<{
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
   const searchUsers = async (keyword: string) => {
-    const result = await getUsers({ filter: keyword || undefined, pageSize: 20 });
+    const result = await getUsers({
+      filter: keyword || undefined,
+      pageSize: 20,
+    });
     setUserOptions(
       result.items.map((user) => ({
         label: user.name ? `${user.userName}（${user.name}）` : user.userName,
@@ -302,11 +328,13 @@ const PostMembersDrawer: React.FC<{
           actionRef.current?.reload();
         }}
       />
-      <ProTable<MemberItem>
+      <AutoHeightProTable<MemberItem>
         rowKey="id"
         actionRef={actionRef}
         columns={columns}
         search={false}
+        /* 抽屉内嵌套布局，不撑满视口 */
+        fillViewport={false}
         pagination={{ pageSize: 10 }}
         params={{ filter }}
         request={async (params) => {

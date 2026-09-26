@@ -148,29 +148,37 @@ const DataScopeDemoPage: React.FC = () => {
   ];
 
   return (
-    <PageContainer
-      title="数据范围演示"
-      extra={[
-        <Button key="refresh" icon={<ReloadOutlined />} onClick={fetchData}>
-          刷新
-        </Button>,
-        <Button
-          key="create"
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setCreateModalOpen(true)}
-        >
-          新建
-        </Button>,
-      ]}
-    >
+    <PageContainer>
       <Card>
-        <div style={{ marginBottom: 16 }}>
+        <div
+          style={{
+            marginBottom: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 8,
+          }}
+        >
           <Space>
             <span>当前可见数据条数：</span>
             <Tag color="green" style={{ fontSize: 16 }}>
               {total}
             </Tag>
+          </Space>
+          {/* 页头标题行已全局隐藏，操作按钮挪到列表卡片工具行 */}
+          <Space>
+            <Button key="refresh" icon={<ReloadOutlined />} onClick={fetchData}>
+              刷新
+            </Button>
+            <Button
+              key="create"
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setCreateModalOpen(true)}
+            >
+              新建
+            </Button>
           </Space>
         </div>
         <Table

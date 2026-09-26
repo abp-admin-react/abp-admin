@@ -1,23 +1,15 @@
-import {
-  type ActionType,
-  PageContainer,
-  ProTable,
-} from '@ant-design/pro-components';
+import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Switch, Tag } from 'antd';
-import React, {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import ExecutionDrawer from './components/ExecutionDrawer';
 import ScheduledJobForm from './components/ScheduledJobForm';
 import {
   createScheduledJob,
   deleteScheduledJob,
   getJobTypes,
-  type JobTypeOption,
   getScheduledJobs,
+  type JobTypeOption,
   type ScheduledJob,
   setJobEnabled,
   triggerJob,
@@ -57,7 +49,7 @@ const ScheduledJobsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<ScheduledJob>
+      <AutoHeightProTable<ScheduledJob>
         rowKey="id"
         actionRef={actionRef}
         columns={[

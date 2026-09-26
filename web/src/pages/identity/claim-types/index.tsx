@@ -6,11 +6,10 @@ import {
   ProFormSelect,
   ProFormSwitch,
   ProFormText,
-  ProTable,
 } from '@ant-design/pro-components';
+import { useAccess } from '@umijs/max';
 import { App, Button, Popconfirm } from 'antd';
 import React, { useRef } from 'react';
-import { useAccess } from '@umijs/max';
 import {
   type ClaimTypeDto,
   createClaimType,
@@ -18,6 +17,7 @@ import {
   getClaimTypes,
   updateClaimType,
 } from '@/abp/identityAdmin';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 
 const ClaimTypesPage: React.FC = () => {
   const actionRef = useRef<ActionType>(undefined);
@@ -43,47 +43,45 @@ const ClaimTypesPage: React.FC = () => {
       title: '操作',
       valueType: 'option',
       render: (_, record) => [
-        !record.isStatic &&
-          access.canUpdateClaimTypes && (
-            <ModalForm
-              key="edit"
-              title="编辑声明类型"
-              trigger={<a>编辑</a>}
-              initialValues={record}
-              onFinish={async (values) => {
-                await updateClaimType(record.id, values);
-                message.success('已更新');
-                actionRef.current?.reload();
-                return true;
-              }}
-            >
-              <ProFormText name="name" label="名称" disabled />
-              <ProFormSwitch name="required" label="必填" />
-              <ProFormText name="regex" label="正则" />
-              <ProFormText name="description" label="说明" />
-            </ModalForm>
-          ),
-        !record.isStatic &&
-          access.canDeleteClaimTypes && (
-            <Popconfirm
-              key="delete"
-              title="确认删除？"
-              onConfirm={async () => {
-                await deleteClaimType(record.id);
-                message.success('已删除');
-                actionRef.current?.reload();
-              }}
-            >
-              <a>删除</a>
-            </Popconfirm>
-          ),
+        !record.isStatic && access.canUpdateClaimTypes && (
+          <ModalForm
+            key="edit"
+            title="编辑声明类型"
+            trigger={<a>编辑</a>}
+            initialValues={record}
+            onFinish={async (values) => {
+              await updateClaimType(record.id, values);
+              message.success('已更新');
+              actionRef.current?.reload();
+              return true;
+            }}
+          >
+            <ProFormText name="name" label="名称" disabled />
+            <ProFormSwitch name="required" label="必填" />
+            <ProFormText name="regex" label="正则" />
+            <ProFormText name="description" label="说明" />
+          </ModalForm>
+        ),
+        !record.isStatic && access.canDeleteClaimTypes && (
+          <Popconfirm
+            key="delete"
+            title="确认删除？"
+            onConfirm={async () => {
+              await deleteClaimType(record.id);
+              message.success('已删除');
+              actionRef.current?.reload();
+            }}
+          >
+            <a>删除</a>
+          </Popconfirm>
+        ),
       ],
     },
   ];
 
   return (
     <PageContainer>
-      <ProTable<ClaimTypeDto>
+      <AutoHeightProTable<ClaimTypeDto>
         rowKey="id"
         actionRef={actionRef}
         columns={columns}

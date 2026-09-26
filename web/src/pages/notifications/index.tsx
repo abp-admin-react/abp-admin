@@ -1,10 +1,7 @@
-import {
-  type ActionType,
-  PageContainer,
-  ProTable,
-} from '@ant-design/pro-components';
+import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Tag } from 'antd';
 import React, { useRef, useState } from 'react';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { useDictionary } from '@/hooks/useDictionary';
 import { toDayEnd } from '@/utils/format';
 import NotificationDetailDrawer from './components/NotificationDetail';
@@ -39,7 +36,7 @@ const NotificationsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <ProTable<NotificationListItem>
+      <AutoHeightProTable<NotificationListItem>
         rowKey="id"
         actionRef={actionRef}
         headerTitle="发送记录"
