@@ -56,7 +56,10 @@ export async function getOrganizationUnitMembers(
  * 父子关系走请求体（后端 MoveOrganizationUnitInput）：路由段无法表达 null，
  * 也为「移到根」保留了可空语义；防环校验在服务端（UI 不是控制）。
  */
-export async function moveOrganizationUnit(id: string, parentId?: string | null) {
+export async function moveOrganizationUnit(
+  id: string,
+  parentId?: string | null,
+) {
   return request(`/api/app/organization-unit/${id}/move`, {
     method: 'POST',
     data: { parentId: parentId ?? null },
@@ -244,19 +247,16 @@ export async function getSessions(params: {
 }) {
   const maxResultCount = params.pageSize ?? 10;
   const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
-  return request<PagedResult<IdentitySessionDto>>(
-    '/api/app/identity-session',
-    {
-      method: 'GET',
-      params: {
-        SkipCount: skipCount,
-        MaxResultCount: maxResultCount,
-        UserId: params.userId,
-        Device: params.device,
-        ClientId: params.clientId,
-      },
+  return request<PagedResult<IdentitySessionDto>>('/api/app/identity-session', {
+    method: 'GET',
+    params: {
+      SkipCount: skipCount,
+      MaxResultCount: maxResultCount,
+      UserId: params.userId,
+      Device: params.device,
+      ClientId: params.clientId,
     },
-  );
+  });
 }
 
 export async function revokeSession(id: string) {

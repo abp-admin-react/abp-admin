@@ -40,7 +40,8 @@ const ConnectionStringDrawer: React.FC<ConnectionStringDrawerProps> = ({
   const [databases, setDatabases] = useState<string[]>([]);
 
   // 掩码 → 空值：空值提交时服务端解释为「保持原值」
-  const maskToEmpty = (value?: string | null) => (value === MASK ? '' : value ?? '');
+  const maskToEmpty = (value?: string | null) =>
+    value === MASK ? '' : (value ?? '');
 
   // 测试连接只做连通性探测（服务端开一次连接立即关闭，不写库），不入库。
   // 掩码分支现为纯防御：掩码已不回显进输入框（见 request/maskToEmpty），
@@ -84,7 +85,10 @@ const ConnectionStringDrawer: React.FC<ConnectionStringDrawerProps> = ({
           ),
           items: management.items
             .filter((item) => item.name !== 'Default')
-            .map((item) => ({ name: item.name, value: maskToEmpty(item.value) })),
+            .map((item) => ({
+              name: item.name,
+              value: maskToEmpty(item.value),
+            })),
         };
       }}
       onFinish={async (values) => {
