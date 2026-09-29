@@ -123,7 +123,14 @@ public class HostServiceGraphValidationTests
         new(
             $"{nameof(IAbpDistributedLock)} -> {nameof(MedallionAbpDistributedLock)} (transient)",
             descriptor => descriptor.ServiceType == typeof(IAbpDistributedLock)
-                          && descriptor.ImplementationType == typeof(MedallionAbpDistributedLock))
+                          && descriptor.ImplementationType == typeof(MedallionAbpDistributedLock)),
+        // 锁 + DataProtection 共享连接的持有者：实例注册（ServiceType 即具体类型、嵌套私有，
+        // 只能按名匹配）。删掉 AddSingleton(connection) 编译照过、全部测试照绿——连接从此
+        // 不随宿主释放，必须钉住。
+        new(
+            "SharedRedisConnection (singleton instance, owns the shared lock/DP multiplexer)",
+            descriptor => descriptor.Lifetime == ServiceLifetime.Singleton
+                          && descriptor.ServiceType.Name == "SharedRedisConnection")
     ];
 
     [Fact]

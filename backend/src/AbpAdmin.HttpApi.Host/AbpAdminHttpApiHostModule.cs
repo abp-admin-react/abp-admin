@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -427,12 +428,124 @@ public class AbpAdminHttpApiHostModule : AbpModule
             return;
         }
 
+        // 锁与 DataProtection 密钥共用一条惰性连接（SharedRedisConnection）：ConfigureServices
+        // 只登记持有者，真正的 Connect 推迟到锁/密钥环首次使用——这是被
+        // HostServiceGraphValidationTests/HostInitializationLogTests 钉住的契约（建图阶段不得
+        // 拨号；下游 HFT 仓库为 fail-fast 改成了急切 Connect，代价是 Redis 分支只能在
+        // 有真 Redis 的环境建图验证，此处不跟随）。本宿主的首次解析由启动探针触发
+        // （OnPostApplicationInitializationAsync 的 startup-probe，早于 Kestrel 接受请求）：
+        // Redis 不可达时启动失败，语义与急切版等价；连接失败不缓存（30s 冷却后可自愈），
+        // 探针万一被移除，首用失败也只是冷却期快速报错而非永久砖化到进程重启。
+        var connection = new SharedRedisConnection(redisConfiguration);
+        context.Services.AddSingleton(connection);
+
         context.Services.AddSingleton<IDistributedLockProvider>(_ =>
-        {
-            var connection = ConnectionMultiplexer.Connect(redisConfiguration);
-            return new RedisDistributedSynchronizationProvider(connection.GetDatabase());
-        });
+            new RedisDistributedSynchronizationProvider(connection.GetDatabase()));
         context.Services.AddTransient<IAbpDistributedLock, MedallionAbpDistributedLock>();
+
+        // DataProtection 签名密钥持久化到 Redis：ASP.NET Core 默认把密钥落在本地文件系统，
+        // 多实例下机器 A 签发的 cookie/OpenIddict 令牌到机器 B 验不过，必须集中存储。四个配套决定：
+        // 1. SetApplicationName 固定应用名：默认取 content root 路径，镜像工作目录不同或
+        //    滚动升级换目录时各实例会判成不同应用、各发各的密钥环，持久化形同虚设。
+        // 2. 键名带环境名：多环境共用一台 Redis 时密钥不得互通（dev 不该解得开 prod 的
+        //    令牌），与 ConfigureSignalRBackplane 的 ChannelPrefix 同一约定。
+        // 3. 从本地存储切到 Redis 后旧密钥不可见，存量 cookie/token 失效、用户重登一次——
+        //    密钥存储搬家无法避免。
+        // 4. 密钥在 Redis 里是明文 XML（与文件系统默认同保护级别，未叠加 ProtectKeysWith*
+        //    加密——引入证书属部署侧决策）：能 GET 到该键的主体即具备伪造令牌的能力，
+        //    共享的 Redis 实例必须按敏感凭据存储对待（ACL/网络隔离）；键名含固定应用名
+        //    AbpAdmin，同一 Redis 上跑多套本框架部署时不得共用该键——否则两套应用会
+        //    互相认可对方签发的令牌。
+        // Redis:IsEnabled=false（单实例默认）不进此分支，维持框架默认的文件系统存储。
+        context.Services
+            .AddDataProtection()
+            .SetApplicationName("AbpAdmin")
+            .PersistKeysToStackExchangeRedis(
+                connection.GetDatabase,
+                BuildDataProtectionKeyName(context.Services.GetHostingEnvironment().EnvironmentName));
+    }
+
+    /// <summary>
+    /// DataProtection 密钥环的 Redis 键名：按环境名隔离（多环境共用一台 Redis 时密钥不得互通）。
+    /// 独立成方法供 AbpAdmin.HttpApi.Host.Tests 钉住格式——env 后缀一旦丢失就是跨环境
+    /// 令牌互验漏洞，必须有红测试兜底。
+    /// </summary>
+    internal static string BuildDataProtectionKeyName(string environmentName) =>
+        $"AbpAdmin:DataProtection-Keys:{environmentName}";
+
+    /// <summary>
+    /// 锁与 DataProtection 共享的惰性 Redis 连接：构造只记下连接串，首次 <see cref="GetDatabase"/>
+    /// 才真正 Connect（建图零拨号契约见 ConfigureRedis 注释）；实例注册进容器，关停时随宿主释放。
+    /// 刻意不用 <c>Lazy&lt;T&gt;</c>：其默认模式会把首次连接异常永久缓存——Redis 恢复后也要
+    /// 重启进程才能自愈；这里与 <see cref="CacheMonitorRedisConnection"/> 同一纪律：失败进入
+    /// 冷却期，期间快速抛错不再重拨。两个消费面（锁提供程序工厂、DP 密钥环委托）都是同步
+    /// API，Connect 因此用同步版本；串行化只发生在启动探针期，请求路径不付拨号成本。
+    /// </summary>
+    private sealed class SharedRedisConnection : IDisposable
+    {
+        private static readonly TimeSpan FailureCooldown = TimeSpan.FromSeconds(30);
+
+        private readonly string _configuration;
+        private readonly object _gate = new();
+        private ConnectionMultiplexer? _multiplexer;
+        private DateTime _lastFailureUtc = DateTime.MinValue;
+
+        public SharedRedisConnection(string configuration)
+        {
+            _configuration = configuration;
+        }
+
+        public IDatabase GetDatabase()
+        {
+            var multiplexer = _multiplexer;
+            if (multiplexer != null)
+            {
+                return multiplexer.GetDatabase();
+            }
+
+            lock (_gate)
+            {
+                if (_multiplexer != null)
+                {
+                    return _multiplexer.GetDatabase();
+                }
+                if (DateTime.UtcNow - _lastFailureUtc < FailureCooldown)
+                {
+                    // 冷却期内不重拨：Redis 故障时受保护的操作快速失败，而不是各付一次
+                    // 同步拨号超时（Connect 默认预算约 9 秒，会卡住所有并发首用）。
+                    // 原始失败原因见启动/首用日志，这里不重复包装以免吞类型。
+                    throw new InvalidOperationException(
+                        $"Redis connection failed within the last {FailureCooldown.TotalSeconds:F0}s " +
+                        "(failure cooldown, retry deferred); see logs for the original error.");
+                }
+
+                var options = ConfigurationOptions.Parse(_configuration);
+                // AbortOnConnectFail 强制 true：连接串里常见的 abortConnect=false 会让 Connect 在
+                // Redis 不可达时静默返回未连接的多路复用器——那正是「带病运行」的静默形态；
+                // 运行期断线自愈由 SE.Redis 的自动重连承担，不依赖该开关。
+                options.AbortOnConnectFail = true;
+                try
+                {
+                    _multiplexer = ConnectionMultiplexer.Connect(options);
+                }
+                catch
+                {
+                    _lastFailureUtc = DateTime.UtcNow;
+                    throw;
+                }
+                return _multiplexer.GetDatabase();
+            }
+        }
+
+        public void Dispose()
+        {
+            // 拨号与释放在同一把锁下：关停撞上首用拨号时不会泄漏刚建好的连接
+            lock (_gate)
+            {
+                _multiplexer?.Dispose();
+                _multiplexer = null;
+            }
+        }
     }
 
     /// <summary>
@@ -442,9 +555,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
     /// 不是启动失败：功能正常，只是广播范围只有本进程。
     /// ChannelPrefix 用环境名派生（修法①，不新增必填配置键）：多环境共用一台 Redis 时
     /// 不设前缀会互相串消息。规格原文的 Redis:InstanceName 在本仓库不存在，会静默退回 Default。
-    /// backplane 保持默认的自建连接，不复用 ABP 缓存/锁那条 multiplexer（性能隔离，
-    /// 订阅背压不应影响缓存延迟）；AbpAspNetCoreSignalRModule 内部的 AddSignalR() 全部走
-    /// TryAdd*，这里再调一次是安全的（不会挤掉 ABP 注册的三个 Hub filter）。
+    /// backplane 保持默认的自建连接，不复用其它任何一条 multiplexer——本宿主共四条 Redis
+    /// 连接、各有归属：ABP 缓存的（藏在 RedisCache 内部）、锁 + DataProtection 共享的
+    /// SharedRedisConnection、backplane 自建的这条、监控自建的 CacheMonitorRedisConnection。
+    /// 背板隔离的理由是订阅背压不应影响缓存/锁延迟；AbpAspNetCoreSignalRModule 内部的
+    /// AddSignalR() 全部走 TryAdd*，这里再调一次是安全的（不会挤掉 ABP 注册的三个 Hub filter）。
     /// </summary>
     private void ConfigureSignalRBackplane(ServiceConfigurationContext context, IConfiguration configuration)
     {
@@ -888,10 +1003,84 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     public override async Task OnPreApplicationInitializationAsync(ApplicationInitializationContext context)
     {
-        // 空库首启的关键顺序：ABP 先跑完所有模块的 Pre-Init，再跑各模块的 OnApplicationInitialization——
+        WarnOnIncoherentRedisPosture(context);
+
+        // 空库首启的关键顺序：ABP 先跑完所有模块的 Pre-INIT，再跑各模块的 OnApplicationInitialization——
         // OpenIddict Token 清理、动态权限/设置/特性存储都在框架模块的初始化阶段查库，若等到本模块的
-        // OnApplicationInitialization 才迁移，这些初始化器会在空库上撞 no such table。迁移必须放在 Pre-Init。
+        // OnApplicationInitialization 才迁移，这些初始化器会在空库上撞 no such table。迁移必须放在 Pre-INIT。
         await MigrateSchemaIfConfiguredAsync(context);
+    }
+
+    /// <summary>
+    /// 姿态一致性告警（初始化期，只告警不抛）：
+    /// 1. <c>SignalR:UseRedisBackplane=true</c> 宣告了跨实例广播（判据只有 Redis:Configuration，
+    ///    与 Redis:IsEnabled 正交），而 Redis:IsEnabled=false 时分布式锁与 DataProtection 签名
+    ///    密钥仍留在实例本地——多实例部署下 cookie/OpenIddict 令牌跨实例验不过、锁退化为进程内。
+    ///    这正是 ConfigureRedis 对 IsEnabled 非法值直接抛异常要防的同一类静默不一致；只告警
+    ///    不抛是因为：单实例 + 可达 Redis 而刻意只开 backplane 是合法（虽罕见）的形态。
+    /// 2. Redis 启用但连接串仍是出厂模板默认（127.0.0.1:6379）——多半是忘了用环境变量覆盖，
+    ///    锁/签名密钥会静默指向错误实例（本机无 Redis 则首个受保护操作报错）。
+    /// 放在容器建好之后（而非 ConfigureServices）：模块配置阶段没有 ILogger，且
+    /// HostInitializationLogTests 刻意不跑到初始化阶段，告警不会被误纳入建图期清单。
+    /// 判定逻辑抽成纯函数供宿主测试表驱动钉住。
+    /// </summary>
+    private static void WarnOnIncoherentRedisPosture(ApplicationInitializationContext context)
+    {
+        var configuration = context.ServiceProvider.GetRequiredService<IConfiguration>();
+        var logger = context.ServiceProvider
+            .GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>();
+
+        if (ShouldWarnOnIncoherentRedisPosture(configuration))
+        {
+            logger.LogWarning(
+                "SignalR:UseRedisBackplane is true but Redis:IsEnabled is false: the backplane broadcasts " +
+                "cross-instance via Redis while distributed locks and DataProtection signing keys stay " +
+                "instance-local. In a multi-instance deployment cookies/OpenIddict tokens signed on one " +
+                "instance fail validation on another. Set Redis:IsEnabled=true for the multi-instance " +
+                "posture (see appsettings.Production.json).");
+        }
+
+        var hostingEnvironment = context.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        if (ShouldWarnOnTemplateRedisConfiguration(configuration, hostingEnvironment.EnvironmentName))
+        {
+            logger.LogWarning(
+                "Redis:IsEnabled is true but Redis:Configuration is still the shipped template default " +
+                "(127.0.0.1:6379). Unless Redis genuinely runs on this host, override it via the " +
+                "Redis__Configuration environment variable (or appsettings.secrets.json) — locks and " +
+                "DataProtection signing keys will otherwise silently target the wrong instance.");
+        }
+    }
+
+    /// <summary>
+    /// 纯判定：backplane 声明多实例而 Redis 子系统显式关闭。键位口径与 ConfigureRedis 一致：
+    /// 缺省/空 = 启用，仅显式 false 才关；非法值在 ConfigureServices 已抛，TryParse 失败按启用
+    /// 处理不重复报。
+    /// </summary>
+    internal static bool ShouldWarnOnIncoherentRedisPosture(IConfiguration configuration)
+    {
+        if (!configuration.GetValue<bool>("SignalR:UseRedisBackplane"))
+        {
+            return false;
+        }
+        return bool.TryParse(configuration["Redis:IsEnabled"], out var redisEnabled) && !redisEnabled;
+    }
+
+    /// <summary>
+    /// 纯判定：Redis 启用但连接串仍是出厂模板默认。Development 豁免——本机调试 Redis 就在
+    /// 默认端口是常态，不该被启动日志刷屏。
+    /// </summary>
+    internal static bool ShouldWarnOnTemplateRedisConfiguration(
+        IConfiguration configuration, string environmentName)
+    {
+        if (environmentName == "Development")
+        {
+            return false;
+        }
+        if (!bool.TryParse(configuration["Redis:IsEnabled"], out var redisEnabled) || !redisEnabled)
+        {
+            return false;
+        }
+        return configuration["Redis:Configuration"] == "127.0.0.1:6379";
     }
 
     // 全自动建表（开关 Database:AutoMigrateOnStartup，默认开）：启动时枚举全部 IAbpAdminDbSchemaMigrator

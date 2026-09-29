@@ -141,10 +141,10 @@ public class HostInitializationLogTests
     /// <see cref="Host_Initialization_Log_Should_Contain_Only_The_Expected_Warnings_With_Redis_Enabled"/>.
     /// </summary>
     /// <remarks>
-    /// IsEnabled is written as an explicit true rather than left absent, because the two readers of
-    /// this key disagree on what absent means: the host's own GetValue("Redis:IsEnabled", false)
-    /// treats a missing key as off, while AbpCachingStackExchangeRedisModule treats it as on. Only an
-    /// explicit value gets both to the same branch.
+    /// IsEnabled is written as an explicit true (historical): the host's ConfigureRedis now reads
+    /// absent/empty as enabled (only an explicit false disables; invalid values fail startup),
+    /// matching AbpCachingStackExchangeRedisModule's default-on. The explicit value keeps both
+    /// readers on the same branch regardless of layered environment config files.
     /// <para>
     /// Port 1 is privileged, unassigned and could not plausibly be a real Redis. Nothing here
     /// resolves a Redis service, so no connection should ever be attempted; the point of an address
