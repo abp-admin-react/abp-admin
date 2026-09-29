@@ -26,8 +26,9 @@ public class CacheMonitorInfoDto
     /// <summary>redis | memory。</summary>
     public string Backend { get; set; } = "memory";
 
-    /// <summary>ABP 分布式缓存键前缀（AbpDistributedCacheOptions.KeyPrefix，默认为空）。
-    /// 键的结构性前缀是 c:（宿主）/ t:租户Id,（租户），本字段只是 KeyPrefix 配置的透出。</summary>
+    /// <summary>应用隔离前缀（AbpDistributedCacheOptions.KeyPrefix，默认为空）。
+    /// rel-10.6 中它插在键的 k: 段内（c:{CacheName},k:{KeyPrefix}{业务key}），不在键首——
+    /// 监控页把它作为键浏览的默认过滤词（配置后默认只列出本应用的键）。</summary>
     public string KeyPrefix { get; set; } = default!;
 
     /// <summary>库内总键数（Redis；memory 后端为 null）。</summary>
@@ -42,8 +43,12 @@ public class CacheMonitorInfoDto
     /// <summary>Redis maxmemory（字节，0 = 未限制）。</summary>
     public long? MaxMemoryBytes { get; set; }
 
-    /// <summary>连接失败时的错误信息（Backend=redis 且连不上时非空）。</summary>
+    /// <summary>连接失败时的错误信息（Backend=redis 且连不上时非空；此时键浏览/删除均不可用）。</summary>
     public string? ConnectionError { get; set; }
+
+    /// <summary>概览统计命令（DBSIZE/INFO）被服务器拒绝时的原因（连接正常，键浏览/操作不受影响）。
+    /// 典型场景：共享实例以非 admin 模式运行时 INFO 会被拒绝（"admin mode is enabled"）。</summary>
+    public string? InfoError { get; set; }
 }
 
 public class CacheKeyListResultDto

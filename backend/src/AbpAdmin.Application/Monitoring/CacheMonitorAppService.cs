@@ -16,7 +16,7 @@ namespace AbpAdmin.Monitoring;
 
 /// <summary>
 /// 缓存监控（对标 RuoYi「缓存监控」）。排障用：按前缀浏览键、看值、删键。
-/// 只允许操作 <see cref="AbpDistributedCacheOptions.KeyPrefix"/>（默认 c:）下的键，
+/// 只允许操作 ABP 结构前缀（c:/t:）下的键，
 /// 防止共享 Redis 上误删其他系统的数据。浏览走 SCAN（增量、不阻塞），绝不 KEYS。
 /// Memory 后端（开发默认）无法枚举键：Microsoft 的 MemoryDistributedCache 没有枚举入口，
 /// 页面据此提示切 Redis 才可浏览。
@@ -49,42 +49,95 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
             KeyPrefix = _cacheOptions.KeyPrefix
         };
 
-        if (_redisConnection.IsEnabled)
+        if (!_redisConnection.IsEnabled)
         {
-            dto.Backend = "redis";
-            try
-            {
-                var database = await GetDatabaseAsync();
-                // 注：GetEndPoints()[0] 在集群/哨兵拓扑下不一定是可查询节点，此处按
-                // 单实例/主从常规部署取第一个端点（监控页只读，错了由下方 catch 兜底亮出原因）
-                var server = database.Multiplexer.GetServer(database.Multiplexer.GetEndPoints()[0]);
-                dto.TotalKeys = await server.DatabaseSizeAsync(database.Database);
+            return dto;
+        }
 
-                var sections = await server.InfoAsync();
-                foreach (var entry in sections.SelectMany(section => section))
-                {
-                    switch (entry.Key)
-                    {
-                        case "redis_version":
-                            dto.RedisVersion = entry.Value;
-                            break;
-                        case "used_memory":
-                            dto.UsedMemoryBytes = long.TryParse(entry.Value, out var used) ? used : null;
-                            break;
-                        case "maxmemory":
-                            dto.MaxMemoryBytes = long.TryParse(entry.Value, out var max) ? max : null;
-                            break;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // 连不上不炸整个页面：把原因亮给监控页（此时键浏览/删除自然也不可用）
-                dto.ConnectionError = ex.Message;
-            }
+        dto.Backend = "redis";
+
+        IDatabase database;
+        try
+        {
+            database = await GetDatabaseAsync();
+        }
+        catch (Exception ex)
+        {
+            // 连不上：此时键浏览/删除自然也不可用，把原因亮给监控页
+            dto.ConnectionError = ex.Message;
+            return dto;
+        }
+
+        // 以下概览统计（DBSIZE/INFO）与连接是两回事：共享实例以非 admin 模式运行时
+        // 这些命令会被服务器拒绝，但连接与键浏览完全正常——单独归类，不误报成"连接失败"。
+        // 两条命令都走 raw Execute：该实例的兼容层会让 SE.Redis 对部分"server 级" API
+        // 在客户端本地（ConnectionMultiplexer.CheckMessage 的 admin gate 判定）直接拒绝
+        // ——2026-09-29 对该实例实测 server.InfoAsync() 抛 RedisCommandException 而
+        // ExecuteAsync("INFO") 返回全文；DBSIZE 本就是 per-db 命令，也不需要 IServer/
+        // GetEndPoints 的端点猜测，统一走当前 IDatabase 最简。
+        var infoErrors = new List<string>();
+        try
+        {
+            dto.TotalKeys = (long)await database.ExecuteAsync("DBSIZE");
+        }
+        catch (Exception ex)
+        {
+            infoErrors.Add($"DBSIZE：{ex.Message}");
+        }
+
+        try
+        {
+            var rawInfo = await database.ExecuteAsync("INFO");
+            ApplyInfoText(dto, rawInfo.IsNull ? null : rawInfo.ToString());
+        }
+        catch (Exception ex)
+        {
+            infoErrors.Add($"INFO：{ex.Message}");
+        }
+
+        if (infoErrors.Count > 0)
+        {
+            dto.InfoError = string.Join("；", infoErrors);
         }
 
         return dto;
+    }
+
+    /// <summary>
+    /// 解析 INFO 命令的文本输出到概览 DTO（raw Execute 通道配套——SE.Redis 的结构化
+    /// 解析器 IServer.Info 在该实例上不可用，见 GetInfoAsync 注释）。只取三个白名单
+    /// 字段；节头（# Server）不含冒号、keyspace 行（db0:keys=…）与 *_human 诱饵键
+    /// 不在白名单，均被自然跳过；CRLF 行尾的 \r 由 Trim 处理。
+    /// </summary>
+    internal static void ApplyInfoText(CacheMonitorInfoDto dto, string? infoText)
+    {
+        if (infoText == null)
+        {
+            return;
+        }
+
+        foreach (var line in infoText.Split('\n'))
+        {
+            var separator = line.IndexOf(':');
+            if (separator <= 0)
+            {
+                continue;
+            }
+            var key = line[..separator].Trim();
+            var value = line[(separator + 1)..].Trim();
+            switch (key)
+            {
+                case "redis_version":
+                    dto.RedisVersion = value;
+                    break;
+                case "used_memory":
+                    dto.UsedMemoryBytes = long.TryParse(value, out var used) ? used : null;
+                    break;
+                case "maxmemory":
+                    dto.MaxMemoryBytes = long.TryParse(value, out var max) ? max : null;
+                    break;
+            }
+        }
     }
 
     public virtual async Task<CacheKeyListResultDto> GetKeysAsync(string? prefix, long cursor, int maxResultCount)
@@ -92,7 +145,8 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         var database = await RequireDatabaseAsync();
         maxResultCount = Math.Clamp(maxResultCount, 1, 200);
 
-        var pattern = "*" + (prefix ?? string.Empty) + "*";
+        // 锚定到 ABP 键空间的扫描模式（信息隔离；口径与构造依据见 BuildScanPattern）
+        var pattern = BuildScanPattern(prefix);
 
         // 单次 SCAN 只是"扫描提示"，返回的键可能多于 maxResultCount：旧实现 .Take(N) 截断后
         // 游标已前进，溢出键跨页永久丢失。这里循环 SCAN 攒够一页，溢出键 + 游标留在
@@ -133,7 +187,9 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         {
             var first = await ScanPageAsync(database, 0, pattern, maxResultCount);
             scanCursor = first.Cursor;
-            keys.AddRange(first.Keys);
+            // 后置过滤（双保险）：glob 锚定段理论上可被 KeyPrefix 中的元字符破坏，
+            // 回显前再过一遍 IsAllowedKey——返回永不越出 ABP 键空间
+            keys.AddRange(first.Keys.Where(IsAllowedKey));
         }
 
         // MATCH 命中稀疏时（冷门前缀）可能要翻完整个键空间才凑满一页——加迭代上限：
@@ -143,7 +199,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         {
             var result = await ScanPageAsync(database, scanCursor, pattern, maxResultCount);
             scanCursor = result.Cursor;
-            keys.AddRange(result.Keys);
+            keys.AddRange(result.Keys.Where(IsAllowedKey));
         }
 
         var page = keys.Take(maxResultCount).ToList();
@@ -307,22 +363,61 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
 
     /// <summary>
     /// 只放行 ABP 缓存键，防止共享 Redis 上误删其他系统的数据。
-    /// 判定依据（rel-10.6 DistributedCacheKeyNormalizer 已核实）：
-    /// KeyPrefix 配置非空 → 键必须以它开头；
-    /// 为空（默认）→ 键必须以结构性标记开头：c:（宿主键）或 t:（租户键 t:{TenantId},c:...）。
+    /// 判定依据（rel-10.6 DistributedCacheKeyNormalizer 反编译核实，2026-09-29）：
+    /// 键恒以结构性标记开头——c:（宿主）或 t:（租户 t:{TenantId},c:...）；
+    /// <see cref="AbpDistributedCacheOptions.KeyPrefix"/> 不在键首，它插在 k: 段内
+    /// （键形如 c:{CacheName},k:{KeyPrefix}{业务key}）——应用隔离靠它成立，
+    /// 但不影响本判定，也不参与扫描锚定（见 <see cref="BuildScanPattern"/>）。
     /// </summary>
     protected virtual void AssertAbpKey(string key)
     {
-        var allowed = string.IsNullOrEmpty(_cacheOptions.KeyPrefix)
-            ? key.StartsWith("c:", StringComparison.Ordinal) ||
-              key.StartsWith("t:", StringComparison.Ordinal)
-            : key.StartsWith(_cacheOptions.KeyPrefix, StringComparison.Ordinal);
-
-        if (!allowed)
+        if (!IsAllowedKey(key))
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.Monitoring.CacheMonitorKeyNotAllowed)
-                .WithData("KeyPrefix", _cacheOptions.KeyPrefix is { Length: > 0 } prefix ? prefix : "c: / t:");
+                .WithData("KeyPrefix", "c: / t:");
         }
+    }
+
+    /// <summary><see cref="AssertAbpKey"/> 的非抛出版（键枚举的后置过滤复用同一判定）。</summary>
+    protected virtual bool IsAllowedKey(string key)
+    {
+        return key.StartsWith("c:", StringComparison.Ordinal) ||
+               key.StartsWith("t:", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 构造键枚举的 SCAN MATCH 模式——锚定到 ABP 键空间，口径与 <see cref="AssertAbpKey"/> 一致：
+    /// 键恒以结构性标记开头（c: 宿主 / t: 租户，见 AssertAbpKey 注释的反编译依据），
+    /// 默认锚定 glob 字符类 <c>[ct]:</c> 一次覆盖两种（单模式单游标）；用户词以 c:/t:
+    /// 开头时把锚定段收窄到该前缀并剥掉重复段——否则过滤词 <c>c:</c> 会变成
+    /// <c>[ct]:*c:*</c>（要求前缀之后再次出现 "c:"），一个键都匹配不到（2026-09-29
+    /// 页面实测回归）。应用隔离前缀（AbpDistributedCacheOptions.KeyPrefix，位于 k: 段内）
+    /// 不参与锚定——它作为普通包含词使用时（如 <c>[ct]:*AbpAdmin:*</c>）天然只匹配本应用
+    /// 的键，监控页把它作为默认过滤词下发（见 GetInfoAsync 与前端种子逻辑）。
+    /// 依据（redis.io SCAN 文档）：MATCH 是元素取回之后的过滤，锚定并不减少服务器扫描量，
+    /// 收益是信息隔离——共享 Redis 上不把其它系统的键名/元数据回显给持监控查看权限的人。
+    /// 用户词原样进入 glob（含元字符也只影响中段、逃不出锚定），枚举结果仍过
+    /// <see cref="IsAllowedKey"/> 兜底。
+    /// </summary>
+    internal static string BuildScanPattern(string? prefix)
+    {
+        prefix ??= string.Empty;
+        string anchor;
+        if (prefix.StartsWith("c:", StringComparison.Ordinal))
+        {
+            anchor = "c:";
+            prefix = prefix[2..];
+        }
+        else if (prefix.StartsWith("t:", StringComparison.Ordinal))
+        {
+            anchor = "t:";
+            prefix = prefix[2..];
+        }
+        else
+        {
+            anchor = "[ct]:";
+        }
+        return $"{anchor}*{prefix}*";
     }
 
     protected static async Task<long?> GetMemoryUsageAsync(IDatabaseAsync database, string key)

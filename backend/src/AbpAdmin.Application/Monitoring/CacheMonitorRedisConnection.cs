@@ -11,7 +11,9 @@ namespace AbpAdmin.Monitoring;
 /// 缓存监控专用的 Redis 连接（单例、懒加载、独立多路复用器）。
 /// 为什么自建：宿主的 AbpCachingStackExchangeRedisModule 走微软 AddStackExchangeRedisCache，
 /// 多路复用器在 RedisCache 内部、不进 DI（已核实 rel-10.6 源码），而键级 SCAN/MEMORY/DEL
-/// 需要裸 IDatabase。配置键与宿主一致（Redis:IsEnabled / Redis:Configuration），
+/// 需要裸 IDatabase。宿主另有一条锁 + DataProtection 共享的 SharedRedisConnection，但那是
+/// HttpApi.Host 模块的私有嵌套类型——Application 层够不着（也不该为复用连接反向依赖宿主）；
+/// 且监控需要与宿主启动 fail-fast 不同的姿态（懒加载 + 失败冷却，不能打崩监控页）。配置键与宿主一致（Redis:IsEnabled / Redis:Configuration），
 /// 判定口径：IsEnabled 未配置视为开（与模块一致），但 Configuration 为空按未启用处理
 /// （否则连的就是微软默认的 localhost:6379，监控页会给出误导结论）。
 /// </summary>
