@@ -2,6 +2,7 @@ import { history } from '@umijs/max';
 import { Result, Spin } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { completeLogin } from '@/abp/oidc';
+import { consumeIntendedRedirect } from '@/utils/redirect';
 
 const Callback: React.FC = () => {
   const [error, setError] = useState<string>();
@@ -9,13 +10,9 @@ const Callback: React.FC = () => {
   useEffect(() => {
     completeLogin()
       .then(() => {
-        const raw = sessionStorage.getItem('abp.redirect');
-        sessionStorage.removeItem('abp.redirect');
-        // 双保险：login 侧已过滤，这里再校验一次（防其它入口写入 sessionStorage）
-        const redirect =
-          raw && raw.startsWith('/') && !raw.startsWith('//')
-            ? raw
-            : '/administration';
+        // 读侧双保险：login 侧已过滤，这里再校验一次（防其它入口写入 sessionStorage）；
+        // 走私形态判定与读后即清都在 utils/redirect 收口
+        const redirect = consumeIntendedRedirect();
         window.location.replace(redirect);
       })
       .catch((err: Error) => {

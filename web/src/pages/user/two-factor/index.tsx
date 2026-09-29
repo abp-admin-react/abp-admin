@@ -7,6 +7,7 @@ import {
   sendTwoFactorCode,
   verifyTwoFactorCode,
 } from '@/abp/account';
+import { consumeIntendedRedirect } from '@/utils/redirect';
 import Settings from '../../../../config/defaultSettings';
 
 const useStyles = createStyles(() => ({
@@ -116,10 +117,9 @@ const TwoFactorVerification: React.FC = () => {
       await verifyTwoFactorCode({ code, provider });
       message.success('验证成功');
 
-      // 跳转到原来的目标页面或首页
-      const redirect = sessionStorage.getItem('abp.redirect') || '/';
-      sessionStorage.removeItem('abp.redirect');
-      history.replace(redirect);
+      // 跳转到原来的目标页面或首页（守卫与读后即清收口在 utils/redirect——此前这里是
+      // 无校验直读，登录侧的过滤对它不生效）
+      history.replace(consumeIntendedRedirect('/'));
     } catch {
       // 错误由全局 errorHandler 统一提示
     } finally {

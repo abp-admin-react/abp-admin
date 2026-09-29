@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { loginWithMagicLink } from '@/abp/account';
 import { findTenantByName } from '@/abp/config';
 import { applyTokensForNewSession, startLogin } from '@/abp/oidc';
-import { isRealTimeAvailable, restartRealTime } from '@/abp/signalr';
+import { hasRealTimeConnection, restartRealTime } from '@/abp/signalr';
 import { syncTenantFromSubdomain } from '@/abp/subdomain';
 import {
   getStoredTenant,
@@ -13,6 +13,7 @@ import {
   isSubdomainTenantMode,
   setStoredTenant,
 } from '@/abp/tenant';
+import { storeIntendedRedirect } from '@/utils/redirect';
 import Settings from '../../../../config/defaultSettings';
 
 const useStyles = createStyles(({ token }) => ({
@@ -79,11 +80,13 @@ const Login: React.FC = () => {
   }, [subdomainMode]);
 
   // T3.2：租户信息在 access token 的 claim 里，切租户后旧连接持有的还是
-  // 旧租户上下文，必须断开重连。登录页通常尚未登录（无连接），
-  // 仅在已有实时连接时重建，避免未登录时多一次注定 401 的尝试。
+  // 旧租户上下文，必须断开重连。登录页通常尚未登录（无连接），门闸必须判
+  // 「连接对象存在」（hasRealTimeConnection）而不是可用性（其乐观初值 true 会把
+  // 未登录访客也放进重建分支，得到一次注定 401 的建连加 60 秒重建循环）；
+  // 重建不传 handlers，保持应用级注册不被清空。
   const reconnectRealTimeAfterTenantSwitch = () => {
-    if (isRealTimeAvailable()) {
-      void restartRealTime({});
+    if (hasRealTimeConnection()) {
+      void restartRealTime();
     }
   };
 
@@ -202,11 +205,8 @@ const Login: React.FC = () => {
       const redirect = new URLSearchParams(window.location.search).get(
         'redirect',
       );
-      // 只接受站内相对路径：以 / 开头且非协议相对（//evil.com），
-      // 防止登录后被 query 里的绝对 URL 带去钓鱼站（post-auth open redirect）
-      if (redirect?.startsWith('/') && !redirect.startsWith('//')) {
-        sessionStorage.setItem('abp.redirect', redirect);
-      }
+      // 只存站内目标（post-auth open redirect 防线，走私形态的判定见 utils/redirect）
+      storeIntendedRedirect(redirect);
       await startLogin();
     } catch (error) {
       setLoading(false);
