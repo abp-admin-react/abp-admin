@@ -13,7 +13,7 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type CacheKeyDto,
   type CacheMonitorInfoDto,
@@ -81,9 +81,27 @@ const CacheMonitorPage: React.FC = () => {
     }
   }, [message]);
 
+  // 挂载期一次性编排：拉概览 → 后端为 Redis 且连接正常则自动扫第一页（扫描结果只存在
+  // 组件 state 里，不自动扫的话"空表"与"还没扫过"无法区分，看起来像数据丢了）。
+  // ref 只防 StrictMode 双挂载；刷新按钮的重扫走 scanFirstPage，不经此 effect。
+  const mountedScanRef = useRef(false);
   useEffect(() => {
-    loadInfo();
-  }, [loadInfo]);
+    if (mountedScanRef.current) {
+      return;
+    }
+    mountedScanRef.current = true;
+    void loadInfo().then((loaded) => {
+      if (loaded) {
+        scanFirstPage(
+          loaded.keyPrefix || 'c:',
+          loaded.backend,
+          loaded.connectionError,
+        );
+      }
+    });
+    // loadInfo 为 useCallback([message])，message 来自 App.useApp() 稳定引用——
+    // 挂载期一次性编排，无需跟踪其依赖
+  }, []);
 
   // prefixOverride：onSearch/扫描按钮先 setState 再触发扫描，render 闭包里的 activePrefix
   // 还是旧值，必须显式传入新前缀，否则首次扫描用的是上一次的过滤条件。
@@ -92,7 +110,11 @@ const CacheMonitorPage: React.FC = () => {
     merge: boolean,
     prefixOverride?: string,
   ) => {
-    if (info?.backend !== 'redis') {
+    // info 为 undefined 时放行：挂载期编排的自动首扫发生在 loadInfo resolve 之后、
+    // setInfo 提交渲染之前，此 render 闭包里的 info 还是 undefined；backend 判定
+    // 已由调用方（scanFirstPage）用加载结果做过。info 已载的正常路径（onSearch、
+    // 继续扫描）照常拦截 memory 后端。
+    if (info && info.backend !== 'redis') {
       return;
     }
     setLoading(true);
@@ -112,6 +134,22 @@ const CacheMonitorPage: React.FC = () => {
     }
   };
 
+  // 首页扫描的统一入口（挂载自动扫 + 刷新重扫共用）：与 onSearch/扫描按钮一致地同步
+  // activePrefix——"继续扫描"不带过滤词，靠它沿用首页口径；漏同步会让首页 c:** 的
+  // 续扫退化成 [ct]:**（口径漂移：合成游标失配静默截断、真实游标混入租户键）。
+  // 连接已失败（connectionError 非空）时不扫：红色告警已说明状况，不白发注定失败的请求。
+  const scanFirstPage = (
+    prefix: string,
+    backend?: string,
+    connectionError?: string | null,
+  ) => {
+    if (backend !== 'redis' || connectionError) {
+      return;
+    }
+    setActivePrefix(prefix || undefined);
+    void scan(0, false, prefix || undefined);
+  };
+
   const openValue = async (record: CacheKeyDto) => {
     setValueTarget(record);
     setValueLoading(true);
@@ -123,8 +161,8 @@ const CacheMonitorPage: React.FC = () => {
       );
     } catch (e) {
       setValueContent(
-        `读取失败：${e instanceof Error ? e.message : '未知错误'}（仅允许 ABP 缓存键：c: / t: 前缀${
-          info?.keyPrefix ? `或配置的 ${info.keyPrefix} 前缀` : ''
+        `读取失败：${e instanceof Error ? e.message : '未知错误'}（仅允许 ABP 缓存键：c: / t: 结构前缀开头${
+          info?.keyPrefix ? `；本应用键含 ${info.keyPrefix} 隔离前缀` : ''
         }）`,
       );
     } finally {
@@ -142,9 +180,19 @@ const CacheMonitorPage: React.FC = () => {
           <Space>
             <Button
               onClick={() => {
-                loadInfo();
+                // 刷新已清空表格与游标——"空表"对用户无法与"数据丢了"区分，因此连同
+                // 首页一起按当前输入框的词重扫（连接失败则只刷新概览，红色告警自会说明）
                 setKeys([]);
                 setCursor(0);
+                void loadInfo().then((loaded) => {
+                  if (loaded) {
+                    scanFirstPage(
+                      prefixInput ?? loaded.keyPrefix ?? 'c:',
+                      loaded.backend,
+                      loaded.connectionError,
+                    );
+                  }
+                });
               }}
             >
               刷新
@@ -175,9 +223,9 @@ const CacheMonitorPage: React.FC = () => {
               </>
             )}
             <span>
-              ABP 键前缀：
+              应用隔离前缀：
               <Typography.Text code>
-                {info.keyPrefix || 'c: / t:（默认结构前缀）'}
+                {info.keyPrefix || '（未配置：键仅带 c: / t: 结构前缀）'}
               </Typography.Text>
             </span>
           </Space>
@@ -191,6 +239,15 @@ const CacheMonitorPage: React.FC = () => {
             style={{ marginTop: 12 }}
             title="Redis 连接失败"
             description={info.connectionError}
+          />
+        )}
+        {info?.infoError && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginTop: 12 }}
+            title="服务器信息不可用（连接正常，键浏览与操作不受影响）"
+            description={info.infoError}
           />
         )}
         {redisDisabled && (
@@ -209,7 +266,7 @@ const CacheMonitorPage: React.FC = () => {
         extra={
           <Space>
             <Input.Search
-              placeholder="键名包含匹配（后端自动按 *关键词* 模糊扫描）"
+              placeholder="键名包含匹配；输入 c: / t: 开头按宿主/租户过滤；应用前缀可直接粘贴"
               allowClear
               style={{ width: 320 }}
               value={prefixInput}

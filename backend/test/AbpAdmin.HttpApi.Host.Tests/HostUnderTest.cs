@@ -78,7 +78,12 @@ internal static class HostUnderTest
             EnvironmentName = Environments.Development
         });
 
-        builder.Host.AddAppSettingsSecretsJson();
+        // AddAppSettingsSecretsJson is deliberately NOT replayed: the secrets file is
+        // per-machine deployment state (Redis endpoint, DB credentials, cache key prefix),
+        // while this builder's contract is the configuration AS IT SHIPS — the same reason
+        // ResolveHostContentRootPath pins the host's own appsettings.json. Replaying secrets
+        // would let one developer's e2e leftovers silently flip every "as shipped" test onto
+        // the Redis-enabled branch (observed 2026-09-29 after secrets gained Redis:IsEnabled=true).
 
         if (useAutofac)
         {
@@ -87,10 +92,8 @@ internal static class HostUnderTest
 
         if (configurationOverrides != null)
         {
-            // Added last so it outranks appsettings.json, appsettings.secrets.json, the environment
-            // variables and everything else CreateBuilder set up. ConfigureHostBuilder applies
-            // AddAppSettingsSecretsJson to builder.Configuration on the spot rather than deferring
-            // it to Build(), so this really is the last source in the chain.
+            // Added last so it outranks appsettings.json, the environment variables and
+            // everything else CreateBuilder set up.
             builder.Configuration.AddInMemoryCollection(configurationOverrides);
         }
 

@@ -413,6 +413,8 @@ export type CacheMonitorInfoDto = {
   usedMemoryBytes?: number;
   maxMemoryBytes?: number;
   connectionError?: string;
+  /** 概览统计命令（DBSIZE/INFO）被拒的原因：连接正常、键浏览不受影响 */
+  infoError?: string;
 };
 
 export async function getCacheMonitorInfo() {
