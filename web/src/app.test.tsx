@@ -85,6 +85,8 @@ vi.mock('@ant-design/icons', () => {
 
 vi.mock('./requestErrorConfig', () => ({
   errorConfig: {},
+  // app.tsx 的 NotificationInstanceBridge 会调用；mock 必须提供，否则首个渲染用例即挂
+  setNotificationInstance: vi.fn(),
 }));
 
 vi.mock('../config/defaultSettings', () => ({

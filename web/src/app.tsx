@@ -4,10 +4,10 @@ import { SettingDrawer } from '@ant-design/pro-components';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { RequestConfig, RunTimeLayoutConfig } from '@umijs/max';
 import { history, Link } from '@umijs/max';
-import { Tag } from 'antd';
+import { App as AntdApp, type notification, Tag } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import React from 'react';
+import React, { useEffect } from 'react';
 
 dayjs.extend(relativeTime);
 
@@ -32,6 +32,8 @@ import {
   VersionDropdown,
 } from '@/components';
 import { queryClient } from '@/queryClient';
+import { setNotificationInstance } from '@/requestErrorConfig';
+import { isSafeMenuPath } from '@/utils/redirect';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
@@ -43,16 +45,9 @@ const publicPaths = [loginPath, '/user/callback', '/tenant-not-found'];
 const skipPasswordCheckPaths = [forceChangePasswordPath];
 
 /** 判定后端下发的菜单 path 是否为站内路由形态。
- * 服务端菜单管理已拒绝外链（//、://、非 / 开头），此处是渲染前的第二道防线：
- * 历史脏数据或绕过校验的行直接丢弃，绝不让外链进入可信侧边栏。 */
-function isSafeMenuPath(path?: string | null): path is string {
-  return (
-    !!path &&
-    path.startsWith('/') &&
-    !path.startsWith('//') &&
-    !path.includes('://')
-  );
-}
+ * 服务端菜单管理已拒绝外链，此处是渲染前的第二道防线：历史脏数据或绕过校验的行直接
+ * 丢弃，绝不让外链进入可信侧边栏。实现收口在 utils/redirect（与登录回跳同一套
+ * 规范化 + 同源判定——第二道防线不弱于第一道）。 */
 
 /** 后端动态菜单 → ProLayout MenuDataItem。
  * locale 键由本函数沿树拼完整链（menu.a.b.c）：节点因隐藏祖先上浮后树层级变化，
@@ -337,6 +332,19 @@ export const request: RequestConfig = {
   ...errorConfig,
 };
 
+/** 把 AntdApp.useApp() 的 notification 实例交给非组件层（requestErrorConfig），
+ *  静态 notification 不吃 antd App 上下文——每弹一条都会打两条警告（context + message 弃用）。
+ *  注入放在 effect 而不是渲染期：渲染期改模块状态是不纯渲染，眼下恰好幂等（StrictMode
+ *  双渲染注入同一实例），但这个约束不该留给下一个扩展此桥的人守；挂载前的极早期请求
+ *  由 requestErrorConfig 的静态回退兜住。 */
+function NotificationInstanceBridge() {
+  const { notification: appNotification } = AntdApp.useApp();
+  useEffect(() => {
+    setNotificationInstance(appNotification as unknown as typeof notification);
+  }, [appNotification]);
+  return null;
+}
+
 export function rootContainer(container: React.ReactNode) {
   return (
     <>
@@ -344,9 +352,12 @@ export function rootContainer(container: React.ReactNode) {
       <ErrorBoundary>
         {/* T3.4：全局唯一的 QueryClientProvider（实例见 src/queryClient.ts），
             工具函数 dictionaryRequest 与 useDictionary 共享同一份缓存 */}
-        <QueryClientProvider client={queryClient}>
-          {container}
-        </QueryClientProvider>
+        <AntdApp>
+          <NotificationInstanceBridge />
+          <QueryClientProvider client={queryClient}>
+            {container}
+          </QueryClientProvider>
+        </AntdApp>
       </ErrorBoundary>
       <CookieConsent />
     </>

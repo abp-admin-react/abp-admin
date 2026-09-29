@@ -2,7 +2,7 @@ import { message, notification } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAccessToken } from './abp/oidc';
 import { getAbpHeaders } from './abp/tenant';
-import { errorConfig } from './requestErrorConfig';
+import { errorConfig, setNotificationInstance } from './requestErrorConfig';
 
 const mockHistoryReplace = vi.hoisted(() => vi.fn());
 
@@ -41,6 +41,8 @@ describe('requestErrorConfig', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // 桥接实例是模块级状态：不重置会串场（上一用例注入的实例会劫持后续断言目标）
+    setNotificationInstance(null);
   });
 
   describe('errorThrower', () => {
@@ -164,10 +166,59 @@ describe('requestErrorConfig', () => {
       errorHandler(error, {});
 
       expect(notification.error).toHaveBeenCalledWith({
-        message: 'HTTP 500',
+        // antd 6：notification 的 message 键已更名 title（源文件随之迁移，测试对齐）
+        title: 'HTTP 500',
         description: '服务器内部错误',
       });
       expect(message.error).not.toHaveBeenCalled();
+    });
+
+    it('should NOT open global notification for 404 (business semantics, page-level catch)', () => {
+      const error: any = new Error('Not Found');
+      error.response = { status: 404, data: {} };
+
+      errorHandler(error, {});
+
+      // 404 是业务语义（数据不存在/端点未覆盖），页面层自行 catch 降级——全局层零反馈
+      expect(notification.error).not.toHaveBeenCalled();
+      expect(message.error).not.toHaveBeenCalled();
+    });
+
+    it('should prefer the injected notification instance over the static one', () => {
+      // app.tsx 的 NotificationInstanceBridge 在挂载后注入 App 上下文里的实例；
+      // 注入后静态 notification（每弹一条打两条弃用警告）不得再被触达
+      const injected = { error: vi.fn() };
+      setNotificationInstance(injected as unknown as typeof notification);
+
+      const error: any = new Error('Server Error');
+      error.response = {
+        status: 500,
+        data: { error: { message: '服务器内部错误' } },
+      };
+
+      errorHandler(error, {});
+
+      expect(injected.error).toHaveBeenCalledWith({
+        title: 'HTTP 500',
+        description: '服务器内部错误',
+      });
+      expect(notification.error).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to the static notification when the instance is reset to null', () => {
+      setNotificationInstance({
+        error: vi.fn(),
+      } as unknown as typeof notification);
+      setNotificationInstance(null);
+
+      const error: any = new Error('Server Error');
+      error.response = { status: 500, data: {} };
+
+      errorHandler(error, {});
+
+      expect(notification.error).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'HTTP 500' }),
+      );
     });
 
     it('should show offline message when navigator is offline', () => {

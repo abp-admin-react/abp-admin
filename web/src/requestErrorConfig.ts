@@ -15,6 +15,32 @@ type AbpError = {
   };
 };
 
+// antd 6 未从包根导出 NotificationInstance 类型——用静态对象反推实例形态
+type NotificationLike = typeof notification;
+let notificationInstance: NotificationLike | null = null;
+
+/** 运行时注入 AntdApp.useApp() 的 notification（见 app.tsx）——静态函数不吃 context 的官方出路。 */
+export function setNotificationInstance(instance: NotificationLike | null) {
+  notificationInstance = instance;
+}
+
+function notifyError(args: { title: string; description: string }) {
+  // antd 6：notification.message 已更名 title
+  (notificationInstance ?? notification).error({
+    title: args.title,
+    description: args.description,
+  });
+}
+
+/** 404 判定：全局层对 404 静默（业务语义，见 errorHandler），页面层用它区分
+ *  「未配置/不存在」与「读失败（403/500/网络）」——后者必须向上抛而不是被当成不存在。 */
+export function isNotFound(error: unknown): boolean {
+  return (
+    (error as { response?: { status?: number } } | null)?.response?.status ===
+    404
+  );
+}
+
 function getAntiForgeryHeaders(): Record<string, string> {
   if (typeof document === 'undefined') {
     return {};
@@ -73,8 +99,12 @@ export const errorConfig: RequestConfig = {
         return;
       }
       if (error.response) {
-        notification.error({
-          message: `HTTP ${error.response.status}`,
+        if (error.response?.status === 404) {
+          // 404 是业务语义（数据不存在/端点未覆盖），页面层已 catch 降级——不弹全局错误
+          return;
+        }
+        notifyError({
+          title: `HTTP ${error.response.status}`,
           description: text,
         });
         return;
