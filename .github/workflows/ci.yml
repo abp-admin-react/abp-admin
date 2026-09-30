@@ -1,0 +1,48 @@
+# CI 门禁：把仓库的机器契约（后端全量测试——含契约快照/宿主建图/姿态测试，
+# 前端类型检查 + vitest）从"本地纪律"升级为"合并前必红/必绿"。刻意保持最小：
+# 不发布、不打包，只守门。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Test
+        # 含 FrontendContractSnapshotTests（DTO 形状快照）、HostServiceGraphValidationTests
+        # （建图零拨号）、RedisStartupPostureTests（首用 fail-fast，拨 127.0.0.1:1 立即拒绝，
+        # runner 上语义相同）——契约快照未同提交刷新时本步必红
+        run: dotnet test backend/AbpAdmin.slnx --nologo
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm tsc
+      - name: Test
+        run: pnpm test
