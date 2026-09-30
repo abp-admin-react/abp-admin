@@ -520,16 +520,16 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         using (_currentTenant.Change(tenantId))
         {
             var myMenu = await _myMenuAppService.GetAsync();
-            // 懒拷贝后：公开节点（欢迎/当前会话）可见
+            // 懒拷贝后：公开节点（服务监控/当前会话）可见——/welcome 已随 65422aa 演示页移除
             var paths = Flatten(myMenu.Items).Select(x => x.Path).ToList();
-            paths.ShouldContain("/welcome");
+            paths.ShouldContain("/system/server-monitor");
             paths.ShouldContain("/current-session");
 
             // 租户内删除一个节点不影响 Host 模板
             await WithUnitOfWorkAsync(async () =>
             {
-                var welcome = (await _menuRepository.GetListAsync(x => x.Path == "/welcome")).First();
-                await _menuRepository.DeleteAsync(welcome);
+                var serverMonitor = (await _menuRepository.GetListAsync(x => x.Path == "/system/server-monitor")).First();
+                await _menuRepository.DeleteAsync(serverMonitor);
             });
         }
 
@@ -537,8 +537,8 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         {
             await WithUnitOfWorkAsync(async () =>
             {
-                var hostWelcome = await _menuRepository.FirstOrDefaultAsync(x => x.TenantId == null && x.Path == "/welcome");
-                hostWelcome.ShouldNotBeNull();
+                var hostNode = await _menuRepository.FirstOrDefaultAsync(x => x.TenantId == null && x.Path == "/system/server-monitor");
+                hostNode.ShouldNotBeNull();
             });
         }
     }

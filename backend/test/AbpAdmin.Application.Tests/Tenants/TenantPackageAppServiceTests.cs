@@ -98,10 +98,12 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         }
 
         var usersNode = template.First(x => x.Path == "/administration/identity/users");
-        var welcome = template.First(x => x.Path == "/welcome");
+        // 模板自 65422aa（移除 Welcome 演示页）起无 /welcome——用 /system/server-monitor 作
+        // 独立第二分支（负断言的对象是 /current-session 与 roles，互不冲突）
+        var serverMonitor = template.First(x => x.Path == "/system/server-monitor");
         await _packageAppService.UpdateMenuSelectionAsync(package.Id, new UpdateTenantPackageMenusDto
         {
-            MenuIds = new List<Guid> { welcome.Id, usersNode.Id }
+            MenuIds = new List<Guid> { serverMonitor.Id, usersNode.Id }
         });
 
         var selection = await _packageAppService.GetMenuSelectionAsync(package.Id);
@@ -129,12 +131,13 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
             template = await _menuRepository.GetListAsync(x => x.TenantId == null);
         }
 
-        // 勾选：欢迎 + 用户（其祖先链 管理/身份管理 应自动保留），不勾 系统/当前会话 等
-        var welcome = template.First(x => x.Path == "/welcome");
+        // 勾选：服务监控 + 用户（两者的祖先链 /system 与 /administration/identity 应自动保留），
+        // 不勾 当前会话、角色 等
+        var serverMonitor = template.First(x => x.Path == "/system/server-monitor");
         var usersNode = template.First(x => x.Path == "/administration/identity/users");
         await _packageAppService.UpdateMenuSelectionAsync(package.Id, new UpdateTenantPackageMenusDto
         {
-            MenuIds = new List<Guid> { welcome.Id, usersNode.Id }
+            MenuIds = new List<Guid> { serverMonitor.Id, usersNode.Id }
         });
 
         var tenantId = Guid.NewGuid();
@@ -156,7 +159,8 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
             ((long)tenantMenus.Count).ShouldBeLessThan(fullCount);
 
             var paths = tenantMenus.Select(x => x.Path).ToList();
-            paths.ShouldContain("/welcome");
+            paths.ShouldContain("/system/server-monitor");
+            paths.ShouldContain("/system");                        // 第二分支的祖先链
             paths.ShouldContain("/administration/identity/users");
             paths.ShouldContain("/administration/identity"); // 祖先链
             paths.ShouldContain("/administration");
@@ -186,18 +190,18 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         var tenantAppService = GetRequiredService<AbpAdmin.Tenants.TenantAppService>();
         var tenantRepository = GetRequiredService<Volo.Abp.TenantManagement.ITenantRepository>();
 
-        // 套餐勾选：欢迎 + 用户
+        // 套餐勾选：服务监控 + 用户（65422aa 移除 /welcome 后的替代选型，见上测试注释）
         var package = await _packageAppService.CreateAsync(new TenantPackageCreateDto { Name = "应用套餐" });
         List<Menu> template;
         using (_dataFilter.Disable<IMultiTenant>())
         {
             template = await _menuRepository.GetListAsync(x => x.TenantId == null);
         }
-        var welcome = template.First(x => x.Path == "/welcome");
+        var serverMonitor = template.First(x => x.Path == "/system/server-monitor");
         var usersNode = template.First(x => x.Path == "/administration/identity/users");
         await _packageAppService.UpdateMenuSelectionAsync(package.Id, new UpdateTenantPackageMenusDto
         {
-            MenuIds = new List<Guid> { welcome.Id, usersNode.Id }
+            MenuIds = new List<Guid> { serverMonitor.Id, usersNode.Id }
         });
 
         var tenantManager = GetRequiredService<Volo.Abp.TenantManagement.ITenantManager>();
@@ -240,7 +244,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         {
             var paths = (await _menuRepository.GetListAsync()).Select(x => x.Path).ToList();
             paths.ShouldNotContain("/custom-page"); // 破坏性重置清掉自定义菜单
-            paths.ShouldContain("/welcome");
+            paths.ShouldContain("/system/server-monitor");
             paths.ShouldContain("/administration/identity/users");
             paths.ShouldNotContain("/current-session");
         }
@@ -259,8 +263,8 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         {
             template = await _menuRepository.GetListAsync(x => x.TenantId == null);
         }
-        var welcome = template.First(x => x.Path == "/welcome");
-        package.SetMenus(new[] { welcome.Id }, GetRequiredService<Volo.Abp.Guids.IGuidGenerator>());
+        var serverMonitor = template.First(x => x.Path == "/system/server-monitor");
+        package.SetMenus(new[] { serverMonitor.Id }, GetRequiredService<Volo.Abp.Guids.IGuidGenerator>());
         await WithUnitOfWorkAsync(() => packageRepository.InsertAsync(package, autoSave: true));
 
         // 租户只配了 PackageId（模拟 apply-package 第二步失败的补偿场景），从不显式应用
@@ -274,7 +278,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         {
             await WithUnitOfWorkAsync(() => _menuManager.EnsureTenantMenusAsync(tenantId));
             var paths = (await _menuRepository.GetListAsync()).Select(x => x.Path).ToList();
-            paths.ShouldContain("/welcome");
+            paths.ShouldContain("/system/server-monitor");
             paths.ShouldNotContain("/current-session"); // 懒拷贝直接按套餐收敛，而不是全量
         }
     }
