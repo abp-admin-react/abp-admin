@@ -27,8 +27,9 @@ public class CacheMonitorInfoDto
     public string Backend { get; set; } = "memory";
 
     /// <summary>应用隔离前缀（AbpDistributedCacheOptions.KeyPrefix，默认为空）。
-    /// rel-10.6 中它插在键的 k: 段内（c:{CacheName},k:{KeyPrefix}{业务key}），不在键首——
-    /// 监控页把它作为键浏览的默认过滤词（配置后默认只列出本应用的键）。</summary>
+    /// rel-10.6.1 中它插在键的 k: 段内（c:{CacheName},k:{KeyPrefix}{业务key}），不在键首——
+    /// 配置后是监控的硬边界（键浏览/读值/删除只限含此前缀的本应用键），同时仍是
+    /// 键浏览的默认过滤词。</summary>
     public string KeyPrefix { get; set; } = default!;
 
     /// <summary>库内总键数（Redis；memory 后端为 null）。</summary>

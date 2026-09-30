@@ -16,8 +16,8 @@ namespace AbpAdmin.Monitoring;
 
 /// <summary>
 /// 缓存监控（对标 RuoYi「缓存监控」）。排障用：按前缀浏览键、看值、删键。
-/// 只允许操作 ABP 结构前缀（c:/t:）下的键，
-/// 防止共享 Redis 上误删其他系统的数据。浏览走 SCAN（增量、不阻塞），绝不 KEYS。
+/// 只允许操作本应用的 ABP 键（结构前缀 c:/t:；配置了隔离前缀时还要求 k: 段含它），
+/// 防止共享 Redis 上读写/误删其他系统的数据。浏览走 SCAN（增量、不阻塞），绝不 KEYS。
 /// Memory 后端（开发默认）无法枚举键：Microsoft 的 MemoryDistributedCache 没有枚举入口，
 /// 页面据此提示切 Redis 才可浏览。
 /// </summary>
@@ -76,9 +76,13 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         // ExecuteAsync("INFO") 返回全文；DBSIZE 本就是 per-db 命令，也不需要 IServer/
         // GetEndPoints 的端点猜测，统一走当前 IDatabase 最简。
         var infoErrors = new List<string>();
+        // 两条独立命令先发起再各自 await：SE.Redis 只在没有 await 间隔地排队时才自动管线化，
+        // 串行写法会把它们拆成两个 RTT（每次监控页加载/刷新都付双倍网络腿）
+        var sizeTask = database.ExecuteAsync("DBSIZE");
+        var infoTask = database.ExecuteAsync("INFO");
         try
         {
-            dto.TotalKeys = (long)await database.ExecuteAsync("DBSIZE");
+            dto.TotalKeys = (long)await sizeTask;
         }
         catch (Exception ex)
         {
@@ -87,7 +91,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
 
         try
         {
-            var rawInfo = await database.ExecuteAsync("INFO");
+            var rawInfo = await infoTask;
             ApplyInfoText(dto, rawInfo.IsNull ? null : rawInfo.ToString());
         }
         catch (Exception ex)
@@ -145,8 +149,8 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         var database = await RequireDatabaseAsync();
         maxResultCount = Math.Clamp(maxResultCount, 1, 200);
 
-        // 锚定到 ABP 键空间的扫描模式（信息隔离；口径与构造依据见 BuildScanPattern）
-        var pattern = BuildScanPattern(prefix);
+        // 锚定到 ABP 键空间的扫描模式（信息隔离 + 隔离前缀必含；口径与构造依据见 BuildScanPattern）
+        var pattern = BuildScanPattern(prefix, _cacheOptions.KeyPrefix);
 
         // 单次 SCAN 只是"扫描提示"，返回的键可能多于 maxResultCount：旧实现 .Take(N) 截断后
         // 游标已前进，溢出键跨页永久丢失。这里循环 SCAN 攒够一页，溢出键 + 游标留在
@@ -227,11 +231,26 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
             nextCursor = scanCursor;
         }
 
-        // 每键 3 次往返（TYPE/TTL/MEMORY USAGE）合到一个 IBatch 里发，
-        // 一批 50 键从 150+ 次 RTT 降为 1 次批往返。
-        // Execute 保持同步是有据可查的取舍：StackExchange.Redis 的 IBatch 只有 void Execute()，
-        // 没有 ExecuteAsync()（已对照 2.7.33 与 2.9.x 反编译核实）；Execute 只是把已排队
-        // 的异步命令冲刷出去，命令结果全部由下方 await 的任务异步消费，不在 I/O 上阻塞线程
+        var dtos = await HydrateKeysAsync(database, page);
+
+        return new CacheKeyListResultDto
+        {
+            Keys = dtos,
+            NextCursor = nextCursor
+        };
+    }
+
+    /// <summary>
+    /// 为本页键补齐元数据（TYPE/TTL/MEMORY USAGE）。每键 3 次往返合到一个 IBatch 里发，
+    /// 一批 50 键从 150+ 次 RTT 降为 1 次批往返。Execute 保持同步是有据可查的取舍：
+    /// StackExchange.Redis 的 IBatch 只有 void Execute()，没有 ExecuteAsync()（已对照
+    /// 2.7.33 与 2.9.x 反编译核实）；Execute 只是把已排队的异步命令冲刷出去，命令结果
+    /// 全部由 await 的任务异步消费，不在 I/O 上阻塞线程。
+    /// protected virtual 是单测缝：分页协议测试（CacheMonitorScanPaginationTests）以
+    /// 脚本化 SCAN 驱动 GetKeysAsync，本方法在彼处短路——真实批处理属 Redis 集成层。
+    /// </summary>
+    protected virtual async Task<List<CacheKeyDto>> HydrateKeysAsync(IDatabase database, List<string> page)
+    {
         var batch = database.CreateBatch();
         var typeTasks = page.Select(k => batch.KeyTypeAsync(k)).ToList();
         var ttlTasks = page.Select(k => batch.KeyTimeToLiveAsync(k)).ToList();
@@ -255,11 +274,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
             });
         }
 
-        return new CacheKeyListResultDto
-        {
-            Keys = dtos,
-            NextCursor = nextCursor
-        };
+        return dtos;
     }
 
     /// <summary>
@@ -362,44 +377,55 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
     }
 
     /// <summary>
-    /// 只放行 ABP 缓存键，防止共享 Redis 上误删其他系统的数据。
-    /// 判定依据（rel-10.6 DistributedCacheKeyNormalizer 反编译核实，2026-09-29）：
-    /// 键恒以结构性标记开头——c:（宿主）或 t:（租户 t:{TenantId},c:...）；
-    /// <see cref="AbpDistributedCacheOptions.KeyPrefix"/> 不在键首，它插在 k: 段内
-    /// （键形如 c:{CacheName},k:{KeyPrefix}{业务key}）——应用隔离靠它成立，
-    /// 但不影响本判定，也不参与扫描锚定（见 <see cref="BuildScanPattern"/>）。
+    /// 只放行本应用的 ABP 缓存键，防止共享 Redis 上读写/误删其他系统的数据。
+    /// 判定依据（rel-10.6.1 DistributedCacheKeyNormalizer 反编译，DistributedCacheKeyShapeTests
+    /// 机器钉住）：键恒以结构性标记开头——c:（宿主）或 t:（租户 t:{TenantId},c:...）；
+    /// <see cref="AbpDistributedCacheOptions.KeyPrefix"/> 不在键首，插在 k: 段内
+    /// （键形如 c:{CacheName},k:{KeyPrefix}{业务key}）。配置了隔离前缀时守卫随之收紧：
+    /// 键还必须含 ",k:{KeyPrefix}"——其它 ABP 应用的键（无此前缀或前缀不同）据此拒读拒删。
+    /// 隔离边界不得宽于缓存自身的隔离机制（此前前缀只作页面默认过滤词，清空搜索框即可
+    /// 越界浏览/删除，属装饰性边界）。
     /// </summary>
     protected virtual void AssertAbpKey(string key)
     {
         if (!IsAllowedKey(key))
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.Monitoring.CacheMonitorKeyNotAllowed)
-                .WithData("KeyPrefix", "c: / t:");
+                .WithData("KeyPrefix", string.IsNullOrEmpty(_cacheOptions.KeyPrefix)
+                    ? "c: / t:"
+                    : $"c: / t: 且 k: 段含隔离前缀 {_cacheOptions.KeyPrefix}");
         }
     }
 
     /// <summary><see cref="AssertAbpKey"/> 的非抛出版（键枚举的后置过滤复用同一判定）。</summary>
     protected virtual bool IsAllowedKey(string key)
     {
-        return key.StartsWith("c:", StringComparison.Ordinal) ||
-               key.StartsWith("t:", StringComparison.Ordinal);
+        if (!key.StartsWith("c:", StringComparison.Ordinal) &&
+            !key.StartsWith("t:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var keyPrefix = _cacheOptions.KeyPrefix;
+        return string.IsNullOrEmpty(keyPrefix) ||
+               key.Contains(",k:" + keyPrefix, StringComparison.Ordinal);
     }
 
     /// <summary>
     /// 构造键枚举的 SCAN MATCH 模式——锚定到 ABP 键空间，口径与 <see cref="AssertAbpKey"/> 一致：
-    /// 键恒以结构性标记开头（c: 宿主 / t: 租户，见 AssertAbpKey 注释的反编译依据），
+    /// 键恒以结构性标记开头（c: 宿主 / t: 租户，键形依据见 IsAllowedKey 注释），
     /// 默认锚定 glob 字符类 <c>[ct]:</c> 一次覆盖两种（单模式单游标）；用户词以 c:/t:
     /// 开头时把锚定段收窄到该前缀并剥掉重复段——否则过滤词 <c>c:</c> 会变成
     /// <c>[ct]:*c:*</c>（要求前缀之后再次出现 "c:"），一个键都匹配不到（2026-09-29
-    /// 页面实测回归）。应用隔离前缀（AbpDistributedCacheOptions.KeyPrefix，位于 k: 段内）
-    /// 不参与锚定——它作为普通包含词使用时（如 <c>[ct]:*AbpAdmin:*</c>）天然只匹配本应用
-    /// 的键，监控页把它作为默认过滤词下发（见 GetInfoAsync 与前端种子逻辑）。
+    /// 页面实测回归）。隔离前缀（keyPrefix，来自 AbpDistributedCacheOptions）非空时作为
+    /// 必含段拼进 glob——扫描天然只命中本应用键，与 IsAllowedKey 的硬边界同口径；用户词
+    /// 已含前缀时不重复拼（页面默认过滤词就是 KeyPrefix，重复拼接会要求键中出现两次而漏光）。
     /// 依据（redis.io SCAN 文档）：MATCH 是元素取回之后的过滤，锚定并不减少服务器扫描量，
     /// 收益是信息隔离——共享 Redis 上不把其它系统的键名/元数据回显给持监控查看权限的人。
     /// 用户词原样进入 glob（含元字符也只影响中段、逃不出锚定），枚举结果仍过
     /// <see cref="IsAllowedKey"/> 兜底。
     /// </summary>
-    internal static string BuildScanPattern(string? prefix)
+    internal static string BuildScanPattern(string? prefix, string? keyPrefix)
     {
         prefix ??= string.Empty;
         string anchor;
@@ -417,7 +443,16 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         {
             anchor = "[ct]:";
         }
-        return $"{anchor}*{prefix}*";
+
+        var containsIsolation = !string.IsNullOrEmpty(keyPrefix) &&
+                                prefix.Contains(keyPrefix, StringComparison.Ordinal);
+        // 无必含段时与既有口径逐字节一致（含用户词为空时的收尾 **——glob 语义等价于 *，
+        // 旧测试按字面钉住）；有必含段时单星拼接，避免空段插值出 ** 改变全部历史期望
+        if (string.IsNullOrEmpty(keyPrefix) || containsIsolation)
+        {
+            return $"{anchor}*{prefix}*";
+        }
+        return $"{anchor}*{keyPrefix}*{prefix}*";
     }
 
     protected static async Task<long?> GetMemoryUsageAsync(IDatabaseAsync database, string key)
@@ -436,8 +471,10 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
 
     /// <summary>
     /// 单次 SCAN 调用。游标 0 = 从头开始（合法首轮游标），返回游标 0 = 扫描结束。
+    /// protected virtual 是单测缝：分页协议（溢出缓冲/合成游标/迭代熔断）的测试以脚本化
+    /// 应答重写本方法驱动 GetKeysAsync，不依赖真 Redis（见 CacheMonitorScanPaginationTests）。
     /// </summary>
-    private static async Task<(long Cursor, List<string> Keys)> ScanPageAsync(
+    protected virtual async Task<(long Cursor, List<string> Keys)> ScanPageAsync(
         IDatabaseAsync database, long cursor, string pattern, int countHint)
     {
         var result = await database.ExecuteAsync(

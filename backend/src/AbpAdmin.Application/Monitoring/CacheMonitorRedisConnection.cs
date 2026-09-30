@@ -17,7 +17,7 @@ namespace AbpAdmin.Monitoring;
 /// 判定口径：IsEnabled 未配置视为开（与模块一致），但 Configuration 为空按未启用处理
 /// （否则连的就是微软默认的 localhost:6379，监控页会给出误导结论）。
 /// </summary>
-public class CacheMonitorRedisConnection : ISingletonDependency
+public class CacheMonitorRedisConnection : ISingletonDependency, IDisposable
 {
     private readonly IConfiguration _configuration;
 
@@ -25,6 +25,7 @@ public class CacheMonitorRedisConnection : ISingletonDependency
     private readonly SemaphoreSlim _connectLock = new(1, 1);
     private volatile ConnectionMultiplexer? _multiplexer;
     private bool _connectAttempted;
+    private bool _disposed;
     private DateTime _lastConnectFailureUtc;
 
     /// <summary>连接失败后的冷却间隔：期间直接复用上次失败结果，避免 Redis 宕机时每个请求都白等一次连接超时。</summary>
@@ -86,6 +87,13 @@ public class CacheMonitorRedisConnection : ISingletonDependency
                 return _multiplexer;
             }
 
+            // 关停闩锁（与宿主 SharedRedisConnection 同一纪律）：容器释放后再取连接必须
+            // 显式拒绝——关停窗口里迟到的监控请求会复活一条永不释放的新连接
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(CacheMonitorRedisConnection));
+            }
+
             if (_connectAttempted &&
                 DateTime.UtcNow - _lastConnectFailureUtc < ConnectRetryCooldown)
             {
@@ -95,7 +103,14 @@ public class CacheMonitorRedisConnection : ISingletonDependency
             _connectAttempted = true;
             try
             {
-                _multiplexer = await ConnectionMultiplexer.ConnectAsync(_configuration["Redis:Configuration"]!);
+                // AbortOnConnectFail 强制 true（与宿主 SharedRedisConnection 同一纪律）：连接串里
+                // 常见的 abortConnect=false 会让 ConnectAsync 在 Redis 不可达时静默返回未连接的
+                // 多路复用器——监控页随后每条命令都付一次超时、被误报成 INFO/连接异常，正是
+                // 本类注释宣称要避免的误导诊断。运行期断线自愈由 SE.Redis 自动重连承担，
+                // 不依赖该开关（此前直接以字符串 ConnectAsync，该纪律只在宿主侧成立）。
+                var options = ConfigurationOptions.Parse(_configuration["Redis:Configuration"]!);
+                options.AbortOnConnectFail = true;
+                _multiplexer = await ConnectionMultiplexer.ConnectAsync(options);
                 LastConnectError = null;
             }
             catch (Exception ex)
@@ -107,6 +122,26 @@ public class CacheMonitorRedisConnection : ISingletonDependency
             }
 
             return _multiplexer;
+        }
+        finally
+        {
+            _connectLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// 随容器关停释放多路复用器（此前该类不是 IDisposable，连接在进程退出前从不释放——
+    /// 与宿主 SharedRedisConnection 的关停纪律对齐）。释放与拨号在同一把信号量下串行，
+    /// 关停撞上首用拨号时不会泄漏刚建好的连接。
+    /// </summary>
+    public void Dispose()
+    {
+        _connectLock.Wait();
+        try
+        {
+            _disposed = true;
+            _multiplexer?.Dispose();
+            _multiplexer = null;
         }
         finally
         {

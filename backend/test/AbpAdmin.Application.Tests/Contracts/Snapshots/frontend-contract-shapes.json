@@ -10,6 +10,10 @@
         "type": "string",
         "nullable": true
       },
+      "InfoError": {
+        "type": "string",
+        "nullable": true
+      },
       "KeyPrefix": {
         "type": "string",
         "nullable": false
