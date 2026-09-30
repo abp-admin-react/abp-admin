@@ -428,6 +428,19 @@ describe('signalr', () => {
     expect(h.created[1].has('ReceiveNotification', handler)).toBe(true);
   });
 
+  it('restartRealTime({})（回归的原始形态）：空对象同样是合并语义，不清空注册', async () => {
+    const { startRealTime, restartRealTime } = await importFresh();
+
+    const handler = () => {};
+    await startRealTime({ ReceiveNotification: handler });
+    // 历史事故的精确形态是 restartRealTime({})（租户切换路径）：若合并语义被改成
+    // "传了对象就替换"，无参形态的测试依然全绿——必须按原始形态钉住
+    await restartRealTime({});
+
+    expect(h.created).toHaveLength(2);
+    expect(h.created[1].has('ReceiveNotification', handler)).toBe(true);
+  });
+
   it('动态订阅跨连接重建保持：新连接自动重挂，退订也作用到新连接', async () => {
     vi.useFakeTimers();
     const { onRealTimeMessage, offRealTimeMessage, startRealTime } =

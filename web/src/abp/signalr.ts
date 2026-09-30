@@ -242,7 +242,7 @@ export async function startRealTime(
     scheduleRetryAfterClose();
   });
 
-  starting = nextConnection
+  const thisStart: Promise<void> = nextConnection
     .start()
     .then(() => setAvailable(true))
     .catch((err) => {
@@ -255,10 +255,18 @@ export async function startRealTime(
       scheduleRetryAfterClose();
     })
     .finally(() => {
-      starting = null;
+      // 只有仍是本轮 start 占着槽位才清空守卫：stopRealTime → startRealTime 与在途
+      // start 交错时（stop 先清空 starting、新 start 占位，随后旧轮收尾），
+      // 旧轮 finally 若无条件清空会误清新轮的守卫——连接窗口内再次 start 会建出
+      // 第二条并行连接（重复推送直到整页刷新）
+      if (starting === thisStart) {
+        starting = null;
+      }
     });
 
-  return starting;
+  starting = thisStart;
+
+  return thisStart;
 }
 
 export async function stopRealTime(): Promise<void> {
