@@ -453,25 +453,61 @@ public class AbpAdminHttpApiHostModule : AbpModule
         //    密钥存储搬家无法避免。
         // 4. 密钥在 Redis 里是明文 XML（与文件系统默认同保护级别，未叠加 ProtectKeysWith*
         //    加密——引入证书属部署侧决策）：能 GET 到该键的主体即具备伪造令牌的能力，
-        //    共享的 Redis 实例必须按敏感凭据存储对待（ACL/网络隔离）；键名含固定应用名
-        //    AbpAdmin，同一 Redis 上跑多套本框架部署时不得共用该键——否则两套应用会
+        //    共享的 Redis 实例必须按敏感凭据存储对待（ACL/网络隔离）；同一 Redis 上跑多套
+        //    本框架部署时必须各自设置 App:InstanceDiscriminator（见 5），否则两套应用会
         //    互相认可对方签发的令牌。
+        // 5. 键名带部署判别键（App:InstanceDiscriminator，可选）：环境名只区分 dev/prod，
+        //    同环境多套部署共用一台 Redis 时靠它分开密钥环——与 ChannelPrefix、缓存 KeyPrefix
+        //    默认值同一判别键（部署身份的三处接线，见 GetInstanceDiscriminator）。
         // Redis:IsEnabled=false（单实例默认）不进此分支，维持框架默认的文件系统存储。
-        context.Services
+        var dataProtection = context.Services
             .AddDataProtection()
             .SetApplicationName("AbpAdmin")
             .PersistKeysToStackExchangeRedis(
                 connection.GetDatabase,
-                BuildDataProtectionKeyName(context.Services.GetHostingEnvironment().EnvironmentName));
+                BuildDataProtectionKeyName(
+                    context.Services.GetHostingEnvironment().EnvironmentName,
+                    GetInstanceDiscriminator(configuration)));
+
+        // 可选静态加密出口（DataProtection:CertificatePath / CertificatePassword）：密钥环在
+        // Redis 里默认是明文 XML（与文件系统默认同保护级别），共享实例上任何有 GET 权限的
+        // 主体都能取走整环伪造令牌——部署侧提供证书时叠加 ProtectKeysWithCertificate 提高
+        // 门槛。证书已配置但不可用直接抛（fail-fast）：静默退回明文等于撤掉已声明的保护。
+        var certificatePath = configuration["DataProtection:CertificatePath"];
+        if (!string.IsNullOrWhiteSpace(certificatePath))
+        {
+            var certificatePassword = configuration["DataProtection:CertificatePassword"];
+            dataProtection.ProtectKeysWithCertificate(new System.Security.Cryptography.X509Certificates.X509Certificate2(
+                certificatePath,
+                string.IsNullOrEmpty(certificatePassword) ? null : certificatePassword));
+        }
     }
 
     /// <summary>
-    /// DataProtection 密钥环的 Redis 键名：按环境名隔离（多环境共用一台 Redis 时密钥不得互通）。
-    /// 独立成方法供 AbpAdmin.HttpApi.Host.Tests 钉住格式——env 后缀一旦丢失就是跨环境
+    /// 部署身份判别键（App:InstanceDiscriminator，可选）：同环境多套部署共用一台 Redis 时的
+    /// 区分手段，一个键喂三处——DataProtection 密钥环键名、SignalR ChannelPrefix、缓存
+    /// KeyPrefix 的默认值（显式 DistributedCache:KeyPrefix 优先）。建议字符集
+    /// [A-Za-z0-9._-]（它会成为 Redis 键名/频道名的一段）；空/空白视为未设置。
+    /// </summary>
+    internal static string? GetInstanceDiscriminator(IConfiguration configuration)
+    {
+        var discriminator = configuration["App:InstanceDiscriminator"]?.Trim();
+        return string.IsNullOrEmpty(discriminator) ? null : discriminator;
+    }
+
+    /// <summary>
+    /// DataProtection 密钥环的 Redis 键名：按环境名隔离（多环境共用一台 Redis 时密钥不得互通），
+    /// 部署判别键非空时再叠加（同环境多套部署不得互验令牌）。独立成方法供
+    /// AbpAdmin.HttpApi.Host.Tests 钉住格式——env 后缀或判别键一旦丢失就是跨环境/跨部署
     /// 令牌互验漏洞，必须有红测试兜底。
     /// </summary>
-    internal static string BuildDataProtectionKeyName(string environmentName) =>
-        $"AbpAdmin:DataProtection-Keys:{environmentName}";
+    internal static string BuildDataProtectionKeyName(string environmentName, string? instanceDiscriminator)
+    {
+        instanceDiscriminator = instanceDiscriminator?.Trim();
+        return string.IsNullOrEmpty(instanceDiscriminator)
+            ? $"AbpAdmin:DataProtection-Keys:{environmentName}"
+            : $"AbpAdmin:DataProtection-Keys:{environmentName}:{instanceDiscriminator}";
+    }
 
     /// <summary>
     /// 锁与 DataProtection 共享的惰性 Redis 连接：构造只记下连接串，首次 <see cref="GetDatabase"/>
@@ -480,6 +516,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
     /// 重启进程才能自愈；这里与 <see cref="CacheMonitorRedisConnection"/> 同一纪律：失败进入
     /// 冷却期，期间快速抛错不再重拨。两个消费面（锁提供程序工厂、DP 密钥环委托）都是同步
     /// API，Connect 因此用同步版本；串行化只发生在启动探针期，请求路径不付拨号成本。
+    /// 关停语义：Dispose 后 GetDatabase 抛 <see cref="ObjectDisposedException"/>——关停窗口里
+    /// DP 密钥环仍可能调工厂委托，不闩锁会复活一条永不释放的新连接（审计发现的泄漏路径）。
     /// </summary>
     private sealed class SharedRedisConnection : IDisposable
     {
@@ -489,6 +527,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
         private readonly object _gate = new();
         private ConnectionMultiplexer? _multiplexer;
         private DateTime _lastFailureUtc = DateTime.MinValue;
+        private Exception? _lastFailure;
+        private bool _disposed;
 
         public SharedRedisConnection(string configuration)
         {
@@ -497,6 +537,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
         public IDatabase GetDatabase()
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SharedRedisConnection));
+            }
+
             var multiplexer = _multiplexer;
             if (multiplexer != null)
             {
@@ -505,6 +550,10 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
             lock (_gate)
             {
+                if (_disposed)
+                {
+                    throw new ObjectDisposedException(nameof(SharedRedisConnection));
+                }
                 if (_multiplexer != null)
                 {
                     return _multiplexer.GetDatabase();
@@ -513,10 +562,13 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 {
                     // 冷却期内不重拨：Redis 故障时受保护的操作快速失败，而不是各付一次
                     // 同步拨号超时（Connect 默认预算约 9 秒，会卡住所有并发首用）。
-                    // 原始失败原因见启动/首用日志，这里不重复包装以免吞类型。
+                    // 原始异常挂在 InnerException 上——消费方（锁拦截器/日志）能继续区分
+                    // 连接类与配置类故障，不因冷却包装吞掉类型。
                     throw new InvalidOperationException(
                         $"Redis connection failed within the last {FailureCooldown.TotalSeconds:F0}s " +
-                        "(failure cooldown, retry deferred); see logs for the original error.");
+                        "(failure cooldown, retry deferred); the original failure is the InnerException " +
+                        "of this exception (and was logged at first occurrence).",
+                        _lastFailure);
                 }
 
                 var options = ConfigurationOptions.Parse(_configuration);
@@ -528,9 +580,10 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 {
                     _multiplexer = ConnectionMultiplexer.Connect(options);
                 }
-                catch
+                catch (Exception ex)
                 {
                     _lastFailureUtc = DateTime.UtcNow;
+                    _lastFailure = ex;
                     throw;
                 }
                 return _multiplexer.GetDatabase();
@@ -542,6 +595,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             // 拨号与释放在同一把锁下：关停撞上首用拨号时不会泄漏刚建好的连接
             lock (_gate)
             {
+                _disposed = true;
                 _multiplexer?.Dispose();
                 _multiplexer = null;
             }
@@ -550,11 +604,13 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     /// <summary>
     /// T3.2：SignalR Redis backplane（多实例推送正确送达）。
-    /// 开关与 Redis:IsEnabled 完全正交——唯一有效判据是 SignalR:UseRedisBackplane
-    /// （Redis:Configuration 在本仓库恒非空）。退化行为是"进程内广播"（DefaultHubLifetimeManager），
-    /// 不是启动失败：功能正常，只是广播范围只有本进程。
-    /// ChannelPrefix 用环境名派生（修法①，不新增必填配置键）：多环境共用一台 Redis 时
-    /// 不设前缀会互相串消息。规格原文的 Redis:InstanceName 在本仓库不存在，会静默退回 Default。
+    /// 开关与 Redis:IsEnabled 完全正交——唯一有效判据是 SignalR:UseRedisBackplane；
+    /// Redis:Configuration 为空时本方法直接退出，退化行为是"进程内广播"
+    /// （DefaultHubLifetimeManager），不是启动失败：功能正常，只是广播范围只有本进程。
+    /// ChannelPrefix = AbpAdmin:SignalR:{环境名}[:{部署判别键}]：环境名隔离多环境共用的
+    /// Redis，判别键（App:InstanceDiscriminator，可选）再隔离同环境多套部署——与 DP 密钥环
+    /// 键名、缓存 KeyPrefix 默认值同源（部署身份三接线，见 GetInstanceDiscriminator）。
+    /// 规格原文的 Redis:InstanceName 在本仓库不存在，会静默退回 Default。
     /// backplane 保持默认的自建连接，不复用其它任何一条 multiplexer——本宿主共四条 Redis
     /// 连接、各有归属：ABP 缓存的（藏在 RedisCache 内部）、锁 + DataProtection 共享的
     /// SharedRedisConnection、backplane 自建的这条、监控自建的 CacheMonitorRedisConnection。
@@ -571,13 +627,19 @@ public class AbpAdminHttpApiHostModule : AbpModule
         }
 
         var environmentName = context.Services.GetHostingEnvironment().EnvironmentName;
+        var instanceDiscriminator = GetInstanceDiscriminator(configuration);
 
         context.Services
             .AddSignalR()
             .AddStackExchangeRedis(redisConfiguration!, options =>
             {
-                options.Configuration.ChannelPrefix =
-                    RedisChannel.Literal($"AbpAdmin:SignalR:{environmentName}");
+                // ChannelPrefix = 应用名:用途:环境名[:部署判别键]——判别键与 DataProtection 键名、
+                // 缓存 KeyPrefix 默认值同一来源（部署身份三接线，见 GetInstanceDiscriminator）：
+                // 同环境多套部署共用 backplane Redis 时消息不互串
+                options.Configuration.ChannelPrefix = RedisChannel.Literal(
+                    string.IsNullOrEmpty(instanceDiscriminator)
+                        ? $"AbpAdmin:SignalR:{environmentName}"
+                        : $"AbpAdmin:SignalR:{environmentName}:{instanceDiscriminator}");
             });
     }
 
@@ -1016,8 +1078,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
     /// 1. <c>SignalR:UseRedisBackplane=true</c> 宣告了跨实例广播（判据只有 Redis:Configuration，
     ///    与 Redis:IsEnabled 正交），而 Redis:IsEnabled=false 时分布式锁与 DataProtection 签名
     ///    密钥仍留在实例本地——多实例部署下 cookie/OpenIddict 令牌跨实例验不过、锁退化为进程内。
-    ///    这正是 ConfigureRedis 对 IsEnabled 非法值直接抛异常要防的同一类静默不一致；只告警
-    ///    不抛是因为：单实例 + 可达 Redis 而刻意只开 backplane 是合法（虽罕见）的形态。
+    ///    前置条件：Redis:Configuration 非空——为空时 backplane 根本没接线（已退化进程内广播），
+    ///    "跨实例广播中而锁留在本地"的诊断不成立，不告警（判定与 ConfigureSignalRBackplane
+    ///    的退出条件同源）。这正是 ConfigureRedis 对 IsEnabled 非法值直接抛异常要防的同一类
+    ///    静默不一致；只告警不抛是因为：单实例 + 可达 Redis 而刻意只开 backplane 是合法
+    ///    （虽罕见）的形态。
     /// 2. Redis 启用但连接串仍是出厂模板默认（127.0.0.1:6379）——多半是忘了用环境变量覆盖，
     ///    锁/签名密钥会静默指向错误实例（本机无 Redis 则首个受保护操作报错）。
     /// 放在容器建好之后（而非 ConfigureServices）：模块配置阶段没有 ILogger，且
@@ -1054,11 +1119,17 @@ public class AbpAdminHttpApiHostModule : AbpModule
     /// <summary>
     /// 纯判定：backplane 声明多实例而 Redis 子系统显式关闭。键位口径与 ConfigureRedis 一致：
     /// 缺省/空 = 启用，仅显式 false 才关；非法值在 ConfigureServices 已抛，TryParse 失败按启用
-    /// 处理不重复报。
+    /// 处理不重复报。前置条件：Redis:Configuration 非空——为空时 ConfigureSignalRBackplane
+    /// 直接退出、backplane 已静默退化为进程内广播，"跨实例广播中而锁留在本地"的诊断不成立，
+    /// 不告警（该形态由 backplane 自身的降级注释与部署文档覆盖，不属本告警）。
     /// </summary>
     internal static bool ShouldWarnOnIncoherentRedisPosture(IConfiguration configuration)
     {
         if (!configuration.GetValue<bool>("SignalR:UseRedisBackplane"))
+        {
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(configuration["Redis:Configuration"]))
         {
             return false;
         }
@@ -1067,7 +1138,10 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     /// <summary>
     /// 纯判定：Redis 启用但连接串仍是出厂模板默认。Development 豁免——本机调试 Redis 就在
-    /// 默认端口是常态，不该被启动日志刷屏。
+    /// 默认端口是常态，不该被启动日志刷屏。键位口径与 <see cref="ConfigureRedis"/> /
+    /// <see cref="ShouldWarnOnIncoherentRedisPosture"/> 一致：缺省/空 = 启用，仅显式 false 才关
+    /// （TryParse 失败到达此处只剩缺省/空一种形态——非法值在 ConfigureServices 已抛）。
+    /// 此前写成「TryParse 失败按未启用」恰好放过要抓的姿态：缺省启用 + 模板串不告警。
     /// </summary>
     internal static bool ShouldWarnOnTemplateRedisConfiguration(
         IConfiguration configuration, string environmentName)
@@ -1076,7 +1150,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
         {
             return false;
         }
-        if (!bool.TryParse(configuration["Redis:IsEnabled"], out var redisEnabled) || !redisEnabled)
+        if (bool.TryParse(configuration["Redis:IsEnabled"], out var redisEnabled) && !redisEnabled)
         {
             return false;
         }

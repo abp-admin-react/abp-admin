@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using System.Reflection;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -36,10 +39,34 @@ public class DataProtectionServiceRegistrationTests
     {
         // env 后缀一旦丢失（键名固定、跨环境共享），dev 与 prod 的签名密钥就互相可见、
         // 令牌互相可验——ConfigureRedis 注释点名的跨环境互验漏洞，用红测试钉死格式。
-        AbpAdminHttpApiHostModule.BuildDataProtectionKeyName("Development")
+        AbpAdminHttpApiHostModule.BuildDataProtectionKeyName("Development", null)
             .ShouldBe("AbpAdmin:DataProtection-Keys:Development");
-        AbpAdminHttpApiHostModule.BuildDataProtectionKeyName("Production")
+        AbpAdminHttpApiHostModule.BuildDataProtectionKeyName("Production", null)
             .ShouldBe("AbpAdmin:DataProtection-Keys:Production");
+    }
+
+    [Fact]
+    public void Key_Name_Appends_The_Instance_Discriminator_When_Configured()
+    {
+        // 部署身份三接线之一（DataProtection 密钥环；另两处：SignalR ChannelPrefix、缓存
+        // KeyPrefix 默认值，同源于 App:InstanceDiscriminator）：同环境多套部署共用一台
+        // Redis 时，判别键缺失 = 两套部署共用一个密钥环、互相认可对方签发的令牌
+        AbpAdminHttpApiHostModule.BuildDataProtectionKeyName("Production", "shop-a")
+            .ShouldBe("AbpAdmin:DataProtection-Keys:Production:shop-a");
+        // 空白等同未设置（与 GetInstanceDiscriminator 的 Trim 同口径，双保险）
+        AbpAdminHttpApiHostModule.BuildDataProtectionKeyName("Production", "  ")
+            .ShouldBe("AbpAdmin:DataProtection-Keys:Production");
+    }
+
+    [Fact]
+    public void Instance_Discriminator_Is_Trimmed_And_Optional()
+    {
+        AbpAdminHttpApiHostModule.GetInstanceDiscriminator(new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["App:InstanceDiscriminator"] = " shop-a " })!
+                .Build())
+            .ShouldBe("shop-a");
+        AbpAdminHttpApiHostModule.GetInstanceDiscriminator(new ConfigurationBuilder().Build())
+            .ShouldBeNull();
     }
 
     [Fact]
@@ -63,13 +90,53 @@ public class DataProtectionServiceRegistrationTests
         keyField.ShouldNotBeNull();
         // 包内把键名存为 RedisKey 值类型（私有字段 _key），按字符串比较
         keyField.GetValue(repository)!.ToString().ShouldBe(
-            AbpAdminHttpApiHostModule.BuildDataProtectionKeyName("Development"));
+            AbpAdminHttpApiHostModule.BuildDataProtectionKeyName("Development", null));
 
         // SetApplicationName 固定为 "AbpAdmin"：默认取 content root 路径，镜像工作目录不同或
         // 滚动升级换目录时各实例会各发各的密钥环，集中持久化形同虚设
         // SetApplicationName 落在 ApplicationDiscriminator 上
         provider.GetRequiredService<IOptions<DataProtectionOptions>>()
             .Value.ApplicationDiscriminator.ShouldBe("AbpAdmin");
+    }
+
+    [Fact]
+    public async Task Configured_Certificate_Switches_On_At_Rest_Encryption()
+    {
+        // 可选静态加密出口：共享 Redis 上密钥环默认明文 XML，配置证书后必须叠上
+        // CertificateXmlEncryptor——接线丢失时密钥环静默退回明文而全绿
+        using var rsa = RSA.Create(2048);
+        var request = new System.Security.Cryptography.X509Certificates.CertificateRequest(
+            new System.Security.Cryptography.X509Certificates.X500DistinguishedName("CN=AbpAdmin-DP-Test"),
+            rsa,
+            HashAlgorithmName.SHA256,
+            System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(10));
+        var pfxPath = Path.Combine(Path.GetTempPath(), $"abpadmin-dp-test-{Guid.NewGuid():N}.pfx");
+        File.WriteAllBytes(pfxPath, certificate.Export(
+            System.Security.Cryptography.X509Certificates.X509ContentType.Pfx, "test-password"));
+        try
+        {
+            var services = await HostUnderTest.CreateServiceCollectionAsync(
+            [
+                .. RedisEnabledConfiguration,
+                new KeyValuePair<string, string?>("DataProtection:CertificatePath", pfxPath),
+                new KeyValuePair<string, string?>("DataProtection:CertificatePassword", "test-password"),
+            ]);
+            await using var provider = services.BuildServiceProvider();
+
+            var options = provider.GetRequiredService<IOptions<KeyManagementOptions>>().Value;
+            // 存储仍是 Redis（证书只加静态加密，不换存储）
+            options.XmlRepository.ShouldNotBeNull();
+            options.XmlRepository.GetType().Name.ShouldBe("RedisXmlRepository");
+            // 加密器必须是证书实现（未接线时 XmlEncryptor 为 null）
+            options.XmlEncryptor.ShouldNotBeNull();
+            options.XmlEncryptor.GetType().Name.ShouldContain("CertificateXmlEncryptor");
+        }
+        finally
+        {
+            File.Delete(pfxPath);
+        }
     }
 
     [Fact]

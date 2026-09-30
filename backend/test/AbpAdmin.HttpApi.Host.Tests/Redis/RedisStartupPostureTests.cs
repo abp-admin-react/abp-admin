@@ -4,8 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Medallion.Threading;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
@@ -26,35 +28,43 @@ public class RedisStartupPostureTests
     }
 
     [Theory]
-    [InlineData("true", "false", true)]   // backplane 声明多实例而 Redis 显式关——要告警
-    [InlineData("true", null, false)]     // 缺省 = 启用（与 ConfigureRedis 同口径），姿态自洽
-    [InlineData("true", "true", false)]
-    [InlineData("false", "false", false)] // 未宣告多实例，怎么配都不属于本告警
-    [InlineData(null, "false", false)]
+    [InlineData("true", "false", "redis:6379", true)]   // backplane 声明多实例而 Redis 显式关——要告警
+    [InlineData("true", null, "redis:6379", false)]     // 缺省 = 启用（与 ConfigureRedis 同口径），姿态自洽
+    [InlineData("true", "true", "redis:6379", false)]
+    [InlineData("false", "false", "redis:6379", false)] // 未宣告多实例，怎么配都不属于本告警
+    [InlineData(null, "false", "redis:6379", false)]
+    // Redis:Configuration 为空：ConfigureSignalRBackplane 直接退出、backplane 已退化为进程内
+    // 广播，"跨实例广播中而锁留在本地"的诊断不成立——不告警（此前会误诊，见谓词前置条件注释）
+    [InlineData("true", "false", null, false)]
+    [InlineData("true", "false", "  ", false)]
     public void Incoherent_Posture_Detection_Follows_The_Documented_Key_Semantics(
-        string? backplane, string? redisEnabled, bool expected)
+        string? backplane, string? redisEnabled, string? redisConfiguration, bool expected)
     {
         var pairs = new List<KeyValuePair<string, string?>>();
         if (backplane != null) pairs.Add(new("SignalR:UseRedisBackplane", backplane));
         if (redisEnabled != null) pairs.Add(new("Redis:IsEnabled", redisEnabled));
+        if (redisConfiguration != null) pairs.Add(new("Redis:Configuration", redisConfiguration));
 
         AbpAdminHttpApiHostModule.ShouldWarnOnIncoherentRedisPosture(Config([.. pairs]))
             .ShouldBe(expected);
     }
 
     [Theory]
-    [InlineData("Production", "127.0.0.1:6379", true)]   // 生产 + 出厂默认连接串——多半忘了覆盖
-    [InlineData("Production", "redis.internal:6379", false)]
-    [InlineData("Development", "127.0.0.1:6379", false)] // 本机调试 Redis 在默认端口是常态，豁免
-    [InlineData("Production", null, false)]               // 未启用 Redis 不归本告警管
-    [InlineData("Staging", "127.0.0.1:6379", true)]
+    [InlineData("Production", "true", "127.0.0.1:6379", true)]   // 生产 + 出厂默认连接串——多半忘了覆盖
+    [InlineData("Production", "true", "redis.internal:6379", false)]
+    [InlineData("Development", "true", "127.0.0.1:6379", false)] // 本机调试 Redis 在默认端口是常态，豁免
+    [InlineData("Production", "true", null, false)]               // 没配连接串不归本告警管
+    [InlineData("Staging", "true", "127.0.0.1:6379", true)]
+    // 键位口径与 ConfigureRedis 同口径（缺省/空 = 启用）：IsEnabled 没写也要按启用告警。
+    // 此前实现把 TryParse 失败当"未启用"静默放过——缺省启用 + 模板串恰是本告警要抓的姿态
+    [InlineData("Production", null, "127.0.0.1:6379", true)]
+    [InlineData("Production", "", "127.0.0.1:6379", true)]
+    [InlineData("Production", "false", "127.0.0.1:6379", false)]  // 显式关：Redis 子系统未启用
     public void Template_Default_Configuration_Warning(
-        string environment, string? redisConfiguration, bool expected)
+        string environment, string? redisEnabled, string? redisConfiguration, bool expected)
     {
-        var pairs = new List<KeyValuePair<string, string?>>
-        {
-            new("Redis:IsEnabled", "true"),
-        };
+        var pairs = new List<KeyValuePair<string, string?>>();
+        if (redisEnabled != null) pairs.Add(new("Redis:IsEnabled", redisEnabled));
         if (redisConfiguration != null) pairs.Add(new("Redis:Configuration", redisConfiguration));
 
         AbpAdminHttpApiHostModule.ShouldWarnOnTemplateRedisConfiguration(Config([.. pairs]), environment)
@@ -84,10 +94,88 @@ public class RedisStartupPostureTests
             provider.GetRequiredService<IDistributedLockProvider>());
 
         // 冷却期内：不再重拨（快速失败），异常信息带冷却标记——这是「失败不永久缓存」的
-        // 前半段；后半段（冷却结束后可重试成功）需要真 Redis，属集成测试层
+        // 前半段；后半段（冷却结束后可重试成功）需要真 Redis，属集成测试层。
+        // 原始异常必须挂在 InnerException 上：消费方要能继续区分连接类/配置类故障，
+        // 冷却包装不得吞掉类型（审计发现此前的包装是裸 InvalidOperationException）
         var second = Should.Throw<InvalidOperationException>(() =>
             provider.GetRequiredService<IDistributedLockProvider>());
         second.Message.ShouldContain("cooldown");
+        second.InnerException.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// 关停闩锁：Dispose 之后 GetDatabase 必须抛 <see cref="ObjectDisposedException"/>，
+    /// 而不是复活一条永不释放的新连接——关停窗口里 DP 密钥环（RedisXmlRepository 持有
+    /// 惰性委托）仍可能调工厂。经由密钥环仓储直接持有委托调用，绕开已释放容器的解析
+    /// 检查，命中连接自身的闩锁。
+    /// </summary>
+    [Fact]
+    public async Task Disposed_Connection_Refuses_Further_Use_Instead_Of_Resurrecting()
+    {
+        var services = await HostUnderTest.CreateServiceCollectionAsync(
+        [
+            new KeyValuePair<string, string?>("Redis:IsEnabled", "true"),
+            new KeyValuePair<string, string?>("Redis:Configuration", "127.0.0.1:1"),
+        ]);
+        var provider = services.BuildServiceProvider();
+
+        // 建图零拨号契约下仓储只是存下委托，不连 Redis（见 DataProtectionServiceRegistrationTests）
+        var repository = provider.GetRequiredService<IOptions<KeyManagementOptions>>()
+            .Value.XmlRepository;
+        repository.ShouldNotBeNull();
+
+        // SharedRedisConnection 是宿主私有嵌套类型，按名反射解析一次：MS DI 对常量单例
+        // 只有解析过才接管释放（生产路径由启动探针解析锁提供程序时顺带接管），随后
+        // DisposeAsync 才会真的释放连接、落下闩锁
+        var connectionType = typeof(AbpAdminHttpApiHostModule).Assembly
+            .GetTypes().First(t => t.Name == "SharedRedisConnection");
+        var connection = provider.GetRequiredService(connectionType);
+        await provider.DisposeAsync();
+
+        // 容器释放路径以反射直达 Dispose 收尾：生产宿主走 Autofac（RegisterInstance 的释放
+        // 语义与 MS DI 的按解析捕获不同），本测试钉的是连接自身的关停闩锁语义，不是某个
+        // 容器的释放策略——MS DI 手工 Build 的 provider 实测不释放未解析工厂的常量单例
+        connectionType.GetMethod("Dispose")!.Invoke(connection, null); // 闩锁落下
+
+        // 没有闩锁的旧行为：_multiplexer 为空 + 无冷却记录 → 重新 Connect（哪怕连不上也要
+        // 付一次拨号；连得上就是泄漏）。闩锁后必须显式 ObjectDisposedException
+        Should.Throw<ObjectDisposedException>(() => repository!.GetAllElements());
+    }
+
+    /// <summary>
+    /// 非法 Redis:IsEnabled（如 "yes"）必须让宿主启动失败，而不是静默当作关闭——
+    /// 多实例部署里那等于把分布式锁悄悄关掉。此前该 fail-fast 只有注释宣称（模块、
+    /// HostServiceGraphValidationTests、HostInitializationLogTests 三处），无测试钉住。
+    /// </summary>
+    [Fact]
+    public async Task Invalid_RedisIsEnabled_Fails_Host_Startup_Instead_Of_Silently_Disabling_Locks()
+    {
+        await Should.ThrowAsync<Exception>(() => HostUnderTest.CreateBuilderAsync(
+        [
+            new KeyValuePair<string, string?>("Redis:IsEnabled", "yes"),
+            new KeyValuePair<string, string?>("Redis:Configuration", "127.0.0.1:1"),
+        ]));
+    }
+
+    /// <summary>
+    /// 钉住 AbortOnConnectFail 的强制覆盖：abortConnect=false 是连接串常见默认（Azure 风格），
+    /// 不覆盖时 Connect 会静默返回未连接的多路复用器——锁/DP 拿到的 IDatabase 带病运行，
+    /// 而不是显式抛错。删掉 <c>options.AbortOnConnectFail = true</c> 那行，本测试变红
+    /// （拨号"成功"、不再抛异常）。与 Application 侧 CacheMonitorRedisConnectionTests 互补，
+    /// 两条连接各自钉住同一纪律。
+    /// </summary>
+    [Fact]
+    public async Task Shared_Connection_Fails_Fast_Even_When_String_Opts_Out_Via_AbortConnectFalse()
+    {
+        var services = await HostUnderTest.CreateServiceCollectionAsync(
+        [
+            new KeyValuePair<string, string?>("Redis:IsEnabled", "true"),
+            new KeyValuePair<string, string?>("Redis:Configuration", "127.0.0.1:1,abortConnect=false"),
+        ]);
+        await using var provider = services.BuildServiceProvider();
+
+        Should.Throw<Exception>(() =>
+            provider.GetRequiredService<IDistributedLockProvider>());
     }
 
     /// <summary>

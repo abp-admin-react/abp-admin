@@ -29,14 +29,21 @@ internal static class CachingAndTenancyConfigurator
         services.Configure<AbpAdminEditionCacheOptions>(configuration.GetSection(AbpAdminEditionCacheOptions.SectionName));
         services.Configure<AbpDistributedCacheOptions>(options =>
         {
-            // 共享 Redis 的多应用隔离前缀（ABP 官方机制；rel-10.6 反编译核实的作用位置）：
+            // 共享 Redis 的多应用隔离前缀（ABP 官方机制；rel-10.6.1 DistributedCacheKeyNormalizer
+            // 反编译核实 + DistributedCacheKeyShapeTests 机器钉住的作用位置）：
             // ① 缓存条目键的 k: 段内——c:{CacheName},k:{KeyPrefix}{业务key}，多套部署的
             //    键同名不再互相覆盖；② stamp/hash 全局键的头部——{KeyPrefix}_Abp...Hash。
-            // 键首的结构段 c:/t: 不变，缓存监控的锚定口径（AssertAbpKey/BuildScanPattern）
-            // 恒按 c:/t:，本前缀由监控页作为默认过滤词透出（配置后默认只列本应用键）。
-            // 留空 = 不隔离（独占实例/专属库）。切换后旧键读不到、缓存按需重建（无损）；
-            // DataProtection 密钥环与 SignalR ChannelPrefix 是独立键名体系，不随本前缀。
+            // 键首的结构段 c:/t: 不变。留空 = 不隔离（独占实例/专属库）。切换后旧键读不到、
+            // 缓存按需重建（无损）；DataProtection 密钥环与 SignalR ChannelPrefix 是独立键名
+            // 体系，不随本前缀（但同源的部署判别键 App:InstanceDiscriminator 是本键的默认值——
+            // 显式 DistributedCache:KeyPrefix 优先，未配时用判别键兜底，部署身份一处声明三处生效）。
+            // 缓存监控的键空间守卫（AssertAbpKey/IsAllowedKey/BuildScanPattern）按本前缀收紧：
+            // 配置后监控只可见/可删本应用的键（隔离是硬边界，不是页面过滤词）。
             var keyPrefix = configuration["DistributedCache:KeyPrefix"];
+            if (string.IsNullOrWhiteSpace(keyPrefix))
+            {
+                keyPrefix = configuration["App:InstanceDiscriminator"]?.Trim();
+            }
             if (!string.IsNullOrWhiteSpace(keyPrefix))
             {
                 options.KeyPrefix = keyPrefix;

@@ -39,7 +39,8 @@ internal static class HostUnderTest
     /// <param name="configurationOverrides">
     /// Configuration entries layered on top of the host's own files, for reaching a branch the
     /// shipped configuration switches off. Callers that pass nothing get the configuration exactly
-    /// as it is deployed.
+    /// as it ships: per-machine secrets (appsettings.secrets.json) are deliberately NOT replayed
+    /// (see the builder contract note below).
     /// </param>
     /// <param name="useAutofac">
     /// Whether to install ABP's Autofac service provider factory, as Program.cs does. This changes
