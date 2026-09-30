@@ -409,11 +409,13 @@ const AutoHeightProTable = <
         return;
       }
       if (window.innerHeight <= 0 || document.hidden) return;
+      // 先测量后扣减预算：满预算 30 个有效拍应做满 30 次测量（旧写法先 --polls 再测，
+      // 第 30 拍被直接丢弃——恰恰是慢 webview 最需要的那一拍）
+      const next = measure();
       if (--polls <= 0) {
         clearInterval(settleTimer);
         return;
       }
-      const next = measure();
       if (next != null && next === lastHeight) {
         stableStreak += 1;
         if (stableStreak >= SETTLE_STABLE_TICKS) {

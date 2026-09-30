@@ -81,25 +81,34 @@ const CacheMonitorPage: React.FC = () => {
     }
   }, [message]);
 
-  // 挂载期一次性编排：拉概览 → 后端为 Redis 且连接正常则自动扫第一页（扫描结果只存在
-  // 组件 state 里，不自动扫的话"空表"与"还没扫过"无法区分，看起来像数据丢了）。
-  // ref 只防 StrictMode 双挂载；刷新按钮的重扫走 scanFirstPage，不经此 effect。
+  // 刷新编排（挂载自动扫与刷新按钮共用，唯一的"清表 → 拉概览 → 扫第一页"实现）：
+  // 扫描结果只存在组件 state 里，不自动扫的话"空表"与"还没扫过"无法区分，看起来像
+  // 数据丢了。seed 是本次的过滤词来源——undefined（挂载/未播种）时回落
+  // keyPrefix || 'c:'：keyPrefix 是 string（可空性镜像合同），?? 会放过空串、
+  // 把默认口径漂移成 [ct]:** 全键空间扫；用户显式清空输入框（''）则尊重其"无过滤词"
+  const rescan = (seed?: string) => {
+    setKeys([]);
+    setCursor(0);
+    void loadInfo().then((loaded) => {
+      if (loaded) {
+        scanFirstPage(
+          seed ?? (loaded.keyPrefix || 'c:'),
+          loaded.backend,
+          loaded.connectionError,
+        );
+      }
+    });
+  };
+
+  // 挂载期一次性编排（ref 只防 StrictMode 双挂载；刷新按钮走 rescan(prefixInput)）
   const mountedScanRef = useRef(false);
   useEffect(() => {
     if (mountedScanRef.current) {
       return;
     }
     mountedScanRef.current = true;
-    void loadInfo().then((loaded) => {
-      if (loaded) {
-        scanFirstPage(
-          loaded.keyPrefix || 'c:',
-          loaded.backend,
-          loaded.connectionError,
-        );
-      }
-    });
-    // loadInfo 为 useCallback([message])，message 来自 App.useApp() 稳定引用——
+    rescan();
+    // rescan 依赖 loadInfo（useCallback([message])，message 来自 App.useApp() 稳定引用）——
     // 挂载期一次性编排，无需跟踪其依赖
   }, []);
 
@@ -180,19 +189,8 @@ const CacheMonitorPage: React.FC = () => {
           <Space>
             <Button
               onClick={() => {
-                // 刷新已清空表格与游标——"空表"对用户无法与"数据丢了"区分，因此连同
-                // 首页一起按当前输入框的词重扫（连接失败则只刷新概览，红色告警自会说明）
-                setKeys([]);
-                setCursor(0);
-                void loadInfo().then((loaded) => {
-                  if (loaded) {
-                    scanFirstPage(
-                      prefixInput ?? loaded.keyPrefix ?? 'c:',
-                      loaded.backend,
-                      loaded.connectionError,
-                    );
-                  }
-                });
+                // 按当前输入框的词重扫（连接失败则只刷新概览，红色告警自会说明）
+                rescan(prefixInput);
               }}
             >
               刷新
@@ -280,7 +278,9 @@ const CacheMonitorPage: React.FC = () => {
             />
             <Button
               type="primary"
-              disabled={!!redisDisabled}
+              // memory 后端或连接已失败都不可扫：后者的红色告警已说明状况，不白发注定
+              // 失败的请求——与 scanFirstPage 的闸门同一口径（此前按钮只看 redisDisabled）
+              disabled={!!redisDisabled || !!info?.connectionError}
               onClick={() => {
                 setActivePrefix(prefixInput || undefined);
                 setKeys([]);
@@ -350,7 +350,11 @@ const CacheMonitorPage: React.FC = () => {
                         );
                       } catch {
                         message.error(
-                          '删除失败（仅允许 ABP 缓存键：c: / t: 前缀或配置的 KeyPrefix 前缀）',
+                          `删除失败（仅允许 ABP 缓存键：c: / t: 结构前缀开头${
+                            info?.keyPrefix
+                              ? `；本应用键含 ${info.keyPrefix} 隔离前缀`
+                              : ''
+                          }）`,
                         );
                       }
                     }}

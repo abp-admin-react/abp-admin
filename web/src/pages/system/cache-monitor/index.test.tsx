@@ -71,6 +71,22 @@ describe('CacheMonitorPage', () => {
     });
   });
 
+  it('配置了隔离前缀时默认过滤词是 keyPrefix（89b0e9 的头号特性：默认只列本应用键）', async () => {
+    mockGetCacheMonitorInfo.mockResolvedValue({ ...redisInfo, keyPrefix: 'AbpAdmin:' });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(mockGetCacheKeys).toHaveBeenCalledTimes(1);
+    });
+    // 种子若退化为恒定 'c:'，共享 Redis 部署会默认列出别家应用的键（服务端守卫兜底
+    // 不返回，但口径本身必须钉住：默认只看本应用）
+    expect(mockGetCacheKeys).toHaveBeenCalledWith({
+      prefix: 'AbpAdmin:',
+      cursor: 0,
+    });
+  });
+
   it('后端为 memory 时不自动扫描', async () => {
     mockGetCacheMonitorInfo.mockResolvedValue({
       ...redisInfo,
