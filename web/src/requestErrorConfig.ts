@@ -100,7 +100,15 @@ export const errorConfig: RequestConfig = {
       }
       if (error.response) {
         if (error.response?.status === 404) {
-          // 404 是业务语义（数据不存在/端点未覆盖），页面层已 catch 降级——不弹全局错误
+          // 404 是业务语义（数据不存在/端点未覆盖），页面层已 catch 降级——不弹全局错误。
+          // 开发期留一条 console 痕迹：静默是全局面板级策略，端点拼写错/契约漂移时
+          // 没有任何线索会显著拖慢排查（生产不输出）
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(
+              '[request] 404 silenced (page layer should catch):',
+              error.config?.url,
+            );
+          }
           return;
         }
         notifyError({

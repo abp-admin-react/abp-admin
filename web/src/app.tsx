@@ -44,10 +44,8 @@ const publicPaths = [loginPath, '/user/callback', '/tenant-not-found'];
 /** 需要登录但不需要检查密码过期的路径 */
 const skipPasswordCheckPaths = [forceChangePasswordPath];
 
-/** 判定后端下发的菜单 path 是否为站内路由形态。
- * 服务端菜单管理已拒绝外链，此处是渲染前的第二道防线：历史脏数据或绕过校验的行直接
- * 丢弃，绝不让外链进入可信侧边栏。实现收口在 utils/redirect（与登录回跳同一套
- * 规范化 + 同源判定——第二道防线不弱于第一道）。 */
+/** 菜单 path 守卫（isSafeMenuPath）收口在 utils/redirect：与登录回跳同一套
+ * 规范化 + 同源判定，第二道防线不弱于第一道。 */
 
 /** 后端动态菜单 → ProLayout MenuDataItem。
  * locale 键由本函数沿树拼完整链（menu.a.b.c）：节点因隐藏祖先上浮后树层级变化，

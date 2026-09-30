@@ -30,5 +30,6 @@ openapi 生成器已退役，前端 API 层不再有「生成物」，全部由 
 - URL 一律写**相对路径**（`/api/app/...`）、无 baseURL——开发请求走 umi 代理（`config/proxy.ts`），不要写死后端地址；**查询参数用 PascalCase**（`SkipCount` / `MaxResultCount`，ABP 模型绑定默认口径），camelCase→PascalCase 适配收在 `src/abp` 函数内，页面不感知。
 - **`src/services/abpadmin/` 是历史 openapi 生成物，已冻结**：不再新增、不再重新生成、页面不要再新接入。仅剩存量域仍在用（language/languageText、myNotification/notificationManagement、scheduledJob、textTemplate、virtualFileExplorer、dataScopeDemo，以及 `src/abp/settingUi.ts`、`dataDictionary.ts`、`proModules.ts` 的委托目标 auditLog/backgroundJob 等）——**哪个域要改动时，顺手整域迁入 `src/abp` 并删除对应生成文件**，逐步清空。
 - `src/services/` 下 ant-design-pro / abp-admin-web 两套脚手架演示残留已随唯一消费者（table-list 演示页）一并删除，勿再引入。
+- **404 全局静默契约**：`requestErrorConfig` 对 404 不弹全局错误（业务语义：不存在/未配置）。页面层读端点存在该语义时**必须**用 `isNotFound` 分流降级（对照实现 `src/abp/dataScope.ts`），否则用户点了个"没反应"；其余错误码照常全局提示。全栈契约地图见仓库根 `docs/framework-contracts.md`。
 - 契约漂移以**后端 Contracts 为事实源**：改后端接口时同步改 `src/abp` 对应函数；`pnpm tsc` 只兜底类型层面的不一致，不再承担生成物漂移检测（该机制随生成器退役）。
 - **可空性镜像规则（机器强制）**：镜像字段可空性必须逐字段对齐后端 C#——`T?` / 可空引用 ⇔ TS 的 `T | null`，非空 ⇔ 不加 `| null`。任何生成器都不可信（umi `nullable` 是「可选即 null」的粗开关；ABP 官方 Angular 代理也丢可空性，见 abp#22798/#25176）。后端 `FrontendContractSnapshotTests`（Contracts/Snapshots/frontend-contract-shapes.json）会把前端消费的 DTO 形状反射为快照：改后端契约该测试必红，此时同步镜像后用 `FRONTEND_CONTRACT_SNAPSHOT_UPDATE=1` 重跑刷新快照、与镜像变更同提交。前端新消费一个 DTO 时，把类型加进该测试的 `SeedTypes`（嵌套 DTO 自动递归）。

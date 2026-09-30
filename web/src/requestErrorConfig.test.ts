@@ -2,7 +2,7 @@ import { message, notification } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAccessToken } from './abp/oidc';
 import { getAbpHeaders } from './abp/tenant';
-import { errorConfig, setNotificationInstance } from './requestErrorConfig';
+import { errorConfig, isNotFound, setNotificationInstance } from './requestErrorConfig';
 
 const mockHistoryReplace = vi.hoisted(() => vi.fn());
 
@@ -283,5 +283,30 @@ describe('requestErrorConfig', () => {
       expect(result.url).toBe('https://api.example.com/users');
       expect(result.headers.Authorization).toBeUndefined();
     });
+  });
+});
+
+describe('isNotFound', () => {
+  // 404 全局静默的配套判别器：页面层靠它区分「未配置/不存在」与「读失败」——
+  // 形态漂移（如 umi 错误结构变化）会让 dataScope 一类分流静默误判
+
+  it('识别 response.status 为 404 的错误', () => {
+    const error = Object.assign(new Error('HTTP 404'), {
+      response: { status: 404 },
+    });
+    expect(isNotFound(error)).toBe(true);
+  });
+
+  it.each([403, 500])('非 404 状态码返回 false（%d）', (status) => {
+    const error = Object.assign(new Error(`HTTP ${status}`), {
+      response: { status },
+    });
+    expect(isNotFound(error)).toBe(false);
+  });
+
+  it('无 response 形态（网络层错误/null）返回 false 而不是抛错', () => {
+    expect(isNotFound(new Error('Network Error'))).toBe(false);
+    expect(isNotFound(null)).toBe(false);
+    expect(isNotFound(undefined)).toBe(false);
   });
 });

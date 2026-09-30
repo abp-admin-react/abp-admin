@@ -13,7 +13,7 @@ import {
   isSubdomainTenantMode,
   setStoredTenant,
 } from '@/abp/tenant';
-import { storeIntendedRedirect } from '@/utils/redirect';
+import { DEFAULT_LANDING_PATH, storeIntendedRedirect } from '@/utils/redirect';
 import Settings from '../../../../config/defaultSettings';
 
 const useStyles = createStyles(({ token }) => ({
@@ -96,7 +96,7 @@ const Login: React.FC = () => {
   ) => {
     await applyTokensForNewSession(result);
     message.success('登录成功，正在进入系统…');
-    window.location.replace('/administration');
+    window.location.replace(DEFAULT_LANDING_PATH);
   };
 
   const consumeMagicLink = async (
