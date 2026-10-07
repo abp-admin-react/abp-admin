@@ -1,60 +1,38 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Data;
-using AbpAdmin.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Volo.Abp.DependencyInjection;
 
 namespace AbpAdmin.Biz.Template.Data;
 
 /// <summary>
-/// 框架迁移扫描约定点。按 <c>Database:Provider</c> 执行本程序集里的 SQL 脚本
-/// （<c>Sql/postgresql</c> 或 <c>Sql/sqlite</c>，经 <see cref="EmbeddedSqlScriptMigrator"/>：
-/// 每脚本一事务、History 记账、失败回滚为「未应用」），并在 <c>__BizTemplateMigrations</c> 记账。
-/// <see cref="HasPendingAsync"/> 供宿主启动检查：脚本是否都已记入 History 表。
+/// 框架迁移扫描约定点：执行本模块 DbContext 的 EF Core 迁移（Migrations/ 目录，
+/// 记账在 <c>__BizTemplate_EFMigrationsHistory</c>，与框架 <c>__EFMigrationsHistory</c> 两本账）。
+/// <see cref="HasPendingAsync"/> 供宿主启动检查：History 表与当前模型相比是否还有未应用迁移。
 /// DbContext 经容器解析（非构造注入），租户循环下的连接串切换照常生效。
 /// </summary>
 public class BizTemplateDbSchemaMigrator : IAbpAdminDbSchemaMigrator, ITransientDependency
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly IConfiguration _configuration;
-    private readonly ILogger<BizTemplateDbSchemaMigrator> _logger;
 
-    public BizTemplateDbSchemaMigrator(
-        IServiceProvider serviceProvider,
-        IConfiguration configuration,
-        ILogger<BizTemplateDbSchemaMigrator> logger)
+    public BizTemplateDbSchemaMigrator(IServiceProvider serviceProvider)
     {
         _serviceProvider = serviceProvider;
-        _configuration = configuration;
-        _logger = logger;
     }
 
     public async Task MigrateAsync()
     {
-        await EmbeddedSqlScriptMigrator.ApplyAsync(
-            _serviceProvider.GetRequiredService<BizTemplateDbContext>(),
-            GetScriptFolder(),
-            BizTemplateConsts.SchemaHistoryTable,
-            typeof(BizTemplateDbSchemaMigrator).Assembly,
-            _logger,
-            "BizTemplate 业务库");
+        await _serviceProvider.GetRequiredService<BizTemplateDbContext>()
+            .Database.MigrateAsync();
     }
 
     public async Task<bool> HasPendingAsync()
     {
-        return await EmbeddedSqlScriptMigrator.HasPendingAsync(
-            _serviceProvider.GetRequiredService<BizTemplateDbContext>(),
-            GetScriptFolder(),
-            BizTemplateConsts.SchemaHistoryTable,
-            typeof(BizTemplateDbSchemaMigrator).Assembly);
-    }
-
-    // 提供程序判定唯一入口：脚本目录名与 csproj 的 Sql\<目录> 嵌入约定绑定
-    private string GetScriptFolder()
-    {
-        return AbpAdminDatabaseProvider.GetScriptFolder(_configuration);
+        // 库不存在 / History 表缺失时会抛错，调用方（宿主启动检查）统一视为「需要迁移」
+        var dbContext = _serviceProvider.GetRequiredService<BizTemplateDbContext>();
+        return (await dbContext.Database.GetPendingMigrationsAsync()).Any();
     }
 }

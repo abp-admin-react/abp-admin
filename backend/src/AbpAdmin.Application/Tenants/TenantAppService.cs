@@ -47,7 +47,6 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
 {
     private readonly TenantConnectionStringProtector _connectionStringProtector;
     private readonly AbpDbConnectionOptions _dbConnectionOptions;
-    private readonly IConfiguration _configuration;
     private readonly TenantPackageManager _tenantPackageManager;
     private readonly MenuManager _menuManager;
     // 本类继承 ABP TenantManagementAppServiceBase，L 走 AbpTenantManagementResource；
@@ -62,7 +61,6 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
         ILocalEventBus localEventBus,
         TenantConnectionStringProtector connectionStringProtector,
         IOptions<AbpDbConnectionOptions> dbConnectionOptions,
-        IConfiguration configuration,
         TenantPackageManager tenantPackageManager,
         MenuManager menuManager,
         IStringLocalizer<AbpAdminResource> abpAdminLocalizer)
@@ -70,7 +68,6 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
     {
         _connectionStringProtector = connectionStringProtector;
         _dbConnectionOptions = dbConnectionOptions.Value;
-        _configuration = configuration;
         _tenantPackageManager = tenantPackageManager;
         _menuManager = menuManager;
         _abpAdminLocalizer = abpAdminLocalizer;
@@ -366,20 +363,11 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
     }
 
     /// <summary>
-    /// 按应用当前配置的数据库提供程序建连接（租户库与 host 同 DBMS）。
-    /// 提供程序判定与 AbpAdmin.EntityFrameworkCore 的 AbpAdminDatabaseProvider 同一配置键
-    /// （Database:Provider，默认 Sqlite）；Application 层不引用 EFCore 项目，这里直接读配置。
+    /// 建租户库连接（租户库与 host 同 DBMS：PostgreSQL）。
     /// </summary>
     protected virtual DbConnection CreateConnection(string connectionString)
     {
-        var provider = _configuration["Database:Provider"];
-        if (!string.IsNullOrWhiteSpace(provider) &&
-            provider.Trim().Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
-        {
-            return new NpgsqlConnection(connectionString);
-        }
-
-        return new SqliteConnection(connectionString);
+        return new NpgsqlConnection(connectionString);
     }
 
     /// <summary>

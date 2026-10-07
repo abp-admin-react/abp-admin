@@ -19,6 +19,6 @@ public class BizTemplateConsts
 
     public const int MaxDescriptionLength = 2048;
 
-    /// <summary>本模块脚本执行记录，与框架 EF 的 __EFMigrationsHistory 分开。</summary>
-    public const string SchemaHistoryTable = "__BizTemplateMigrations";
+    /// <summary>本模块 EF Core 迁移记账表，与框架 __EFMigrationsHistory 分开（两本账）。</summary>
+    public const string SchemaHistoryTable = "__BizTemplate_EFMigrationsHistory";
 }

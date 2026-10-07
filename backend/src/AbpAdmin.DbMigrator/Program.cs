@@ -70,13 +70,6 @@ class Program
             .ConfigureLogging((context, logging) => logging.ClearProviders())
             .ConfigureServices((hostContext, services) =>
             {
-                // 相对路径 SQLite 连接串按 cwd 解析，从仓库根运行会在仓库外静默建库；
-                // 以仓库根（AbpAdmin.slnx）为锚改写为绝对路径，须在模块初始化读取连接串之前
-                if (AbpAdminDbPathNormalizer.TryNormalize(hostContext.Configuration, out var dbPath))
-                {
-                    Log.Information("SQLite connection normalized to {DbPath}", dbPath);
-                }
-
                 services.AddHostedService<DbMigratorHostedService>();
             });
 }

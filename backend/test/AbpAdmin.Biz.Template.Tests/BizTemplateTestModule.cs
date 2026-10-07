@@ -51,6 +51,18 @@ public class BizTemplateTestModule : AbpModule
         // 内存 SQLite（每个测试实例独立建库，互不污染）
         context.Services.AddAlwaysDisableUnitOfWorkTransaction();
         ConfigureInMemorySqlite(context.Services);
+
+        // 模块侧为 BizTemplateDbContext 注册了上下文级 UseNpgsql（MigrationsHistoryTable 定制，
+        // 运行期 PG-only 语义）。AbpDbContextOptions 的同上下文 Actions 按注册顺序执行、
+        // provider 后注册者胜——本模块晚于业务模块初始化，这里补一条上下文级 UseSqlite 覆盖它，
+        // 否则种子阶段会用 SQLite 连接串建 Npgsql 连接（Couldn't set data source）
+        Configure<AbpDbContextOptions>(options =>
+        {
+            options.Configure<BizTemplateDbContext>(contextOptions =>
+            {
+                contextOptions.UseSqlite();
+            });
+        });
     }
 
     private void ConfigureInMemorySqlite(IServiceCollection services)

@@ -18,12 +18,12 @@ namespace AbpAdmin.Biz.Template;
 
 /// <summary>
 /// 自包含业务模块样板（一个工程，对齐 Admin.NET.Application 的摆放方式）：
-/// 实体/服务/权限/本地化/DbContext，以及 PostgreSQL、SQLite 两份 SQL 脚本都在本模块。
+/// 实体/服务/权限/本地化/DbContext，以及模块自己的 EF Core 迁移（Migrations/，记账表
+/// __BizTemplate_EFMigrationsHistory）都在本模块。
 /// 宿主接线是 csproj 引用 + 一行 DependsOn；DbMigrator 同样只引用本工程。
-/// 框架迁移循环与宿主启动待办检查会自动枚举模块的 IAbpAdminDbSchemaMigrator（MigrateAsync / HasPendingAsync），
-/// 按 Database:Provider 执行对应脚本。
+/// 框架迁移循环与宿主启动待办检查会自动枚举模块的 IAbpAdminDbSchemaMigrator（MigrateAsync / HasPendingAsync）。
 /// 新增业务：复制本工程改名。改名清单（全部词根一个不落，漏一处即静默冲突）：
-/// ① BizTemplate——模块/类/资源/SectionName/History 表 __BizTemplateMigrations；
+/// ① BizTemplate——模块/类/资源/SectionName/History 表 __BizTemplate_EFMigrationsHistory；
 /// ② Biz——表前缀（BizTemplateConsts.DbTablePrefix）；③ BizProject(s)——实体/表名/本地化键 Menu:BizProjects。
 ///
 /// 模块配置按三层落位（对应实现都带注释，照着扩）：
@@ -85,10 +85,23 @@ public class AbpAdminBizTemplateModule : AbpModule
             options.AddDefaultRepositories(includeAllEntities: true);
         });
 
+        // 独立 History 表记账：本模块迁移记在 __BizTemplate_EFMigrationsHistory（BizTemplateConsts），
+        // 与框架 __EFMigrationsHistory 两本账。按上下文（而非全局）配置，不影响框架上下文；
+        // 连接串沿用框架 AbpDbContextOptions 的解析（同库多上下文，Default 连接串）。
+        Configure<AbpDbContextOptions>(options =>
+        {
+            options.Configure<BizTemplateDbContext>(contextOptions =>
+            {
+                contextOptions.UseNpgsql(npgsql =>
+                {
+                    npgsql.MigrationsHistoryTable(BizTemplateConsts.SchemaHistoryTable);
+                });
+            });
+        });
+
         // 显式注册迁移器：框架迁移循环按 IAbpAdminDbSchemaMigrator 接口枚举。
         // 不依赖约定暴露（ITransientDependency 的接口自动暴露在跨程序集场景下不保证），
         // 显式一行换来确定被扫到——这是模块接线契约的一部分。
-        // 提供程序沿用框架 AbpDbContextOptions 的 Database:Provider，本模块不再单独指定迁移程序集。
         context.Services.AddTransient<IAbpAdminDbSchemaMigrator, BizTemplateDbSchemaMigrator>();
 
         // 模块服务自动暴露为 REST API（/api/app/biz-project）

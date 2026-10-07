@@ -1,8 +1,6 @@
 using System;
-using System.IO;
 using System.Threading.Tasks;
 using AbpAdmin.Data;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,12 +10,11 @@ using Volo.Abp.DependencyInjection;
 namespace AbpAdmin.EntityFrameworkCore;
 
 /// <summary>
-/// <see cref="ITenantDatabaseCreator"/> 的实现：按 Database:Provider（AbpAdminDatabaseProvider）
-/// 建独立租户库，租户库与 host 同 DBMS（连接串管理界面的语义约定）。
-/// - PostgreSql：连维护库 postgres 查 pg_database，缺失则 CREATE DATABASE；
-/// - Sqlite：确保文件父目录存在，开/关一次连接创建空库文件（空文件由迁移器补 schema）；
-/// - 其余 provider 抛 NotSupportedException（与 AbpAdminDatabaseProvider 的支持面一致）。
-/// 日志契约：新建库/文件记 Information（带库名/路径，不含凭据）；已存在走 ensure 常态分支
+/// <see cref="ITenantDatabaseCreator"/> 的实现：建独立租户库（PostgreSQL），
+/// 租户库与 host 同 DBMS（连接串管理界面的语义约定）。
+/// 连维护库 postgres 查 pg_database，缺失则 CREATE DATABASE；schema 由
+/// <see cref="IAbpAdminDbSchemaMigrator"/> 的 EF Core 迁移补齐。
+/// 日志契约：新建库记 Information（带库名，不含凭据）；已存在走 ensure 常态分支
 /// 记 Debug——上游 handler 的「Ensuring... / ensured and migrated」配这里的明细定位实际动作。
 /// </summary>
 public class TenantDatabaseCreator : ITenantDatabaseCreator, ITransientDependency
@@ -34,21 +31,7 @@ public class TenantDatabaseCreator : ITenantDatabaseCreator, ITransientDependenc
 
     public async Task CreateIfNotExistsAsync(string connectionString)
     {
-        if (AbpAdminDatabaseProvider.IsPostgreSql(_configuration))
-        {
-            await EnsurePostgreSqlDatabaseAsync(connectionString);
-            return;
-        }
-
-        if (AbpAdminDatabaseProvider.Get(_configuration)
-                .Equals(AbpAdminDatabaseProvider.Sqlite, StringComparison.OrdinalIgnoreCase))
-        {
-            EnsureSqliteDatabase(connectionString);
-            return;
-        }
-
-        throw new NotSupportedException(
-            $"Runtime tenant database creation does not support provider '{AbpAdminDatabaseProvider.Get(_configuration)}'.");
+        await EnsurePostgreSqlDatabaseAsync(connectionString);
     }
 
     private async Task EnsurePostgreSqlDatabaseAsync(string connectionString)
@@ -83,34 +66,5 @@ public class TenantDatabaseCreator : ITenantDatabaseCreator, ITransientDependenc
         await createCommand.ExecuteNonQueryAsync();
 
         Logger.LogInformation("Tenant database {DatabaseName} created.", databaseName);
-    }
-
-    private void EnsureSqliteDatabase(string connectionString)
-    {
-        var dataSource = new SqliteConnectionStringBuilder(connectionString).DataSource;
-        if (string.IsNullOrWhiteSpace(dataSource))
-        {
-            throw new ArgumentException("SQLite tenant connection string is missing 'Data Source'.");
-        }
-
-        var fullPath = Path.GetFullPath(dataSource);
-        var directory = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        if (File.Exists(fullPath))
-        {
-            // Debug：ensure 语义下的常态分支（重复保存/重试）
-            Logger.LogDebug("SQLite tenant database file {Path} already exists, skipping creation.", fullPath);
-            return;
-        }
-
-        // Microsoft.Data.Sqlite 在首次打开连接时创建空库文件；schema 由后续建表脚本迁移器填充
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
-
-        Logger.LogInformation("SQLite tenant database file {Path} created (empty; schema comes from the SQL script migrators).", fullPath);
     }
 }
