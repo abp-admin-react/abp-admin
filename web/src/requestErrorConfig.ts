@@ -1,9 +1,10 @@
 import type { RequestOptions } from '@@/plugin-request/request';
 import type { RequestConfig } from '@umijs/max';
-import { getIntl, history } from '@umijs/max';
+import { getIntl, getLocale, history } from '@umijs/max';
 import { message, notification } from 'antd';
 import { getAccessToken } from './abp/oidc';
 import { getAbpHeaders } from './abp/tenant';
+import { toAbpCulture } from './abp/culture';
 import { formatRetryAfter } from './utils/format';
 
 type AbpError = {
@@ -139,6 +140,11 @@ export const errorConfig: RequestConfig = {
       } as Record<string, string>;
       if (token) {
         headers.Authorization = `Bearer ${token}`;
+      }
+      // ABP Angular 同款做法：SPA 语言即事实源，每请求经 Accept-Language 传给后端，
+      // 后端错误消息与前端 UI 同语言（见 abp/culture.ts）。
+      if (typeof document !== 'undefined') {
+        headers['Accept-Language'] = toAbpCulture(getLocale());
       }
       return {
         ...config,

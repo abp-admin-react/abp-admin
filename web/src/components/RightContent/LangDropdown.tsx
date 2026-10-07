@@ -5,6 +5,7 @@ import { Button } from 'antd';
 import { useMemo } from 'react';
 import HeaderDropdown from '../HeaderDropdown';
 import useHeaderActionStyles from './style';
+import { syncCultureCookie } from '@/abp/culture';
 
 const localeLabelMap: Record<string, { emoji: string; label: string }> = {
   'zh-CN': { emoji: '🇨🇳', label: '简体中文' },
@@ -19,7 +20,11 @@ const localeLabelMap: Record<string, { emoji: string; label: string }> = {
 
 const onLangClick: MenuProps['onClick'] = ({ key }) => {
   if (key.startsWith('lang-')) {
-    setLocale(key.replace('lang-', ''), false);
+    const locale = key.replace('lang-', '');
+    setLocale(locale, false);
+    // 同步 ABP culture cookie：后端 Razor 页（登录页）与 API 的 cookie provider
+    // 都读它，不写的话后端永远停在旧语言（cookie 优先级高于 Accept-Language 头）。
+    syncCultureCookie(locale);
   }
 };
 
