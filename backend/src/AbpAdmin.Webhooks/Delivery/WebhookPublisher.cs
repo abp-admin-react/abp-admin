@@ -98,7 +98,6 @@ public class WebhookPublisher : IWebhookPublisher, ITransientDependency
     public virtual async Task PublishAsync(string eventName, object? data)
     {
         var occurredAt = _clock.Now;
-        var now = occurredAt;
 
         // 订阅筛选在数据库侧：事件名命中 + 订阅活跃
         var eventQueryable = await _subscriptionEventRepository.GetQueryableAsync();
@@ -125,7 +124,7 @@ public class WebhookPublisher : IWebhookPublisher, ITransientDependency
                 subscriptionId,
                 eventName,
                 payload,
-                now,
+                occurredAt,
                 tenantId: _currentTenant.Id);
             await _sendRecordRepository.InsertAsync(sendRecord);
 

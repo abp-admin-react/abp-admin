@@ -13,7 +13,6 @@
     "Webhooks:SubscriptionNotFound": "Webhook 订阅 {0} 不存在",
     "Webhooks:SendRecordNotFound": "Webhook 发送记录 {0} 不存在",
     "Webhooks:InvalidWebhookUri": "Webhook 地址必须是合法的 http(s) 绝对 URL",
-    "Webhooks:DuplicateEventName": "事件名 {0} 在订阅中重复",
-    "Webhooks:SubscriptionInactive": "Webhook 订阅 {0} 已暂停，跳过投递"
+    "Webhooks:DuplicateEventName": "事件名 {0} 在订阅中重复"
   }
 }

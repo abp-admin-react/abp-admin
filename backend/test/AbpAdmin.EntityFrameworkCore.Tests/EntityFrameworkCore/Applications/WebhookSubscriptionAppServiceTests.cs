@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using AbpAdmin;
 using AbpAdmin.Webhooks;
 using Shouldly;
+using Volo.Abp;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Modularity;
 using Xunit;
@@ -71,7 +72,8 @@ public abstract class WebhookSubscriptionAppServiceTests<TStartupModule> : AbpAd
     [Fact]
     public async Task Create_Should_Reject_Duplicate_Events()
     {
-        var exception = await Should.ThrowAsync<ArgumentException>(() =>
+        // 应用服务层前置转换为用户可见 400（实体层保留 ArgumentException 编程契约守卫）
+        var exception = await Should.ThrowAsync<UserFriendlyException>(() =>
             _subscriptionAppService.CreateAsync(new CreateWebhookSubscriptionInput
             {
                 WebhookUri = "https://example.com/hook",

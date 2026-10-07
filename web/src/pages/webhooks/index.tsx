@@ -18,7 +18,7 @@ import {
   updateWebhookSubscription,
 } from '@/abp/webhooks';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
-import { firstFilterValue } from '@/components/tableColumnFilters';
+import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 
 /**
  * Webhook 管理：Tab1 订阅 CRUD（密钥写后不回显，留空=保持）；
@@ -95,7 +95,7 @@ const WebhooksPage: React.FC = () => {
   };
 
   const subscriptionColumns: ProColumns<WebhookSubscription>[] = [
-    { title: '地址', dataIndex: 'webhookUri', ellipsis: true, copyable: true },
+    { title: '地址', dataIndex: 'webhookUri', ellipsis: true, copyable: true, ...textFilter('地址') },
     {
       title: '事件',
       dataIndex: 'events',
@@ -141,7 +141,7 @@ const WebhooksPage: React.FC = () => {
   ];
 
   const recordColumns: ProColumns<WebhookSendRecord>[] = [
-    { title: '事件', dataIndex: 'eventName', width: 180 },
+    { title: '事件', dataIndex: 'eventName', width: 180, ...textFilter('事件名') },
     { title: '负载', dataIndex: 'payload', ellipsis: true, copyable: true },
     {
       title: '结果',

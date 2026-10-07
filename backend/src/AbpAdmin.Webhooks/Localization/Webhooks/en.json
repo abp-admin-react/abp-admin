@@ -13,7 +13,6 @@
     "Webhooks:SubscriptionNotFound": "Webhook subscription {0} does not exist",
     "Webhooks:SendRecordNotFound": "Webhook send record {0} does not exist",
     "Webhooks:InvalidWebhookUri": "Webhook URI must be a valid absolute http(s) URL",
-    "Webhooks:DuplicateEventName": "Event name {0} is duplicated in the subscription",
-    "Webhooks:SubscriptionInactive": "Webhook subscription {0} is paused, delivery skipped"
+    "Webhooks:DuplicateEventName": "Event name {0} is duplicated in the subscription"
   }
 }

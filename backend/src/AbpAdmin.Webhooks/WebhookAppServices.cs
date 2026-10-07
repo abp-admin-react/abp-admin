@@ -26,6 +26,8 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
     {
         _subscriptionRepository = subscriptionRepository;
         _eventRepository = eventRepository;
+        // 模块资源：L["Webhooks:*"]（URI 校验/重名事件等用户可见文案）
+        LocalizationResource = typeof(Localization.WebhooksResource);
     }
 
     public virtual async Task<PagedResultDto<WebhookSubscriptionDto>> GetListAsync(GetWebhookSubscriptionListInput input)
@@ -71,6 +73,9 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
     [Authorize(WebhooksPermissions.Subscriptions.Create)]
     public virtual async Task<WebhookSubscriptionDto> CreateAsync(CreateWebhookSubscriptionInput input)
     {
+        EnsureEventsDistinct(input.Events);
+        EnsureHttpsOrHttpUri(input.WebhookUri);
+
         var subscription = new WebhookSubscription(
             GuidGenerator.Create(),
             input.WebhookUri,
@@ -87,6 +92,9 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
     [Authorize(WebhooksPermissions.Subscriptions.Update)]
     public virtual async Task<WebhookSubscriptionDto> UpdateAsync(Guid id, UpdateWebhookSubscriptionInput input)
     {
+        EnsureEventsDistinct(input.Events);
+        EnsureHttpsOrHttpUri(input.WebhookUri);
+
         // SetEvents 做差量增删，必须带出 Events 导航（默认仓储不带 Include）
         var queryable = await _subscriptionRepository.WithDetailsAsync(s => s.Events);
         var subscription = await AsyncExecuter.FirstOrDefaultAsync(queryable.Where(s => s.Id == id))
@@ -123,6 +131,26 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
             IsActive = subscription.IsActive,
             Events = events,
         };
+    }
+
+    /// <summary>重名事件在实体层是 ArgumentException（编程契约），在此前置转换为用户可见 400。</summary>
+    private void EnsureEventsDistinct(List<string> events)
+    {
+        var duplicated = events.GroupBy(e => e).FirstOrDefault(g => g.Count() > 1);
+        if (duplicated != null)
+        {
+            throw new UserFriendlyException(L["Webhooks:DuplicateEventName", duplicated.Key]);
+        }
+    }
+
+    /// <summary>URI 必须是绝对 http(s) URL（交付作业用 HttpClient POST，相对串/其他 scheme 无意义）。</summary>
+    private void EnsureHttpsOrHttpUri(string uri)
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+            || (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new UserFriendlyException(L["Webhooks:InvalidWebhookUri", uri]);
+        }
     }
 }
 

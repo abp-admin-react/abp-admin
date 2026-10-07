@@ -18,8 +18,11 @@ namespace AbpAdmin.Webhooks.Delivery;
 /// <summary>
 /// 投递作业：以订阅配置的密钥做 HMAC-SHA256 签名（对 "{timestampSeconds}.{body}"），
 /// 头部 X-AbpAdmin-Event / X-AbpAdmin-Timestamp / X-AbpAdmin-Signature；收端按同一算法验签即防伪造。
-/// 失败原地重试（指数退避 2s/4s），终态写回 SendRecord（成功/最终失败 + 尝试次数 + 响应摘要）。
-/// UoW：作业自身开环境 UoW（后台作业无请求作用域），SendRecord 写回走仓储默认行为。
+/// 失败原地重试（退避 2s/4s，共 3 次尝试，见 <see cref="RetryBackoffs"/>），终态写回
+/// SendRecord（成功/最终失败 + 尝试次数 + 响应摘要）。
+/// UoW：终态写回走 <see cref="SaveResultAsync"/> 的独立新 UoW（requiresNew）——终态必须落库，
+/// 不与作业里其他潜在写操作共生死；除此之外本作业不开环境 UoW。
+/// 日志语义：还会重试的失败=Warning（带 retrying）；最后一次失败=Error；订阅已删/暂停=静默落失败终态。
 /// </summary>
 public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, ITransientDependency
 {
@@ -91,10 +94,19 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
                     }
                     catch (Exception ex)
                     {
-                        // 网络层失败也计入尝试：重试耗尽后走"无响应"终态，不让异常逃出作业
-                        // （ABP 作业层还会再重试整个作业，终态记录会被覆盖一次，语义仍收敛）
-                        Logger.LogWarning(ex, "Webhook delivery attempt {Attempt} failed for {Uri}.",
-                            attempts, subscription.WebhookUri);
+                        // 网络层失败也计入尝试：重试耗尽后走"无响应"终态，不让异常逃出作业。
+                        // 日志级别对齐语义：还会重试的失败=Warning；最后一次失败=Error（终态已注定）
+                        var isFinalAttempt = attempts >= RetryBackoffs.Length + 1;
+                        if (isFinalAttempt)
+                        {
+                            Logger.LogError(ex, "Webhook delivery failed after {Attempt} attempts for {Uri}.",
+                                attempts, subscription.WebhookUri);
+                        }
+                        else
+                        {
+                            Logger.LogWarning(ex, "Webhook delivery attempt {Attempt} failed for {Uri}, retrying.",
+                                attempts, subscription.WebhookUri);
+                        }
                     }
 
                     if (attempts < RetryBackoffs.Length + 1)
