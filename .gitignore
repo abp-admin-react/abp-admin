@@ -321,3 +321,6 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# ip2region 离线数据文件（约 48MB 二进制，按 etc/ip2region/README.md 手动下载，数据会过期勿入库）
+backend/etc/ip2region/*.xdb
