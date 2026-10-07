@@ -58,6 +58,7 @@
         "AbpAdmin:InvalidSearchField": "字段 {0} 不在动态搜索可用字段白名单内",
         "AbpAdmin:InvalidSearchComparison": "字段 {0} 不支持操作符 {1}",
         "AbpAdmin:InvalidSearchCondition": "搜索条件非法：{0}",
+        "AbpAdmin:TooManySearchConditions": "搜索条件过多：{0}，上限 {1}",
         "AbpAdmin:EntityRestoreEntityTypeNotAllowed": "实体类型 {0} 不在允许回滚的清单内",
         "AbpAdmin:EntityRestoreSkippedConcurrencyStamp": "并发戳由并发控制管理，不参与回滚",
         "AbpAdmin:EntityRestoreSkippedPropertyMissing": "实体上不存在该属性（影子属性或属性已删除）",

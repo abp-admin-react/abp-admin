@@ -106,6 +106,19 @@ public abstract class IdentityUserSearchAppServiceTests<TStartupModule> : AbpAdm
     }
 
     [Fact]
+    public async Task Search_Should_Reject_Too_Many_Conditions()
+    {
+        var conditions = Enumerable.Range(0, 33)
+            .Select(i => new DynamicCondition { Field = "UserName", Comparison = DynamicComparison.Contains, Value = i.ToString() })
+            .ToList();
+
+        var exception = await Should.ThrowAsync<AbpValidationException>(() =>
+            _searchAppService.SearchAsync(new IdentityUserDynamicSearchInput { Conditions = conditions }));
+
+        exception.Message.ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact]
     public async Task Search_Should_Reject_Field_Outside_Whitelist()
     {
         var exception = await Should.ThrowAsync<UserFriendlyException>(() =>

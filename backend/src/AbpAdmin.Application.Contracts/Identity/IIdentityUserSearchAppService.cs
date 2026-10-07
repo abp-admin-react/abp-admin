@@ -29,6 +29,11 @@ public interface IIdentityUserSearchAppService : IApplicationService
 /// <summary>动态搜索请求：条件组 + 分页 + 排序（白名单校验）。</summary>
 public class IdentityUserDynamicSearchInput : PagedResultRequestDto
 {
+    /// <summary>
+    /// 条件组上限 32（防条件爆炸拖慢表达式构建与 SQL 长度）。
+    /// 注意：DataAnnotations 的 MaxLength 对 List 不生效，该上限由
+    /// <c>SearchAsync</c> 显式校验（AbpValidationException → 400），此处仅作文档契约。
+    /// </summary>
     [MaxLength(32)]
     public List<DynamicCondition> Conditions { get; set; } = new();
 

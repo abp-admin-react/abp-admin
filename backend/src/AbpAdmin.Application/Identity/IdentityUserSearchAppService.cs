@@ -96,6 +96,9 @@ public class IdentityUserSearchAppService : AbpAdminAppService, IIdentityUserSea
         },
     };
 
+    /// <summary>条件组数量上限（契约出处 IIdentityUserDynamicSearchInput.Conditions 注释）。</summary>
+    private const int MaxConditions = 32;
+
     private readonly IRepository<IdentityUser, Guid> _userRepository;
 
     public IdentityUserSearchAppService(IRepository<IdentityUser, Guid> userRepository)
@@ -118,6 +121,13 @@ public class IdentityUserSearchAppService : AbpAdminAppService, IIdentityUserSea
     public virtual async Task<PagedResultDto<IdentityUserSearchItemDto>> SearchAsync(
         IdentityUserDynamicSearchInput input)
     {
+        // 条件数上限：DataAnnotations MaxLength 对 List 不生效，这里显式执行（契约值 32）
+        if (input.Conditions.Count > MaxConditions)
+        {
+            throw new AbpValidationException(
+                L["AbpAdmin:TooManySearchConditions", input.Conditions.Count, MaxConditions]);
+        }
+
         // 字段白名单 + 每字段操作符集校验（先于表达式构建，非法组合转 400 而非 500）
         var fieldMap = AvailableFields.ToDictionary(f => f.Field);
         foreach (var condition in input.Conditions)
