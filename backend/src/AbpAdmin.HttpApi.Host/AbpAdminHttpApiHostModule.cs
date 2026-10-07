@@ -112,6 +112,10 @@ namespace AbpAdmin;
     // 继续走 EF 存储，BackgroundJobAppService 与 AbpBackgroundJobs 表不受影响。
     // 放 Host 而不是 Domain：worker 调度器是宿主级基础设施，DbMigrator 不应起调度器。
     typeof(AbpBackgroundWorkersQuartzModule),
+    // Redis 分支把 MedallionAbpDistributedLock（本程序集类型）注册进容器：不加 DependsOn 会
+    // 触发 ABP 的 orphaned-module 警告（程序集有服务注册但模块不在链上，属性注入不生效）。
+    // 模块体为空、无副作用，仅把隐式依赖显式化；IDistributedLockProvider 仍由下方 Redis 分支注册。
+    typeof(AbpDistributedLockingModule),
     // T5：ES/ClickHouse 辅助存储（宿主级基础设施；模块内部按配置开关，未启用即无副作用）
     typeof(AbpAdminElasticsearchModule),
     typeof(AbpAdminClickHouseModule)

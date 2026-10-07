@@ -7,8 +7,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Shouldly;
-using Volo.Abp.Autofac;
-using Volo.Abp.DistributedLocking;
 using Volo.Abp.Logging;
 using Xunit;
 
@@ -70,31 +68,17 @@ public class HostInitializationLogTests
     /// </summary>
     /// <remarks>
     /// Turning Redis on registers <c>MedallionAbpDistributedLock</c>, which lives in the
-    /// Volo.Abp.DistributedLocking assembly, and <c>WarnForOrphanedAbpModules</c> then notices that
-    /// the assembly ships an ABP module that is not in the host's [DependsOn] chain. With Redis off
-    /// nothing from that assembly is registered, so the warning does not exist; the distributed
-    /// locking types that are always present come from Volo.Abp.DistributedLocking.Abstractions,
-    /// whose module is in the chain.
+    /// Volo.Abp.DistributedLocking assembly. It used to trip <c>WarnForOrphanedAbpModules</c>
+    /// because the module was not in the host's [DependsOn] chain — a consciously deferred T3.3
+    /// to-do, pinned here as an accepted warning. The dependency is now declared
+    /// (<c>typeof(AbpDistributedLockingModule)</c> on <c>AbpAdminHttpApiHostModule</c>), so the
+    /// warning is gone; this list is identical to the Redis-disabled one, which is itself the
+    /// regression guard: if a future change re-introduces an orphaned module in the Redis branch,
+    /// the unexpected-warning half of the comparison turns red again.
     /// </remarks>
     private static readonly IReadOnlyList<ExpectedInitializationWarning> ExpectedWarningsWithRedisEnabled =
     [
-        ExpectedT35NullEmailSenderWarning.Entry,
-        new(
-            CategoryName: typeof(AbpAutofacModule).FullName!,
-            Level: LogLevel.Warning,
-            MessageMustContain: typeof(AbpDistributedLockingModule).FullName!,
-            Reason:
-            "Known and consciously deferred. Property injection into types from this assembly will " +
-            "not work, but the host resolves IAbpDistributedLock through the abstractions module " +
-            "and does not depend on property injection into Medallion-backed types today, so the " +
-            "[DependsOn] chain is being left alone until the work that actually uses distributed " +
-            "locking lands. Recorded as a T3.3 to-do.",
-            RevisitWhen:
-            "T3.3 (Quartz scheduling with distributed locks) starts, or anything begins resolving " +
-            "types out of Volo.Abp.DistributedLocking directly. The fix is one line: add " +
-            "typeof(AbpDistributedLockingModule) to AbpAdminHttpApiHostModule's [DependsOn]. Doing " +
-            "that makes the warning disappear, which fails this test until the entry is deleted, " +
-            "and deleting it is the last step of the fix.")
+        ExpectedT35NullEmailSenderWarning.Entry
     ];
 
     /// <summary>
@@ -123,11 +107,10 @@ public class HostInitializationLogTests
     /// <remarks>
     /// "No warnings" is trivially true of an empty list, and an empty list is the shape this test
     /// takes if ABP changes where the buffer lives, if <c>GetAllEntries</c> is read after something
-    /// has already drained it, or if the container is never built. Measured at 140 with Redis off
-    /// and 141 with it on, all but the one warning being Debug entries from
-    /// <c>Volo.Abp.AbpApplicationBase</c>. The floor sits far below that because the exact number
-    /// moves with every module added or removed and is not itself worth guarding; there is no
-    /// ceiling for the same reason.
+    /// has already drained it, or if the container is never built. The entry count sits in the low
+    /// hundreds (every module in the [DependsOn] chain logs several Debug entries of its own), far
+    /// above the floor below; the exact figure moves with every module added or removed and is not
+    /// itself worth guarding, so no ceiling is asserted for the same reason.
     /// </remarks>
     private const int MinimumInitLogEntries = 50;
 
