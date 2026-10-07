@@ -11,8 +11,9 @@ namespace AbpAdmin.IpRegions;
 
 /// <summary>
 /// IpRegionSearcher 双栈真实查询测试（IP2Region.Net Searcher + 真实 xdb 数据文件）。
-/// xdb 数据文件不随仓库提交（见 backend/etc/ip2region/README.md），文件缺失时用例直接返回——
-/// CI 与未下载数据的机器上不应红；本地下载后即为真数据回归。
+/// xdb 数据文件随仓库提交（基础数据，见 backend/etc/ip2region/README.md），正常检出即可跑；
+/// 找不到文件时（如文件被误删）用例直接返回而非报错——归属地是展示增强，不该让测试基础设施
+/// 替文件看门。
 /// </summary>
 public class IpRegionSearcherFileTests
 {

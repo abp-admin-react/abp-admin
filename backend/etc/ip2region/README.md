@@ -4,14 +4,15 @@
 
 ## 启用步骤
 
-1. 下载 xdb 数据文件。上游 2025-09 起 data 目录拆分为 `ip2region_v4.xdb`（IPv4，约 11 MB）
-   和 `ip2region_v6.xdb`（IPv6，约 37 MB）两份，旧的合并版 `ip2region.xdb` 已不再发布：
+1. 数据文件已随仓库提交（基础数据，克隆即用）：`backend/etc/ip2region/ip2region_v4.xdb`（IPv4，
+   约 11 MB）与 `ip2region_v6.xdb`（IPv6，约 37 MB）。上游 2025-09 起 data 目录拆分为这两份，
+   旧的合并版 `ip2region.xdb` 已不再发布。
+
+2. 数据会过期；需要更新时从上游重新下载并同名覆盖、随代码一起提交：
 
    - IPv4: <https://github.com/lionsoul2014/ip2region/blob/master/data/ip2region_v4.xdb>
    - IPv6: <https://github.com/lionsoul2014/ip2region/blob/master/data/ip2region_v6.xdb>
    - Gitee 镜像: <https://gitee.com/lionsoul/ip2region/blob/master/data/>
-
-2. 按原名放置到本目录（`backend/etc/ip2region/ip2region_v4.xdb`、`ip2region_v6.xdb`）。
 
 3. 配置 `IpRegion:DbPath`（IPv4）与 `IpRegion:DbPathV6`（IPv6）（Host `appsettings.json` 默认已指向
    `../../etc/ip2region/` 下两个文件，相对路径按应用 ContentRoot 解析；生产部署请按实际部署位置
@@ -29,4 +30,5 @@
 - 上游新数据的语言为混合制：中国 IP 返回中文（`中国|江苏省|南京市|0|CN`）、海外 IP 返回
   英文（`United States|California|0|Google LLC|US`），`IpLocationResolver.FormatRegion`
   按 `|` 分段拼展示串，与语言无关。
-- xdb 数据文件不随仓库提交（数据会过期，按需更新即可；重新下载覆盖后重启应用生效）。
+- xdb 数据文件随仓库提交（基础数据，克隆即用）；数据会过期，更新时从上游重新下载覆盖
+  并提交，重启应用生效。
