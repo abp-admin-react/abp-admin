@@ -37,7 +37,7 @@ export function storeIntendedRedirect(raw: string | null | undefined) {
 
 /** 登录后默认落地路径：唯一事实源（路由 config/routes.ts 的语义别名），
  * 回调页 fallback 与登录页 magic-link 直跳共用——此前两处各自硬编码，改路由时会漂移。 */
-export const DEFAULT_LANDING_PATH = '/administration';
+export const DEFAULT_LANDING_PATH = '/welcome';
 
 /** 消费暂存的回跳目标（回调/双因素页：读后即清；非法值与脏值落回 fallback）。 */
 export function consumeIntendedRedirect(fallback = DEFAULT_LANDING_PATH): string {

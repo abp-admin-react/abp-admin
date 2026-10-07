@@ -98,8 +98,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         }
 
         var usersNode = template.First(x => x.Path == "/administration/identity/users");
-        // 模板自 65422aa（移除 Welcome 演示页）起无 /welcome——用 /system/server-monitor 作
-        // 独立第二分支（负断言的对象是 /current-session 与 roles，互不冲突）
+        // 用 /system/server-monitor 作独立第二分支（负断言的对象是 /current-session 与 roles，互不冲突）
         var serverMonitor = template.First(x => x.Path == "/system/server-monitor");
         await _packageAppService.UpdateMenuSelectionAsync(package.Id, new UpdateTenantPackageMenusDto
         {
@@ -190,7 +189,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         var tenantAppService = GetRequiredService<AbpAdmin.Tenants.TenantAppService>();
         var tenantRepository = GetRequiredService<Volo.Abp.TenantManagement.ITenantRepository>();
 
-        // 套餐勾选：服务监控 + 用户（65422aa 移除 /welcome 后的替代选型，见上测试注释）
+        // 套餐勾选：服务监控 + 用户
         var package = await _packageAppService.CreateAsync(new TenantPackageCreateDto { Name = "应用套餐" });
         List<Menu> template;
         using (_dataFilter.Disable<IMultiTenant>())

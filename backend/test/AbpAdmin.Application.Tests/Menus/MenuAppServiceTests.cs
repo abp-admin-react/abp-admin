@@ -520,7 +520,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         using (_currentTenant.Change(tenantId))
         {
             var myMenu = await _myMenuAppService.GetAsync();
-            // 懒拷贝后：公开节点（服务监控/当前会话）可见——/welcome 已随 65422aa 演示页移除
+            // 懒拷贝后：公开节点（欢迎/服务监控/当前会话）可见
             var paths = Flatten(myMenu.Items).Select(x => x.Path).ToList();
             paths.ShouldContain("/system/server-monitor");
             paths.ShouldContain("/current-session");

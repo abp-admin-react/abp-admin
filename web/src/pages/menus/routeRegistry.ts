@@ -9,6 +9,7 @@ export type RouteRegistryItem = {
 };
 
 export const routeRegistry: RouteRegistryItem[] = [
+  { path: '/welcome', label: '欢迎' },
   { path: '/administration/saas/tenants', label: 'SaaS / 租户' },
   { path: '/administration/saas/editions', label: 'SaaS / 版本' },
   { path: '/administration/saas/tenant-packages', label: 'SaaS / 租户套餐' },
