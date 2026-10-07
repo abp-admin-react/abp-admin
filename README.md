@@ -175,6 +175,7 @@ pnpm tsc        # 类型检查
 - 生产环境需要 OpenIddict 签名证书(`openiddict.pfx`,口令对应 `AuthServer:CertificatePassPhrase`;生成方式见 [OpenIddict 证书配置](https://documentation.openiddict.com/configuration/encryption-and-signing-credentials.html))
 - 连接串/证书口令等敏感配置走环境变量或 `appsettings.secrets.json`(不入库)
 - 多实例部署:打开 `Redis:IsEnabled`(分布式锁与 DataProtection 密钥依赖 Redis),`Database:AutoMigrateOnStartup` 置 false,由 DbMigrator/CI 负责迁移
+- 多机房(异地灾备)部署:铁律见 [docs/framework-contracts.md §7](docs/framework-contracts.md),操作手册见 [docs/dr-runbook.md](docs/dr-runbook.md)
 - 其余见 [ABP Deployment](https://abp.io/docs/latest/Deployment/Index)
 
 ## License

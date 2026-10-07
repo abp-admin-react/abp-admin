@@ -17,6 +17,7 @@
 | `DataProtectionServiceRegistrationTests` | 密钥环 Redis 仓储、键名格式（env + 部署判别键）、`SetApplicationName`、证书加密出口 | 跨环境/跨部署令牌互验漏洞；密钥静默退回明文 |
 | `DistributedCacheKeyShapeTests` | ABP 10.6.1 键规范化输出（`c:{Name},k:{Prefix}{key}`、租户 `t:{id},` 包裹） | 监控守卫/扫描锚定静默失配（漏键或越界） |
 | `MonitoringAppServiceTests` / `CacheMonitorScanPaginationTests` | 缓存键空间硬边界（c:/t: + 隔离前缀）、SCAN 分页协议（溢出缓冲/合成游标/熔断/后置过滤）、删除守卫 | 共享 Redis 上误删/误读其它应用数据；翻页丢键 |
+| `TenantRegionStoreTests`（Domain.Tests） | 租户地域归属：ExtraProperties 持久化往返、未标注回落 DefaultRegion | 方案二按租户分区搬迁时丢失归属标记（租户落错机房） |
 | `.github/workflows/ci.yml` | 以上全部 + 前端 `tsc`/vitest，push/PR 必跑 | fork 后保留此文件即继承全部保证 |
 
 ## 2. 部署身份与共享 Redis 基线
@@ -50,10 +51,14 @@
 ## 4. 本宿主的多实例姿态（出厂与生产模板）
 
 - 开发默认（appsettings.json）：Redis 关（缓存走内存、锁进程内、DP 密钥文件系统）——单实例够用。
+  Redis 显式关闭分支会移除无人能构造的 MedallionAbpDistributedLock 瞬态注册，并把
+  IAbpDistributedLock 回切为 LocalAbpDistributedLock（进程内）——Redis-off 图自洽、可独立
+  启动，由 `HostServiceGraphValidationTests` 钉住。
 - 生产模板（appsettings.Production.json）：`SignalR:UseRedisBackplane` + `Redis:IsEnabled`
   + `Quartz:UsePersistentStore` 三件套全开，`Redis__Configuration` 由部署环境注入。
 - 本机部署状态（Redis/ES/ClickHouse 端点与凭据）一律放 `appsettings.secrets.json`
   （gitignored，"as it ships" 的测试形态刻意不加载它）。
+- 多机房（异地灾备）超出本节单集群范围：铁律见 §7，操作手册见 [dr-runbook.md](dr-runbook.md)。
 
 ## 5. 已知取舍登记（有意为之，勿当缺陷修）
 
@@ -74,6 +79,29 @@
 （appsettings `OpenIddict` 节）、菜单模板（`MenuTemplateDefinition.cs`）、Logo/标题、
 业务模块（`AbpAdmin.Biz.*`）；部署时设 `App:InstanceDiscriminator`（共享 Redis 场景）。
 
+克隆时可整体剔除的模板遗留（不影响框架能力）：`web/cloudflare-worker`（antd pro 演示
+mock API，前端无引用，见其目录 README）、Payment 三件套（EasyAbp
+PaymentService/Prepayment/WeChatPay，无支付业务时）。
+
 别动：§1 表中的保证测试与被它们钉住的实现；守卫（`AssertAbpKey`/`IsAllowedKey`/
 `BuildScanPattern`）、键名构造（`BuildDataProtectionKeyName`）、姿态判定——改这些先改
 契约测试，让红测试带你走。
+
+## 7. 多机房部署约定（方案一铁律）
+
+> 定位：单主多备（A 省主库 + B 省流复制备库，写流量单点），灾备不是双活。操作面
+> （流复制搭建/切换/回切/备份、升级方案二路径）见 [dr-runbook.md](dr-runbook.md)；
+> 本节只登记会踩代码契约的硬约定。
+
+- **issuer 单域名**：`AuthServer:Authority` 作为 issuer 签进所有 token，双机房共用一个
+  对外域名；切机房只动 DNS，永不改 issuer（拆 issuer = 另一机房验签全挂）。
+- **连接串 DNS 别名**：生产 `ConnectionStrings:Default`/`Redis:Configuration` 用别名不用
+  裸 IP——切库改解析、应用零改动；这也是方案二（按租户分区）路由的前置习惯。
+- **密钥材料一致**：`openiddict.pfx` 与 DataProtection 证书两机房同一份（离线分发 + 备份），
+  生产打开密钥环静态加密（§2 出口）。
+- **租户地域归属**：ExtraProperties 键 `AbpAdminTenantConsts.RegionPropertyName`（与
+  PackageId 同机制，只存租户实体——ABP 10.6 的 TenantConfiguration 无 ExtraProperties，
+  归属不进解析缓存项），新建租户默认写 `DefaultRegion`，读侧
+  （`TenantRegionExtensions.GetRegion`）缺省回落——存量租户零迁移。方案一只标记不路由；
+  方案二据此 + 每租户连接串（`TenantConfiguration.ConnectionStrings`，解析链路已就绪）
+  做归属路由（持久化往返与回落由 `TenantRegionStoreTests` 钉住）。
