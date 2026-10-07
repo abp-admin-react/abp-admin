@@ -4,6 +4,6 @@ using Xunit;
 namespace AbpAdmin.EntityFrameworkCore.Applications.Saas;
 
 [Collection(AbpAdminTestConsts.CollectionDefinitionName)]
-public class EfCoreTenantConnectionStringTests : TenantConnectionStringTests<AbpAdminEntityFrameworkCoreTestModule>
+public class EfCoreTenantConnectionStringTests : TenantConnectionStringTests<SaasTestsModule>
 {
 }

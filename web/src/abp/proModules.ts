@@ -138,6 +138,34 @@ export async function getEntityChangeHistory(params: {
   });
 }
 
+/** 实体变更回滚结果（restoreEntityChange 的返回契约，与后端 EntityRestoreResultDto 镜像） */
+export type EntityRestoreResult = {
+  entityChangeId: string;
+  entityTypeFullName: string;
+  entityId: string;
+  restoredProperties: string[];
+  skippedProperties: { propertyName: string; reason: string }[];
+};
+
+/**
+ * 按一条实体变更记录回滚实体属性（写回 OriginalValue）。
+ * 仅 Updated 型变更支持；回滚本身会再产生一条变更记录。
+ */
+export async function restoreEntityChange(params: {
+  entityChangeId: string;
+  entityId: string;
+  entityTypeFullName: string;
+}): Promise<EntityRestoreResult> {
+  return request<EntityRestoreResult>('/api/app/audit-log/restore-entity-change', {
+    method: 'POST',
+    data: {
+      EntityChangeId: params.entityChangeId,
+      EntityId: params.entityId,
+      EntityTypeFullName: params.entityTypeFullName,
+    },
+  });
+}
+
 /** 平均执行时长统计 */
 export async function getAuditLogAverageDuration(params?: {
   startTime?: string;
@@ -455,6 +483,8 @@ export async function getCacheValue(key: string) {
     ttlSeconds?: number | null;
     content: string;
     truncated: boolean;
+    /** hash 键 data 字段原文（写值预填用；超限或非 RedisCache 条目为 null） */
+    dataField?: string | null;
   }>('/api/app/cache-monitor/value', {
     method: 'GET',
     params: { key },
@@ -466,5 +496,36 @@ export async function deleteCacheKey(key: string) {
   return request('/api/app/cache-monitor/key', {
     method: 'DELETE',
     params: { key },
+  });
+}
+
+export type CacheSetValueInput = {
+  key: string;
+  /** 写入的值原文。hash 键写 data 字段（保持 ABP 缓存的 JSON 信封可反序列化）；string 键覆盖整键 */
+  value: string;
+  /** 绝对过期（从现在起算的秒数）；不传 = 沿用既有 absexp 元数据（无则不过期） */
+  absoluteExpirationSeconds?: number;
+  /** 滑动过期（秒数）；不传 = 沿用既有 sldexp 元数据 */
+  slidingExpirationSeconds?: number;
+};
+
+export async function updateCacheValue(input: CacheSetValueInput) {
+  // 后端 SetValueAsync：无动词前缀 → ABP 默认 POST + kebab-case 全名路由 set-value
+  // （swagger 实测：/api/app/cache-monitor/set-value；与 GET /value 不同路径）
+  return request('/api/app/cache-monitor/set-value', {
+    method: 'POST',
+    data: input,
+  });
+}
+
+export async function refreshCacheKey(input: {
+  key: string;
+  absoluteExpirationSeconds?: number;
+  slidingExpirationSeconds?: number;
+}) {
+  // 后端 RefreshAsync：无动词前缀 → ABP 默认 POST + 全名 camel 路由
+  return request('/api/app/cache-monitor/refresh', {
+    method: 'POST',
+    data: input,
   });
 }

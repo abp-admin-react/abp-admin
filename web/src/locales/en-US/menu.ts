@@ -68,6 +68,8 @@ export default {
   'menu.administration.identity.claim-types': 'Claim types',
   'menu.administration.identity.security-logs': 'Security logs',
   'menu.administration.identity.sessions': 'Sessions',
+  'menu.administration.permission-definitions': 'Permission Definitions',
+  'menu.administration.webhooks': 'Webhooks',
   'menu.administration.openiddict': 'OpenIddict',
   'menu.administration.openiddict.applications': 'Applications',
   'menu.administration.openiddict.scopes': 'Scopes',

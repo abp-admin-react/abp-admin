@@ -1,0 +1,19 @@
+{
+  "culture": "zh-Hans",
+  "texts": {
+    "Menu:Webhooks": "Webhook 管理",
+    "Permission:Webhooks": "Webhook 管理",
+    "Permission:Subscriptions": "订阅管理",
+    "Permission:Subscriptions.Create": "新建订阅",
+    "Permission:Subscriptions.Update": "编辑订阅",
+    "Permission:Subscriptions.Delete": "删除订阅",
+    "Permission:SendRecords": "发送记录",
+    "Permission:SendRecords.Resend": "重发 Webhook",
+    "Permission:SendRecords.Delete": "删除发送记录",
+    "Webhooks:SubscriptionNotFound": "Webhook 订阅 {0} 不存在",
+    "Webhooks:SendRecordNotFound": "Webhook 发送记录 {0} 不存在",
+    "Webhooks:InvalidWebhookUri": "Webhook 地址必须是合法的 http(s) 绝对 URL",
+    "Webhooks:DuplicateEventName": "事件名 {0} 在订阅中重复",
+    "Webhooks:SubscriptionInactive": "Webhook 订阅 {0} 已暂停，跳过投递"
+  }
+}

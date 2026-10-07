@@ -1,7 +1,8 @@
 import { ProTable } from '@ant-design/pro-components';
 import React from 'react';
 
-interface PropertyChangeRow {
+/** 属性变更行（实体变更历史 / 审计详情共用，镜像后端 EntityPropertyChangeDto）。 */
+export interface PropertyChangeRow {
   propertyName?: string;
   originalValue?: string;
   newValue?: string;

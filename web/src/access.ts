@@ -53,6 +53,24 @@ export default function access(
     canManageOperationLogs: !!policies['AbpAdmin.OperationLogs'],
     canExportAuditLogs: !!policies['AbpAdmin.AuditLogs.Export'],
     canHandleAuditLogErrors: !!policies['AbpAdmin.AuditLogs.HandleErrors'],
+    // 实体变更回滚：能看变更历史 ≠ 能改写业务数据，独立权限
+    canRestoreEntityChange: !!policies['AbpAdmin.AuditLogs.Restore'],
+    // 权限定义运行时管理（Host 专属，后端 multiTenancySide=Host）
+    canManagePermissionDefinitions: !!policies['AbpAdmin.PermissionDefinitions'] && isHost,
+    // Webhook 管理（模块自持权限组 AbpAdmin.Webhooks.*）
+    canManageWebhooks: !!policies['AbpAdmin.Webhooks.Subscriptions'],
+    canCreateWebhookSubscriptions: !!policies['AbpAdmin.Webhooks.Subscriptions.Create'],
+    canUpdateWebhookSubscriptions: !!policies['AbpAdmin.Webhooks.Subscriptions.Update'],
+    canDeleteWebhookSubscriptions: !!policies['AbpAdmin.Webhooks.Subscriptions.Delete'],
+    canManageWebhookSendRecords: !!policies['AbpAdmin.Webhooks.SendRecords'],
+    canResendWebhookSendRecords: !!policies['AbpAdmin.Webhooks.SendRecords.Resend'],
+    canDeleteWebhookSendRecords: !!policies['AbpAdmin.Webhooks.SendRecords.Delete'],
+    canCreatePermissionDefinitions:
+      !!policies['AbpAdmin.PermissionDefinitions.Create'] && isHost,
+    canUpdatePermissionDefinitions:
+      !!policies['AbpAdmin.PermissionDefinitions.Update'] && isHost,
+    canDeletePermissionDefinitions:
+      !!policies['AbpAdmin.PermissionDefinitions.Delete'] && isHost,
     canManageOpenIddict: !!policies['AbpAdmin.OpenIddict'] && isHost,
     canManageOpenIddictApplications:
       !!policies['AbpAdmin.OpenIddict.Applications'] && isHost,

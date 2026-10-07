@@ -50,6 +50,11 @@ public static class AbpAdminPermissions
         public const string Default = GroupName + ".AuditLogs";
         public const string Export = Default + ".Export";
         public const string HandleErrors = Default + ".HandleErrors";
+        /// <summary>
+        /// 按实体变更记录回滚实体属性（借鉴 abp-next-admin EntityRestoreAppService）。
+        /// 独立权限：能看变更历史 ≠ 能改写业务数据；此权限实际等价于对受审计实体的写权。
+        /// </summary>
+        public const string Restore = Default + ".Restore";
     }
 
     /// <summary>语义化操作日志（业务人员可读的「谁对谁做了什么」），与审计日志互补。</summary>
@@ -230,6 +235,18 @@ public static class AbpAdminPermissions
     public static class SettingUi
     {
         public const string Update = GroupName + ".SettingUi.Update";
+    }
+
+    /// <summary>
+    /// 权限定义运行时管理（Host 专属）：动态权限定义的增删改查。
+    /// 持有写权限 ≈ 能为任意角色授予新权限，等同安全敏感操作，收敛到 Host。
+    /// </summary>
+    public static class PermissionDefinitions
+    {
+        public const string Default = GroupName + ".PermissionDefinitions";
+        public const string Create = Default + ".Create";
+        public const string Update = Default + ".Update";
+        public const string Delete = Default + ".Delete";
     }
 
     // 问题15 修复：已删除无调用方的 GetAll()——它会把 GroupName（"AbpAdmin"）与

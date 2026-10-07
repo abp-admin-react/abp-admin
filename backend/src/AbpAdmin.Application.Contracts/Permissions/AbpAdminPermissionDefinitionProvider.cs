@@ -51,6 +51,7 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
             L("Permission:AuditLogs"));
         auditLogs.AddChild(AbpAdminPermissions.AuditLogs.Export, L("Permission:Export"));
         auditLogs.AddChild(AbpAdminPermissions.AuditLogs.HandleErrors, L("Permission:AuditLogs.HandleErrors"));
+        auditLogs.AddChild(AbpAdminPermissions.AuditLogs.Restore, L("Permission:AuditLogs.Restore"));
 
         group.AddPermission(
             AbpAdminPermissions.OperationLogs.Default,
@@ -203,6 +204,14 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
         // SettingUi 读写分离（模块五收口的对齐项）：写权限挂在上游 SettingUi 权限组下，
         // 与 ShowSettingPage（读）并列展示。模块依赖已声明 AbpSettingUiApplicationContractsModule，
         // 上游 provider 先执行，GetGroupOrNull 必中。
+        var permissionDefinitions = group.AddPermission(
+            AbpAdminPermissions.PermissionDefinitions.Default,
+            L("Permission:PermissionDefinitions"),
+            multiTenancySide: MultiTenancySides.Host);
+        permissionDefinitions.AddChild(AbpAdminPermissions.PermissionDefinitions.Create, L("Permission:Create"), MultiTenancySides.Host);
+        permissionDefinitions.AddChild(AbpAdminPermissions.PermissionDefinitions.Update, L("Permission:Update"), MultiTenancySides.Host);
+        permissionDefinitions.AddChild(AbpAdminPermissions.PermissionDefinitions.Delete, L("Permission:Delete"), MultiTenancySides.Host);
+
         var settingUiGroup = context.GetGroupOrNull(SettingUiPermissions.GroupName)
             ?? context.AddGroup(SettingUiPermissions.GroupName, L("Permission:SettingUi"));
         settingUiGroup.AddPermission(

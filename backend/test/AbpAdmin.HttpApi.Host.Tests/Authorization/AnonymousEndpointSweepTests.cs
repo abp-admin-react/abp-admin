@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Builder;
+using Npgsql;
+using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -56,9 +58,33 @@ public class AnonymousEndpointSweepTests
 
     private static async Task<WebApplication> CreateInitializedHostAsync()
     {
-        // dev 库 → 临时副本。定位逻辑与 HostUnderTest.ResolveHostContentRootPath 同构
-        // （沿目录向上找 AbpAdmin.slnx——它就在 backend/ 下），库文件与它同目录
-        // （与 appsettings 的 "Data Source=../../AbpAdmin.db" 归一化结果一致）。
+        // A-block 迁移机制重构后宿主是 PostgreSQL-only（EF 模块无条件 UseNpgsql，
+        // SQLite 分支已删）——SQLite 文件副本隔离不再可行。改为：凭证沿用宿主同一分层源
+        // （appsettings.json → appsettings.secrets.json，与 Program.cs 同序），schema 隔离到
+        // 专用 abp_admin_hosttest（不存在则创建；宿主启动的 AutoMigrateOnStartup 会在其中
+        // 自举迁移+种子），与 dev schema（abp_admin_efm）互不干扰。
+        var baseConn = ResolveHostDatabaseConnectionString();
+        var connString = await EnsureIsolatedSchemaAsync(baseConn, "abp_admin_hosttest");
+
+        var builder = await HostUnderTest.CreateBuilderAsync(
+            new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Default"] = connString,
+            },
+            useAutofac: true);
+        var app = builder.Build();
+        await app.InitializeApplicationAsync();
+        return app;
+    }
+
+    private static Task<WebApplication> HostTask => LazyHost.Value;
+
+    /// <summary>
+    /// 沿用宿主同序的连接串分层（appsettings.json → appsettings.secrets.json；环境变量与
+    /// in-memory 源在 HostUnderTest 内已分层）。测试进程不依赖用户机器的环境变量注入。
+    /// </summary>
+    private static string ResolveHostDatabaseConnectionString()
+    {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory != null && !File.Exists(Path.Combine(directory.FullName, "AbpAdmin.slnx")))
         {
@@ -70,25 +96,38 @@ public class AnonymousEndpointSweepTests
             throw new DirectoryNotFoundException("AbpAdmin.slnx not found above the test binaries.");
         }
 
-        var sourceDb = Path.Combine(directory.FullName, "AbpAdmin.db");
-        var isolatedDb = Path.Combine(Path.GetTempPath(), $"abpadmin-anon-sweep-{Guid.NewGuid():N}.db");
-        File.Copy(sourceDb, isolatedDb);
+        var hostRoot = Path.Combine(directory.FullName, "src", "AbpAdmin.HttpApi.Host");
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(Path.Combine(hostRoot, "appsettings.json"), optional: false)
+            .AddJsonFile(Path.Combine(hostRoot, "appsettings.secrets.json"), optional: true)
+            .Build();
 
-        var builder = await HostUnderTest.CreateBuilderAsync(
-            new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:Default"] = $"Data Source={isolatedDb}",
-                // 隔离前提是 SQLite 副本：provider 必须一并钉住——appsettings 出厂默认是 PostgreSql，
-                // 本机若靠 appsettings.secrets.json 切回 Sqlite，测试就会因机器配置不同而飘红
-                ["Database:Provider"] = "Sqlite",
-            },
-            useAutofac: true);
-        var app = builder.Build();
-        await app.InitializeApplicationAsync();
-        return app;
+        var conn = configuration.GetConnectionString("Default");
+        if (string.IsNullOrWhiteSpace(conn) || conn.Contains("Data Source=", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "匿名端点扫查需要 PostgreSQL 连接串（宿主已 PG-only）。" +
+                "请在 src/AbpAdmin.HttpApi.Host/appsettings.secrets.json 配置 ConnectionStrings:Default（含凭据）。");
+        }
+
+        return conn;
     }
 
-    private static Task<WebApplication> HostTask => LazyHost.Value;
+    /// <summary>确保专用 schema 存在并返回追加 SearchPath 的连接串（测试写副作用全部落在该 schema）。</summary>
+    private static async Task<string> EnsureIsolatedSchemaAsync(string connectionString, string schemaName)
+    {
+        var bare = connectionString.Contains("SearchPath=", StringComparison.OrdinalIgnoreCase)
+            ? connectionString[..connectionString.IndexOf("SearchPath=", StringComparison.OrdinalIgnoreCase)].TrimEnd(';')
+            : connectionString;
+
+        await using var conn = new NpgsqlConnection(bare);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            $"CREATE SCHEMA IF NOT EXISTS {schemaName}", conn);
+        await cmd.ExecuteNonQueryAsync();
+
+        return bare.EndsWith(";") ? bare + $"SearchPath={schemaName}" : bare + $";SearchPath={schemaName}";
+    }
 
     /// <summary>一个匿名端点的判定面：路由模板 + 显示名（控制器动作/页面的全名）。</summary>
     private sealed record EndpointInfo(string Template, string DisplayName);

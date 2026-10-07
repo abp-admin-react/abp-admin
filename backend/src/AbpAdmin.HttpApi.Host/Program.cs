@@ -36,14 +36,6 @@ public class Program
             builder.Configuration.AddJsonFile("appsettings.secrets.json", optional: true, reloadOnChange: false);
             builder.Configuration.AddEnvironmentVariables();
 
-            // 相对路径 SQLite 连接串按 cwd 解析，从仓库根运行会在仓库外静默建库；
-            // 以仓库根（AbpAdmin.slnx）为锚改写为绝对路径，须在模块初始化读取连接串之前，
-            // 且必须在上面 secrets/env 源注册之后——归一化要看到它们提供的连接串
-            if (AbpAdminDbPathNormalizer.TryNormalize(builder.Configuration, out var dbPath))
-            {
-                Log.Information("SQLite connection normalized to {DbPath}", dbPath);
-            }
-
             builder.Host
                 .UseAutofac()
                 .UseSerilog((context, services, loggerConfiguration) =>
@@ -55,6 +47,8 @@ public class Program
                         // "Request starting" 在任何中间件之前就用原始 QueryString 记录，
                         // 管道内的剥离盖不住它，必须在日志出口对 /signalr-hubs 路径脱敏。
                         .Enrich.With<SignalR.SignalRQueryStringSanitizingEnricher>()
+                        // 每条日志唯一短 ID(LogUniqueId):报障单点定位,覆盖后台作业/启动期等无请求上下文的日志
+                        .Enrich.With<Logging.LogUniqueIdEnricher>()
                         .WriteTo.Async(c => c.AbpStudio(services));
 
                     // T5：ES 运行日志 sink（Elastic 官方 sink，与 ABP 微服务模板同思路）。

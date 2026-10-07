@@ -18,6 +18,7 @@ using OpenIddict.Validation.AspNetCore;
 using OpenIddict.Server.AspNetCore;
 using AbpAdmin.EntityFrameworkCore;
 using AbpAdmin.Biz.Template;
+using AbpAdmin.Webhooks;
 using AbpAdmin.Files;
 using AbpAdmin.MultiTenancy;
 using AbpAdmin.HealthChecks;
@@ -104,6 +105,7 @@ namespace AbpAdmin;
     typeof(AbpAdminEntityFrameworkCoreModule),
     // 业务模块挂接点：每新增一个业务模块加一行（Auto API/权限/本地化随模块自动生效）
     typeof(AbpAdminBizTemplateModule),
+    typeof(AbpAdmin.Webhooks.AbpAdminWebhooksModule), // Webhook 模块（业务模块挂接点同款：一行）
     typeof(AbpCachingStackExchangeRedisModule),
     typeof(AbpAccountWebOpenIddictModule),
     typeof(AbpSwashbuckleModule),
@@ -434,6 +436,9 @@ public class AbpAdminHttpApiHostModule : AbpModule
             // "不开则锁退化为进程内"语义回切到框架抽象层的 LocalAbpDistributedLock
             // （进程内信号量，即 68000ff 之前 Redis-off 图的形态），并移除无人能构造的
             // MedallionAbpDistributedLock 瞬态注册，保持 Redis-off 图自洽、可独立启动。
+            // （rebase 整合注：原 feature 线在此注册自研 LocalInProcessDistributedLockProvider
+            // 兜底，与 main 的 b299990 回切方案二选一——保留更新的崩溃修复方案，两个
+            // Redis-off 分支统一姿态。）
             context.Services.RemoveAll(typeof(MedallionAbpDistributedLock));
             context.Services.Replace(ServiceDescriptor.Singleton<IAbpDistributedLock, LocalAbpDistributedLock>());
             return;
@@ -442,6 +447,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
         var redisConfiguration = configuration["Redis:Configuration"];
         if (string.IsNullOrWhiteSpace(redisConfiguration))
         {
+            // 未配置 Redis（单实例默认）：与上方显式关闭同姿态——锁退化为进程内
+            // LocalAbpDistributedLock、移除无人能构造的 Medallion 瞬态注册，保持默认
+            // 建图自洽（HostServiceGraphValidationTests 默认配置走的就是这条分支）。
+            // 语义=进程内按锁名互斥；多实例必须配置 Redis:Configuration。
+            context.Services.RemoveAll(typeof(MedallionAbpDistributedLock));
+            context.Services.Replace(ServiceDescriptor.Singleton<IAbpDistributedLock, LocalAbpDistributedLock>());
             return;
         }
 

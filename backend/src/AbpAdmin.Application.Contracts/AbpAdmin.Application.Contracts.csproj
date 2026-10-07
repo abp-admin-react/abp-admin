@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AbpAdmin.Domain.Shared\AbpAdmin.Domain.Shared.csproj" />
+    <!-- 动态查询条件 DTO（DynamicCondition 等）来自零依赖表达式树库 -->
+    <ProjectReference Include="..\AbpAdmin.DynamicQueryable\AbpAdmin.DynamicQueryable.csproj" />
   </ItemGroup>
   
   <ItemGroup>

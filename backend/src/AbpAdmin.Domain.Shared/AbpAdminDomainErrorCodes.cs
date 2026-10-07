@@ -452,4 +452,23 @@ public static class AbpAdminDomainErrorCodes
         /// <summary>发送目标用户列表为空（WithData("ParamName")）。</summary>
         public const string EmptyUserIds = "AbpAdmin:EmptyUserIds";
     }
+
+    /// <summary>实体变更回滚（RestoreEntityChangeAsync）的业务错误码。测试按 Code 断言，与文案解耦。</summary>
+    public static class EntityRestore
+    {
+        public const string OnlyUpdated = "AbpAdmin:EntityRestoreOnlyUpdated";
+        public const string EntityTypeNotAllowed = "AbpAdmin:EntityRestoreEntityTypeNotAllowed";
+        public const string EntityTypeNotResolvable = "AbpAdmin:EntityRestoreEntityTypeNotResolvable";
+        public const string OnlyGuidKeyed = "AbpAdmin:EntityRestoreOnlyGuidKeyed";
+        public const string InvalidEntityId = "AbpAdmin:EntityRestoreInvalidEntityId";
+        public const string EntityNotFound = "AbpAdmin:EntityRestoreEntityNotFound";
+        public const string NothingToRestore = "AbpAdmin:EntityRestoreNothingToRestore";
+        public const string UpdateFailed = "AbpAdmin:EntityRestoreUpdateFailed";
+    }
+
+    public static class EntityChange
+    {
+        public const string NotFound = "AbpAdmin:EntityChangeNotFound";
+        public const string EntityMismatch = "AbpAdmin:EntityChangeEntityMismatch";
+    }
 }

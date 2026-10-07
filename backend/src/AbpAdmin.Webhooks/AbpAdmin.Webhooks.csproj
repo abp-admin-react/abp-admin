@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin.Webhooks</RootNamespace>
+    <!-- 自包含模块：实体/服务/权限/本地化/DbContext/EF 迁移（记账表 __AbpAdminWebhooks_EFMigrationsHistory）都在本工程。
+         宿主接线 = csproj 引用 + Host/DbMigrator 模块 DependsOn 各加一行。
+         设计期迁移命令见 WebhooksDbContextFactory 注释（dotnet ef，context WebhooksDbContext）。 -->
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 只依赖框架 EF 基建（连带 Domain/迁移约定接口），业务归业务 -->
+    <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.Ddd.Application" />
+    <PackageReference Include="Volo.Abp.AspNetCore.Mvc" />
+    <PackageReference Include="Volo.Abp.Authorization" />
+    <PackageReference Include="Volo.Abp.BackgroundJobs.Abstractions" />
+    <PackageReference Include="Volo.Abp.Localization" />
+    <PackageReference Include="Volo.Abp.VirtualFileSystem" />
+    <!-- 嵌入清单生成任务依赖此包（缺它则 GenerateEmbeddedFilesManifest 静默不生效） -->
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\Webhooks\*.json" />
+  </ItemGroup>
+
+</Project>

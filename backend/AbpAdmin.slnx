@@ -3,11 +3,13 @@
         <Platform Name="Any CPU" />
     </Configurations>
     <Folder Name="/src/">
+        <Project Path="src/AbpAdmin.DynamicQueryable/AbpAdmin.DynamicQueryable.csproj" />
         <Project Path="src/AbpAdmin.Domain/AbpAdmin.Domain.csproj" />
         <Project Path="src/AbpAdmin.Application/AbpAdmin.Application.csproj" />
         <Project Path="src/AbpAdmin.EntityFrameworkCore/AbpAdmin.EntityFrameworkCore.csproj" />
         <!-- 自包含业务模块样板：一个工程，PostgreSQL / SQLite 脚本在模块 Sql/ 下 -->
         <Project Path="src/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj" />
+        <Project Path="src/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj" />
         <Project Path="src/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj" />
         <Project Path="src/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts.csproj" />
         <Project Path="src/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj" />
@@ -19,6 +21,7 @@
         <Project Path="src/AbpAdmin.ClickHouse/AbpAdmin.ClickHouse.csproj" />
     </Folder>
     <Folder Name="/test/">
+        <Project Path="test/AbpAdmin.DynamicQueryable.Tests/AbpAdmin.DynamicQueryable.Tests.csproj" />
         <Project Path="test/AbpAdmin.Application.Tests/AbpAdmin.Application.Tests.csproj" />
         <Project Path="test/AbpAdmin.EntityFrameworkCore.Tests/AbpAdmin.EntityFrameworkCore.Tests.csproj" />
         <Project Path="test/AbpAdmin.HttpApi.Host.Tests/AbpAdmin.HttpApi.Host.Tests.csproj" />

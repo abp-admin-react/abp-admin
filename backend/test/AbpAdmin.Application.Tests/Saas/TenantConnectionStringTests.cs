@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using AbpAdmin.Settings;
 using AbpAdmin.Tenants;
 using Shouldly;
+using Microsoft.Extensions.Configuration;
 using Volo.Abp;
 using Volo.Abp.Data;
 using Volo.Abp.Modularity;
@@ -195,18 +196,19 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
     {
         var tenantId = await CreateTenantAsync();
 
-        // 合法的 SQLite 连接串（内存库，打开即成功）
+        // A-block 重构后建库/校验是 PostgreSQL-only（CreateConnection 用 Npgsql）。
+        // 合法串 = 宿主同一分层源（appsettings.json → secrets）里的可连接 PG 串
         var ok = await _tenantAppService.CheckConnectionStringAsync(tenantId, new CheckTenantConnectionStringInput
         {
-            ConnectionString = "Data Source=:memory:"
+            ConnectionString = ResolveHostPgConnectionString()
         });
         ok.IsValid.ShouldBeTrue();
         ok.ErrorMessage.ShouldBeNull();
 
-        // 目录不存在的连接串：打开失败并返回具体原因
+        // 不可达地址：打开失败（1s 超时快速失败）并返回本地化原因（驱动原文只进日志）
         var bad = await _tenantAppService.CheckConnectionStringAsync(tenantId, new CheckTenantConnectionStringInput
         {
-            ConnectionString = "Data Source=/definitely-not-exists-t28-check/sub/x.db"
+            ConnectionString = "Host=10.255.255.1;Port=5432;Database=none;Timeout=1"
         });
         bad.IsValid.ShouldBeFalse();
         bad.ErrorMessage.ShouldNotBeNullOrWhiteSpace();
@@ -214,6 +216,40 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
         // 纯校验，不写库：两次调用后租户仍无连接串记录
         var tenant = await WithUnitOfWorkAsync(() => _tenantRepository.GetAsync(tenantId));
         tenant.ConnectionStrings.Count.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// 与宿主/匿名端点扫查同源的分层读法（沿目录向上找 AbpAdmin.slnx，
+    /// 叠加 HttpApi.Host 的 appsettings.json 与 secrets）。连接串校验需要一台可连的 PG。
+    /// </summary>
+    private static string ResolveHostPgConnectionString()
+    {
+        var directory = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null && !System.IO.File.Exists(System.IO.Path.Combine(directory.FullName, "AbpAdmin.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        if (directory == null)
+        {
+            throw new System.IO.DirectoryNotFoundException("AbpAdmin.slnx not found above the test binaries.");
+        }
+
+        var hostRoot = System.IO.Path.Combine(directory.FullName, "src", "AbpAdmin.HttpApi.Host");
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddJsonFile(System.IO.Path.Combine(hostRoot, "appsettings.json"), optional: false)
+            .AddJsonFile(System.IO.Path.Combine(hostRoot, "appsettings.secrets.json"), optional: true)
+            .Build();
+
+        var conn = configuration.GetConnectionString("Default");
+        if (string.IsNullOrWhiteSpace(conn) || conn.Contains("Data Source=", System.StringComparison.OrdinalIgnoreCase))
+        {
+            throw new System.InvalidOperationException(
+                "连接串校验用例需要 PostgreSQL 连接串（宿主已 PG-only）。" +
+                "请在 src/AbpAdmin.HttpApi.Host/appsettings.secrets.json 配置 ConnectionStrings:Default。");
+        }
+
+        return conn;
     }
 
     [Fact]

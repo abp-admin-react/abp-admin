@@ -68,6 +68,8 @@
     <ProjectReference Include="..\AbpAdmin.ClickHouse\AbpAdmin.ClickHouse.csproj" />
     <!-- 自包含业务模块样板。新增业务模块：加这一行引用 + AbpAdminHttpApiHostModule 的 DependsOn 一行 -->
     <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
+    <!-- Webhook 模块（自包含：订阅/投递/发送记录，独立 History 表） -->
+    <ProjectReference Include="..\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
   </ItemGroup>
 
   <ItemGroup>

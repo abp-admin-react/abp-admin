@@ -4,6 +4,6 @@ using Xunit;
 namespace AbpAdmin.EntityFrameworkCore.Applications.Saas;
 
 [Collection(AbpAdminTestConsts.CollectionDefinitionName)]
-public class EfCoreSaasFeaturePolicyAndCleanupTests : SaasFeaturePolicyAndCleanupTests<AbpAdminEntityFrameworkCoreTestModule>
+public class EfCoreSaasFeaturePolicyAndCleanupTests : SaasFeaturePolicyAndCleanupTests<SaasTestsModule>
 {
 }

@@ -16,10 +16,13 @@
 
   <ItemGroup>
     <PackageReference Include="Volo.Abp.Autofac" />
+    <!-- dotnet ef 设计时（AbpAdminDbContextFactory 为本工程 startup）：工具需要本包 -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\AbpAdmin.Application.Contracts\AbpAdmin.Application.Contracts.csproj" />
     <!-- 业务模块：引用后其 IAbpAdminDbSchemaMigrator 实现进入容器，被迁移循环自动枚举 -->
     <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,11 +40,7 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <!-- 凭证不再放本项目：共享 appsettings.secrets.json 由 HttpApi.Host 持有，DbMigrator 经配置链读取 -->
-    <!-- T3.3：Quartz QRTZ_ 建表脚本（官方幂等化版），Quartz:UsePersistentStore=true 时由
-         EntityFrameworkCoreAbpAdminDbSchemaMigrator 在 EF 迁移后执行 -->
-    <None Include="..\..\etc\quartz\tables_postgres.sql" Link="quartz\tables_postgres.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <!-- QRTZ_ 表 DDL 已并入 EF 迁移（__EFMigrationsHistory 记账），不再单独分发建表脚本 -->
   </ItemGroup>
 
 </Project>

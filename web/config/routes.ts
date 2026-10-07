@@ -121,6 +121,20 @@ export default [
         ],
       },
       {
+        path: '/administration/webhooks',
+        name: 'webhooks',
+        icon: 'api',
+        access: 'canManageWebhooks',
+        component: './webhooks',
+      },
+      {
+        path: '/administration/permission-definitions',
+        name: 'permission-definitions',
+        icon: 'key',
+        access: 'canManagePermissionDefinitions',
+        component: './permission-definitions',
+      },
+      {
         path: '/administration/openiddict',
         name: 'openiddict',
         icon: 'safety',

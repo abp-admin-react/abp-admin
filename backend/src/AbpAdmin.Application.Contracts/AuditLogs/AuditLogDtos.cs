@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Net;
 using System.Threading.Tasks;
 using Volo.Abp.Application.Dtos;
@@ -26,6 +27,12 @@ public interface IAuditLogAppService : IApplicationService
     Task<AuditLogExportResultDto> EnqueueExportAsync(GetAuditLogListInput input);
 
     Task<PagedResultDto<EntityChangeHistoryDto>> GetEntityChangeHistoryAsync(GetEntityChangeHistoryInput input);
+
+    /// <summary>
+    /// 按一条实体变更记录回滚实体属性（写回 OriginalValue）。
+    /// 仅支持 Updated 型变更；回滚本身会再产生一条变更记录（可再回滚）。
+    /// </summary>
+    Task<EntityRestoreResultDto> RestoreEntityChangeAsync(RestoreEntityChangeInput input);
 
     Task<List<AuditLogAverageDurationDto>> GetAverageExecutionDurationPerDayAsync(GetAuditLogStatisticsInput input);
 
@@ -162,6 +169,45 @@ public class EntityChangeHistoryDto
     public string? UserName { get; set; }
 
     public List<EntityPropertyChangeDto> PropertyChanges { get; set; } = new();
+}
+
+/// <summary>
+/// 按某条实体变更记录回滚实体属性（把 OriginalValue 写回实体）。
+/// 输入携带 EntityId/EntityTypeFullName 是因为回滚要先定位实体，
+/// 抽屉页上下文里两者现成，避免后端再按变更反查一轮。
+/// </summary>
+public class RestoreEntityChangeInput
+{
+    [Required]
+    public Guid EntityChangeId { get; set; }
+
+    [Required]
+    public string EntityId { get; set; } = default!;
+
+    [Required]
+    public string EntityTypeFullName { get; set; } = default!;
+}
+
+public class EntityRestoreResultDto
+{
+    public Guid EntityChangeId { get; set; }
+
+    public string EntityTypeFullName { get; set; } = default!;
+
+    public string EntityId { get; set; } = default!;
+
+    /// <summary>成功写回实体的属性名（按变更记录顺序）。</summary>
+    public List<string> RestoredProperties { get; set; } = new();
+
+    /// <summary>无法回滚而跳过的属性与原因（如属性在实体上已不存在、值无法反序列化）。</summary>
+    public List<EntityRestoreSkippedPropertyDto> SkippedProperties { get; set; } = new();
+}
+
+public class EntityRestoreSkippedPropertyDto
+{
+    public string PropertyName { get; set; } = default!;
+
+    public string Reason { get; set; } = default!;
 }
 
 public class GetAuditLogStatisticsInput

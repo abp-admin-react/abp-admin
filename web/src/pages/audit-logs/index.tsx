@@ -490,6 +490,7 @@ const AuditLogsPage: React.FC = () => {
         />
       </Modal>
       <EntityChangeHistoryDrawer
+        key={historyDrawer.entityId ?? "none"}
         open={historyDrawer.open}
         onClose={() => setHistoryDrawer({ open: false })}
         entityTypeFullName={historyDrawer.entityTypeFullName}

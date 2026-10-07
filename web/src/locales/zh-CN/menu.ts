@@ -68,6 +68,8 @@ export default {
   'menu.administration.identity.claim-types': '声明类型',
   'menu.administration.identity.security-logs': '安全日志',
   'menu.administration.identity.sessions': '会话',
+  'menu.administration.permission-definitions': '权限定义',
+  'menu.administration.webhooks': 'Webhook 管理',
   'menu.administration.openiddict': 'OpenIddict',
   'menu.administration.openiddict.applications': '应用程序',
   'menu.administration.openiddict.scopes': '范围',

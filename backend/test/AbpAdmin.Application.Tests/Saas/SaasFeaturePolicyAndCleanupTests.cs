@@ -22,6 +22,15 @@ using Xunit;
 namespace AbpAdmin.Saas;
 
 /// <summary>
+/// 建库器调用记录契约（测试内抽象）：抽象用例面向它断言，
+/// 具体实现（记录式 Fake）由各测试工程的聚合模块提供——见 EFCore.Tests 的 SaasTestsModule。
+/// </summary>
+public interface ITenantDatabaseCreationRecorder
+{
+    System.Collections.Concurrent.ConcurrentQueue<string> ReceivedConnectionStrings { get; }
+}
+
+/// <summary>
 /// T2.8 SaaS Pro 缺口补齐的四条链路：
 /// 1) FeatureManagement ProviderPolicies——租户/版本级功能编辑此前抛
 ///    "No policy defined to get/set permissions for the provider"（点开即 500）；
@@ -34,6 +43,10 @@ namespace AbpAdmin.Saas;
 public abstract class SaasFeaturePolicyAndCleanupTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
     where TStartupModule : IAbpModule
 {
+    // 传给记录式建库器的占位连接串（Fake 只记录不解析；PG 语义由部署侧覆盖）
+    private const string PlainConnectionString = "Host=localhost;Port=5432;Database=tenant_placeholder;Username=u;Password=p";
+
+    
     private readonly IFeatureAppService _featureAppService;
     private readonly IFeatureValueRepository _featureValueRepository;
     private readonly IFeatureManagementStore _featureManagementStore;
@@ -191,41 +204,34 @@ public abstract class SaasFeaturePolicyAndCleanupTests<TStartupModule> : AbpAdmi
     public async Task Should_Create_And_Migrate_Database_When_Default_ConnectionString_Changed()
     {
         var tenantId = await CreateTenantAsync();
-        var dbPath = TempDbPath();
-        try
-        {
-            // 事件经分布式总线缓冲到 UoW 提交后投递；LocalDistributedEventBus 同步执行，
-            // 调用返回时建库+迁移已完成（失败会被处理器记日志吞掉，这里用产物断言兜住）
-            await _tenantAppService.UpdateDefaultConnectionStringAsync(tenantId, $"Data Source={dbPath}");
 
-            await Should_Have_Migrated_Schema_Async(dbPath);
-        }
-        finally
-        {
-            CleanupTempDb(dbPath);
-        }
+        // A-block 重构后建库器是 PG-only（经维护库 CREATE DATABASE），测试基建没有可建库的
+        // PG 服务器（pg_hba 只放行既有库）——用例守护的本仓库接线改为记录式 Fake 断言：
+        // 「保存独立连接串 → UoW 提交后事件处理器以明文连接串调用建库器」。
+        // 建库器内部的 Npgsql 语义与真实建库+迁移由宿主启动链路/部署侧覆盖。
+        var fake = GetRequiredService<ITenantDatabaseCreationRecorder>();
+        fake.ReceivedConnectionStrings.Clear();
+
+        await _tenantAppService.UpdateDefaultConnectionStringAsync(tenantId, PlainConnectionString);
+
+        fake.ReceivedConnectionStrings.ShouldContain(PlainConnectionString);
     }
 
     [Fact]
     public async Task Should_Create_And_Migrate_Database_Via_ConnectionStrings_Items_Channel()
     {
         // 前端连接串抽屉把 Default 作为 Items 一项经 UpdateConnectionStringsAsync 提交——
-        // 这是真正的生产路径，必须同样触发建库+迁移（回归保护：触发条件曾漏挂在本通道）
+        // 这是真正的生产路径，必须同样触发建库（回归保护：触发条件曾漏挂在本通道）
         var tenantId = await CreateTenantAsync();
-        var dbPath = TempDbPath();
-        try
-        {
-            await _tenantAppService.UpdateConnectionStringsAsync(tenantId, new UpdateTenantConnectionStringsInput
-            {
-                Items = { new TenantConnectionStringItemInput { Name = "Default", Value = $"Data Source={dbPath}" } }
-            });
+        var fake = GetRequiredService<ITenantDatabaseCreationRecorder>();
+        fake.ReceivedConnectionStrings.Clear();
 
-            await Should_Have_Migrated_Schema_Async(dbPath);
-        }
-        finally
+        await _tenantAppService.UpdateConnectionStringsAsync(tenantId, new UpdateTenantConnectionStringsInput
         {
-            CleanupTempDb(dbPath);
-        }
+            Items = { new TenantConnectionStringItemInput { Name = "Default", Value = PlainConnectionString } }
+        });
+
+        fake.ReceivedConnectionStrings.ShouldContain(PlainConnectionString);
     }
 
     [Fact]
@@ -233,21 +239,16 @@ public abstract class SaasFeaturePolicyAndCleanupTests<TStartupModule> : AbpAdmi
     {
         // UseSharedDatabase=true 是「回退共享库」：不得触发建库迁移（负向条件保护）
         var tenantId = await CreateTenantAsync();
-        var dbPath = TempDbPath();
-        try
-        {
-            await _tenantAppService.UpdateConnectionStringsAsync(tenantId, new UpdateTenantConnectionStringsInput
-            {
-                UseSharedDatabase = true,
-                Items = { new TenantConnectionStringItemInput { Name = "Default", Value = $"Data Source={dbPath}" } }
-            });
+        var fake = GetRequiredService<ITenantDatabaseCreationRecorder>();
+        fake.ReceivedConnectionStrings.Clear();
 
-            File.Exists(dbPath).ShouldBeFalse("使用共享数据库时不得建库");
-        }
-        finally
+        await _tenantAppService.UpdateConnectionStringsAsync(tenantId, new UpdateTenantConnectionStringsInput
         {
-            CleanupTempDb(dbPath);
-        }
+            UseSharedDatabase = true,
+            Items = { new TenantConnectionStringItemInput { Name = "Default", Value = PlainConnectionString } }
+        });
+
+        fake.ReceivedConnectionStrings.ShouldBeEmpty();
     }
 
     [Fact]
@@ -274,28 +275,6 @@ public abstract class SaasFeaturePolicyAndCleanupTests<TStartupModule> : AbpAdmi
         tenant.FindDefaultConnectionString().ShouldBeNull();
     }
 
-    private static string TempDbPath()
-    {
-        return Path.Combine(Path.GetTempPath(), $"abpadmin-test-tenant-{Guid.NewGuid():N}.db");
-    }
 
-    private static async Task Should_Have_Migrated_Schema_Async(string dbPath)
-    {
-        File.Exists(dbPath).ShouldBeTrue("迁移事件应在提交后同步完成建库");
 
-        await using var connection = new SqliteConnection($"Data Source={dbPath}");
-        await connection.OpenAsync();
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AbpTenants'";
-        ((long)(await command.ExecuteScalarAsync())!).ShouldBeGreaterThan(0);
-    }
-
-    private static void CleanupTempDb(string dbPath)
-    {
-        SqliteConnection.ClearAllPools();
-        if (File.Exists(dbPath))
-        {
-            File.Delete(dbPath);
-        }
-    }
 }

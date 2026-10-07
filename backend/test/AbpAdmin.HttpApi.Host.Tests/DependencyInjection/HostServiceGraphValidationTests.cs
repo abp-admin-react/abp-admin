@@ -217,6 +217,12 @@ public class HostServiceGraphValidationTests
 
         AssertRedisBranchReachedTheServiceCollection(services, await CreateHostServiceCollectionAsync());
 
+        // Redis 分支把 IDistributedLockProvider 注册为 Redis 后端工厂（Redis-off 分支不注册
+        // 任何 provider，IAbpDistributedLock 被顶替为 LocalAbpDistributedLock）——锁真正
+        // 分布式化的判据。工厂注册没有 ImplementationType，按"最后一个注册走工厂"断言
+        var lockProvider = services.Last(descriptor => descriptor.ServiceType == typeof(IDistributedLockProvider));
+        lockProvider.ImplementationFactory.ShouldNotBeNull();
+
         var failures = ValidateWithMicrosoftDependencyInjection(services);
 
         var captiveDependencies = UntoleratedCaptiveDependencies(failures);

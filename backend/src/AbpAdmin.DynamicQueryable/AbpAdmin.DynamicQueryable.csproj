@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin.Linq.DynamicQueryable</RootNamespace>
+    <!-- 纯表达式树库：零 NuGet 依赖、零 ABP 依赖（借鉴 abp-next-admin framework/dynamic-queryable），
+         Application/Contracts 直接引本工程消费，任何仓储/集合都可用 -->
+  </PropertyGroup>
+
+</Project>
