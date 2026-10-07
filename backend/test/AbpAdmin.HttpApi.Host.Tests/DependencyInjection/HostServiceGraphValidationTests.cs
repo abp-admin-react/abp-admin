@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Medallion.Threading;
+using Medallion.Threading.Redis;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Volo.Abp.DistributedLocking;
@@ -109,21 +110,24 @@ public class HostServiceGraphValidationTests
     /// </summary>
     /// <remarks>
     /// Each predicate has to be narrow enough to fail against the Redis-off collection.
-    /// <see cref="IAbpDistributedLock"/> on its own is not: AbpDistributedLockingAbstractionsModule,
-    /// which is in the graph either way, already registers LocalAbpDistributedLock as a singleton
-    /// against that interface, so the Redis-off collection has an <see cref="IAbpDistributedLock"/>
-    /// too and only the implementation type tells the two apart.
+    /// <para>
+    /// <see cref="IAbpDistributedLock"/> is not usable as a gate at all: since the host module
+    /// chain pulled <c>AbpDistributedLockingModule</c> in unconditionally (68000ff), the
+    /// <c>IAbpDistributedLock -> MedallionAbpDistributedLock</c> transient is present in the
+    /// Redis-off graph too — the off branch replaces that interface with a
+    /// <see cref="LocalAbpDistributedLock"/> singleton and removes the orphaned Medallion
+    /// transient, keeping the graph constructible. What still distinguishes the Redis
+    /// branch is that it is the only source of <see cref="IDistributedLockProvider"/>
+    /// registrations, added through a factory delegate.
+    /// </para>
     /// </remarks>
     private static readonly IReadOnlyList<RedisGatedRegistration> RedisGatedRegistrations =
     [
         new(
-            $"{nameof(IDistributedLockProvider)} (singleton)",
+            $"{nameof(IDistributedLockProvider)} -> {nameof(RedisDistributedSynchronizationProvider)} (singleton factory)",
             descriptor => descriptor.ServiceType == typeof(IDistributedLockProvider)
-                          && descriptor.Lifetime == ServiceLifetime.Singleton),
-        new(
-            $"{nameof(IAbpDistributedLock)} -> {nameof(MedallionAbpDistributedLock)} (transient)",
-            descriptor => descriptor.ServiceType == typeof(IAbpDistributedLock)
-                          && descriptor.ImplementationType == typeof(MedallionAbpDistributedLock)),
+                          && descriptor.Lifetime == ServiceLifetime.Singleton
+                          && descriptor.ImplementationFactory != null),
         // 锁 + DataProtection 共享连接的持有者：实例注册（ServiceType 即具体类型、嵌套私有，
         // 只能按名匹配）。删掉 AddSingleton(connection) 编译照过、全部测试照绿——连接从此
         // 不随宿主释放，必须钉住。

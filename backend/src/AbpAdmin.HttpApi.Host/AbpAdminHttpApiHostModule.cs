@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.AspNetCore.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
@@ -112,9 +113,11 @@ namespace AbpAdmin;
     // 继续走 EF 存储，BackgroundJobAppService 与 AbpBackgroundJobs 表不受影响。
     // 放 Host 而不是 Domain：worker 调度器是宿主级基础设施，DbMigrator 不应起调度器。
     typeof(AbpBackgroundWorkersQuartzModule),
-    // Redis 分支把 MedallionAbpDistributedLock（本程序集类型）注册进容器：不加 DependsOn 会
-    // 触发 ABP 的 orphaned-module 警告（程序集有服务注册但模块不在链上，属性注入不生效）。
-    // 模块体为空、无副作用，仅把隐式依赖显式化；IDistributedLockProvider 仍由下方 Redis 分支注册。
+    // AbpDistributedLockingModule 会无条件注册 IAbpDistributedLock -> MedallionAbpDistributedLock
+    //（瞬态，依赖 IDistributedLockProvider）：不加 DependsOn 会触发 ABP 的 orphaned-module 警告
+    //（程序集有服务注册但模块不在链上，属性注入不生效）。提供者按姿态分两路——Redis 分支注册
+    // RedisDistributedSynchronizationProvider；Redis 显式关闭分支回切 LocalAbpDistributedLock
+    //（见 ConfigureRedis 注释）——两分支各自保证服务图自洽，Redis-off 不再依赖隐式缺省。
     typeof(AbpDistributedLockingModule),
     // T5：ES/ClickHouse 辅助存储（宿主级基础设施；模块内部按配置开关，未启用即无副作用）
     typeof(AbpAdminElasticsearchModule),
@@ -423,6 +426,16 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
         if (!redisEnabled)
         {
+            // 68000ff 把 AbpDistributedLockingModule 补进宿主 [DependsOn] 链后，Redis-off 图里
+            // 也无条件出现了 IAbpDistributedLock -> MedallionAbpDistributedLock（需要
+            // IDistributedLockProvider），而提供者只有下方 Redis 分支才注册——缺位使
+            // BackgroundJobWorker 等首用分布式锁的服务启动即崩（graph 校验与匿名端点扫描
+            // 红灯的根因；本地开发因 secrets 恒开 Redis 而未暴露）。按 appsettings 承诺的
+            // "不开则锁退化为进程内"语义回切到框架抽象层的 LocalAbpDistributedLock
+            // （进程内信号量，即 68000ff 之前 Redis-off 图的形态），并移除无人能构造的
+            // MedallionAbpDistributedLock 瞬态注册，保持 Redis-off 图自洽、可独立启动。
+            context.Services.RemoveAll(typeof(MedallionAbpDistributedLock));
+            context.Services.Replace(ServiceDescriptor.Singleton<IAbpDistributedLock, LocalAbpDistributedLock>());
             return;
         }
 
