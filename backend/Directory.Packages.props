@@ -173,7 +173,6 @@
     <PackageVersion Include="AspNetCore.HealthChecks.UI.InMemory.Storage" Version="$(HealthChecksVersion)" />
 
     <!-- 其他第三方 -->
-    <PackageVersion Include="KubernetesClient" Version="18.0.5" />
     <PackageVersion Include="IdentityModel" Version="7.0.0" />
     <PackageVersion Include="DistributedLock.Redis" Version="1.1.0" />
     <!-- 出站 HTTP 统一客户端（HttpAgent，非 Furion 本体、独立包）：声明式接口 + 请求构建器，
