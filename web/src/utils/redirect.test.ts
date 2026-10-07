@@ -46,7 +46,7 @@ describe('redirect utils', () => {
 
     // 其它入口写入的脏值：读侧同样校验，不因写过就信任
     sessionStorage.setItem(REDIRECT_STORAGE_KEY, '/\\evil.com');
-    expect(consumeIntendedRedirect()).toBe('/administration');
+    expect(consumeIntendedRedirect()).toBe('/welcome');
     expect(consumeIntendedRedirect('/')).toBe('/');
   });
 

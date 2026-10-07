@@ -1,4 +1,121 @@
 {
+  "AbpAdmin.AuditLogs.EntityRestoreResultDto": {
+    "kind": "dto",
+    "properties": {
+      "EntityChangeId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "EntityId": {
+        "type": "string",
+        "nullable": false
+      },
+      "EntityTypeFullName": {
+        "type": "string",
+        "nullable": false
+      },
+      "RestoredProperties": {
+        "type": "List\u003Cstring\u003E",
+        "nullable": false
+      },
+      "SkippedProperties": {
+        "type": "List\u003CEntityRestoreSkippedPropertyDto\u003E",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.AuditLogs.EntityRestoreSkippedPropertyDto": {
+    "kind": "dto",
+    "properties": {
+      "PropertyName": {
+        "type": "string",
+        "nullable": false
+      },
+      "Reason": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.AuditLogs.RestoreEntityChangeInput": {
+    "kind": "dto",
+    "properties": {
+      "EntityChangeId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "EntityId": {
+        "type": "string",
+        "nullable": false
+      },
+      "EntityTypeFullName": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Identity.DynamicSearchFieldDto": {
+    "kind": "dto",
+    "properties": {
+      "Comparisons": {
+        "type": "List\u003CDynamicComparison\u003E",
+        "nullable": false
+      },
+      "DisplayName": {
+        "type": "string",
+        "nullable": false
+      },
+      "Field": {
+        "type": "string",
+        "nullable": false
+      },
+      "ValueType": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Identity.IdentityUserSearchItemDto": {
+    "kind": "dto",
+    "properties": {
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Email": {
+        "type": "string",
+        "nullable": false
+      },
+      "EmailConfirmed": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "IsActive": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Name": {
+        "type": "string",
+        "nullable": true
+      },
+      "PhoneNumber": {
+        "type": "string",
+        "nullable": true
+      },
+      "Surname": {
+        "type": "string",
+        "nullable": true
+      },
+      "UserName": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Monitoring.CacheMonitorInfoDto": {
     "kind": "dto",
     "properties": {
@@ -33,6 +150,73 @@
       "UsedMemoryBytes": {
         "type": "long?",
         "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Monitoring.CacheRefreshInput": {
+    "kind": "dto",
+    "properties": {
+      "AbsoluteExpirationSeconds": {
+        "type": "long?",
+        "nullable": true
+      },
+      "Key": {
+        "type": "string",
+        "nullable": false
+      },
+      "SlidingExpirationSeconds": {
+        "type": "long?",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Monitoring.CacheSetValueInput": {
+    "kind": "dto",
+    "properties": {
+      "AbsoluteExpirationSeconds": {
+        "type": "long?",
+        "nullable": true
+      },
+      "Key": {
+        "type": "string",
+        "nullable": false
+      },
+      "SlidingExpirationSeconds": {
+        "type": "long?",
+        "nullable": true
+      },
+      "Value": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Monitoring.CacheValueDto": {
+    "kind": "dto",
+    "properties": {
+      "Content": {
+        "type": "string",
+        "nullable": false
+      },
+      "DataField": {
+        "type": "string",
+        "nullable": true
+      },
+      "Key": {
+        "type": "string",
+        "nullable": false
+      },
+      "Truncated": {
+        "type": "bool",
+        "nullable": false
+      },
+      "TtlSeconds": {
+        "type": "long?",
+        "nullable": true
+      },
+      "Type": {
+        "type": "string",
+        "nullable": false
       }
     }
   },
@@ -142,6 +326,102 @@
       },
       "WorkingSetBytes": {
         "type": "long",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.PermissionManagement.CreatePermissionDefinitionInput": {
+    "kind": "dto",
+    "properties": {
+      "DisplayName": {
+        "type": "string",
+        "nullable": false
+      },
+      "GroupName": {
+        "type": "string",
+        "nullable": false
+      },
+      "IsEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Name": {
+        "type": "string",
+        "nullable": false
+      },
+      "ParentName": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.PermissionManagement.CreatePermissionGroupInput": {
+    "kind": "dto",
+    "properties": {
+      "DisplayName": {
+        "type": "string",
+        "nullable": false
+      },
+      "Name": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.PermissionManagement.PermissionDefinitionRecordDto": {
+    "kind": "dto",
+    "properties": {
+      "DisplayName": {
+        "type": "string",
+        "nullable": false
+      },
+      "DisplayNameLocalized": {
+        "type": "string",
+        "nullable": false
+      },
+      "GroupName": {
+        "type": "string",
+        "nullable": true
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "IsEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "MultiTenancySide": {
+        "type": "byte",
+        "nullable": false
+      },
+      "Name": {
+        "type": "string",
+        "nullable": false
+      },
+      "ParentName": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.PermissionManagement.PermissionGroupRecordDto": {
+    "kind": "dto",
+    "properties": {
+      "DisplayName": {
+        "type": "string",
+        "nullable": false
+      },
+      "DisplayNameLocalized": {
+        "type": "string",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "Name": {
+        "type": "string",
         "nullable": false
       }
     }

@@ -40,6 +40,22 @@ public class FrontendContractSnapshotTests
     {
         typeof(ServerMonitorDto),
         typeof(CacheMonitorInfoDto),
+        // 缓存监控写值/改期（对标 abp-next-admin CachingManagement）的前端消费面：
+        // 输入 DTO + 值读取 DTO（dataField 预填的可空性是镜像层易漂移点）
+        typeof(CacheSetValueInput),
+        typeof(CacheRefreshInput),
+        typeof(CacheValueDto),
+        // 实体变更回滚（web 抽屉回滚按钮消费 EntityRestoreResultDto；嵌套 Skipped DTO 自动递归）
+        typeof(AbpAdmin.AuditLogs.RestoreEntityChangeInput),
+        typeof(AbpAdmin.AuditLogs.EntityRestoreResultDto),
+        // 权限定义管理页（列表/创建表单消费；输入 DTO 的可空性是镜像层易漂移点）
+        typeof(AbpAdmin.PermissionManagement.PermissionGroupRecordDto),
+        typeof(AbpAdmin.PermissionManagement.PermissionDefinitionRecordDto),
+        typeof(AbpAdmin.PermissionManagement.CreatePermissionGroupInput),
+        typeof(AbpAdmin.PermissionManagement.CreatePermissionDefinitionInput),
+        // 用户动态搜索（可用字段元数据 + 结果行；Masked 字段所在 DTO）
+        typeof(AbpAdmin.Identity.DynamicSearchFieldDto),
+        typeof(AbpAdmin.Identity.IdentityUserSearchItemDto),
     };
 
     private static readonly NullabilityInfoContext NullabilityCtx = new();

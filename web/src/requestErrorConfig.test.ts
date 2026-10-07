@@ -20,6 +20,7 @@ vi.mock('@umijs/max', () => ({
   getIntl: vi.fn(() => ({
     formatMessage: vi.fn(({ defaultMessage }) => defaultMessage),
   })),
+  getLocale: vi.fn(() => 'zh-CN'),
   history: {
     replace: mockHistoryReplace,
   },
@@ -270,6 +271,8 @@ describe('requestErrorConfig', () => {
       expect(result.url).toBe('https://api.example.com/users');
       expect(result.headers.Authorization).toBe('Bearer token-1');
       expect(result.headers['x-tenant']).toBe('tenant-1');
+      // SPA 语言单源：每请求经 Accept-Language 传给后端（zh-CN 映射 zh-Hans）
+      expect(result.headers['Accept-Language']).toBe('zh-Hans');
     });
 
     it('should pass through config without Authorization when no token', async () => {

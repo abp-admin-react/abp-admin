@@ -19,6 +19,12 @@ public interface ICacheMonitorAppService : IApplicationService
 
     /// <summary>删除单个键。仅允许删除 ABP 缓存键（服务端按键结构判定，见实现注释）。</summary>
     Task DeleteKeyAsync(string key);
+
+    /// <summary>写值：hash 写 data 字段并按需重写过期元数据，string 覆盖原文。仅允许 ABP 缓存键（Manage 权限）。</summary>
+    Task SetValueAsync(CacheSetValueInput input);
+
+    /// <summary>改期：重写 absexp/sldexp 元数据并按 RedisCache 同口径（两者取最小）重设 TTL，滑动过期从现在重新起算。仅允许 ABP 缓存键（Manage 权限）。</summary>
+    Task RefreshAsync(CacheRefreshInput input);
 }
 
 public class CacheMonitorInfoDto
@@ -89,4 +95,40 @@ public class CacheValueDto
 
     /// <summary>内容超过预览上限被截断。</summary>
     public bool Truncated { get; set; }
+
+    /// <summary>
+    /// hash 键 data 字段的原文（Microsoft RedisCache 条目格式，写值预填用；string 键用 Content 预填）。
+    /// ABP 缓存条目的 data 是序列化 JSON 信封——写回必须保持可反序列化。
+    /// 键过大或值超过预览上限时为 null（半截值存回去就是数据损坏，宁可不给预填）。
+    /// </summary>
+    public string? DataField { get; set; }
+}
+
+/// <summary>写值输入（对标 abp-next-admin CachingManagement 的 Set：hash 写 data 字段，string 覆盖原文）。</summary>
+public class CacheSetValueInput
+{
+    /// <summary>完整键名（与键浏览回显一致；服务端按 ABP 键结构 + 隔离前缀判定）。</summary>
+    public string Key { get; set; } = default!;
+
+    /// <summary>写入的值原文。hash 键写 data 字段（保持 JSON 信封可反序列化）；string 键覆盖整键。</summary>
+    public string Value { get; set; } = default!;
+
+    /// <summary>绝对过期（从现在起算的秒数）；null = 沿用键既有的 absexp 元数据（无则不过期）。</summary>
+    public long? AbsoluteExpirationSeconds { get; set; }
+
+    /// <summary>滑动过期（秒数）；null = 沿用既有的 sldexp 元数据。</summary>
+    public long? SlidingExpirationSeconds { get; set; }
+}
+
+/// <summary>改期输入（对标 abp-next-admin CachingManagement 的 Refresh：重写过期元数据并按同口径重设 TTL）。</summary>
+public class CacheRefreshInput
+{
+    /// <summary>完整键名。</summary>
+    public string Key { get; set; } = default!;
+
+    /// <summary>绝对过期（从现在起算的秒数）；null = 沿用既有 absexp（两个都为 null 时 hash 键=按原元数据续期，string 键报错）。</summary>
+    public long? AbsoluteExpirationSeconds { get; set; }
+
+    /// <summary>滑动过期（秒数）；null = 沿用既有 sldexp。</summary>
+    public long? SlidingExpirationSeconds { get; set; }
 }

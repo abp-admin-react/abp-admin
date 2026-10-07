@@ -17,12 +17,17 @@ vi.mock('@umijs/max', () => ({
 
 const mockGetCacheMonitorInfo = vi.fn();
 const mockGetCacheKeys = vi.fn();
+const mockGetCacheValue = vi.fn();
+const mockUpdateCacheValue = vi.fn();
+const mockRefreshCacheKey = vi.fn();
 
 vi.mock('@/abp/proModules', () => ({
   getCacheMonitorInfo: (...args: unknown[]) => mockGetCacheMonitorInfo(...args),
   getCacheKeys: (...args: unknown[]) => mockGetCacheKeys(...args),
-  getCacheValue: vi.fn(),
+  getCacheValue: (...args: unknown[]) => mockGetCacheValue(...args),
   deleteCacheKey: vi.fn(),
+  updateCacheValue: (...args: unknown[]) => mockUpdateCacheValue(...args),
+  refreshCacheKey: (...args: unknown[]) => mockRefreshCacheKey(...args),
 }));
 
 vi.mock('@ant-design/pro-components', () => ({
@@ -153,5 +158,53 @@ describe('CacheMonitorPage', () => {
       prefix: 'c:',
       cursor: 0,
     });
+  });
+
+  it('写值：hash 键预填 data 字段原文，写值请求携带编辑后的值与过期输入', async () => {
+    mockGetCacheMonitorInfo.mockResolvedValue(redisInfo);
+    mockGetCacheKeys.mockResolvedValue({
+      keys: [
+        { key: 'c:Demo.Cache,k:AbpAdmin:x', type: 'hash', sizeBytes: 1, ttlSeconds: 600 },
+      ],
+      nextCursor: 0,
+    });
+    mockGetCacheValue.mockResolvedValue({
+      key: 'c:Demo.Cache,k:AbpAdmin:x',
+      type: 'hash',
+      ttlSeconds: 600,
+      content: 'absexp = -1\nsldexp = 12000000000\ndata = {"value":null}',
+      truncated: false,
+      dataField: '{"value":null}',
+    });
+    mockUpdateCacheValue.mockResolvedValue({});
+
+    renderPage();
+    await waitFor(() => {
+      expect(mockGetCacheKeys).toHaveBeenCalledTimes(1);
+    });
+
+    // 行内操作是无 href 的 <a>（无 link role），按文本定位
+    fireEvent.click(screen.getByText('查看'));
+
+    // 抽屉内的管理区：预填的 data 字段原文可编辑（搜索框也是 textbox，用占位符定位）
+    const textarea = await screen.findByPlaceholderText(
+      '未能预填（非 RedisCache 条目或值超限），请粘贴完整值',
+    );
+    expect(textarea).toHaveValue('{"value":null}');
+    fireEvent.change(textarea, { target: { value: '{"value":"patched"}' } });
+
+    fireEvent.click(screen.getByRole('button', { name: '写 值' }));
+
+    await waitFor(() => {
+      expect(mockUpdateCacheValue).toHaveBeenCalledTimes(1);
+    });
+    expect(mockUpdateCacheValue).toHaveBeenCalledWith({
+      key: 'c:Demo.Cache,k:AbpAdmin:x',
+      value: '{"value":"patched"}',
+      absoluteExpirationSeconds: undefined,
+      slidingExpirationSeconds: undefined,
+    });
+    // 不传过期 = 沿用既有元数据，改期接口不应被误调
+    expect(mockRefreshCacheKey).not.toHaveBeenCalled();
   });
 });

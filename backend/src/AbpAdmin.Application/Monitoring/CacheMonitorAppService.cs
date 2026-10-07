@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -300,6 +301,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         var ttl = await database.KeyTimeToLiveAsync(key);
         var builder = new StringBuilder();
         var truncated = new TruncationFlag();
+        string? dataField = null;
 
         switch (type)
         {
@@ -310,6 +312,8 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
 
             case RedisType.Hash:
                 await AppendHashPreviewAsync(database, key, builder, truncated);
+                // data 字段原文单独取（写值预填用）：预览是给人看的格式化文本，回写要的是原始值
+                dataField = await ReadDataFieldAsync(database, key);
                 break;
 
             case RedisType.List:
@@ -335,7 +339,8 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
             Type = type.ToString().ToLowerInvariant(),
             TtlSeconds = ttl == null ? null : (long)Math.Ceiling(ttl.Value.TotalSeconds),
             Content = builder.ToString(),
-            Truncated = truncated.Value
+            Truncated = truncated.Value,
+            DataField = dataField
         };
     }
 
@@ -353,6 +358,200 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         AssertAbpKey(key);
         var database = await RequireDatabaseAsync();
         await database.KeyDeleteAsync(key);
+    }
+
+    [Authorize(AbpAdminPermissions.CacheMonitor.Manage)]
+    public virtual async Task SetValueAsync(CacheSetValueInput input)
+    {
+        AssertAbpKey(input.Key);
+        if (input.Value.Length > WritableValueLimit)
+        {
+            throw new UserFriendlyException($"值长度 {input.Value.Length} 超过上限 {WritableValueLimit} 字符——排障工具不承运大对象。");
+        }
+
+        var database = await RequireDatabaseAsync();
+        var type = await database.KeyTypeAsync(input.Key);
+        var now = DateTimeOffset.UtcNow;
+
+        if (type == RedisType.Hash)
+        {
+            // 写 data 字段；过期元数据按"未提及沿用既有"合并后全量回写（保持 RedisCache 条目格式）
+            var (currentAbs, currentSld) = await ReadMetadataAsync(database, input.Key);
+            await WriteHashEntryAsync(database, input.Key, input.Value, currentAbs, currentSld,
+                input.AbsoluteExpirationSeconds, input.SlidingExpirationSeconds, now);
+            return;
+        }
+
+        if (type == RedisType.String)
+        {
+            var (abs, sld) = MergeMetadata(null, null,
+                input.AbsoluteExpirationSeconds, input.SlidingExpirationSeconds, now);
+            var ttl = ComputeRedisTtl(abs, sld, now);
+            AssertFutureTtl(ttl);
+            // 两个过期都没给 = 覆盖为永不过期（string 键无元数据可"沿用"，语义就是显式覆盖）
+            await database.StringSetAsync(input.Key, input.Value, ttl);
+            return;
+        }
+
+        throw new UserFriendlyException($"仅支持 hash / string 键的写值（当前类型：{type}）。");
+    }
+
+    [Authorize(AbpAdminPermissions.CacheMonitor.Manage)]
+    public virtual async Task RefreshAsync(CacheRefreshInput input)
+    {
+        AssertAbpKey(input.Key);
+        var database = await RequireDatabaseAsync();
+        var type = await database.KeyTypeAsync(input.Key);
+        var now = DateTimeOffset.UtcNow;
+
+        if (type == RedisType.Hash)
+        {
+            // 不带 data 的 hash 写入 = 只重写过期元数据；两个输入都为 null 时即"按原口径续期"
+            // （滑动过期从现在重新起算，语义与 IDistributedCache.RefreshAsync 一致）
+            var (currentAbs, currentSld) = await ReadMetadataAsync(database, input.Key);
+            await WriteHashEntryAsync(database, input.Key, value: null, currentAbs, currentSld,
+                input.AbsoluteExpirationSeconds, input.SlidingExpirationSeconds, now);
+            return;
+        }
+
+        if (type == RedisType.String)
+        {
+            if (!input.AbsoluteExpirationSeconds.HasValue && !input.SlidingExpirationSeconds.HasValue)
+            {
+                throw new UserFriendlyException("string 键没有过期元数据，改期必须显式提供绝对或滑动过期（秒）。");
+            }
+
+            var (abs, sld) = MergeMetadata(null, null,
+                input.AbsoluteExpirationSeconds, input.SlidingExpirationSeconds, now);
+            var ttl = ComputeRedisTtl(abs, sld, now);
+            AssertFutureTtl(ttl);
+            await database.KeyExpireAsync(input.Key, ttl!.Value);
+            return;
+        }
+
+        throw new UserFriendlyException($"仅支持 hash / string 键的改期（当前类型：{type}）。");
+    }
+
+    /// <summary>
+    /// Microsoft.Extensions.Caching.StackExchangeRedis.RedisCache 条目 hash 的字段名（对齐其实现，
+    /// 拼错字段名等于静默丢元数据）：absexp=绝对过期（epoch 毫秒，-1=无）；sldexp=滑动过期
+    /// （TimeSpan ticks，-1=无）；data=条目值（ABP 缓存为序列化 JSON 信封）。
+    /// </summary>
+    internal const string AbsoluteExpirationField = "absexp";
+    internal const string SlidingExpirationField = "sldexp";
+    internal const string DataField = "data";
+
+    /// <summary>写值/预填的单值上限（字符，与值预览同上限）：排障工具不承运大对象，
+    /// 且超长值的预填截断后再存回去就是数据损坏。</summary>
+    internal const int WritableValueLimit = ContentPreviewLimit;
+
+    /// <summary>hash 的 data 字段原文（写值预填用）。超上限返回 null——半截值存回去就是数据损坏，宁可不给预填。</summary>
+    protected virtual async Task<string?> ReadDataFieldAsync(IDatabaseAsync database, string key)
+    {
+        var value = await database.HashGetAsync(key, DataField);
+        var text = value.IsNull ? null : (string?)value;
+        return text is { Length: <= WritableValueLimit } ? text : null;
+    }
+
+    /// <summary>
+    /// hash 条目写入（value=null 时只重写过期元数据 = 改期）。absexp/sldexp 恒全量回写——
+    /// RedisCache 的 Get 依赖这两个字段判定条目生死，漏写/写歪等于把活条目判成过期。
+    /// TTL 按 RedisCache 同一口径（绝对过期距今与滑动过期取最小）随写更新；data 与元数据
+    /// 分两条命令、无事务——排障工具的单写者场景下中间态窗口（元数据先变、值未变）无实际危害，
+    /// 不为此引入 Lua/事务复杂度。
+    /// </summary>
+    protected virtual async Task WriteHashEntryAsync(
+        IDatabase database, string key, string? value,
+        long? currentAbsoluteMs, TimeSpan? currentSliding,
+        long? absoluteSeconds, long? slidingSeconds, DateTimeOffset now)
+    {
+        var (abs, sld) = MergeMetadata(currentAbsoluteMs, currentSliding, absoluteSeconds, slidingSeconds, now);
+        var ttl = ComputeRedisTtl(abs, sld, now);
+        AssertFutureTtl(ttl);
+
+        var entries = new List<HashEntry>(3)
+        {
+            new(AbsoluteExpirationField, (abs ?? -1).ToString(CultureInfo.InvariantCulture)),
+            new(SlidingExpirationField, (sld?.Ticks ?? -1).ToString(CultureInfo.InvariantCulture)),
+        };
+        if (value != null)
+        {
+            entries.Add(new HashEntry(DataField, value));
+        }
+        await database.HashSetAsync(key, [.. entries]);
+        if (ttl.HasValue)
+        {
+            await database.KeyExpireAsync(key, ttl.Value);
+        }
+    }
+
+    /// <summary>读条目的过期元数据（字段缺失 = 未设置；RedisCache 写入时恒写三字段，老条目/外部写入可能缺失）。</summary>
+    protected virtual async Task<(long? AbsoluteExpirationUnixMs, TimeSpan? SlidingExpiration)> ReadMetadataAsync(
+        IDatabaseAsync database, string key)
+    {
+        var values = await database.HashGetAsync(key, [AbsoluteExpirationField, SlidingExpirationField]);
+        return ParseMetadata(values[0], values[1]);
+    }
+
+    /// <summary>解析 RedisCache 元数据字段：absexp（epoch 毫秒）/-1=无；sldexp（TimeSpan ticks）/-1=无。</summary>
+    internal static (long? AbsoluteExpirationUnixMs, TimeSpan? SlidingExpiration) ParseMetadata(
+        RedisValue absoluteMs, RedisValue slidingTicks)
+    {
+        long? abs = null;
+        if (!absoluteMs.IsNull && long.TryParse(absoluteMs.ToString(), CultureInfo.InvariantCulture, out var a) && a > 0)
+        {
+            abs = a;
+        }
+
+        TimeSpan? sld = null;
+        if (!slidingTicks.IsNull && long.TryParse(slidingTicks.ToString(), CultureInfo.InvariantCulture, out var s) && s > 0)
+        {
+            sld = TimeSpan.FromTicks(s);
+        }
+
+        return (abs, sld);
+    }
+
+    /// <summary>合并新过期与既有元数据：null 输入沿用既有（写值/改期不改变未提及的口径），有值则覆盖。</summary>
+    internal static (long? AbsoluteExpirationUnixMs, TimeSpan? SlidingExpiration) MergeMetadata(
+        long? currentAbsoluteMs, TimeSpan? currentSliding,
+        long? absoluteSeconds, long? slidingSeconds, DateTimeOffset now)
+    {
+        var abs = absoluteSeconds.HasValue
+            ? now.AddSeconds(absoluteSeconds.Value).ToUnixTimeMilliseconds()
+            : currentAbsoluteMs;
+        var sld = slidingSeconds.HasValue ? TimeSpan.FromSeconds(slidingSeconds.Value) : currentSliding;
+        return (abs, sld);
+    }
+
+    /// <summary>
+    /// 键 TTL 的 RedisCache 口径（其 Set/Refresh 尾部：过期时间取绝对过期距今与滑动过期的最小值）；
+    /// 都未设置 = 永不过期（null）。绝对过期已过时结果为负——调用方须先过 AssertFutureTtl。
+    /// </summary>
+    internal static TimeSpan? ComputeRedisTtl(long? absoluteMs, TimeSpan? sliding, DateTimeOffset now)
+    {
+        TimeSpan? absTtl = absoluteMs.HasValue
+            ? TimeSpan.FromMilliseconds(absoluteMs.Value - now.ToUnixTimeMilliseconds())
+            : null;
+        if (absTtl.HasValue && sliding.HasValue)
+        {
+            return absTtl.Value < sliding.Value ? absTtl : sliding;
+        }
+
+        return absTtl ?? sliding;
+    }
+
+    /// <summary>
+    /// 算出的 TTL 必须在未来：已过期的口径若直接 EXPIRE，负值会把键当场删掉——删除是
+    /// 删除功能的显式动作，不归写值/改期静默顺手做。
+    /// </summary>
+    internal static void AssertFutureTtl(TimeSpan? ttl)
+    {
+        if (ttl is { } value && value <= TimeSpan.Zero)
+        {
+            throw new UserFriendlyException(
+                $"过期时间已过（按新口径 TTL={value.TotalSeconds:F0} 秒），写值/改期拒绝执行；要立即删除请用删除功能。");
+        }
     }
 
     protected virtual async Task<IDatabase> GetDatabaseAsync()

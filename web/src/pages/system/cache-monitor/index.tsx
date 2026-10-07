@@ -7,6 +7,7 @@ import {
   Card,
   Drawer,
   Input,
+  InputNumber,
   Popconfirm,
   Space,
   Table,
@@ -21,6 +22,8 @@ import {
   getCacheKeys,
   getCacheMonitorInfo,
   getCacheValue,
+  refreshCacheKey,
+  updateCacheValue,
 } from '@/abp/proModules';
 
 const formatBytes = (bytes?: number | null): string => {
@@ -66,8 +69,13 @@ const CacheMonitorPage: React.FC = () => {
   const [prefixInput, setPrefixInput] = useState<string>();
   const [activePrefix, setActivePrefix] = useState<string>();
   const [valueTarget, setValueTarget] = useState<CacheKeyDto>();
-  const [valueContent, setValueContent] = useState<string>();
+  const [valueResult, setValueResult] = useState<Awaited<ReturnType<typeof getCacheValue>>>();
+  const [valueError, setValueError] = useState<string>();
   const [valueLoading, setValueLoading] = useState(false);
+  const [editValue, setEditValue] = useState<string>();
+  const [editAbsSeconds, setEditAbsSeconds] = useState<number>();
+  const [editSldSeconds, setEditSldSeconds] = useState<number>();
+  const [saving, setSaving] = useState(false);
 
   const loadInfo = useCallback(async () => {
     try {
@@ -162,20 +170,77 @@ const CacheMonitorPage: React.FC = () => {
   const openValue = async (record: CacheKeyDto) => {
     setValueTarget(record);
     setValueLoading(true);
-    setValueContent(undefined);
+    setValueResult(undefined);
+    setValueError(undefined);
+    setEditValue(undefined);
+    setEditAbsSeconds(undefined);
+    setEditSldSeconds(undefined);
     try {
       const result = await getCacheValue(record.key);
-      setValueContent(
-        `${result.content}${result.truncated ? '\n…（内容已截断）' : ''}`,
+      setValueResult(result);
+      // 写值预填：hash 取 data 字段原文；string 用完整内容（截断的不预填——半截值存回去就是
+      // 数据损坏）；两者都拿不到留空，由用户粘贴完整值
+      setEditValue(
+        result.dataField ??
+          (result.type === 'string' && !result.truncated ? result.content : undefined),
+      );
+      // 行 TTL 就地同步（写值/改期后的重读也走这里），不等下一次扫描
+      setKeys((current) =>
+        current.map((k) =>
+          k.key === record.key ? { ...k, ttlSeconds: result.ttlSeconds ?? undefined } : k,
+        ),
       );
     } catch (e) {
-      setValueContent(
+      setValueError(
         `读取失败：${e instanceof Error ? e.message : '未知错误'}（仅允许 ABP 缓存键：c: / t: 结构前缀开头${
           info?.keyPrefix ? `；本应用键含 ${info.keyPrefix} 隔离前缀` : ''
         }）`,
       );
     } finally {
       setValueLoading(false);
+    }
+  };
+
+  // 写值（hash → data 字段；string → 覆盖整键）与改期共用抽屉里的过期输入：
+  // 不传 = 沿用既有元数据（后端口径）。成功后重读当前键——内容与 TTL 都以服务端为准。
+  const saveValue = async () => {
+    if (!valueTarget || editValue === undefined) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateCacheValue({
+        key: valueTarget.key,
+        value: editValue,
+        absoluteExpirationSeconds: editAbsSeconds,
+        slidingExpirationSeconds: editSldSeconds,
+      });
+      message.success('已写入');
+      await openValue(valueTarget);
+    } catch (e) {
+      message.error(`写值失败：${e instanceof Error ? e.message : '未知错误'}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const applyRefresh = async () => {
+    if (!valueTarget) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await refreshCacheKey({
+        key: valueTarget.key,
+        absoluteExpirationSeconds: editAbsSeconds,
+        slidingExpirationSeconds: editSldSeconds,
+      });
+      message.success('已改期');
+      await openValue(valueTarget);
+    } catch (e) {
+      message.error(`改期失败：${e instanceof Error ? e.message : '未知错误'}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -387,12 +452,79 @@ const CacheMonitorPage: React.FC = () => {
       >
         {valueLoading ? (
           '读取中…'
+        ) : valueError ? (
+          <Typography.Paragraph type="danger">{valueError}</Typography.Paragraph>
         ) : (
-          <Typography.Paragraph>
-            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {valueContent}
-            </pre>
-          </Typography.Paragraph>
+          <>
+            <Typography.Paragraph>
+              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {valueResult?.content}
+                {valueResult?.truncated ? '\n…（内容已截断）' : ''}
+              </pre>
+            </Typography.Paragraph>
+            {access.canManageCache && valueTarget && (
+              <Card type="inner" title="写值 / 改期" style={{ marginTop: 16 }}>
+                {valueTarget.type === 'hash' || valueTarget.type === 'string' ? (
+                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                    <Typography.Text type="secondary">
+                      {valueTarget.type === 'hash'
+                        ? '写值写入 data 字段（ABP 缓存条目为 JSON 信封，须保持可反序列化）；改期重写过期元数据，滑动过期从现在重新起算。'
+                        : 'string 键写值覆盖整键原文；改期必须显式提供过期时间。'}
+                    </Typography.Text>
+                    <Input.TextArea
+                      rows={5}
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      placeholder={
+                        valueTarget.type === 'hash'
+                          ? '未能预填（非 RedisCache 条目或值超限），请粘贴完整值'
+                          : '键的新内容'
+                      }
+                    />
+                    <Space wrap>
+                      <span>
+                        绝对过期（秒）
+                        <InputNumber
+                          min={1}
+                          style={{ width: 120, marginLeft: 4 }}
+                          value={editAbsSeconds}
+                          onChange={(v) => setEditAbsSeconds(v ?? undefined)}
+                          placeholder="沿用现有"
+                        />
+                      </span>
+                      <span>
+                        滑动过期（秒）
+                        <InputNumber
+                          min={1}
+                          style={{ width: 120, marginLeft: 4 }}
+                          value={editSldSeconds}
+                          onChange={(v) => setEditSldSeconds(v ?? undefined)}
+                          placeholder="沿用现有"
+                        />
+                      </span>
+                    </Space>
+                    <Space>
+                      <Button
+                        type="primary"
+                        loading={saving}
+                        disabled={!editValue?.length}
+                        onClick={() => void saveValue()}
+                      >
+                        写值
+                      </Button>
+                      <Button loading={saving} onClick={() => void applyRefresh()}>
+                        改期
+                      </Button>
+                    </Space>
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary">
+                    该类型（{valueTarget.type}）不支持写值/改期。
+                  </Typography.Text>
+                )}
+              </Card>
+            )}
+          </>
         )}
       </Drawer>
     </PageContainer>
