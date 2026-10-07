@@ -92,6 +92,9 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
     public override async Task<TenantDto> CreateAsync(TenantCreateDto input)
     {
         var tenant = await TenantManager.CreateAsync(input.Name);
+        // 多机房归属标记（docs/dr-runbook.md §6）：新建租户默认主库机房。放在 MapExtraPropertiesTo
+        // 之前——未来若 DTO 放行 Region 扩展属性，显式传入可覆盖默认值。
+        tenant.SetRegion(AbpAdminTenantConsts.DefaultRegion);
         input.MapExtraPropertiesTo(tenant);
         await TenantRepository.InsertAsync(tenant);
 
