@@ -35,6 +35,10 @@ public class MenuGrantConfig : IEntityTypeConfiguration<MenuGrant>
         b.ConfigureByConvention();
         b.Property(x => x.ProviderName).IsRequired().HasMaxLength(MenuConsts.MaxProviderNameLength);
         b.Property(x => x.ProviderKey).IsRequired().HasMaxLength(MenuConsts.MaxProviderKeyLength);
+        // 唯一索引是授权表三条写路径（角色侧差集 / 菜单侧全量覆盖 / 角色级联清理）的
+        // 并发守卫：并发双写同一 (菜单, 角色) 授权时后者撞索引失败（应用层转
+        // MenuGrantConflict 业务错），而不是静默产生重复行。
+        // TenantId 前缀索引服务角色侧读路径（GetRoleMenuGrantsAsync / 级联按角色名清理）。
         b.HasIndex(x => new { x.MenuId, x.ProviderName, x.ProviderKey }).IsUnique();
         b.HasIndex(x => new { x.TenantId, x.ProviderName, x.ProviderKey });
         // 外键级联：授权行随菜单行生灭（应用层此前手工删除是唯一防线，这里补上 DB 层防线——

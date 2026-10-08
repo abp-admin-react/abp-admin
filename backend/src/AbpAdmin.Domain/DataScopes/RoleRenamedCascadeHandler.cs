@@ -13,7 +13,10 @@ namespace AbpAdmin.DataScopes;
 /// <summary>
 /// 角色重命名的级联同步。<see cref="MenuGrant"/>（ProviderName=R, ProviderKey=角色名）与
 /// <see cref="RoleDataScope"/>（RoleName）都以角色名为键，角色重命名后残留旧行会静默失配
-/// （fail-closed：菜单对角色成员消失、数据范围归零），管理端无任何提示——重命名时同步改键。
+/// （fail-closed：菜单对角色成员消失、数据范围归零），管理端无任何提示——重命名时同步：
+/// MenuGrant 行按<strong>合并语义</strong>处理（目标名已有同菜单授权——孤儿残留或竞态——
+/// 则删旧行保新行，避免撞 (MenuId, ProviderName, ProviderKey) 唯一索引让整个改名失败）；
+/// RoleDataScope 一角色一行、目标名行在角色名唯一约束下不可能并存，直接改键。
 /// <para>事件与处理方式对齐 ABP 官方：IdentityRole.ChangeName 发布分布式事件
 /// <see cref="IdentityRoleNameChangedEto"/>（携带 OldName/Name，单机部署下 distributed bus
 /// 是进程内实现，无需真实 broker），PermissionManagement 模块自己的

@@ -291,14 +291,17 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
                    ?? throw new EntityNotFoundException(typeof(Volo.Abp.Identity.IdentityRole), roleId);
 
         // 幽灵菜单拒绝（fail-closed，与 RoleDataScope 的 OU 校验同款）：勾选集里混入
-        // 已被删除的菜单 id 时整单拒绝，而不是静默吞掉造成「保存成功但授权缺失」
+        // 已被删除的菜单 id 时整单拒绝，而不是静默吞掉造成「保存成功但授权缺失」。
+        // 取实体而非 Count：新授权行的 TenantId 必须取自菜单实体（MenuGrant 契约是
+        // 「租户隔离跟随菜单实体」），与菜单侧写入口同一口径
         var targetMenuIds = input.MenuIds.Distinct().ToList();
-        var existingMenuCount = await _menuRepository.CountAsync(x => targetMenuIds.Contains(x.Id));
-        if (existingMenuCount != targetMenuIds.Count)
+        var targetMenus = await _menuRepository.GetListAsync(x => targetMenuIds.Contains(x.Id));
+        if (targetMenus.Count != targetMenuIds.Count)
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.Menus.MenuNotFound)
-                .WithData("Count", targetMenuIds.Count - existingMenuCount);
+                .WithData("Count", targetMenuIds.Count - targetMenus.Count);
         }
+        var tenantIdByMenuId = targetMenus.ToDictionary(m => m.Id, m => m.TenantId);
 
         var grants = await _menuGrantRepository.GetListAsync(
             x => x.ProviderName == MenuConsts.RoleProviderName && x.ProviderKey == role.Name);
@@ -314,7 +317,7 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
             // 不用 autoSave: true：逐行 SaveChanges 会随勾选规模线性放大 DB 往返，
             // 统一在 SaveGrantsOrThrowConflictAsync 一次性落库
             await _menuGrantRepository.InsertAsync(
-                new MenuGrant(GuidGenerator.Create(), menuId, CurrentTenant.Id, MenuConsts.RoleProviderName, role.Name!));
+                new MenuGrant(GuidGenerator.Create(), menuId, tenantIdByMenuId[menuId], MenuConsts.RoleProviderName, role.Name!));
         }
 
         await SaveGrantsOrThrowConflictAsync();

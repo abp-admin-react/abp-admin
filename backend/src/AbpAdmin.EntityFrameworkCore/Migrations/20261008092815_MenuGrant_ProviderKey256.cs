@@ -4,7 +4,13 @@
 
 namespace AbpAdmin.Migrations
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// AppMenuGrants 键宽对齐 ABP 角色名上限：ProviderKey 64→256——
+    /// 此前 64 时，角色名 65+（ABP IdentityRole.Name 允许 256）的角色一旦被授予菜单，
+    /// 插入即撞列宽 500（宽度校验在 ABP 侧，本服务无法前置拦截）。
+    /// ProviderName 收窄 64→8（代码常量 "R"/"U"，随键共用常量虚胖，单列）。
+    /// 加宽方向无数据风险；Down 收窄前需确认存量值不超过 64。
+    /// </summary>
     public partial class MenuGrant_ProviderKey256 : Migration
     {
         /// <inheritdoc />
