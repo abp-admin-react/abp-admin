@@ -8,11 +8,12 @@ namespace AbpAdmin;
 /// <summary>
 /// 真库（宿主 PostgreSQL）门控 Fact：发现期解析宿主连接串的"真实覆盖"——
 /// 环境变量 ConnectionStrings__Default 优先，其后 src/AbpAdmin.HttpApi.Host/appsettings.secrets.json
-/// （即宿主 Program.cs 同序分层中刨去 tracked 基座的部分）。
-/// tracked 的 appsettings.json 基座是 PG 占位串（Password=CHANGE_ME，设计为运行期 fail-fast，
-/// 见其"兜底连接串"注释），不算配置；无覆盖时用例标记为 Skipped——CI 干净 checkout 无凭证，
-/// 真库用例按仓库既有约定（Storage.Tests/TestInfrastructure/RequiresEnvFactAttribute 同款机制）
-/// 显示 Skipped 而非红。
+/// （入库的开发样本，或被 skip-worktree 本地化的真实凭据）。tracked 基座 appsettings.json 的
+/// PG 占位串（Password=CHANGE_ME，设计为运行期 fail-fast）不算配置。
+/// 样本连接串指向 localhost:5432 的本地默认库：本机 docker 同参起库、CI 的 postgres 服务容器、
+/// 内网实库（本地化后的样本）都能命中，用例真跑；仅当连样本都没有（文件被删/更名）时才
+/// Skipped——机制与 Storage.Tests/TestInfrastructure/RequiresEnvFactAttribute 同款，
+/// CI 报告可区分跳过与通过。
 /// </summary>
 public sealed class RequiresHostDatabaseFactAttribute : FactAttribute
 {

@@ -19,7 +19,7 @@
 | 前端 | React 19 · antd 6 · Ant Design Pro v6 · Umi Max 4 · pnpm 10 · Vitest · Biome |
 | 认证 | OpenIddict(OIDC,前后端分离,SPA 独立部署) |
 
-默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库 PostgreSQL(连接串放 `backend/src/AbpAdmin.HttpApi.Host/appsettings.secrets.json`,不入库)。默认管理员 `admin` / `1q2w3E*`。
+默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库 PostgreSQL(连接串在 `backend/src/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 开发样本中指向本地默认库,本机真实凭据直接改该文件并用 skip-worktree 屏蔽,见文件头注释)。默认管理员 `admin` / `1q2w3E*`。
 
 ## 内置能力
 
@@ -80,7 +80,7 @@ pnpm start                                             # http://localhost:8000
 
 ### 配置单一来源
 
-`Database:Provider` 与 `ConnectionStrings:Default` 只维护在 `backend/src/AbpAdmin.HttpApi.Host/appsettings.json`(真实凭证放同目录 `appsettings.secrets.json`,该文件不入库);DbMigrator 与 EF 设计时工具自动跟随读取。生效顺序(后者覆盖前者):
+`Database:Provider` 与 `ConnectionStrings:Default` 只维护在 `backend/src/AbpAdmin.HttpApi.Host/appsettings.json`(真实凭证放同目录 `appsettings.secrets.json`:入库的是公开安全的开发样本,本机真实凭据改同文件后 `git update-index --skip-worktree` 屏蔽);DbMigrator 与 EF 设计时工具自动跟随读取。生效顺序(后者覆盖前者):
 
 1. `HttpApi.Host/appsettings.json`(共享基座)
 2. `HttpApi.Host/appsettings.secrets.json`(共享凭证)
@@ -173,7 +173,7 @@ pnpm tsc        # 类型检查
 ## 生产部署
 
 - 生产环境需要 OpenIddict 签名证书(`openiddict.pfx`,口令对应 `AuthServer:CertificatePassPhrase`;生成方式见 [OpenIddict 证书配置](https://documentation.openiddict.com/configuration/encryption-and-signing-credentials.html))
-- 连接串/证书口令等敏感配置走环境变量或 `appsettings.secrets.json`(不入库)
+- 连接串/证书口令等敏感配置走环境变量或 `appsettings.secrets.json`(本机真实凭据以 skip-worktree 屏蔽,不入库)
 - 多实例部署:打开 `Redis:IsEnabled`(分布式锁与 DataProtection 密钥依赖 Redis),`Database:AutoMigrateOnStartup` 置 false,由 DbMigrator/CI 负责迁移
 - 多机房(异地灾备)部署:铁律见 [docs/framework-contracts.md §7](docs/framework-contracts.md),操作手册见 [docs/dr-runbook.md](docs/dr-runbook.md)
 - 其余见 [ABP Deployment](https://abp.io/docs/latest/Deployment/Index)

@@ -36,7 +36,8 @@
 ## 2. 本机/测试环境运行手册（192.168.10.250 实例）
 
 1. **凭据**：只放 `src/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 的
-   `ConnectionStrings:Default`（不入库）。基底 appsettings.json 的 Default 已无意义，
+   `ConnectionStrings:Default`（入库的是开发样本；本机真实凭据改同文件后
+   `git update-index --skip-worktree` 屏蔽）。基底 appsettings.json 的 Default 已无意义，
    会被 secrets 覆盖。
 2. **schema 隔离运行**（不动 public 旧表）：
    ```bash
