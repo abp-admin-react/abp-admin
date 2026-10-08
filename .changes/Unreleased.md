@@ -25,6 +25,9 @@
   - 角色下用户只读查看:新增 `GET /api/app/role-user-admin?roleId=` + 前端角色页「用户」抽屉;`RoleDataScopeAppService` 三个写入口补 `[OperationLog]`,新增 `role(id)` 日志解析函数。
   - 前端配套:`DataScopeModal` 未配置语义如实展示(fail-closed 零行可见)且仅 404 走默认表单、其它读取失败关弹窗防默认值覆盖;`RoleGrantModal` 补「授权按节点生效」说明。
   - 新错误码:`AbpAdmin:Identity:RoleHasUsers`、`AbpAdmin:DataScope:RoleDataScopeEscalation`、`AbpAdmin:DataScope:RoleDataScopeCustomOuOutOfScope`(zh-Hans/en 已配)。
+- `web/src/pages/menus`:RoleGrantModal 的 TreeSelect 节点 key 与 value 统一为角色名,消除 antd 控制台警告(勾选语义本就是角色名,角色名租户内唯一)。
+- `AbpAdmin.Application/AbpAdminRoleAppService`:删除角色操作日志的 IHttpContextAccessor/ICorrelationIdProvider 恢复构造函数注入(测试基座 AbpAdminApplicationTestModule 已补 AddHttpContextAccessor 注册)。
+- 出站 HTTP(HttpAgent):两个命名客户端(AuthServerTokenExchange/Turnstile)接入 ProfilerDelegatingHandler 报文透视,配置键 `HttpRemote:Profiler`(默认 false——报文含 client_secret/token,仅本地联调临时开启);RecordingHttpHandler 测试替身补 Response.RequestMessage 关联(附加 handler 读报文元数据不再 ArgumentNullException)。
 
 ## 依赖项变更
 

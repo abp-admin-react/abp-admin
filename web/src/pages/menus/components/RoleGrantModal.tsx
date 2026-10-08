@@ -86,8 +86,9 @@ const RoleGrantModal: React.FC<RoleGrantModalProps> = ({
       <TreeSelect
         treeData={roles.map((x) => ({
           title: x.name,
+          // key 与 value 必须同值（antd 约束）：勾选语义就是角色名（ProviderKey），
+          // 角色名在租户内唯一，无需用 id 做键
           value: x.name,
-          key: x.id,
         }))}
         value={selectedRoles}
         onChange={setSelectedRoles}
