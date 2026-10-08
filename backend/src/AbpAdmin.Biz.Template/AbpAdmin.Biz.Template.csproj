@@ -36,7 +36,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Localization\BizTemplate\*.json" />
-    <EmbeddedResource Include="Sql\**\*.sql" />
   </ItemGroup>
 
   <ItemGroup>

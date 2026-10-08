@@ -21,4 +21,10 @@ public class BizTemplateConsts
 
     /// <summary>本模块 EF Core 迁移记账表，与框架 __EFMigrationsHistory 分开（两本账）。</summary>
     public const string SchemaHistoryTable = "__BizTemplate_EFMigrationsHistory";
+
+    /// <summary>
+    /// 本模块首个迁移（存量库打戳 baseline 用，与 Migrations/ 下 Initial 保持一致；
+    /// 漂移由 EfCoreLegacySchemaBaselinerDecideTests 工程测试钉死）。
+    /// </summary>
+    public const string InitialMigrationId = "20261007125818_Initial";
 }
