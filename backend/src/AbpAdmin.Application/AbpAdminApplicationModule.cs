@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using AbpAdmin.OpenIddict;
 using AbpAdmin.Permissions;
+using AbpAdmin.Http;
 using Volo.Abp.PermissionManagement;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.Account;
@@ -76,7 +77,11 @@ public class AbpAdminApplicationModule : AbpModule
         // HTTP 探活作业（Monitoring/HttpProbeJobHandler）的命名客户端（注册跟随消费方）：
         // 目标 URL 来自作业 Payload，无 BaseAddress/超时可配（超时走 SetTimeout 按次设置）；
         // 命名是为了测试挂录制替身 + Profiler 全局管道可辨识。
-        context.Services.AddHttpClient(Monitoring.HttpProbeJobHandler.HttpClientName);
+        // 主处理器关闭自动重定向（SafeHttpUrl.CreateNoRedirectPrimaryHandler）：SSRF 防线只
+        // 校验 Payload URL 本身，跟随 3xx 会让探活把状态码"探"到重定向目标上——3xx 按
+        // 非 2xx 失败处理，不跟。
+        context.Services.AddHttpClient(Monitoring.HttpProbeJobHandler.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => SafeHttpUrl.CreateNoRedirectPrimaryHandler());
 
         // T2.8 SaaS Pro 缺口：租户/版本级功能编辑的授权策略。
         // 开源 FeatureAppService 只对 Host 功能（T + providerKey == null，严格 null 比较）

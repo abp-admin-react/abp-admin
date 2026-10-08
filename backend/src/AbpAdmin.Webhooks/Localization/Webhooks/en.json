@@ -13,6 +13,7 @@
     "Webhooks:SubscriptionNotFound": "Webhook subscription {0} does not exist",
     "Webhooks:SendRecordNotFound": "Webhook send record {0} does not exist",
     "Webhooks:InvalidWebhookUri": "Webhook URI must be a valid absolute http(s) URL",
+    "Webhooks:ForbiddenWebhookHost": "Webhook target {0} resolves to an intranet/reserved address and is not allowed (set Webhooks:AllowIntranetTargets=true only for intranet deployments)",
     "Webhooks:DuplicateEventName": "Event name {0} is duplicated in the subscription"
   }
 }

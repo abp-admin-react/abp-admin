@@ -117,3 +117,8 @@ public sealed class RecordingTurnstileHandler : RecordingHttpHandler
 public sealed class RecordingHttpProbeHandler : RecordingHttpHandler
 {
 }
+
+/// <summary>"AbpAdminWebhookDelivery" 命名 HttpClient 的替身（Webhook 投递作业）。</summary>
+public sealed class RecordingWebhookDeliveryHandler : RecordingHttpHandler
+{
+}

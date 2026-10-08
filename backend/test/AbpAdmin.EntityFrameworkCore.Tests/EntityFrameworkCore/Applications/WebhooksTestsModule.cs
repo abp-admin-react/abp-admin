@@ -46,6 +46,12 @@ public class WebhooksTestsModule : AbpModule
         context.Services.AddAlwaysDisableUnitOfWorkTransaction();
         ConfigureInMemorySqlite(context.Services);
 
+        // Webhook 投递作业的出站 HTTP 替身（同探活的 RecordingHttpProbeHandler 惯例）：
+        // 投递作业测试断言"SSRF 拦截路径零外呼"必须能看到请求有没有真的发起
+        context.Services.AddSingleton<HttpStubs.RecordingWebhookDeliveryHandler>();
+        context.Services.AddHttpClient(AbpAdmin.Webhooks.Delivery.WebhookDeliveryHttpClientExtensions.ClientName)
+            .ConfigurePrimaryHttpMessageHandler(sp => sp.GetRequiredService<HttpStubs.RecordingWebhookDeliveryHandler>());
+
         // 上下文级覆盖（必须在业务模块的 UseNpgsql 之后注册——本模块是依赖末端）
         Configure<AbpDbContextOptions>(options =>
         {

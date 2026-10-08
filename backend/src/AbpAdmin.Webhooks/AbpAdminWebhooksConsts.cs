@@ -21,4 +21,10 @@ public static class AbpAdminWebhooksConsts
 
     /// <summary>SendRecord.ResponseBody 落库上限（超出截断）。</summary>
     public const int MaxResponseBodyLength = 2000;
+
+    /// <summary>
+    /// SSRF 放行开关：Webhook 目标是否允许内网/保留地址（默认 false）。
+    /// 订阅创建/更新与投递发送前三处校验共用；内网部署且订阅方都在内网时才显式置 true。
+    /// </summary>
+    public const string AllowIntranetTargetsConfigurationKey = "Webhooks:AllowIntranetTargets";
 }

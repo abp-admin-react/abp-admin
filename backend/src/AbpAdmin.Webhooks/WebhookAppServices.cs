@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Http;
 using AbpAdmin.Webhooks.Delivery;
 using AbpAdmin.Webhooks.Permissions;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Configuration;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
@@ -19,13 +21,16 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
 {
     private readonly IRepository<WebhookSubscription, Guid> _subscriptionRepository;
     private readonly IRepository<WebhookSubscriptionEvent> _eventRepository;
+    private readonly IConfiguration _configuration;
 
     public WebhookSubscriptionAppService(
         IRepository<WebhookSubscription, Guid> subscriptionRepository,
-        IRepository<WebhookSubscriptionEvent> eventRepository)
+        IRepository<WebhookSubscriptionEvent> eventRepository,
+        IConfiguration configuration)
     {
         _subscriptionRepository = subscriptionRepository;
         _eventRepository = eventRepository;
+        _configuration = configuration;
         // 模块资源：L["Webhooks:*"]（URI 校验/重名事件等用户可见文案）
         LocalizationResource = typeof(Localization.WebhooksResource);
     }
@@ -74,7 +79,7 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
     public virtual async Task<WebhookSubscriptionDto> CreateAsync(CreateWebhookSubscriptionInput input)
     {
         EnsureEventsDistinct(input.Events);
-        EnsureHttpsOrHttpUri(input.WebhookUri);
+        await EnsureValidTargetUriAsync(input.WebhookUri);
 
         var subscription = new WebhookSubscription(
             GuidGenerator.Create(),
@@ -93,7 +98,7 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
     public virtual async Task<WebhookSubscriptionDto> UpdateAsync(Guid id, UpdateWebhookSubscriptionInput input)
     {
         EnsureEventsDistinct(input.Events);
-        EnsureHttpsOrHttpUri(input.WebhookUri);
+        await EnsureValidTargetUriAsync(input.WebhookUri);
 
         // SetEvents 做差量增删，必须带出 Events 导航（默认仓储不带 Include）
         var queryable = await _subscriptionRepository.WithDetailsAsync(s => s.Events);
@@ -143,13 +148,26 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
         }
     }
 
-    /// <summary>URI 必须是绝对 http(s) URL（交付作业用 HttpClient POST，相对串/其他 scheme 无意义）。</summary>
-    private void EnsureHttpsOrHttpUri(string uri)
+    /// <summary>
+    /// URI 必须是绝对 http(s) URL（交付作业用 HttpClient POST，相对串/其他 scheme 无意义），
+    /// 且目标不得解析到内网/保留地址（SSRF 防线，SafeHttpUrl；DNS 解析后校验防
+    /// "提交合法域名、投递时切内网记录"的 rebinding——投递作业发送前还会再校验一次）。
+    /// 内网部署的放行开关见 <see cref="AbpAdminWebhooksConsts.AllowIntranetTargetsConfigurationKey"/>，
+    /// 判定统一走 SafeHttpUrl 重载（显式 true 才放行）。
+    /// </summary>
+    private async Task EnsureValidTargetUriAsync(string uri)
     {
         if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
             || (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
         {
             throw new UserFriendlyException(L["Webhooks:InvalidWebhookUri", uri]);
+        }
+
+        var blockedHost = await SafeHttpUrl.GetBlockedHostAsync(
+            parsed.ToString(), _configuration, AbpAdminWebhooksConsts.AllowIntranetTargetsConfigurationKey);
+        if (blockedHost != null)
+        {
+            throw new UserFriendlyException(L["Webhooks:ForbiddenWebhookHost", blockedHost]);
         }
     }
 }

@@ -84,6 +84,66 @@ public abstract class WebhookSubscriptionAppServiceTests<TStartupModule> : AbpAd
         exception.Message.ShouldContain("a.b");
     }
 
+    [Theory]
+    [InlineData("http://169.254.169.254/latest/meta-data/", "169.254.169.254")] // 云元数据端点
+    [InlineData("http://127.0.0.1:9000/hook", "127.0.0.1")]                     // loopback
+    [InlineData("http://10.0.0.5/hook", "10.0.0.5")]                            // RFC1918
+    [InlineData("http://[::1]/hook", "::1")]                                    // IPv6 loopback
+    public async Task Create_Should_Reject_Intranet_Targets(string uri, string blockedHost)
+    {
+        // SSRF 防线：只校验 scheme 挡不住"订阅指向内网/云元数据，借服务端 POST 探测并回读响应"；
+        // 断言违规主机出现在错误消息里（与本地化语言无关）
+        var exception = await Should.ThrowAsync<UserFriendlyException>(() =>
+            _subscriptionAppService.CreateAsync(new CreateWebhookSubscriptionInput
+            {
+                WebhookUri = uri,
+                Secret = "s-0123456789",
+                Events = new() { "e1" },
+            }));
+
+        exception.Message.ShouldContain(blockedHost);
+    }
+
+    [Fact]
+    public async Task Create_Should_Reject_Intranet_Domain_Via_Dns()
+    {
+        // 域名路径：localhost 解析到 loopback 同样被拒（DNS 解析后校验，防"域名合法但指向内网"）
+        await Should.ThrowAsync<UserFriendlyException>(() =>
+            _subscriptionAppService.CreateAsync(new CreateWebhookSubscriptionInput
+            {
+                WebhookUri = "http://localhost/hook",
+                Secret = "s-0123456789",
+                Events = new() { "e1" },
+            }));
+    }
+
+    [Fact]
+    public async Task Update_Should_Reject_Intranet_Target()
+    {
+        var created = await _subscriptionAppService.CreateAsync(new CreateWebhookSubscriptionInput
+        {
+            WebhookUri = "https://example.com/hook",
+            Secret = "s-0123456789",
+            Events = new() { "e1" },
+        });
+
+        // 编辑指向内网同样拦截（防"先建合法订阅再改指向"）
+        var exception = await Should.ThrowAsync<UserFriendlyException>(() =>
+            _subscriptionAppService.UpdateAsync(created.Id, new UpdateWebhookSubscriptionInput
+            {
+                WebhookUri = "http://192.168.1.10/hook",
+                Description = "改指向内网",
+                IsActive = true,
+                Events = new() { "e1" },
+            }));
+
+        exception.Message.ShouldContain("192.168.1.10");
+
+        // 原订阅未被改动
+        var unchanged = await _subscriptionAppService.GetAsync(created.Id);
+        unchanged.WebhookUri.ShouldBe("https://example.com/hook");
+    }
+
     [Fact]
     public async Task GetList_Should_Filter_By_IsActive_And_Text()
     {

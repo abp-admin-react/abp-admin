@@ -1,10 +1,13 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using AbpAdmin.Http;
 using HttpAgent;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -24,6 +27,11 @@ namespace AbpAdmin.Webhooks.Delivery;
 /// AbpAdminWebhookDelivery）：重试交框架重试策略——间隔 2s/4s 与既有手写退避一致，
 /// 仅对网络异常与瞬态状态码（408/429/5xx）重试，4xx 重发无意义不重试；签名对整体 payload
 /// 不随重试变化，重发合法。终态写回 SendRecord（成功/最终失败 + 尝试次数 + 响应摘要）。
+/// SSRF 防线（SafeHttpUrl）：发送前校验目标（订阅创建/更新时已校验，这里兜住存量数据
+/// 与提交后 DNS 切换的 rebinding 窗口）；拦截 = 不发请求、不重试、直接落失败终态。
+/// 配套防线：投递命名客户端关闭自动重定向（AddWebhookDeliveryHttpClient 挂
+/// SafeHttpUrl.CreateNoRedirectPrimaryHandler）——守卫只校验订阅 URL，跟随 3xx 会把
+/// 签名头与 payload 重放给重定向目标。
 /// UoW：终态写回走 <see cref="SaveResultAsync"/> 的独立新 UoW（requiresNew）——终态必须落库，
 /// 不与作业里其他潜在写操作共生死；除此之外本作业不开环境 UoW。
 /// 日志语义（与下方日志字符串一一对应）：
@@ -32,7 +40,11 @@ namespace AbpAdmin.Webhooks.Delivery;
 /// - 最后一次失败 = Error，两种终态形态——非 2xx 终态「Webhook delivery failed after {Attempt} attempts
 ///   for {Uri}: {StatusCode}.」（无异常、状态码即原因），网络层终态「Webhook delivery failed after
 ///   {Attempt} attempts for {Uri}.」+ 异常堆栈（终态按"无响应"落库）；
-/// - 订阅已删/暂停 = 不打日志，静默落失败终态。
+/// - 订阅已删/暂停 = 不打日志，静默落失败终态；
+/// - 目标被 SSRF 防线拦截 = Error「Webhook delivery blocked for {Uri}: target host {Host}
+///   is an intranet/reserved address (SSRF guard).」+ 落失败终态（不重试；
+///   ResponseBody = "blocked: target host {Host} is an intranet/reserved address (SSRF guard)"，
+///   管理端发送记录可读出被拒原因，EfCoreWebhookDeliveryJobTests 钉住）；
 /// </summary>
 public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, ITransientDependency
 {
@@ -56,6 +68,7 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
     private readonly IHttpRemoteService _httpRemoteService;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
     private readonly IClock _clock;
+    private readonly IConfiguration _configuration;
 
     public ILogger<WebhookDeliveryJob> Logger { get; set; } = NullLogger<WebhookDeliveryJob>.Instance;
 
@@ -63,12 +76,14 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
         IServiceProvider serviceProvider,
         IHttpRemoteService httpRemoteService,
         IUnitOfWorkManager unitOfWorkManager,
-        IClock clock)
+        IClock clock,
+        IConfiguration configuration)
     {
         _serviceProvider = serviceProvider;
         _httpRemoteService = httpRemoteService;
         _unitOfWorkManager = unitOfWorkManager;
         _clock = clock;
+        _configuration = configuration;
     }
 
     public override async Task ExecuteAsync(WebhookDeliveryJobArgs args)
@@ -85,6 +100,22 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
                 // 订阅已删/暂停：记录终态为失败（原因在无响应可讲，状态码留空）
                 await SaveResultAsync(recordRepository, args, succeeded: false, statusCode: null,
                     responseBody: "subscription removed or paused", attemptCount: 1);
+                return;
+            }
+
+            // SSRF 防线：发送前拦截内网/保留目标（不发请求、不重试），终态可读出被拒原因。
+            // 开关判定统一走 SafeHttpUrl 重载（显式 true 才放行）
+            var blockedHost = await SafeHttpUrl.GetBlockedHostAsync(
+                subscription.WebhookUri, _configuration,
+                AbpAdminWebhooksConsts.AllowIntranetTargetsConfigurationKey);
+            if (blockedHost != null)
+            {
+                Logger.LogError(
+                    "Webhook delivery blocked for {Uri}: target host {Host} is an intranet/reserved address (SSRF guard).",
+                    subscription.WebhookUri, blockedHost);
+                await SaveResultAsync(recordRepository, args, succeeded: false, statusCode: null,
+                    responseBody: $"blocked: target host {blockedHost} is an intranet/reserved address (SSRF guard)",
+                    attemptCount: 1);
                 return;
             }
 
@@ -119,7 +150,9 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
 
                 statusCode = (int)response.StatusCode;
                 succeeded = statusCode is >= 200 and < 300;
-                responseBody = await response.Content.ReadAsStringAsync();
+                // 有界读：投递目标是用户提交的外部地址（不可信），全量 ReadAsStringAsync
+                // 会被恶意收端在超时窗口内灌爆内存；只取摘要上限 +1 字符，超出部分截断落库
+                responseBody = await ReadBoundedAsync(response.Content);
                 if (!succeeded)
                 {
                     Logger.LogError("Webhook delivery failed after {Attempt} attempts for {Uri}: {StatusCode}.",
@@ -165,6 +198,16 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
                 .SetOnRetry(onRetry));
     }
 
+    /// <summary>响应体有界读：最多读 MaxResponseBodyLength + 1 字符（+1 用于感知截断），防恶意收端撑爆内存。</summary>
+    private static async Task<string> ReadBoundedAsync(HttpContent content)
+    {
+        await using var stream = await content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream);
+        var buffer = new char[AbpAdminWebhooksConsts.MaxResponseBodyLength + 1];
+        var read = await reader.ReadAsync(buffer, 0, buffer.Length);
+        return new string(buffer, 0, read);
+    }
+
     private async Task SaveResultAsync(
         IRepository<WebhookSendRecord, Guid> recordRepository,
         WebhookDeliveryJobArgs args,
@@ -190,14 +233,20 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
     }
 }
 
-/// <summary>命名 HTTP 客户端（投递专用；超时经 HttpRequestBuilder.SetTimeout 按次设置）。</summary>
+/// <summary>
+/// 命名 HTTP 客户端（投递专用；超时经 HttpRequestBuilder.SetTimeout 按次设置）。
+/// 主处理器关闭自动重定向（SafeHttpUrl.CreateNoRedirectPrimaryHandler）：SSRF 防线只
+/// 校验订阅 URL 本身，跟随 3xx 会让服务端把签名头与 payload 重放给重定向目标（含
+/// https→http 降级），防线整体失效——3xx 按"非 2xx 终态失败"处理，不跟。
+/// </summary>
 public static class WebhookDeliveryHttpClientExtensions
 {
     public const string ClientName = "AbpAdminWebhookDelivery";
 
     public static IServiceCollection AddWebhookDeliveryHttpClient(this IServiceCollection services)
     {
-        _ = services.AddHttpClient(ClientName);
+        _ = services.AddHttpClient(ClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => SafeHttpUrl.CreateNoRedirectPrimaryHandler());
         return services;
     }
 }

@@ -19,7 +19,8 @@ namespace AbpAdmin.Monitoring;
 /* HTTP 探活定时作业（HttpAgent 命名客户端 AbpAdminHttpProbe）的回归锚。
  * 覆盖：2xx 放行、ExpectedStatusCode 精确匹配/不匹配、非 2xx 失败先发 HttpProbeFailedEto 再抛出、
  * 网络层异常失败（StatusCode=null）同样"发事件+抛出"、Payload 缺失/非法 JSON/非法 URL
- * 快速失败且不发任何请求。出站请求由 RecordingHttpProbeHandler 截停（不真实外呼）。
+ * 快速失败且不发任何请求、SSRF 防线拦截内网/保留目标（不发请求、走统一失败路径）。
+ * 出站请求由 RecordingHttpProbeHandler 截停（不真实外呼）。
  * 事件用字段承接（不能用"返回闭包局部变量"——拿到的是 return 那一刻的 null 值拷贝）。
  */
 public abstract class HttpProbeJobHandlerTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
@@ -173,5 +174,30 @@ public abstract class HttpProbeJobHandlerTests<TStartupModule> : AbpAdminApplica
         exception.Message.ShouldContain("http(s)");
         _handler.RecordedRequests.ShouldBeEmpty();
         _received.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("http://169.254.169.254/latest/meta-data/", "169.254.169.254")] // 云元数据端点（审计 HIGH-1 PoC 目标）
+    [InlineData("http://127.0.0.1:9000/health", "127.0.0.1")]
+    [InlineData("http://10.0.0.5/health", "10.0.0.5")]
+    [InlineData("http://[::1]/health", "::1")]
+    public async Task Intranet_target_blocked_without_request(string url, string blockedHost)
+    {
+        // SSRF 防线：Payload 的 Url 对有 ScheduledJobs.Create/Update 权限的用户完全可控，
+        // 内网/保留目标在发送前被拒——不发任何请求，走统一失败路径（事件 + 抛出）；
+        // 被拒主机必须出现在事件与异常里（运维可见"为什么被拦"）
+        SubscribeOnce();
+
+        var exception = await Should.ThrowAsync<AbpException>(() =>
+            _jobHandler.ExecuteAsync(Context($"{{\"Url\":\"{url}\"}}")));
+
+        exception.Message.ShouldContain("SSRF 防线");
+        exception.Message.ShouldContain(blockedHost);
+        _handler.RecordedRequests.ShouldBeEmpty();
+        _received.ShouldNotBeNull();
+        _received.Url.ShouldBe(url);
+        _received.StatusCode.ShouldBeNull();
+        _received.ErrorMessage.ShouldNotBeNull();
+        _received.ErrorMessage.ShouldContain(blockedHost);
     }
 }

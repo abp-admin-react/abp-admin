@@ -2,8 +2,10 @@ using System;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
+using AbpAdmin.Http;
 using AbpAdmin.ScheduledJobs;
 using HttpAgent;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
@@ -18,11 +20,21 @@ namespace AbpAdmin.Monitoring;
 /// 失败时先同步发布 <see cref="HttpProbeFailedEto"/>（onUnitOfWorkComplete:false 立即分发，
 /// 不随本方法抛出后的外层 UoW 回滚而丢弃；Webhooks 桥接器自己开独立 UoW 落 SendRecord），
 /// 再抛出让本次执行记为失败。
+/// SSRF 防线（SafeHttpUrl）：发送前校验目标——Payload 的 Url 对有 ScheduledJobs.Create/Update
+/// 权限的用户完全可控，不拦内网地址即等于借服务端之手探测内网/云元数据。默认拒绝
+/// 内网/保留目标（DNS 解析失败放行——连不上的主机构不成 SSRF，残余风险说明见
+/// SafeHttpUrl 类注释）；探活监控内网服务的内网部署经
+/// <see cref="AllowIntranetTargetsConfigurationKey"/> 显式放行。拦截走统一失败路径
+/// （失败事件 + 抛出），不发任何请求。配套防线：探活命名客户端关闭自动重定向
+/// （SafeHttpUrl.CreateNoRedirectPrimaryHandler）——守卫只校验入口 URL，跟随 3xx
+/// 会绕过守卫打到重定向目标。
 /// 日志语义（与下方日志字符串一一对应）：
 /// - 成功 = Information「HTTP probe succeeded for {Url} ({StatusCode})」；
 /// - 失败 = Warning「HTTP probe failed for {Url}: {Error}」+ 抛 AbpException
 ///   「HTTP 探活失败：{Url} → {StatusCode}：{Error}」（无响应时为「（无响应）」），
 ///   异常消息由调度器截断后落 ScheduledJobExecution.Message 与作业行 LastRunMessage；
+/// - 目标被 SSRF 防线拦截 = Warning「HTTP probe target {Url} blocked by SSRF guard: {Host}.」
+///   + 失败事件 + 抛 AbpException（不发任何请求）；
 /// - 停机/令牌取消：不打失败日志、不发事件（交回调度器取消分支，不污染执行历史）。
 /// 刻意不做库内自动重试：探活要暴露的是持续性故障，重试会把"偶发抖动"和"真挂了"混在一起。
 /// Payload 示例：{"Url":"https://example.com/health","TimeoutSeconds":10,"ExpectedStatusCode":200}
@@ -39,6 +51,9 @@ public class HttpProbeJobHandler : IScheduledJobHandler, ITransientDependency
     /// </summary>
     public const string HttpClientName = "AbpAdminHttpProbe";
 
+    /// <summary>SSRF 放行开关：内网部署探活内网服务时置 true（默认 false，拒绝内网/保留目标）。</summary>
+    public const string AllowIntranetTargetsConfigurationKey = "HttpProbe:AllowIntranetTargets";
+
     private const int DefaultTimeoutSeconds = 10;
     private const int MaxTimeoutSeconds = 60;
 
@@ -52,23 +67,27 @@ public class HttpProbeJobHandler : IScheduledJobHandler, ITransientDependency
     private readonly IHttpRemoteService _httpRemoteService;
     private readonly ILocalEventBus _localEventBus;
     private readonly IClock _clock;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<HttpProbeJobHandler> _logger;
 
     public HttpProbeJobHandler(
         IHttpRemoteService httpRemoteService,
         ILocalEventBus localEventBus,
         IClock clock,
+        IConfiguration configuration,
         ILogger<HttpProbeJobHandler> logger)
     {
         _httpRemoteService = httpRemoteService;
         _localEventBus = localEventBus;
         _clock = clock;
+        _configuration = configuration;
         _logger = logger;
     }
 
     public virtual async Task ExecuteAsync(ScheduledJobContext context)
     {
         var probe = ParsePayload(context.Payload);
+        await EnsureTargetAllowedAsync(probe.Url);
 
         int? statusCode = null;
         string? error = null;
@@ -110,6 +129,27 @@ public class HttpProbeJobHandler : IScheduledJobHandler, ITransientDependency
 
         throw new AbpException(
             $"HTTP 探活失败：{probe.Url}{(statusCode.HasValue ? $" → {statusCode}" : "（无响应）")}：{error}");
+    }
+
+    /// <summary>
+    /// SSRF 防线：发送前拦截内网/保留目标（含 DNS 解析后的实际地址；解析失败同样拒绝，
+    /// fail-closed），不发请求、走统一失败路径（失败事件 + 抛出），执行记录里能看到
+    /// 被拒原因与放行开关名。开关判定统一走 SafeHttpUrl 重载（显式 true 才放行）。
+    /// </summary>
+    private async Task EnsureTargetAllowedAsync(string url)
+    {
+        var blockedHost = await SafeHttpUrl.GetBlockedHostAsync(
+            url, _configuration, AllowIntranetTargetsConfigurationKey);
+        if (blockedHost == null)
+        {
+            return;
+        }
+
+        const string error = "目标属于内网/保留地址，已被 SSRF 防线拒绝（内网部署可配置 HttpProbe:AllowIntranetTargets=true 放行）";
+        _logger.LogWarning("HTTP probe target {Url} blocked by SSRF guard: {Host}.", url, blockedHost);
+        await PublishFailureAsync(url, null, $"{error}（{blockedHost}）");
+
+        throw new AbpException($"HTTP 探活失败：{url}：{error}（{blockedHost}）");
     }
 
     /// <summary>期望状态码显式指定则精确匹配；否则按 2xx 判定成功。</summary>
