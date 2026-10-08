@@ -722,7 +722,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
     public async Task UpdateRoleMenuGrants_With_Empty_Set_Should_Revoke_All_For_Target_Role_Only()
     {
         // 空勾选集（前端「清空」+ 保存）= 全撤销，是新 API 最具破坏性的路径；
-        // 同时验证空集下幽灵校验的 CountAsync 翻译（空 Contains）不异常
+        // 同时验证空集下幽灵校验的 GetListAsync 空集 Contains 翻译不异常
         await CleanMenusAsync();
         var roleA = await EnsureRoleAsync($"rmg-empty-a-{Guid.NewGuid():N}"[..32]);
         var roleB = await EnsureRoleAsync($"rmg-empty-b-{Guid.NewGuid():N}"[..32]);
