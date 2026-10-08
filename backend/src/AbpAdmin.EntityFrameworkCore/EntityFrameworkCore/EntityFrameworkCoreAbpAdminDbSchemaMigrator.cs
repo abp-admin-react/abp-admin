@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using AbpAdmin.Data;
 using Npgsql;
 using Volo.Abp.DependencyInjection;
+using Volo.Abp.MultiTenancy;
 
 namespace AbpAdmin.EntityFrameworkCore;
 
@@ -20,8 +21,10 @@ namespace AbpAdmin.EntityFrameworkCore;
 ///    42P07「表已存在」。探测到该形态时把 Initial 记账为已应用（baseline 打戳）而非重放
 ///    ——与 nopCommerce(MigrationVersionInfo)/Umbraco(umbracoMigration) 及微软「存量库
 ///    接入迁移」指引同模式。
-/// ③ AbpAdminDbContext.Database.MigrateAsync()——执行本工程 Migrations/ 下的 EF Core 迁移
-///    （QRTZ_ 表的建表 DDL 已随一次性迁移进 __EFMigrationsHistory 记账，无独立执行步骤）。
+/// ③ AbpAdminDbContext.Database.MigrateAsync()——执行本工程 Migrations/ 下的 EF Core 迁移。
+/// ④ QuartzTablesEnsurer.EnsureCreatedAsync——qrtz_* 持久化表幂等建表（Quartz 自管 schema，
+///    不属任何 DbContext 模型；UsePersistentStore=true 的 Production 姿势依赖这些表，
+///    缺表时宿主启动的 performSchemaValidation 直接失败）。
 /// <see cref="HasPendingAsync"/> 供宿主启动检查：History 表与当前模型相比是否还有未应用迁移。
 /// DbContext 经容器解析（非构造注入），租户循环下的连接串切换照常生效。
 /// </summary>
@@ -29,10 +32,14 @@ public class EntityFrameworkCoreAbpAdminDbSchemaMigrator
     : IAbpAdminDbSchemaMigrator, ITransientDependency
 {
     private readonly IServiceProvider _serviceProvider;
+    private readonly ICurrentTenant _currentTenant;
 
-    public EntityFrameworkCoreAbpAdminDbSchemaMigrator(IServiceProvider serviceProvider)
+    public EntityFrameworkCoreAbpAdminDbSchemaMigrator(
+        IServiceProvider serviceProvider,
+        ICurrentTenant currentTenant)
     {
         _serviceProvider = serviceProvider;
+        _currentTenant = currentTenant;
     }
 
     public async Task MigrateAsync()
@@ -60,6 +67,16 @@ public class EntityFrameworkCoreAbpAdminDbSchemaMigrator
             sentinelTableName: EfCoreLegacySchemaBaseliner.FrameworkSentinelTable);
 
         await dbContext.Database.MigrateAsync();
+
+        // ④：qrtz_* 持久化表只在宿主库建——Quartz 持久化 store 固定读 Default 连接串
+        // （宿主模块配置），租户库用不上；迁移循环会带租户上下文逐库调用本方法，
+        // 这里按租户上下文门控，避免给每个租户库白建 11 表 + 20 索引。
+        // MigrateAsync 结束后连接由 EF 归还关闭状态，EnsureCreatedAsync 需要时自行打开
+        if (_currentTenant.Id == null)
+        {
+            await QuartzTablesEnsurer.EnsureCreatedAsync(
+                (NpgsqlConnection)dbContext.Database.GetDbConnection(), logger);
+        }
     }
 
     public async Task<bool> HasPendingAsync()
