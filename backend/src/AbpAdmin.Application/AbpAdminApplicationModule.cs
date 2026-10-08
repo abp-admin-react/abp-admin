@@ -23,6 +23,8 @@ using EasyAbp.PaymentService;
 using EasyAbp.PaymentService.Prepayment;
 using EasyAbp.PaymentService.WeChatPay;
 using HttpAgent;
+using HttpAgent.Extensions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -113,6 +115,12 @@ public class AbpAdminApplicationModule : AbpModule
                     System.Net.Http.HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
             });
         }
+
+        // HttpAgent 报文透视（Profiler）：把本命名客户端的完整请求/响应报文打到控制台，
+        // 第三方对接调试无需抓包。报文体含 client_secret/token——默认关闭，仅
+        // HttpRemote:Profiler=true 显式开启（建议只在本地联调临时开）。
+        // Func<bool> 重载随 handler 过期重建重读配置，与上方"捕获 IConfiguration 而非快照值"同风格。
+        builder.AddProfilerDelegatingHandler(() => configuration.GetValue("HttpRemote:Profiler", false));
 
         // T3.4：模块的 DataDictionaryRenderer 构造函数要 IList<IDataDictionaryValueProvider>。
         // Autofac 能隐式解析 IList<T>，MS.DI 不能——宿主的服务图校验（HostServiceGraphValidationTests）

@@ -21,6 +21,11 @@ public class AbpAdminApplicationTestModule : AbpModule
 {
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
+        // IHttpContextAccessor：宿主由 ASP.NET Core 自动注册，测试基座没有——补上，
+        // 让按宿主同构消费 HttpContext 的服务（如 AbpAdminRoleAppService 操作日志的 IP/UA）
+        // 在测试里也解析到真实类型；HttpContext 本身仍为 null（无请求），消费方按可空处理。
+        context.Services.AddHttpContextAccessor();
+
         // LinkAccounts/Magic Link：PasswordlessMagicLinkUrlBuilder 读 App:SpaUrl（回落 App:SelfUrl）
         // 构造邮件里的登录链接，缺配置会直接抛 AbpException；测试给一组内存配置
         //（.local 保留域，与下方 Authority 同策略——永不真实解析）。

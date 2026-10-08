@@ -1,6 +1,9 @@
 using AbpAdmin.Captcha;
 using HttpAgent;
+using HttpAgent.Extensions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Volo.Abp;
 
 namespace AbpAdmin.ModuleConfigurators;
 
@@ -16,9 +19,13 @@ internal static class HttpRemoteConfigurator
 {
     public static void ConfigureOutboundHttpRemote(this IServiceCollection services)
     {
+        var configuration = services.GetConfiguration();
+
         // T4.4 Turnstile 校验走命名 HttpClient（开关关闭时不会发请求）；
-        // 注册自 CachingAndTenancyConfigurator 迁入（round4 审查 D4：绑定与注册同处，好找）
-        services.AddHttpClient(TurnstileHttpClients.SiteVerify);
+        // 注册自 CachingAndTenancyConfigurator 迁入（round4 审查 D4：绑定与注册同处，好找）。
+        // Profiler：HttpRemote:Profiler=true 时控制台直出完整报文（默认关——siteverify 报文含密钥字段）
+        services.AddHttpClient(TurnstileHttpClients.SiteVerify)
+            .AddProfilerDelegatingHandler(() => configuration.GetValue("HttpRemote:Profiler", false));
 
         services.AddHttpRemote(builder =>
         {

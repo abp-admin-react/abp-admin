@@ -31,24 +31,24 @@ public class AbpAdminRoleAppService : IdentityRoleAppService
 {
     private readonly IIdentityUserRepository _userRepository;
     private readonly IOperationLogWriter _operationLogWriter;
-
-    // CorrelationId/HttpContext 走惰性可选解析：Application.Tests 等非 Web 测试基座
-    // 没有 IHttpContextAccessor 注册，硬注入会让整个服务无法构造（删除保护跟着失效）
-    private Volo.Abp.Tracing.ICorrelationIdProvider? CorrelationIdProvider
-        => LazyServiceProvider.LazyGetService<Volo.Abp.Tracing.ICorrelationIdProvider>();
-
-    private IHttpContextAccessor? HttpContextAccessor
-        => LazyServiceProvider.LazyGetService<IHttpContextAccessor>();
+    private readonly Volo.Abp.Tracing.ICorrelationIdProvider _correlationIdProvider;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
     public AbpAdminRoleAppService(
         IdentityRoleManager roleManager,
         IIdentityRoleRepository roleRepository,
         IIdentityUserRepository userRepository,
-        IOperationLogWriter operationLogWriter)
+        IOperationLogWriter operationLogWriter,
+        Volo.Abp.Tracing.ICorrelationIdProvider correlationIdProvider,
+        IHttpContextAccessor httpContextAccessor)
         : base(roleManager, roleRepository)
     {
         _userRepository = userRepository;
         _operationLogWriter = operationLogWriter;
+        _correlationIdProvider = correlationIdProvider;
+        _httpContextAccessor = httpContextAccessor;
+        // IHttpContextAccessor 由宿主 ASP.NET Core / 测试基座（AbpAdminApplicationTestModule）注册；
+        // HttpContext 在无请求上下文（后台/测试）时为 null，取值处一律可空处理
     }
 
     public override async Task DeleteAsync(Guid id)
@@ -88,9 +88,9 @@ public class AbpAdminRoleAppService : IdentityRoleAppService
             Success = true,
             RequestMethod = "DELETE",
             RequestUrl = $"/api/identity/roles/{roleId}",
-            CorrelationId = CorrelationIdProvider?.Get(),
-            ClientIpAddress = HttpContextAccessor?.HttpContext?.Connection.RemoteIpAddress?.ToString(),
-            UserAgent = HttpContextAccessor?.HttpContext?.Request.Headers.UserAgent.ToString(),
+            CorrelationId = _correlationIdProvider.Get(),
+            ClientIpAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = _httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString(),
         };
 
         if (uow == null)

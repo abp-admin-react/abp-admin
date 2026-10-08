@@ -68,7 +68,10 @@ public abstract class RecordingHttpHandler : HttpMessageHandler
 
         return new HttpResponseMessage(canned.Status)
         {
-            Content = new StringContent(canned.Body, System.Text.Encoding.UTF8, canned.ContentType)
+            Content = new StringContent(canned.Body, System.Text.Encoding.UTF8, canned.ContentType),
+            // 伪造响应必须关联请求：ProfilerDelegatingHandler 等附加 handler（HttpRemote:Profiler）
+            // 依赖 Response.RequestMessage 读报文元数据，为 null 会 ArgumentNullException
+            RequestMessage = request
         };
     }
 
