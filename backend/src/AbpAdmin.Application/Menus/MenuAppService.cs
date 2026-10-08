@@ -9,6 +9,7 @@ using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.Data;
+using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 using Volo.Abp.Localization;
@@ -195,6 +196,87 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
         {
             await _menuGrantRepository.InsertAsync(
                 new MenuGrant(GuidGenerator.Create(), menuId, menu.TenantId, MenuConsts.RoleProviderName, roleName),
+                autoSave: true);
+        }
+    }
+
+    /// <summary>
+    /// 角色侧菜单授权视图。菜单页的 UpdateRoleGrantsAsync 是「这张菜单给哪些角色」的单向视角；
+    /// 本视图提供反向视角（「这个角色能看哪些菜单」）——管理员配一个受限角色时在一棵树上勾完，
+    /// 不必挨张菜单打开授权。IsControlled 标注节点是否受控：未受控=公开（勾不勾都不影响其可见性），
+    /// 受控=仅勾选角色可见——前端以徽标区分，避免把混合授权模型误解成纯授权模型。
+    /// </summary>
+    [Authorize(AbpAdminPermissions.Menus.AssignRoles)]
+    public virtual async Task<ListResultDto<RoleMenuGrantItemDto>> GetRoleMenuGrantsAsync(Guid roleId)
+    {
+        var role = await _roleRepository.FindAsync(roleId)
+                   ?? throw new EntityNotFoundException(typeof(Volo.Abp.Identity.IdentityRole), roleId);
+
+        var menus = await _menuRepository.GetListAsync();
+        var grants = await _menuGrantRepository.GetListAsync(x => x.ProviderName == MenuConsts.RoleProviderName);
+
+        var grantedMenuIds = grants
+            .Where(x => x.ProviderKey == role.Name)
+            .Select(x => x.MenuId)
+            .ToHashSet();
+        var controlledMenuIds = grants.Select(x => x.MenuId).ToHashSet();
+
+        var items = menus
+            .OrderBy(x => x.OrderNo)
+            .ThenBy(x => x.Title, StringComparer.Ordinal)
+            .Select(x => new RoleMenuGrantItemDto
+            {
+                Id = x.Id,
+                ParentId = x.ParentId,
+                Type = x.Type,
+                Title = x.Title,
+                OrderNo = x.OrderNo,
+                IsEnabled = x.IsEnabled,
+                IsGranted = grantedMenuIds.Contains(x.Id),
+                IsControlled = controlledMenuIds.Contains(x.Id)
+            })
+            .ToList();
+
+        return new ListResultDto<RoleMenuGrantItemDto>(items);
+    }
+
+    /// <summary>
+    /// 以勾选集为该角色的菜单授权全集做差集更新（借鉴 Admin.NET/芋道「角色→菜单树」交互，
+    /// 语义适配混合授权模型）：勾上=插入授权，勾掉=删除该角色授权；未受控菜单与其它角色的授权
+    /// 不受影响。与 UpdateRoleGrantsAsync 写同一张 MenuGrant 表，读取侧（MyMenuAppService）
+    /// 无感。勾选集是逐节点的精确集合（无父子推导）——与菜单可见性的逐节点语义一致。
+    /// </summary>
+    [Authorize(AbpAdminPermissions.Menus.AssignRoles)]
+    [OperationLog("菜单管理", "调整角色菜单权限", BizNo = "{{roleId}}",
+        Success = "调整了角色 {{role(roleId)}} 的菜单授权")]
+    public virtual async Task UpdateRoleMenuGrantsAsync(Guid roleId, UpdateRoleMenuGrantsDto input)
+    {
+        var role = await _roleRepository.FindAsync(roleId)
+                   ?? throw new EntityNotFoundException(typeof(Volo.Abp.Identity.IdentityRole), roleId);
+
+        // 幽灵菜单拒绝（fail-closed，与 RoleDataScope 的 OU 校验同款）：勾选集里混入
+        // 已被删除的菜单 id 时整单拒绝，而不是静默吞掉造成「保存成功但授权缺失」
+        var targetMenuIds = input.MenuIds.Distinct().ToList();
+        var existingMenuCount = await _menuRepository.CountAsync(x => targetMenuIds.Contains(x.Id));
+        if (existingMenuCount != targetMenuIds.Count)
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.Menus.MenuNotFound)
+                .WithData("Count", targetMenuIds.Count - existingMenuCount);
+        }
+
+        var grants = await _menuGrantRepository.GetListAsync(
+            x => x.ProviderName == MenuConsts.RoleProviderName && x.ProviderKey == role.Name);
+        var existingMenuIds = grants.Select(x => x.MenuId).ToHashSet();
+
+        foreach (var grant in grants.Where(x => !targetMenuIds.Contains(x.MenuId)))
+        {
+            await _menuGrantRepository.DeleteAsync(grant);
+        }
+
+        foreach (var menuId in targetMenuIds.Where(id => !existingMenuIds.Contains(id)))
+        {
+            await _menuGrantRepository.InsertAsync(
+                new MenuGrant(GuidGenerator.Create(), menuId, CurrentTenant.Id, MenuConsts.RoleProviderName, role.Name!),
                 autoSave: true);
         }
     }

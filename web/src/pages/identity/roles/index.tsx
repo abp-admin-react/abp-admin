@@ -22,6 +22,7 @@ import ClaimModal from '@/components/ClaimModal';
 import DataScopeModal from '@/components/DataScopeModal';
 import PermissionModal from '@/components/PermissionModal';
 import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import RoleMenuGrantModal from './components/RoleMenuGrantModal';
 import RoleUsersDrawer from './components/RoleUsersDrawer';
 
 const RolesPage: React.FC = () => {
@@ -30,6 +31,7 @@ const RolesPage: React.FC = () => {
   const [claimTarget, setClaimTarget] = useState<IdentityRoleDto>();
   const [dataScopeTarget, setDataScopeTarget] = useState<IdentityRoleDto>();
   const [usersTarget, setUsersTarget] = useState<IdentityRoleDto>();
+  const [menuGrantTarget, setMenuGrantTarget] = useState<IdentityRoleDto>();
   const access = useAccess();
 
   const columns: ProColumns<IdentityRoleDto>[] = [
@@ -110,6 +112,11 @@ const RolesPage: React.FC = () => {
         access.canManageRoleDataScopes && (
           <a key="dataScope" onClick={() => setDataScopeTarget(record)}>
             数据范围
+          </a>
+        ),
+        access.canAssignMenuRoles && (
+          <a key="menuGrant" onClick={() => setMenuGrantTarget(record)}>
+            菜单权限
           </a>
         ),
         !record.isStatic && access.canDeleteRoles && (
@@ -195,6 +202,10 @@ const RolesPage: React.FC = () => {
       <RoleUsersDrawer
         role={usersTarget}
         onClose={() => setUsersTarget(undefined)}
+      />
+      <RoleMenuGrantModal
+        role={menuGrantTarget}
+        onClose={() => setMenuGrantTarget(undefined)}
       />
     </PageContainer>
   );

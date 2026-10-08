@@ -27,6 +27,11 @@
   - 新错误码:`AbpAdmin:Identity:RoleHasUsers`、`AbpAdmin:DataScope:RoleDataScopeEscalation`、`AbpAdmin:DataScope:RoleDataScopeCustomOuOutOfScope`(zh-Hans/en 已配)。
 - `web/src/pages/menus`:RoleGrantModal 的 TreeSelect 节点 key 与 value 统一为角色名,消除 antd 控制台警告(勾选语义本就是角色名,角色名租户内唯一)。
 - `AbpAdmin.Application/AbpAdminRoleAppService`:删除角色操作日志的 IHttpContextAccessor/ICorrelationIdProvider 恢复构造函数注入(测试基座 AbpAdminApplicationTestModule 已补 AddHttpContextAccessor 注册)。
+- **菜单-角色授权双视角 + 树交互基建包(借鉴 Admin.NET/芋道,全局交互升级)**:
+  - P0 角色侧「菜单权限」入口:角色页新增链接 + 弹窗(角色→菜单树勾选,Admin.NET/芋道同款交互方向)。新增 `GET/PUT /api/app/menu/role-menu-grants/{roleId}`——视图平铺全量菜单 + IsGranted(该角色已授权) + IsControlled(受任一角色控制);保存为差集更新(勾上=插入、勾掉=撤销,只动该角色,未受控菜单与其它角色不受影响)。语义适配本系统混合授权模型:节点徽标区分「公开」(不受控,勾不勾不影响可见)与「受限」(仅授权角色可见),说明文案钉住三态;勾选为逐节点精确集(与可见性算法同语义,无父子推导)。幽灵菜单 id 整单拒绝(MenuNotFound+Count);读取失败自动关弹窗防空集覆盖。测试 +3 例(视图标记/差集只动目标角色/幽灵拒绝),MenuAppServiceTests 20/20。
+  - P1 共享 `TreePanel` 组件:全选/清空/展开折叠工具条 + 定高滚动(勾选状态调用方受控、展开内部管理),接入角色菜单权限弹窗、权限弹窗(PermissionModal)、数据范围 OU 树。
+  - P1 数据范围 OU 树新增「父子联动」开关(芋道同款):默认不联动=精确集(勾哪个是哪个),打开后勾父自动勾子。
+  - P2 菜单表单类型驱动收敛:路由地址字段仅「菜单(页面)」类型渲染(目录隐藏防误填),提交时目录归一清空残留 path;菜单列表工具栏新增「展开全部/折叠全部」总开关。
 - 出站 HTTP(HttpAgent):两个命名客户端(AuthServerTokenExchange/Turnstile)接入 ProfilerDelegatingHandler 报文透视,配置键 `HttpRemote:Profiler`(默认 false——报文含 client_secret/token,仅本地联调临时开启);RecordingHttpHandler 测试替身补 Response.RequestMessage 关联(附加 handler 读报文元数据不再 ArgumentNullException)。
 
 ## 依赖项变更

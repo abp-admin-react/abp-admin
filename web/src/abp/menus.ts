@@ -100,6 +100,37 @@ export async function getPermissionOptions() {
   );
 }
 
+/** 角色侧菜单授权视图项：IsGranted=该角色显式授权；IsControlled=受任一角色控制（false=公开） */
+export type RoleMenuGrantItemDto = {
+  id: string;
+  parentId?: string | null;
+  type: number;
+  title: string;
+  orderNo: number;
+  isEnabled: boolean;
+  isGranted: boolean;
+  isControlled: boolean;
+};
+
+/** 角色侧授权视图（角色页「菜单权限」弹窗数据源，平铺列表前端组树） */
+export async function getRoleMenuGrantView(roleId: string) {
+  return request<{ items: RoleMenuGrantItemDto[] }>(
+    `${BASE}/role-menu-grants/${roleId}`,
+    { method: 'GET' },
+  );
+}
+
+/** 以勾选集为该角色的菜单授权全集做差集更新（勾上=插入，勾掉=撤销；其它角色与公开菜单不受影响） */
+export async function updateRoleMenuGrants(
+  roleId: string,
+  menuIds: string[],
+) {
+  return request(`${BASE}/role-menu-grants/${roleId}`, {
+    method: 'PUT',
+    data: { menuIds },
+  });
+}
+
 /** 当前登录用户可见菜单树（动态菜单数据源）。 */
 export async function getMyMenu() {
   return request<{ items: MyMenuItemDto[] }>(`${MY_BASE}`, { method: 'GET' });

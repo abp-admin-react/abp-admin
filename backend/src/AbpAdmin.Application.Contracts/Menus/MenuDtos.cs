@@ -28,6 +28,19 @@ public interface IMenuAppService : IApplicationService
 
     /// <summary>可绑定的 ABP 权限树（平铺 name/displayName/parentName，前端组树）。</summary>
     Task<ListResultDto<PermissionOptionDto>> GetPermissionOptionsAsync();
+
+    /// <summary>
+    /// 角色侧菜单授权视图：平铺全量菜单 + 该角色已授权标记（IsGranted）+
+    /// 各节点是否受角色勾选控制（IsControlled，存在任一角色的授权记录）。
+    /// 供角色页「菜单权限」弹窗组树三态展示（勾选=显式授权；未受控=公开）。
+    /// </summary>
+    Task<ListResultDto<RoleMenuGrantItemDto>> GetRoleMenuGrantsAsync(Guid roleId);
+
+    /// <summary>
+    /// 以勾选集为该角色的菜单授权全集做差集更新：勾上=插入授权、勾掉=删除该角色授权；
+    /// 未受控（无任何角色授权）的菜单不受影响、其它角色的授权不受影响。
+    /// </summary>
+    Task UpdateRoleMenuGrantsAsync(Guid roleId, UpdateRoleMenuGrantsDto input);
 }
 
 public interface IMyMenuAppService : IApplicationService
@@ -121,6 +134,33 @@ public class MenuUpdateDto : MenuCreateDto
 public class UpdateMenuGrantsDto
 {
     public List<string> RoleNames { get; set; } = new();
+}
+
+/// <summary>角色侧菜单授权视图项（平铺，前端组树）。</summary>
+public class RoleMenuGrantItemDto
+{
+    public Guid Id { get; set; }
+
+    public Guid? ParentId { get; set; }
+
+    public MenuTypeEnum Type { get; set; }
+
+    public string Title { get; set; } = default!;
+
+    public int OrderNo { get; set; }
+
+    public bool IsEnabled { get; set; }
+
+    /// <summary>该角色在此菜单上已有显式授权。</summary>
+    public bool IsGranted { get; set; }
+
+    /// <summary>该菜单是否受角色勾选控制（存在任一角色的授权记录）；false = 公开（对所有用户可见，满足权限时）。</summary>
+    public bool IsControlled { get; set; }
+}
+
+public class UpdateRoleMenuGrantsDto
+{
+    public List<Guid> MenuIds { get; set; } = new();
 }
 
 public class PermissionOptionDto

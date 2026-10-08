@@ -1,6 +1,7 @@
-import { Alert, App, Form, Modal, Select, Spin, Tree } from 'antd';
+import { Alert, App, Form, Modal, Select, Spin, Switch } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import React, { useEffect, useState } from 'react';
+import TreePanel from '@/components/TreePanel';
 import {
   DataScopeType,
   DataScopeTypeLabels,
@@ -15,6 +16,15 @@ type OrganizationUnitDto = {
   parentId?: string | null;
   displayName?: string;
 };
+
+/** 收集树全部节点 key（全选按钮用）。 */
+function collectOuKeys(nodes: DataNode[], acc: string[] = []): string[] {
+  for (const node of nodes) {
+    acc.push(String(node.key));
+    if (node.children?.length) collectOuKeys(node.children, acc);
+  }
+  return acc;
+}
 
 type DataScopeModalProps = {
   open: boolean;
@@ -59,6 +69,9 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [unconfigured, setUnconfigured] = useState(false);
   const [ouTree, setOuTree] = useState<DataNode[]>([]);
+  // OU 树父子联动开关（芋道同款）：默认不联动=勾哪个是哪个（精确集，与后端
+  // Custom 范围的逐 OU 语义一致）；打开后勾父自动勾子，方便整棵部门一次选入
+  const [ouParentLinked, setOuParentLinked] = useState(false);
   const [scopeType, setScopeType] = useState<DataScopeType>(DataScopeType.All);
   const [checkedOuIds, setCheckedOuIds] = useState<string[]>([]);
 
@@ -181,16 +194,32 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
                 checkedOuIds.length === 0 ? '请选择至少一个组织单元' : undefined
               }
             >
-              <Tree
+              <TreePanel
                 checkable
-                checkStrictly
+                checkStrictly={!ouParentLinked}
                 defaultExpandAll
+                height={300}
                 treeData={ouTree}
                 checkedKeys={checkedOuIds}
-                onCheck={(keys) => {
+                onCheck={(
+                  keys: React.Key[] | { checked: React.Key[] },
+                ) => {
+                  // 联动模式 antd 返回数组（已级联含子）；不联动模式返回 {checked}
                   const next = Array.isArray(keys) ? keys : keys.checked;
-                  setCheckedOuIds(next as string[]);
+                  setCheckedOuIds(next.map(String));
                 }}
+                onCheckAll={() => setCheckedOuIds(collectOuKeys(ouTree))}
+                onClearAll={() => setCheckedOuIds([])}
+                toolbarExtra={
+                  <span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                    父子联动{' '}
+                    <Switch
+                      size="small"
+                      checked={ouParentLinked}
+                      onChange={setOuParentLinked}
+                    />
+                  </span>
+                }
               />
             </Form.Item>
           )}

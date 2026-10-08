@@ -1,6 +1,7 @@
-import { App, Modal, Spin, Tree } from 'antd';
+import { App, Modal, Spin } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import React, { useEffect, useMemo, useState } from 'react';
+import TreePanel from '@/components/TreePanel';
 import {
   getPermissions,
   type PermissionGrantInfo,
@@ -126,7 +127,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({
       destroyOnHidden
     >
       <Spin spinning={loading}>
-        <Tree
+        <TreePanel
           checkable
           defaultExpandAll
           checkedKeys={checkedKeys}
@@ -137,6 +138,8 @@ const PermissionModal: React.FC<PermissionModalProps> = ({
               (next as string[]).filter((key) => !key.startsWith('group:')),
             );
           }}
+          onCheckAll={() => setCheckedKeys(allPermissionNames)}
+          onClearAll={() => setCheckedKeys([])}
         />
       </Spin>
     </Modal>

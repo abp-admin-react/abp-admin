@@ -598,4 +598,93 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         Walk(items);
         return result;
     }
+
+    /* ===== 角色侧菜单授权（GetRoleMenuGrantsAsync / UpdateRoleMenuGrantsAsync）=====
+     * 反向视角：一棵树配好一个角色的可见菜单。语义钉住三点：
+     * 1) IsGranted=该角色显式授权；IsControlled=存在任一角色授权（未受控=公开，勾不勾不影响可见性）；
+     * 2) 差集保存只动该角色的授权——其它角色的授权与未受控状态不受影响；
+     * 3) 勾选集混入已删除菜单 id 时整单拒绝（fail-closed）。
+     */
+
+    private async Task<Menu> CreateMenuAsync(string title, string path = null, int orderNo = 100)
+    {
+        var menu = new Menu(_guidGenerator.Create(), null, null,
+            path == null ? MenuTypeEnum.Catalog : MenuTypeEnum.Menu,
+            title, name: null, path: path, orderNo: orderNo);
+        await WithUnitOfWorkAsync(() => _menuRepository.InsertAsync(menu, autoSave: true));
+        return menu;
+    }
+
+    [Fact]
+    public async Task GetRoleMenuGrants_Should_Mark_Granted_And_Controlled()
+    {
+        await CleanMenusAsync();
+        var roleA = await EnsureRoleAsync($"rmg-a-{Guid.NewGuid():N}"[..32]);
+        var roleB = await EnsureRoleAsync($"rmg-b-{Guid.NewGuid():N}"[..32]);
+        var menu1 = await CreateMenuAsync("视图-受控菜单", "/rmg/m1");
+        var menu2 = await CreateMenuAsync("视图-公开菜单", "/rmg/m2");
+
+        await WithUnitOfWorkAsync(() => _menuGrantRepository.InsertAsync(
+            new MenuGrant(_guidGenerator.Create(), menu1.Id, null, MenuConsts.RoleProviderName, roleA.Name!)));
+        await WithUnitOfWorkAsync(() => _menuGrantRepository.InsertAsync(
+            new MenuGrant(_guidGenerator.Create(), menu1.Id, null, MenuConsts.RoleProviderName, roleB.Name!)));
+
+        var view = await _menuAppService.GetRoleMenuGrantsAsync(roleA.Id);
+        var items = view.Items.ToDictionary(x => x.Id);
+
+        items[menu1.Id].IsGranted.ShouldBeTrue();       // roleA 有显式授权
+        items[menu1.Id].IsControlled.ShouldBeTrue();    // 有任一角色授权 → 受控
+        items[menu2.Id].IsGranted.ShouldBeFalse();
+        items[menu2.Id].IsControlled.ShouldBeFalse();   // 无任何授权 → 公开
+    }
+
+    [Fact]
+    public async Task UpdateRoleMenuGrants_Should_OnlyTouchTargetRole_DiffSemantics()
+    {
+        await CleanMenusAsync();
+        var roleA = await EnsureRoleAsync($"rmg-diff-a-{Guid.NewGuid():N}"[..32]);
+        var roleB = await EnsureRoleAsync($"rmg-diff-b-{Guid.NewGuid():N}"[..32]);
+        var menu1 = await CreateMenuAsync("差集-旧授权", "/rmg/d1");
+        var menu2 = await CreateMenuAsync("差集-新授权1", "/rmg/d2");
+        var menu3 = await CreateMenuAsync("差集-新授权2", "/rmg/d3");
+
+        // 初始：menu1 同时授给 roleA 和 roleB
+        await WithUnitOfWorkAsync(async () =>
+        {
+            await _menuGrantRepository.InsertAsync(
+                new MenuGrant(_guidGenerator.Create(), menu1.Id, null, MenuConsts.RoleProviderName, roleA.Name!));
+            await _menuGrantRepository.InsertAsync(
+                new MenuGrant(_guidGenerator.Create(), menu1.Id, null, MenuConsts.RoleProviderName, roleB.Name!));
+        });
+
+        // roleA 的授权全集改为 [menu2, menu3]：menu1 撤销、menu2/3 新增
+        await _menuAppService.UpdateRoleMenuGrantsAsync(roleA.Id, new UpdateRoleMenuGrantsDto
+        {
+            MenuIds = new System.Collections.Generic.List<Guid> { menu2.Id, menu3.Id }
+        });
+
+        var allGrants = await WithUnitOfWorkAsync(() =>
+            _menuGrantRepository.GetListAsync(x => x.ProviderName == MenuConsts.RoleProviderName));
+        var roleAGrants = allGrants.Where(x => x.ProviderKey == roleA.Name).Select(x => x.MenuId).ToHashSet();
+        var roleBGrants = allGrants.Where(x => x.ProviderKey == roleB.Name).Select(x => x.MenuId).ToHashSet();
+
+        roleAGrants.ShouldBe(new[] { menu2.Id, menu3.Id }.ToHashSet());
+        // 其它角色（roleB 在 menu1 的授权）不受差集影响
+        roleBGrants.ShouldBe(new[] { menu1.Id }.ToHashSet());
+    }
+
+    [Fact]
+    public async Task UpdateRoleMenuGrants_Should_Reject_Ghost_Menu_Id()
+    {
+        await CleanMenusAsync();
+        var role = await EnsureRoleAsync($"rmg-ghost-{Guid.NewGuid():N}"[..32]);
+
+        var ex = await Should.ThrowAsync<BusinessException>(() =>
+            _menuAppService.UpdateRoleMenuGrantsAsync(role.Id, new UpdateRoleMenuGrantsDto
+            {
+                MenuIds = new System.Collections.Generic.List<Guid> { Guid.NewGuid() }
+            }));
+        ex.Code.ShouldBe(AbpAdminDomainErrorCodes.Menus.MenuNotFound);
+        ex.Data["Count"]!.ToString().ShouldBe("1");
+    }
 }

@@ -1,5 +1,6 @@
 import {
   ModalForm,
+  ProFormDependency,
   ProFormDigit,
   ProFormRadio,
   ProFormSelect,
@@ -142,9 +143,10 @@ const MenuFormModal: React.FC<MenuFormModalProps> = ({
     const payload: MenuCreateDto = {
       parentId: values.parentId ?? null,
       type: values.type,
+      // 目录类型归一掉残留的路由地址（表单切类型时不清空旧值）
       title: values.title,
       name: values.name ?? null,
-      path: values.path ?? null,
+      path: values.type === MENU_TYPE.Menu ? values.path ?? null : null,
       icon: values.icon ?? null,
       orderNo: values.orderNo,
       permissionName: values.permissionName ?? null,
@@ -230,28 +232,33 @@ const MenuFormModal: React.FC<MenuFormModalProps> = ({
         placeholder="如 users（可选）"
         colProps={{ span: 12 }}
       />
-      <ProFormSelect
-        name="path"
-        label="路由地址"
-        placeholder="菜单类型必填，从注册表选择"
-        colProps={{ span: 12 }}
-        // 与后端 MenuTypeMismatch 校验同口径：菜单（页面）必须有路由地址；
-        // 依赖 type，切换类型时重新校验
-        dependencies={['type']}
-        rules={[
-          ({ getFieldValue }) => ({
-            validator: (_, value) =>
-              getFieldValue('type') === MENU_TYPE.Menu && !value
-                ? Promise.reject(new Error('菜单类型必须选择路由地址'))
-                : Promise.resolve(),
-          }),
-        ]}
-        fieldProps={{ showSearch: true, optionFilterProp: 'label' }}
-        options={routeRegistry.map((x) => ({
-          value: x.path,
-          label: `${x.label} (${x.path})`,
-        }))}
-      />
+      {/* 路由地址仅菜单（页面）类型展示（Admin.NET/芋道的类型驱动字段收敛同款）——
+          目录隐藏防误填；校验口径与后端 MenuTypeMismatch 一致 */}
+      <ProFormDependency name={['type']}>
+        {({ type }) =>
+          type === MENU_TYPE.Menu ? (
+            <ProFormSelect
+              name="path"
+              label="路由地址"
+              placeholder="从注册表选择"
+              colProps={{ span: 12 }}
+              rules={[
+                ({ getFieldValue }) => ({
+                  validator: (_, value) =>
+                    getFieldValue('type') === MENU_TYPE.Menu && !value
+                      ? Promise.reject(new Error('菜单类型必须选择路由地址'))
+                      : Promise.resolve(),
+                }),
+              ]}
+              fieldProps={{ showSearch: true, optionFilterProp: 'label' }}
+              options={routeRegistry.map((x) => ({
+                value: x.path,
+                label: `${x.label} (${x.path})`,
+              }))}
+            />
+          ) : null
+        }
+      </ProFormDependency>
       {/* 自定义图标网格面板：Form.Item 直接绑定 value/onChange，与 ProForm 字段同数据流 */}
       <Col span={12}>
         <Form.Item name="icon" label="图标">

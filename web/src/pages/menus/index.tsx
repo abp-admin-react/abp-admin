@@ -31,10 +31,12 @@ import {
 } from './components/menuTypes';
 import RoleGrantModal from './components/RoleGrantModal';
 
-/** 收集整棵树的全部节点 id（加载后默认全展开用）。 */
+/** 收集整棵树的全部节点 id（加载后默认全展开 / 展开折叠总开关用）。 */
 function collectAllKeys(nodes: MenuTreeDto[]): React.Key[] {
   return nodes.flatMap((node) => [node.id, ...collectAllKeys(node.children)]);
 }
+
+
 
 const MenuManagement: React.FC = () => {
   const { message } = App.useApp();
@@ -128,6 +130,18 @@ const MenuManagement: React.FC = () => {
         }}
         toolBarRender={() =>
           [
+            <Button
+              key="expand-toggle"
+              onClick={() =>
+                setExpandedRowKeys((keys) =>
+                  keys.length >= collectAllKeys(tree).length ? [] : collectAllKeys(tree),
+                )
+              }
+            >
+              {expandedRowKeys.length >= collectAllKeys(tree).length
+                ? '折叠全部'
+                : '展开全部'}
+            </Button>,
             access.canCreateMenus ? (
               <Button
                 key="create"
