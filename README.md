@@ -15,18 +15,18 @@
 
 | 端 | 技术 |
 | --- | --- |
-| 后端 | .NET 10 · ABP Framework 10.6 · EF Core(Sqlite / PostgreSQL 双提供程序)· Redis · Quartz · SignalR |
+| 后端 | .NET 10 · ABP Framework 10.6 · EF Core(PostgreSQL 单提供程序)· Redis · Quartz · SignalR |
 | 前端 | React 19 · antd 6 · Ant Design Pro v6 · Umi Max 4 · pnpm 10 · Vitest · Biome |
 | 认证 | OpenIddict(OIDC,前后端分离,SPA 独立部署) |
 
-默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库默认 SQLite(`backend/AbpAdmin.db`,不入库)。默认管理员 `admin` / `1q2w3E*`。
+默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库 PostgreSQL(连接串放 `backend/src/AbpAdmin.HttpApi.Host/appsettings.secrets.json`,不入库)。默认管理员 `admin` / `1q2w3E*`。
 
 ## 内置能力
 
 - ABP 官方模块:Identity、OpenIddict、多租户、审计日志、后台作业(Quartz)、设置管理、语言管理
 - 权限体系:权限定义(PermissionDefinitionProvider)+ 数据范围(DataScope)+ 操作限流
 - 基础设施:分布式锁与 DataProtection 密钥走 Redis(多实例就绪,fail-fast 启动)、健康检查、Serilog
-- 数据库:Sqlite / PostgreSQL 双提供程序一键切换;DbMigrator 支持自动建库、分层配置加载
+- 数据库:PostgreSQL 单提供程序,EF Core 迁移 + 存量库自动打戳;DbMigrator 支持分层配置加载(迁移机制详见 `docs/pg-migration-runbook.md`)
 - 前端:登录/租户切换/菜单权限/OIDC 回调已接通,ABP 动态 API 对接封装在 `web/src/abp/`
 - AI 协作规范:`.cursor/rules/` 内置 DDD 分层、应用层、授权等框架规约,人机共用一套标准
 
@@ -46,7 +46,7 @@ ABP 官方 Layered 模板的 **Host + 独立 SPA 变体**(以 `HttpApi.Host` 承
 │   │   ├── AbpAdmin.HttpApi              # 少量定制 Controller(Auto API 为主)
 │   │   ├── AbpAdmin.HttpApi.Client       # C# 动态客户端代理
 │   │   ├── AbpAdmin.HttpApi.Host         # API / OIDC 宿主
-│   │   └── AbpAdmin.DbMigrator           # 建库 / 脚本迁移 / 种子数据
+│   │   └── AbpAdmin.DbMigrator           # 迁移 / 种子数据
 │   ├── test/                             # 9 个测试项目(含随模块复制的 AbpAdmin.Biz.Template.Tests)
 │   └── etc/                              # nginx / quartz / 初始化脚本 / ip2region
 ├── web/                                  # 前端(Ant Design Pro v6 · Umi Max · pnpm)
@@ -63,7 +63,7 @@ ABP 官方 Layered 模板的 **Host + 独立 SPA 变体**(以 `HttpApi.Host` 承
 # 1) 后端(backend/ 为解决方案根目录)
 cd backend
 dotnet build
-cd src/AbpAdmin.DbMigrator && dotnet run && cd ../..   # 建库 + 迁移 + 种子
+cd src/AbpAdmin.DbMigrator && dotnet run && cd ../..   # 迁移 + 种子（库需已存在，见 docs/pg-migration-runbook.md）
 cd src/AbpAdmin.HttpApi.Host && dotnet run             # API: https://localhost:44395/swagger
 
 # 2) 前端
@@ -76,7 +76,7 @@ pnpm start                                             # http://localhost:8000
 
 - 开发环境 Host 启动时会自动判断并执行待应用的迁移(`Database:AutoMigrateOnStartup`,默认 true);显式跑 DbMigrator / 生产环境(置 false)走迁移器。
 - 一次性初始化可执行 `./backend/etc/scripts/initialize-solution.ps1`(编译 + install-libs + 迁移)。
-- 改框架表:在 `backend/src/AbpAdmin.EntityFrameworkCore/Sql/postgresql` 与 `Sql/sqlite` 各追加一个新的 `.sql`,再跑一次 Migrator。业务表改 `AbpAdmin.Biz.Template/Sql` 下对应目录。已执行过的脚本不要改。
+- 改框架表:改 `AbpAdminDbContext` 后执行 `dotnet ef migrations add`(命令见 `docs/pg-migration-runbook.md`),再跑一次 Migrator。业务模块(样板)同法。已应用的迁移不要改。
 
 ### 配置单一来源
 
@@ -110,12 +110,12 @@ pnpm start                                             # http://localhost:8000
 
 ### A. 子系统级业务 → 复制 `AbpAdmin.Biz.Template` 样板模块(推荐)
 
-`AbpAdmin.Biz.Template` 是自包含业务模块样板:实体/DTO/服务/权限/本地化/DbContext 全部在这一个工程里。建表不走 EF 迁移工程,而是模块内两份 SQL(`Sql/postgresql`、`Sql/sqlite`),由 `BizTemplateDbSchemaMigrator` 按 `Database:Provider` 执行,并记到 `__BizTemplateMigrations`,与宿主迁移"两本账"互不干扰。
+`AbpAdmin.Biz.Template` 是自包含业务模块样板:实体/DTO/服务/权限/本地化/DbContext 全部在这一个工程里。建表走模块内 EF 迁移(`Migrations/` 目录,由 `BizTemplateDbSchemaMigrator` 执行,记到 `__BizTemplate_EFMigrationsHistory`,与宿主 `__EFMigrationsHistory` "两本账"互不干扰)。
 
 新增业务三步:
 
 1. 复制 `AbpAdmin.Biz.Template` 这一个工程,替换 `BizTemplate` 词根(工程名/目录/RootNamespace/常量)
-2. 改表时在 `Sql/postgresql` 与 `Sql/sqlite` 各追加一个按序号命名的 `.sql`(例如 `002_add_column.sql`),不要改已经执行过的脚本
+2. 改表时执行 `dotnet ef migrations add`(命令同上,`--project` 指向模块工程、`--context BizTemplateDbContext`),不要改已经应用的迁移
 3. 宿主接线:`AbpAdmin.HttpApi.Host` 与 `AbpAdmin.DbMigrator` 各加一行 csproj 引用 + `DependsOn` 一行
 
 框架迁移循环(`AbpAdminDbMigrationService`)自动枚举所有 `IAbpAdminDbSchemaMigrator` 实现,模块迁移器显式注册一行即被扫到——**业务建表不产生任何框架仓库改动**。

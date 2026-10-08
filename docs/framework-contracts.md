@@ -56,7 +56,7 @@
   启动，由 `HostServiceGraphValidationTests` 钉住。
 - 生产模板（appsettings.Production.json）：`SignalR:UseRedisBackplane` + `Redis:IsEnabled`
   + `Quartz:UsePersistentStore` 三件套全开，`Redis__Configuration` 由部署环境注入。
-- 本机部署状态（Redis/ES/ClickHouse 端点与凭据）一律放 `appsettings.secrets.json`
+- 本机部署状态（Redis/ES 端点与凭据）一律放 `appsettings.secrets.json`
   （gitignored，"as it ships" 的测试形态刻意不加载它）。
 - 多机房（异地灾备）超出本节单集群范围：铁律见 §7，操作手册见 [dr-runbook.md](dr-runbook.md)。
 

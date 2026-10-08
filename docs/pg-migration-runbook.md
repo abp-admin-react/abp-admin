@@ -9,9 +9,14 @@
 | --- | --- | --- |
 | 框架库 schema | `AbpAdminDbContext.Database.MigrateAsync()`（`EntityFrameworkCoreAbpAdminDbSchemaMigrator`） | `__EFMigrationsHistory` |
 | BizTemplate 业务模块 | 模块自带 `Migrations/`，同上 | `__BizTemplate_EFMigrationsHistory` |
-| 全自动建库 | 宿主/租户库缺失时经维护库 `postgres` 执行 `CREATE DATABASE`（要求登录角色具备 CREATEDB 且 pg_hba 放行 postgres 库） | — |
 
-- **SQLite 支持已移除**：EF 模块不再有 `UseSqlite()` 分支，`Database:Provider` 配置键已废弃。
+- **SQLite 支持已移除**：EF 模块不再有 `UseSqlite()` 分支，`Database:Provider` 配置键已移除
+  （运行时 PostgreSQL 单提供程序；测试基座仍用内存 SQLite，见 §3）。
+- **启动预检（`PostgresStartupPreflight`）**：宿主与 DbMigrator 启动迁移前先校验 Default 连接串——
+  出厂占位串（含 `CHANGE_ME` 标记）、连不上（5 秒探测超时）、目标库不存在（3D000）→ `LogCritical` +
+  `AbpInitializationException` 拒绝启动，错误信息含掩码目标（Host/Port/Database/User，密码不回显）与
+  对应指引（配置方式/排查清单/CREATE DATABASE 建库语句）；`AutoMigrateOnStartup=false` 时同样拦截。
+  本系统不自动建库——建库是部署侧一次性动作（先 CREATE DATABASE 再跑迁移/宿主）。
 - **改框架表**：改 `AbpAdminDbContext`（或实体扩展）后，在仓库根执行
   ```bash
   dotnet ef migrations add <Name> \
@@ -22,10 +27,11 @@
   业务模块同法（`--project src/AbpAdmin.Biz.Template --context BizTemplateDbContext`）。
   设计期连接串由各工程的 `*DbContextFactory` 从 Host appsettings 分层读取，无需启动宿主。
 - **已有旧 schema 的库**（SQL 脚本时代建表、`__EFMigrationsHistory` 里没有 EF 迁移记录）：
-  直接启动会撞 "relation already exists"。两条路：
-  1. **schema 隔离（零破坏，推荐）**：连接串追加 `;SearchPath=<新schema>`，先
-     `CREATE SCHEMA IF NOT EXISTS <新schema>`，再跑 DbMigrator——新旧表同库不同 schema 共存；
-  2. 丢弃旧 schema 重建（需人工确认数据可弃）。
+  启动时自动打戳 baseline（`EfCoreLegacySchemaBaseliner`：哨兵表在而 History 无 Initial 记账 →
+  建 History 并把 Initial 记账为已应用，框架与 BizTemplate 迁移器各管各的账），不再重放建表；
+  打戳打 Warning 提示运维一次性 `pg_dump --schema-only` 对比 `dotnet ef migrations script` 确认无漂移。
+  备用手段（自动打戳不合意时）：schema 隔离（连接串追加 `;SearchPath=<新schema>`，先
+  `CREATE SCHEMA IF NOT EXISTS <新schema>`，新旧表同库不同 schema 共存）。
 
 ## 2. 本机/测试环境运行手册（192.168.10.250 实例）
 
@@ -54,7 +60,8 @@
 
 ## 4. 遗留与迁移点
 
-- `appsettings.json` 的 `ConnectionStrings:Default` 仍是 SQLite 字面量（历史残留，
-  实际一律被 secrets 覆盖）；首发前建议改为 PG 占位串，避免误导。
+- ~~`appsettings.json` 的 `ConnectionStrings:Default` 仍是 SQLite 字面量~~ 已改为 PG 占位串
+  （`Host=localhost;...CHANGE_ME`，实际一律被 secrets/环境变量覆盖；未覆盖时 fail-fast，
+  不再静默建 SQLite 文件）。`Database:Provider` 键已随之移除。
 - 生产部署：多实例必须配 Redis（分布式锁/DataProtection/SignalR 背板）；
   Redis 关闭时分布式锁退化为进程内（`LocalInProcessDistributedLockProvider`），仅单实例有效。
