@@ -35,6 +35,25 @@ public class UserOperationLogParseFunction : OperationLogParseFunctionBase, ITra
         => (await _userRepository.FindAsync(id))?.UserName;
 }
 
+/// <summary>角色 ID → 角色名（如删除角色、调整角色授权的模板 {{role(id)}}）。</summary>
+public class RoleOperationLogParseFunction : OperationLogParseFunctionBase, ITransientDependency
+{
+    private readonly IIdentityRoleRepository _roleRepository;
+
+    public RoleOperationLogParseFunction(
+        IDistributedCache<OperationLogNameCacheItem> cache,
+        IIdentityRoleRepository roleRepository)
+        : base(cache)
+    {
+        _roleRepository = roleRepository;
+    }
+
+    public override string Name => "role";
+
+    protected override async ValueTask<string?> FindNameAsync(Guid id)
+        => (await _roleRepository.FindAsync(id))?.Name;
+}
+
 /// <summary>组织单元 ID → 显示名。</summary>
 public class OrganizationUnitOperationLogParseFunction : OperationLogParseFunctionBase, ITransientDependency
 {

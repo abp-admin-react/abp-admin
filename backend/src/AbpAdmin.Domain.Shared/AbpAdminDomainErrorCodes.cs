@@ -128,6 +128,29 @@ public static class AbpAdminDomainErrorCodes
 
         /// <summary>保存实体时无法解析出应写入的组织单元 Id（WithData("EntityType")）。</summary>
         public const string CannotResolveOrganizationUnit = "AbpAdmin:DataScope:CannotResolveOrganizationUnit";
+
+        /// <summary>
+        /// 不能授予超出操作者自身范围的数据范围：授「全部数据」要求操作者自身快照 IsAll
+        /// （WithData("ScopeType")）。借鉴 Admin.NET GrantDataScope 的防提权设计——
+        /// 否则持有 Manage 权限但自身受限的操作者可以给自己的角色授 All 自我提权。
+        /// </summary>
+        public const string RoleDataScopeEscalation = "AbpAdmin:DataScope:RoleDataScopeEscalation";
+
+        /// <summary>自定义范围里有个组织单元不在操作者自身授权范围内（WithData("Count")）。</summary>
+        public const string RoleDataScopeCustomOuOutOfScope = "AbpAdmin:DataScope:RoleDataScopeCustomOuOutOfScope";
+    }
+
+    /// <summary>
+    /// 身份管理（Identity 模块自研扩展）相关错误码。
+    /// </summary>
+    public static class Identity
+    {
+        /// <summary>
+        /// 删除角色时该角色下仍有用户（WithData("RoleName")、WithData("Count")）。
+        /// 借鉴 Admin.NET DeleteRole 的防误删设计：ABP 原生删除会静默清掉所有用户-角色关联，
+        /// 用户权限无感丢失；先拒绝并提示改派，删除才是显式决定。
+        /// </summary>
+        public const string RoleHasUsers = "AbpAdmin:Identity:RoleHasUsers";
     }
 
     /// <summary>

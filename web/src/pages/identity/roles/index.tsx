@@ -22,12 +22,14 @@ import ClaimModal from '@/components/ClaimModal';
 import DataScopeModal from '@/components/DataScopeModal';
 import PermissionModal from '@/components/PermissionModal';
 import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import RoleUsersDrawer from './components/RoleUsersDrawer';
 
 const RolesPage: React.FC = () => {
   const actionRef = useRef<ActionType>(undefined);
   const [permissionTarget, setPermissionTarget] = useState<IdentityRoleDto>();
   const [claimTarget, setClaimTarget] = useState<IdentityRoleDto>();
   const [dataScopeTarget, setDataScopeTarget] = useState<IdentityRoleDto>();
+  const [usersTarget, setUsersTarget] = useState<IdentityRoleDto>();
   const access = useAccess();
 
   const columns: ProColumns<IdentityRoleDto>[] = [
@@ -102,6 +104,9 @@ const RolesPage: React.FC = () => {
             声明
           </a>
         ),
+        <a key="users" onClick={() => setUsersTarget(record)}>
+          用户
+        </a>,
         access.canManageRoleDataScopes && (
           <a key="dataScope" onClick={() => setDataScopeTarget(record)}>
             数据范围
@@ -186,6 +191,10 @@ const RolesPage: React.FC = () => {
         title={`数据范围 - ${dataScopeTarget?.name || ''}`}
         roleName={dataScopeTarget?.name}
         onClose={() => setDataScopeTarget(undefined)}
+      />
+      <RoleUsersDrawer
+        role={usersTarget}
+        onClose={() => setUsersTarget(undefined)}
       />
     </PageContainer>
   );

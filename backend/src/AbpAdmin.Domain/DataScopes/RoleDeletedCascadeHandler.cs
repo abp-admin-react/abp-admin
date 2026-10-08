@@ -14,9 +14,8 @@ namespace AbpAdmin.DataScopes;
 /// <see cref="RoleDataScope"/>（RoleName）都以角色名为键，角色删除后残留的行会静默失配
 /// （fail-closed：菜单对受控用户消失、数据范围归零），管理端无任何提示——
 /// 删除时同步清理，对齐 ABP Identity 自己对 PermissionGrants 的级联策略。
-/// <para>角色重命名的同步未在此落地：ABP 实体事件（EntityUpdatedEventData&lt;IdentityRole&gt;）
-/// 只携带新值，Domain 层拿不到重命名前的旧角色名；需要 IdentityRoleManager 扩展点或
-/// EF OriginalValues 才能实现，超出本次改造范围（暂以「删除清理」兜住主要风险）。</para>
+/// <para>角色重命名的同步由 <see cref="RoleRenamedCascadeHandler"/> 负责
+/// （订阅 IdentityRoleNameChangedEto，与上游 PermissionManagement 的 RoleUpdateEventHandler 同构）。</para>
 /// <para>RoleDataScope 的删除会触发 DataScopeCacheInvalidationHandler 递增 generation，
 /// 数据范围缓存随之失效，无需额外处理。</para>
 /// </summary>

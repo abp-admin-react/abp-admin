@@ -158,6 +158,42 @@ export async function deleteRole(id: string) {
   return request(`/api/identity/roles/${id}`, { method: 'DELETE' });
 }
 
+/** 角色下的用户（只读视角，RoleUserAdminAppService） */
+export interface RoleUserDto {
+  id: string;
+  userName: string;
+  name?: string;
+  email?: string;
+  phoneNumber?: string;
+  isActive: boolean;
+  /** ISO 时间；晚于当前即处于锁定 */
+  lockoutEnd?: string;
+  creationTime: string;
+}
+
+/**
+ * 查询角色下的用户（分页）。只读——角色分派/改派在用户管理页完成，
+ * 这里只回答「谁拥有这个角色」。
+ */
+export async function getRoleUsers(params: {
+  roleId: string;
+  current?: number;
+  pageSize?: number;
+  sorting?: string;
+}) {
+  const maxResultCount = params.pageSize ?? 10;
+  const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
+  return request<PagedResult<RoleUserDto>>('/api/app/role-user-admin', {
+    method: 'GET',
+    params: {
+      RoleId: params.roleId,
+      Sorting: params.sorting,
+      SkipCount: skipCount,
+      MaxResultCount: maxResultCount,
+    },
+  });
+}
+
 export function isUserLocked(user: IdentityUserDto) {
   return !!user.lockoutEnd && new Date(user.lockoutEnd).getTime() > Date.now();
 }

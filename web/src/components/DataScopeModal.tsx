@@ -1,6 +1,6 @@
-import { App, Form, Modal, Select, Spin, Tree } from 'antd';
+import { Alert, App, Form, Modal, Select, Spin, Tree } from 'antd';
 import type { DataNode } from 'antd/es/tree';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   DataScopeType,
   DataScopeTypeLabels,
@@ -8,6 +8,7 @@ import {
   saveRoleDataScope,
 } from '@/abp/dataScope';
 import { getOrganizationUnits } from '@/abp/identityAdmin';
+import { isNotFound } from '@/requestErrorConfig';
 
 type OrganizationUnitDto = {
   id?: string;
@@ -56,6 +57,7 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [unconfigured, setUnconfigured] = useState(false);
   const [ouTree, setOuTree] = useState<DataNode[]>([]);
   const [scopeType, setScopeType] = useState<DataScopeType>(DataScopeType.All);
   const [checkedOuIds, setCheckedOuIds] = useState<string[]>([]);
@@ -75,6 +77,7 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
   useEffect(() => {
     if (!open || !roleName) {
       form.resetFields();
+      setUnconfigured(false);
       setScopeType(DataScopeType.All);
       setCheckedOuIds([]);
       return;
@@ -83,15 +86,23 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
     getRoleDataScopeByRoleName(roleName)
       .then((data) => {
         const st = data.scopeType ?? DataScopeType.All;
+        setUnconfigured(false);
         setScopeType(st);
         setCheckedOuIds(data.customOrganizationUnitIds || []);
         form.setFieldsValue({ scopeType: st });
       })
-      .catch(() => {
-        // 未配置过，使用默认值
-        setScopeType(DataScopeType.All);
-        setCheckedOuIds([]);
-        form.setFieldsValue({ scopeType: DataScopeType.All });
+      .catch((err) => {
+        // 仅 404（未配置）走默认表单；其它错误关闭弹窗——保存是按 roleName 全量覆盖，
+        // 读取失败时让管理员顺手保存会拿默认值盖掉真实配置（RoleGrantModal 同款防线）
+        if (isNotFound(err)) {
+          setUnconfigured(true);
+          setScopeType(DataScopeType.All);
+          setCheckedOuIds([]);
+          form.setFieldsValue({ scopeType: DataScopeType.All });
+          return;
+        }
+        message.error('读取数据范围失败，请重试');
+        onClose();
       })
       .finally(() => setLoading(false));
   }, [open, roleName, form]);
@@ -136,6 +147,15 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
       forceRender
     >
       <Spin spinning={loading}>
+        {unconfigured && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="该角色尚未配置数据范围"
+            description="未配置时其成员（admin 除外）在启用数据范围的业务数据上默认零行可见（fail-closed），保存后按所选范围生效。"
+          />
+        )}
         <Form form={form} layout="vertical">
           <Form.Item
             name="scopeType"

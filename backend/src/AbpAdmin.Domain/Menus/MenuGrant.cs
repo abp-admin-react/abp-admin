@@ -1,4 +1,5 @@
 using System;
+using Volo.Abp;
 using Volo.Abp.Domain.Entities;
 using Volo.Abp.MultiTenancy;
 
@@ -32,5 +33,15 @@ public class MenuGrant : Entity<Guid>, IMultiTenant
         TenantId = tenantId;
         ProviderName = providerName;
         ProviderKey = providerKey;
+    }
+
+    /// <summary>
+    /// 角色重命名时同步改写授权键（ProviderName=R 时 ProviderKey 即角色名）。
+    /// 只应由 <c>RoleRenamedCascadeHandler</c> 调用——它是 IdentityRoleNameChangedEto 的级联点，
+    /// 任何其它路径改键都会造成授权与角色失配（受控菜单对角色成员静默消失）。
+    /// </summary>
+    public void ChangeProviderKey(string providerKey)
+    {
+        ProviderKey = Check.NotNullOrWhiteSpace(providerKey, nameof(providerKey), maxLength: 256);
     }
 }

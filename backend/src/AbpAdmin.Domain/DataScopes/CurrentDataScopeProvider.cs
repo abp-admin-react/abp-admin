@@ -8,6 +8,7 @@ using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 using Volo.Abp.Linq;
+using Volo.Abp.Roles;
 using Volo.Abp.Users;
 
 namespace AbpAdmin.DataScopes;
@@ -79,6 +80,14 @@ public class CurrentDataScopeProvider : ICurrentDataScopeProvider, ITransientDep
         if (roleNames.Length == 0)
         {
             return new DataScopeSnapshot(false, false, Array.Empty<Guid>(), userId);
+        }
+
+        // admin 超管豁免：出厂不会为 admin 配 RoleDataScope 行，若走常规解析，
+        // 快照为空集合 = 任何 IHasDataScope 实体对 admin 零行可见（fail-closed 变成超管自锁）。
+        // 与 MyMenuAppService 的 admin 豁免、Admin.NET 超管绕过数据范围同口径。
+        if (roleNames.Contains(AbpRoleConsts.AdminRoleName))
+        {
+            return new DataScopeSnapshot(true, false, Array.Empty<Guid>(), userId);
         }
 
         // 必须 WithDetailsAsync 显式加载 CustomOrganizationUnits，

@@ -43,4 +43,14 @@ public class RoleDataScope : AuditedAggregateRoot<Guid>, IMultiTenant
     {
         ScopeType = scopeType;
     }
+
+    /// <summary>
+    /// 角色重命名时同步改写键（RoleName 即配置键）。只应由 <c>RoleRenamedCascadeHandler</c> 调用；
+    /// 改名后实体的 EntityUpdated 事件会让 DataScopeCacheInvalidationHandler 递增 generation，
+    /// 数据范围缓存随之失效，无需额外处理。
+    /// </summary>
+    public void ChangeRoleName(string roleName)
+    {
+        RoleName = Check.NotNullOrWhiteSpace(roleName, nameof(roleName), maxLength: RoleDataScopeConsts.MaxRoleNameLength);
+    }
 }

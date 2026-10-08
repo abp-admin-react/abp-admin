@@ -80,6 +80,7 @@ const RoleGrantModal: React.FC<RoleGrantModalProps> = ({
     >
       <div style={{ marginBottom: 8, color: 'rgba(0,0,0,0.45)' }}>
         勾选的角色可见该菜单；一个角色都不勾时，该菜单不受角色控制（按权限/公开规则显示）。
+        注意授权按节点生效：给目录勾选角色不会限制其子菜单——子菜单需要单独勾选才会受限。
         当前已分配：{grantedRoles.length > 0 ? grantedRoles.join('、') : '无'}
       </div>
       <TreeSelect
