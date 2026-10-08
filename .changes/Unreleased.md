@@ -18,6 +18,13 @@
 - `web/src/pages/permission-definitions`:OCR 修复——列头筛选改用第三参 filter（此前静默无效）；编辑预填原始 displayName（防本地化串被覆盖成明文）；请求体显式 PascalCase；更新/删除路由修正为 `/{id}/group`、`/{id}/definition`（此前 405）；提交失败保持弹窗打开。
 - `web/src/pages/audit-logs`:回滚按钮加进行中防重；抽屉按 entityId remount（防串实体旧数据）。
 - (并行进行中的迁移机制重构——EF 迁移替代内嵌 Sql 脚本、PostgreSQL 单提供程序——由另一会话负责,此处不记录其条目,以该会话自己的说明为准。)
+- **角色管理吸收包(借鉴 Admin.NET + ABP 上游机制)**:
+  - 角色重命名级联:新增 `RoleRenamedCascadeHandler` 订阅 `IdentityRoleNameChangedEto`(与上游 PermissionManagement 的 `RoleUpdateEventHandler` 同构),同步改写 `MenuGrant.ProviderKey` 与 `RoleDataScope.RoleName`——偿还两表以角色名为键、重命名即静默失配的已登记技术债。
+  - 数据范围防越权:`RoleDataScopeAppService` Create/Update 增加 `EnsureOperatorCanGrantAsync`——授「全部数据」要求操作者自身快照 IsAll、自定义 OU 须逐个落在操作者授权范围内;`CurrentDataScopeProvider` 对 `admin` 角色直接返回 IsAll(出厂不为 admin 配 RoleDataScope 行,不豁免则任何 IHasDataScope 实体对 admin 零行可见)。
+  - 删除保护:`AbpAdminRoleAppService` 按 ABP 服务替换模式顶替 `IdentityRoleAppService`(`/api/identity/roles` 路由不变),角色下仍有用户时拒绝删除(原生删除会静默清掉用户-角色关联)。
+  - 角色下用户只读查看:新增 `GET /api/app/role-user-admin?roleId=` + 前端角色页「用户」抽屉;`RoleDataScopeAppService` 三个写入口补 `[OperationLog]`,新增 `role(id)` 日志解析函数。
+  - 前端配套:`DataScopeModal` 未配置语义如实展示(fail-closed 零行可见)且仅 404 走默认表单、其它读取失败关弹窗防默认值覆盖;`RoleGrantModal` 补「授权按节点生效」说明。
+  - 新错误码:`AbpAdmin:Identity:RoleHasUsers`、`AbpAdmin:DataScope:RoleDataScopeEscalation`、`AbpAdmin:DataScope:RoleDataScopeCustomOuOutOfScope`(zh-Hans/en 已配)。
 
 ## 依赖项变更
 
