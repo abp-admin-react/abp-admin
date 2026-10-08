@@ -7,7 +7,7 @@
         <Project Path="src/AbpAdmin.Domain/AbpAdmin.Domain.csproj" />
         <Project Path="src/AbpAdmin.Application/AbpAdmin.Application.csproj" />
         <Project Path="src/AbpAdmin.EntityFrameworkCore/AbpAdmin.EntityFrameworkCore.csproj" />
-        <!-- 自包含业务模块样板：一个工程，PostgreSQL / SQLite 脚本在模块 Sql/ 下 -->
+        <!-- 自包含业务模块样板：一个工程，建表走模块内 EF 迁移（独立 History 表） -->
         <Project Path="src/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj" />
         <Project Path="src/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj" />
         <Project Path="src/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj" />
@@ -16,9 +16,8 @@
         <Project Path="src/AbpAdmin.HttpApi.Client/AbpAdmin.HttpApi.Client.csproj" />
         <Project Path="src/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj" />
         <Project Path="src/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj" />
-        <!-- T5：ES/ClickHouse 辅助存储 -->
+        <!-- T5：ES 辅助存储 -->
         <Project Path="src/AbpAdmin.Elasticsearch/AbpAdmin.Elasticsearch.csproj" />
-        <Project Path="src/AbpAdmin.ClickHouse/AbpAdmin.ClickHouse.csproj" />
     </Folder>
     <Folder Name="/test/">
         <Project Path="test/AbpAdmin.DynamicQueryable.Tests/AbpAdmin.DynamicQueryable.Tests.csproj" />

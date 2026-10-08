@@ -24,7 +24,6 @@ using AbpAdmin.MultiTenancy;
 using AbpAdmin.HealthChecks;
 using AbpAdmin.AuditLogs;
 using AbpAdmin.Elasticsearch;
-using AbpAdmin.ClickHouse;
 using Microsoft.OpenApi;
 using Volo.Abp;
 using Volo.Abp.Studio;
@@ -72,6 +71,7 @@ using AbpAdmin.ExtensionGrants;
 using AbpAdmin.ExternalLogins;
 using AbpAdmin.Gdpr;
 using AbpAdmin.Identity;
+using AbpAdmin.Logging;
 using AbpAdmin.OpenIddict;
 using AbpAdmin.OperationLogs;
 using AbpAdmin.ScheduledJobs;
@@ -121,9 +121,8 @@ namespace AbpAdmin;
     // RedisDistributedSynchronizationProvider；Redis 显式关闭分支回切 LocalAbpDistributedLock
     //（见 ConfigureRedis 注释）——两分支各自保证服务图自洽，Redis-off 不再依赖隐式缺省。
     typeof(AbpDistributedLockingModule),
-    // T5：ES/ClickHouse 辅助存储（宿主级基础设施；模块内部按配置开关，未启用即无副作用）
-    typeof(AbpAdminElasticsearchModule),
-    typeof(AbpAdminClickHouseModule)
+    // T5：ES 辅助存储（宿主级基础设施；模块内部按配置开关，未启用即无副作用）
+    typeof(AbpAdminElasticsearchModule)
     )]
 public class AbpAdminHttpApiHostModule : AbpModule
 {
@@ -214,8 +213,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
                 if (!usePersistentStore)
                 {
-                    // 开发环境（SQLite）走内存 store，不需要 QRTZ_ 表。
-                    // 代价：开发环境测不出 clustering 问题，多实例验收必须在 PostgreSQL 做。
+                    // 不接持久化 store 时走内存 store，不需要 QRTZ_ 表。
+                    // 代价：单机开发测不出 clustering 问题，多实例验收必须配 Quartz:UsePersistentStore（PostgreSQL）。
                     return;
                 }
 
@@ -369,6 +368,16 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
             // 敏感属性（IdentityUser.PasswordHash / Token.Payload / ClientSecret 等）落库前脱敏
             options.Contributors.Add(new SensitiveEntityChangeScrubbingContributor());
+        });
+
+        // 日志保留期（LogRetentionBackgroundWorker 每日批删）：天数键位跟随各日志子系统，
+        // 缺省/0 = 永不清理（代码层缺省安全，不因漏配而删日志）；出厂建议值写在 appsettings.json。
+        // BatchSize 单独一节（两张表共用），可从配置调批大小。
+        Configure<LogRetentionOptions>(options =>
+        {
+            options.OperationLogRetentionDays = configuration.GetValue("OperationLogs:RetentionDays", 0);
+            options.AuditLogRetentionDays = configuration.GetValue("Auditing:RetentionDays", 0);
+            options.BatchSize = configuration.GetValue("LogRetention:BatchSize", 1000);
         });
 
         ConfigureDesensitization(context);
@@ -1093,6 +1102,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     public override async Task OnPreApplicationInitializationAsync(ApplicationInitializationContext context)
     {
+        // PostgreSQL 启动预检：占位串/连不上在迁移与框架初始化器之前给出可行动的致命错误
+        //（AutoMigrateOnStartup=false 关闭自动迁移时同样拦截——没库跑不起来就该明说）。
+        await PostgresStartupPreflight.EnsureConnectableAsync(
+            context.ServiceProvider.GetRequiredService<IConfiguration>(),
+            context.ServiceProvider.GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>());
+
         WarnOnIncoherentRedisPosture(context);
 
         // 空库首启的关键顺序：ABP 先跑完所有模块的 Pre-INIT，再跑各模块的 OnApplicationInitialization——
@@ -1186,10 +1201,10 @@ public class AbpAdminHttpApiHostModule : AbpModule
     }
 
     // 全自动建表（开关 Database:AutoMigrateOnStartup，默认开）：启动时枚举全部 IAbpAdminDbSchemaMigrator
-    // 逐个询问脚本是否都已记入 History 表（框架库 + 各业务模块，宿主无需感知具体模块——
+    // 逐个询问迁移是否都已记入各自 History 表（框架库 + 各业务模块，宿主无需感知具体模块——
     // 与迁移执行路径同一约定，新模块按「引用 + DependsOn」接线即自动纳入检查）。
     // 缺脚本才执行迁移+种子。库不可读（数据库不存在、History 表还没有）时检查会抛错，
-    // 视为需要迁移，走完整流程（含自动建库）。
+    // 视为需要迁移，走完整流程（存量库由 EfCoreLegacySchemaBaseliner 自动打戳，不自动建库）。
     // 生产多实例部署若担心启动竞争，可用环境变量 Database__AutoMigrateOnStartup=false 关闭，改由 DbMigrator 负责。
     private async Task MigrateSchemaIfConfiguredAsync(ApplicationInitializationContext context)
     {
@@ -1234,7 +1249,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             else
             {
                 context.ServiceProvider.GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
-                    .LogInformation("数据库 schema 已就绪（SQL 脚本均已应用），跳过自动迁移");
+                    .LogInformation("数据库 schema 已就绪（EF 迁移均已应用、History 记账齐全），跳过自动迁移");
             }
         }
     }
@@ -1337,6 +1352,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
         app.UseConfiguredEndpoints();
 
         await context.AddBackgroundWorkerAsync<IdentitySessionCleanupBackgroundWorker>();
+        // 日志保留期清理：缺省/0 天数时空转；周期/分批语义见 LogRetentionBackgroundWorker。
+        await context.AddBackgroundWorkerAsync<LogRetentionBackgroundWorker>();
 
         // T2.3: 启动时同步静态模板到数据库
         using (var scope = context.ServiceProvider.CreateScope())

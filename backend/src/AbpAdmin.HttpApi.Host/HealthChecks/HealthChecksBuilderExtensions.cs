@@ -1,5 +1,4 @@
 using System;
-using AbpAdmin.ClickHouse;
 using AbpAdmin.Elasticsearch;
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Builder;
@@ -19,7 +18,7 @@ public static class HealthChecksBuilderExtensions
         var healthChecksBuilder = services.AddHealthChecks();
         healthChecksBuilder.AddCheck<AbpAdminDatabaseCheck>("AbpAdmin DbContext Check", tags: new string[] { "database" });
 
-        // T5：ES/ClickHouse 属辅助存储，按配置开关注册——未启用时不注册，避免健康面板误报。
+        // T5：ES 属辅助存储，按配置开关注册——未启用时不注册，避免健康面板误报。
         // 启用判定走 options.IsUsable 单头谓词(与模块注册/日志装配同一份),防止多处复制漂移
         var configuration = services.GetConfiguration();
         var elasticsearchOptions = configuration
@@ -28,14 +27,6 @@ public static class HealthChecksBuilderExtensions
         if (elasticsearchOptions.IsUsable)
         {
             healthChecksBuilder.AddCheck<ElasticsearchHealthCheck>("Elasticsearch", tags: new string[] { "storage" });
-        }
-
-        var clickHouseOptions = configuration
-            .GetSection(AbpAdminClickHouseOptions.SectionName)
-            .Get<AbpAdminClickHouseOptions>() ?? new AbpAdminClickHouseOptions();
-        if (clickHouseOptions.IsUsable)
-        {
-            healthChecksBuilder.AddCheck<ClickHouseHealthCheck>("ClickHouse", tags: new string[] { "storage" });
         }
 
         services.ConfigureHealthCheckEndpoint("/health-status");

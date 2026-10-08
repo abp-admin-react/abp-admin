@@ -63,9 +63,8 @@
     <ProjectReference Include="..\AbpAdmin.Application\AbpAdmin.Application.csproj" />
     <ProjectReference Include="..\AbpAdmin.HttpApi\AbpAdmin.HttpApi.csproj" />
     <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
-    <!-- T5：ES/ClickHouse 辅助存储模块（宿主级基础设施，DbMigrator 不感知） -->
+    <!-- T5：ES 辅助存储模块（宿主级基础设施，DbMigrator 不感知） -->
     <ProjectReference Include="..\AbpAdmin.Elasticsearch\AbpAdmin.Elasticsearch.csproj" />
-    <ProjectReference Include="..\AbpAdmin.ClickHouse\AbpAdmin.ClickHouse.csproj" />
     <!-- 自包含业务模块样板。新增业务模块：加这一行引用 + AbpAdminHttpApiHostModule 的 DependsOn 一行 -->
     <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
     <!-- Webhook 模块（自包含：订阅/投递/发送记录，独立 History 表） -->
