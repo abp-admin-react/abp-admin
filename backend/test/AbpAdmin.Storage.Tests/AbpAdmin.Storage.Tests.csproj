@@ -10,16 +10,16 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- T5 存储基础设施测试:ClickHouse/、Elasticsearch/ 为零依赖单测(常绿);
-         Storage/ 为真库集成测试(RequiresEnvFact 环境变量门控,未配置显示 Skipped)。
+    <!-- T5 存储基础设施测试,三目录职责:
+         Elasticsearch/ 零依赖单测(不连真库,常绿);
+         Storage/ 真库集成测试(RequiresEnvFact 环境变量门控,未配置显示 Skipped,CI 可区分跳过与通过);
+         TestInfrastructure/ 测试基础设施(RequiresEnvFact 特性),非用例目录。
          目录约定:后续第三存储接入时单测按 store 加目录,集成测试同入 Storage/。 -->
     <ProjectReference Include="..\..\src\AbpAdmin.Elasticsearch\AbpAdmin.Elasticsearch.csproj" />
-    <ProjectReference Include="..\..\src\AbpAdmin.ClickHouse\AbpAdmin.ClickHouse.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="NSubstitute" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
