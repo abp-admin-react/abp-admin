@@ -150,6 +150,9 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
         await _menuRepository.HardDeleteAsync(menu);
     }
 
+    /// <summary>读取与写入同口径：角色分配属管理操作，仅 AssignRoles 可见
+    /// （此前只挂类级 Default，任何能打开菜单管理页的用户都能枚举授权明细）。</summary>
+    [Authorize(AbpAdminPermissions.Menus.AssignRoles)]
     public virtual async Task<ListResultDto<string>> GetRoleGrantsAsync(Guid menuId)
     {
         await GetMenuAsync(menuId);

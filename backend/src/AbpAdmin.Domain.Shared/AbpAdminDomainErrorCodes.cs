@@ -15,7 +15,7 @@ public static class AbpAdminDomainErrorCodes
         /// <summary>菜单不存在。</summary>
         public const string MenuNotFound = "AbpAdmin:MenuNotFound";
 
-        /// <summary>同级下已存在相同路由地址。</summary>
+        /// <summary>已存在相同路由地址（(TenantId, Path) 全局唯一，不分层级）。</summary>
         public const string MenuDuplicatePath = "AbpAdmin:MenuDuplicatePath";
 
         /// <summary>删除目录时其下仍有子菜单。</summary>

@@ -350,7 +350,7 @@
         "AbpAdmin:CacheMonitorKeyNotAllowed": "只允许操作 {KeyPrefix} 前缀下的缓存键。",
         "AbpAdmin:DuplicateSubmit": "请勿重复提交，请稍候 {IntervalSeconds} 秒后再试。",
         "AbpAdmin:MenuNotFound": "菜单不存在。",
-        "AbpAdmin:MenuDuplicatePath": "同级下已存在相同的路由地址：{Path}",
+        "AbpAdmin:MenuDuplicatePath": "已存在相同的路由地址（全局唯一，不分层级）：{Path}",
         "AbpAdmin:MenuHasChildren": "目录下仍有子菜单，请先删除或移动子菜单。",
         "AbpAdmin:MenuParentCycle": "上级菜单不能是自身或其子孙节点。",
         "AbpAdmin:MenuTypeMismatch": "目录类型需要子菜单，菜单类型需要路由地址。",
