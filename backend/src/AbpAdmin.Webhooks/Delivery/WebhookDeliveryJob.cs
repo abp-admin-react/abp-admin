@@ -1,8 +1,10 @@
 using System;
+using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using HttpAgent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,19 +20,40 @@ namespace AbpAdmin.Webhooks.Delivery;
 /// <summary>
 /// 投递作业：以订阅配置的密钥做 HMAC-SHA256 签名（对 "{timestampSeconds}.{body}"），
 /// 头部 X-AbpAdmin-Event / X-AbpAdmin-Timestamp / X-AbpAdmin-Signature；收端按同一算法验签即防伪造。
-/// 失败原地重试（退避 2s/4s，共 3 次尝试，见 <see cref="RetryBackoffs"/>），终态写回
-/// SendRecord（成功/最终失败 + 尝试次数 + 响应摘要）。
+/// 出站走 HttpAgent（IHttpRemoteService + HttpRequestBuilder，底层仍是命名 HttpClient
+/// AbpAdminWebhookDelivery）：重试交框架重试策略——间隔 2s/4s 与既有手写退避一致，
+/// 仅对网络异常与瞬态状态码（408/429/5xx）重试，4xx 重发无意义不重试；签名对整体 payload
+/// 不随重试变化，重发合法。终态写回 SendRecord（成功/最终失败 + 尝试次数 + 响应摘要）。
 /// UoW：终态写回走 <see cref="SaveResultAsync"/> 的独立新 UoW（requiresNew）——终态必须落库，
 /// 不与作业里其他潜在写操作共生死；除此之外本作业不开环境 UoW。
-/// 日志语义：还会重试的失败=Warning（带 retrying）；最后一次失败=Error；订阅已删/暂停=静默落失败终态。
+/// 日志语义（与下方日志字符串一一对应）：
+/// - 还会重试的失败 = Warning「Webhook delivery attempt {Attempt} failed for {Uri} ({Reason}), retrying.」
+///   （框架 OnRetry 回调；异常触发 {Reason}=异常消息，状态码触发 {Reason}=状态码）；
+/// - 最后一次失败 = Error，两种终态形态——非 2xx 终态「Webhook delivery failed after {Attempt} attempts
+///   for {Uri}: {StatusCode}.」（无异常、状态码即原因），网络层终态「Webhook delivery failed after
+///   {Attempt} attempts for {Uri}.」+ 异常堆栈（终态按"无响应"落库）；
+/// - 订阅已删/暂停 = 不打日志，静默落失败终态。
 /// </summary>
 public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, ITransientDependency
 {
     private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(AbpAdminWebhooksConsts.DeliveryTimeoutSeconds);
+
+    /// <summary>与既有手写重试一致的退避序列；RetryIntervals 一经设置，重试次数即数组长度。</summary>
     private static readonly TimeSpan[] RetryBackoffs = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4)];
 
+    /// <summary>值得重试的瞬态状态码：请求超时/限流/服务器与网关侧错误。</summary>
+    private static readonly HttpStatusCode[] RetryableStatusCodes =
+    [
+        HttpStatusCode.RequestTimeout,
+        HttpStatusCode.TooManyRequests,
+        HttpStatusCode.InternalServerError,
+        HttpStatusCode.BadGateway,
+        HttpStatusCode.ServiceUnavailable,
+        HttpStatusCode.GatewayTimeout,
+    ];
+
     private readonly IServiceProvider _serviceProvider;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IHttpRemoteService _httpRemoteService;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
     private readonly IClock _clock;
 
@@ -38,12 +61,12 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
 
     public WebhookDeliveryJob(
         IServiceProvider serviceProvider,
-        IHttpClientFactory httpClientFactory,
+        IHttpRemoteService httpRemoteService,
         IUnitOfWorkManager unitOfWorkManager,
         IClock clock)
     {
         _serviceProvider = serviceProvider;
-        _httpClientFactory = httpClientFactory;
+        _httpRemoteService = httpRemoteService;
         _unitOfWorkManager = unitOfWorkManager;
         _clock = clock;
     }
@@ -68,67 +91,78 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
             var timestamp = new DateTimeOffset(_clock.Now).ToUnixTimeSeconds().ToString();
             var signature = ComputeSignature(subscription.Secret, timestamp, args.Payload);
 
+            // OnRetry 在每次重试前触发（ctx.Attempt 从 1 计）：落 Warning 日志并跟踪尝试次数。
+            // attempts 初值 1（首发）；耗尽后网络异常路径 attempts 恰为 RetryBackoffs.Length + 1。
+            var attempts = 1;
             HttpResponseMessage? response = null;
-            var attempts = 0;
+            bool succeeded;
+            int? statusCode;
+            string responseBody;
             try
             {
-                var client = _httpClientFactory.CreateClient(WebhookDeliveryHttpClientExtensions.ClientName);
-                client.Timeout = HttpTimeout;
-
-                do
+                var sent = await _httpRemoteService.SendAsync(BuildDeliveryRequest(
+                    subscription.WebhookUri, args, timestamp, signature,
+                    ctx =>
+                    {
+                        attempts = ctx.Attempt + 1;
+                        Logger.LogWarning(ctx.Exception,
+                            "Webhook delivery attempt {Attempt} failed for {Uri} ({Reason}), retrying.",
+                            ctx.Attempt, subscription.WebhookUri,
+                            ctx.IsExceptionRetry ? ctx.Exception?.Message : $"{(int?)ctx.StatusCode} {ctx.StatusCode}");
+                    }));
+                if (sent is null)
                 {
-                    attempts++;
-                    try
-                    {
-                        using var request = new HttpRequestMessage(HttpMethod.Post, subscription.WebhookUri);
-                        request.Headers.TryAddWithoutValidation("X-AbpAdmin-Event", args.EventName);
-                        request.Headers.TryAddWithoutValidation("X-AbpAdmin-Timestamp", timestamp);
-                        request.Headers.TryAddWithoutValidation("X-AbpAdmin-Signature", signature);
-                        request.Content = new StringContent(args.Payload, Encoding.UTF8, "application/json");
+                    // HttpAgent 的 SendAsync 返回可空响应：null 视作网络层失败，走统一失败终态
+                    throw new InvalidOperationException("HttpRemoteService returned no response.");
+                }
+                response = sent;
 
-                        response = await client.SendAsync(request);
-                        if ((int)response.StatusCode is >= 200 and < 300)
-                        {
-                            break; // 成功
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // 网络层失败也计入尝试：重试耗尽后走"无响应"终态，不让异常逃出作业。
-                        // 日志级别对齐语义：还会重试的失败=Warning；最后一次失败=Error（终态已注定）
-                        var isFinalAttempt = attempts >= RetryBackoffs.Length + 1;
-                        if (isFinalAttempt)
-                        {
-                            Logger.LogError(ex, "Webhook delivery failed after {Attempt} attempts for {Uri}.",
-                                attempts, subscription.WebhookUri);
-                        }
-                        else
-                        {
-                            Logger.LogWarning(ex, "Webhook delivery attempt {Attempt} failed for {Uri}, retrying.",
-                                attempts, subscription.WebhookUri);
-                        }
-                    }
-
-                    if (attempts < RetryBackoffs.Length + 1)
-                    {
-                        await Task.Delay(RetryBackoffs[attempts - 1]);
-                    }
-                } while (attempts < RetryBackoffs.Length + 1);
-
-                var succeeded = response != null
-                    && (int)response.StatusCode is >= 200 and < 300;
-                var body = response == null
-                    ? "no response (network error)"
-                    : await response.Content.ReadAsStringAsync();
-
-                await SaveResultAsync(recordRepository, args, succeeded,
-                    (int?)response?.StatusCode, body, attempts);
+                statusCode = (int)response.StatusCode;
+                succeeded = statusCode is >= 200 and < 300;
+                responseBody = await response.Content.ReadAsStringAsync();
+                if (!succeeded)
+                {
+                    Logger.LogError("Webhook delivery failed after {Attempt} attempts for {Uri}: {StatusCode}.",
+                        attempts, subscription.WebhookUri, statusCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 重试耗尽仍是网络层失败：不让异常逃出作业，按"无响应"落失败终态
+                Logger.LogError(ex, "Webhook delivery failed after {Attempt} attempts for {Uri}.",
+                    attempts, subscription.WebhookUri);
+                succeeded = false;
+                statusCode = null;
+                responseBody = "no response (network error)";
             }
             finally
             {
                 response?.Dispose();
             }
+
+            await SaveResultAsync(recordRepository, args, succeeded, statusCode, responseBody, attempts);
         }
+    }
+
+    /// <summary>
+    /// 投递请求。正文必须原样发送（签名覆盖 payload 原文），所以用 SetContent(text, contentType)
+    /// 而非 SetJsonContent/SetRawStringContent——后者会把字符串再包一层引号，破坏签名与收端解析。
+    /// </summary>
+    private static HttpRequestBuilder BuildDeliveryRequest(
+        string uri, WebhookDeliveryJobArgs args, string timestamp, string signature,
+        Action<HttpRetryContext> onRetry)
+    {
+        return HttpRequestBuilder.Post(uri)
+            .SetHttpClientName(WebhookDeliveryHttpClientExtensions.ClientName)
+            .SetTimeout(HttpTimeout)
+            .SetContent(args.Payload, "application/json")
+            .WithHeader("X-AbpAdmin-Event", args.EventName)
+            .WithHeader("X-AbpAdmin-Timestamp", timestamp)
+            .WithHeader("X-AbpAdmin-Signature", signature)
+            .SetRetry(options => options
+                .SetRetryIntervals(RetryBackoffs)
+                .AddRetryStatusCodes(RetryableStatusCodes)
+                .SetOnRetry(onRetry));
     }
 
     private async Task SaveResultAsync(
@@ -156,7 +190,7 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
     }
 }
 
-/// <summary>命名 HTTP 客户端（投递专用；超时在作业内按次设置）。</summary>
+/// <summary>命名 HTTP 客户端（投递专用；超时经 HttpRequestBuilder.SetTimeout 按次设置）。</summary>
 public static class WebhookDeliveryHttpClientExtensions
 {
     public const string ClientName = "AbpAdminWebhookDelivery";
