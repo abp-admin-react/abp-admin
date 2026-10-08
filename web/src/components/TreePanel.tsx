@@ -23,8 +23,8 @@ export type TreePanelProps = Omit<
   onCheck?: (checkedKeys: React.Key[]) => void;
 };
 
-/** 深度优先收集整棵树全部节点 key（全选/展开折叠共用）。 */
-export function collectTreeKeys(
+/** 深度优先收集整棵树全部节点 key（全选/展开折叠共用）。全选的自定义过滤由调用方在 onCheckAll 回调里做。 */
+function collectTreeKeys(
   nodes: DataNode[],
   acc: React.Key[] = [],
 ): React.Key[] {
