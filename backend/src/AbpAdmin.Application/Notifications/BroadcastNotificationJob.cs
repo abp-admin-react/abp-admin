@@ -28,9 +28,8 @@ namespace AbpAdmin.Notifications;
 /// - 每批一个事务 UoW：通知记录（本地事件总线内联插入）与游标推进同一事务提交，
 ///   要么整批成功要么整批回滚，重试不会留下半批。
 /// - keyset 游标（Id &gt; 游标）而不是 SkipCount：深分页性能差且期间删人会漏。
-///   游标与过滤都是 Guid 直接比较 + OrderBy(Id)：PG uuid&gt;uuid 走 PK 索引；SQLite 的
-///   Guid→TEXT 类型映射对列与参数用同一转换（同格式 TEXT，字典序 = Guid 十六进制序），
-///   同样可走索引。不再把 Id 投影为文本列比较——lower()/uuid::text 每批都是全表扫描+排序。
+///   游标与过滤都是 Guid 直接比较 + OrderBy(Id)：PG uuid&gt;uuid 走 PK 索引。
+///   不再把 Id 投影为文本列比较——lower()/uuid::text 每批都是全表扫描+排序。
 ///   过滤与排序都下推到 SQL，每批只取一页，不做全量 Id 投影（那会让 N 用户广播累计 O(N²) 行传输）。
 /// - CurrentTenant.Change 在外、UoW 在内（00-overview 6.5 的唯一正确顺序）。
 /// - 本作业放 Application 层：ETO 构造唯一地点是 NotificationDispatcher（门面隔离验收），
@@ -198,12 +197,9 @@ public class BroadcastNotificationJob : IAsyncBackgroundJob<BroadcastNotificatio
         // 与 NotificationDispatcher.CountTargetUsersAsync 共用同一过滤（口径一致）
         queryable = queryable.ApplyBroadcastTarget(broadcast.TargetType, broadcast.TargetId);
 
-        // Guid 直接比较（不再投影文本列）：
-        // - PG：uuid > uuid 原生比较，过滤与排序都能走 Id 的 PK 索引；
-        // - SQLite：EF 的 Guid→TEXT 类型映射对列与参数用同一转换（同格式大写 TEXT），
-        //   TEXT 上的 > 与 ORDER BY 字典序一致，同样可走索引。
-        // 两侧字典序/uuid 序都与 .NET Guid 比较序（十六进制无符号序）一致，与旧文本游标
-        // 语义等价——存量广播的 LastProcessedUserId 游标可无缝续跑。
+        // Guid 直接比较（不再投影文本列）：uuid > uuid 原生比较，过滤与排序都走 Id 的 PK 索引；
+        // 与 .NET Guid 比较序（十六进制无符号序）一致，与旧文本游标语义等价——
+        // 存量广播的 LastProcessedUserId 游标可无缝续跑。
         var cursor = broadcast.LastProcessedUserId;
         if (cursor.HasValue)
         {

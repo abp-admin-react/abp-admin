@@ -7,7 +7,6 @@ using AbpAdmin.Editions;
 using AbpAdmin.Features;
 using AbpAdmin.Menus;
 using AbpAdmin.Tenants;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.Data;

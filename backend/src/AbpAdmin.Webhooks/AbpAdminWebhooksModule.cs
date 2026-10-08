@@ -40,7 +40,8 @@ public class AbpAdminWebhooksModule : AbpModule
             options.AddDefaultRepositories(includeAllEntities: true);
         });
 
-        // 上下文级 UseNpgsql + 独立 History 表（运行期 PG-only；测试工程在同层用 UseSqlite 覆盖）。
+        // 上下文级 UseNpgsql + 独立 History 表（运行期 PG-only；测试工程在同层覆盖为测试基座
+        // 提供程序，见 docs/pg-migration-runbook.md §3）。
         // History 表 schema 从连接串 SearchPath 显式解析（见 WebhooksHistorySchemaResolver）：
         // 省略 schema 时 Npgsql 的 applied-migrations 查询不吃 search_path，
         // DbMigrator 写入的记账行宿主读不回，启动即 42P07 "already exists"

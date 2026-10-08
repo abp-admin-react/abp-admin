@@ -33,7 +33,7 @@ public static class AbpAdminModuleExtensionConfigurator
          * Notice: It is not suggested to change property lengths
          * unless you really need it. Go with the standard values wherever possible.
          *
-         * Schema changes: append a numbered .sql under Sql/postgresql and Sql/sqlite (no EF migrations in this repo).
+         * Schema changes: EF migrations only — run `dotnet ef migrations add` (see docs/pg-migration-runbook.md).
          */
     }
 

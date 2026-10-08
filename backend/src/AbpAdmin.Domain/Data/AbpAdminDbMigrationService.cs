@@ -43,7 +43,7 @@ public class AbpAdminDbMigrationService : ITransientDependency
     // 注意（问题9 修复）：模板遗留的 AddInitialMigrationIfNotExist/AddInitialMigration
     // （运行期调 abp CLI create-migration-and-run-migrator）已删除——生产 DbMigrator 不应携带
     // 开发机专属的建迁移路径，且其 catch (Exception) { return false; } 会静默吞错。
-    // 框架与业务建表都是各工程 Sql/ 下的脚本，由迁移器按 History 表执行。
+    // 框架与业务建表走各工程自己的 EF Core 迁移（Migrations/ 目录），由各 IAbpAdminDbSchemaMigrator 按各自 History 表执行；脚本时代存量库由 EfCoreLegacySchemaBaseliner 自动打戳。
     public async Task MigrateAsync()
     {
         Logger.LogInformation("Started database migrations...");
@@ -141,15 +141,13 @@ public class AbpAdminDbMigrationService : ITransientDependency
             // T3.4：每个贡献者独立 UoW 且立即提交。DataSeeder.SeedAsync 自身的 [UnitOfWork]
             // 会让全部贡献者共用一个未提交 UoW，框架 PermissionDataSeedContributor 与我们的
             // SettingUi/FileManagement/DataScope 权限种子贡献者互相看不到对方的未提交授予行，
-            // 去重失效后重复插入，租户种子在唯一索引上炸掉（host 因 SQLite 把 NULL TenantId
+            // 去重失效后重复插入，租户种子在唯一索引上炸掉（host 因测试库把 NULL TenantId
             // 视为互不相同而静默通过——此前「空库跑通」只验了 host，一直没暴露）。
             // RequiresNew 必须为 true：否则子 UoW 并入环境 UoW，仍然攒到最后一次提交。
             //
-            // 代价（问题10 关联说明）：SQLite 下 ABP UoW 事务被全局禁用
-            // （见 AbpAdminEntityFrameworkCoreModule，框架对 SQLite 嵌套事务限制的标准做法），
-            // SeedInSeparateUow + RequiresNew 意味着种子贡献者逐个独立提交、无整体原子性——
-            // 中途失败会留下"半套数据"。由于各贡献者自身幂等（存在性检查后插入），
-            // 失败后直接重跑 DbMigrator 即可续种；SQLite 开发库脏了就删库重跑。
+            // 代价（问题10 关联说明）：SeedInSeparateUow + RequiresNew 意味着种子贡献者逐个独立
+            // 提交、无整体原子性——中途失败会留下"半套数据"。由于各贡献者自身幂等（存在性检查
+            // 后插入），失败后直接重跑 DbMigrator 即可续种。
             .WithProperty(DataSeederExtensions.SeedInSeparateUow, true)
             .WithProperty(DataSeederExtensions.SeedInSeparateUowRequiresNew, true)
         );

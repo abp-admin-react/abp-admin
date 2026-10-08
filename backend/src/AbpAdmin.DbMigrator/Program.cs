@@ -45,7 +45,7 @@ class Program
             .ConfigureAppConfiguration((hosting, cfg) =>
             {
                 /* 单一配置源（不要搞两套）：
-                 * 数据库相关配置（Database:Provider / ConnectionStrings:Default / AuthServer / StringEncryption
+                 * 数据库相关配置（ConnectionStrings:Default / AuthServer / StringEncryption
                  * 等共享项）只维护在 HttpApi.Host/appsettings.json（+ appsettings.secrets.json），
                  * 本项目 appsettings.json 仅保留迁移器专属配置（Quartz / Identity）；
                  * OpenIddict 客户端清单同样统一在 Host 基座：种子读组合后的 OpenIddict:Applications 节。

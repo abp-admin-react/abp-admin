@@ -29,7 +29,7 @@ namespace AbpAdmin.Data;
 ///
 /// 已知取舍（当前部署形态）：项目未接外部 MQ，IDistributedEventBus 回落
 /// LocalDistributedEventBus——迁移在保存连接串的请求内同步执行，PostgreSQL 全新库
-/// 可能阻塞该请求数十秒（SQLite ~200ms）；失败被吞掉只记日志，管理端看到的是保存
+/// 可能阻塞该请求数十秒；失败被吞掉只记日志，管理端看到的是保存
 /// 成功而迁移结果未知。后台化（IBackgroundJobManager/真 MQ）是既定演进方向，
 /// 在此之前靠：管理员低频操作 + 保存前「测试连接」预检 + 失败日志 + 幂等重试。
 ///

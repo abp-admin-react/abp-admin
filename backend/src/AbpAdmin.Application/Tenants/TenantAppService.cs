@@ -10,7 +10,6 @@ using AbpAdmin.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -81,7 +80,7 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
     /// SettingUi/FileManagement/DataScope/NotificationService 权限种子走 IPermissionDataSeeder
     /// 「先查后插」——查的是数据库，看不到同 UoW 里未提交的行，去重失效 → 双方对同一
     /// (TenantId, Name, ProviderName, ProviderKey) 各插一条，请求末尾 AbpUowActionFilter
-    /// SaveChanges 撞 AbpPermissionGrants 唯一索引（SQLite Error 19）→ 500。
+    /// SaveChanges 撞 AbpPermissionGrants 唯一索引 → 500。
     /// 分离 UoW 后每个贡献者立即提交，后面的贡献者查得到前面已提交的行，幂等去重生效。
     /// RequiresNew 必须为 true：否则子 UoW 并入环境 UoW，仍然攒到最后一次提交。
     /// </summary>
@@ -350,7 +349,7 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
         }
         catch (Exception ex)
         {
-            // 底层驱动异常原文（Npgsql/SQLite 报错常含主机名、端口、账号甚至连接串片段）
+            // 底层驱动异常原文（Npgsql 报错常含主机名、端口、账号甚至连接串片段）
             // 不得回传客户端；原文记入日志供排障（入参连接串本身不作为日志参数），
             // 客户端只拿本地化后的通用失败原因
             Logger.LogWarning(ex, "Tenant connection string check failed. TenantId:{TenantId}", id);
