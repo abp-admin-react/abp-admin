@@ -116,6 +116,56 @@
       }
     }
   },
+  "AbpAdmin.Menus.RoleMenuGrantItemDto": {
+    "kind": "dto",
+    "properties": {
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "IsControlled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "IsEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "IsGranted": {
+        "type": "bool",
+        "nullable": false
+      },
+      "IsHide": {
+        "type": "bool",
+        "nullable": false
+      },
+      "OrderNo": {
+        "type": "int",
+        "nullable": false
+      },
+      "ParentId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "Title": {
+        "type": "string",
+        "nullable": false
+      },
+      "Type": {
+        "type": "MenuTypeEnum",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Menus.UpdateRoleMenuGrantsDto": {
+    "kind": "dto",
+    "properties": {
+      "MenuIds": {
+        "type": "List\u003CGuid\u003E",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Monitoring.CacheMonitorInfoDto": {
     "kind": "dto",
     "properties": {

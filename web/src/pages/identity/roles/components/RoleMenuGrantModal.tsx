@@ -8,6 +8,7 @@ import {
   type RoleMenuGrantItemDto,
   updateRoleMenuGrants,
 } from '@/abp/menus';
+import { isNotFound } from '@/requestErrorConfig';
 import TreePanel from '@/components/TreePanel';
 
 type RoleMenuGrantModalProps = {
@@ -18,9 +19,10 @@ type RoleMenuGrantModalProps = {
 type TreeNodeMeta = {
   isControlled: boolean;
   isEnabled: boolean;
+  isHide: boolean;
 };
 
-/** 平铺视图组树：返回树节点与元数据（公开/受限、启停）映射，key=菜单 id。 */
+/** 平铺视图组树：返回树节点与元数据（公开/受限、启停、隐藏）映射，key=菜单 id。 */
 function buildTree(
   items: RoleMenuGrantItemDto[],
 ): [DataNode[], Map<React.Key, TreeNodeMeta>] {
@@ -31,6 +33,7 @@ function buildTree(
     meta.set(item.id, {
       isControlled: item.isControlled,
       isEnabled: item.isEnabled,
+      isHide: item.isHide,
     });
   }
 
@@ -48,7 +51,7 @@ function buildTree(
   return [roots, meta];
 }
 
-/** 节点标题：显示名 + 受控徽标；停用节点弱化（保存不受影响，只是提醒该菜单当前不可见）。 */
+/** 节点标题：显示名 + 受控徽标；停用/隐藏节点弱化——授权仍可配置（停用菜单重新启用后生效），但当前对用户不可见。 */
 function renderTitle(
   title: DataNode['title'],
   key: React.Key,
@@ -58,14 +61,18 @@ function renderTitle(
     typeof title === 'function' ? title({ key } as DataNode) : title;
   const m = meta.get(key);
   if (!m) return label;
+  const invisible = !m.isEnabled || m.isHide;
   return (
     <span
       style={{
-        opacity: m.isEnabled ? 1 : 0.45,
+        opacity: invisible ? 0.45 : 1,
         textDecoration: m.isEnabled ? 'none' : 'line-through',
       }}
     >
       {label}
+      {m.isHide ? (
+        <Tag style={{ marginLeft: 8 }}>隐藏</Tag>
+      ) : null}
       {m.isControlled ? (
         <Tag color="geekblue" style={{ marginLeft: 8 }}>
           受限
@@ -91,6 +98,7 @@ const RoleMenuGrantModal: React.FC<RoleMenuGrantModalProps> = ({
 }) => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [items, setItems] = useState<RoleMenuGrantItemDto[]>([]);
   const [checkedKeys, setCheckedKeys] = useState<React.Key[]>([]);
 
@@ -140,16 +148,27 @@ const RoleMenuGrantModal: React.FC<RoleMenuGrantModalProps> = ({
     [treeData, nodeMeta],
   );
 
-  const allIds = React.useMemo(() => items.map((x) => x.id), [items]);
-
   const save = async () => {
     if (!role) return;
-    await updateRoleMenuGrants(
-      role.id,
-      checkedKeys.map((k) => String(k)),
-    );
-    message.success('角色菜单授权已保存');
-    onClose();
+    setSaving(true);
+    try {
+      await updateRoleMenuGrants(
+        role.id,
+        checkedKeys.map((k) => String(k)),
+      );
+      message.success('角色菜单授权已保存');
+      onClose();
+    } catch (err) {
+      // 404 = 角色刚在别处被删除（全局层对 404 静默，页面层按契约自行提示）——关弹窗防继续编辑幽灵角色
+      if (isNotFound(err)) {
+        message.error('该角色已不存在，弹窗已关闭');
+        onClose();
+        return;
+      }
+      message.error('保存角色菜单授权失败');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -160,10 +179,10 @@ const RoleMenuGrantModal: React.FC<RoleMenuGrantModalProps> = ({
       key={role?.id}
       modalProps={{ destroyOnHidden: true, onCancel: onClose }}
       onFinish={save}
-      submitter={{ searchConfig: { submitText: '保存' } }}
+      submitter={{ searchConfig: { submitText: '保存' }, submitButtonProps: { loading: saving } }}
     >
       <div style={{ marginBottom: 8, color: 'rgba(0,0,0,0.45)' }}>
-        勾选=为该角色显式授权可见，勾掉=撤销该角色的授权（只影响这一个角色）。标注「公开」的菜单未受任何角色控制、对所有用户可见，不受本次保存影响；「受限」菜单仅授权角色可见。
+        勾选=为该角色显式授权可见，勾掉=撤销该角色的授权（只影响这一个角色）。标注「公开」的菜单未受任何角色控制、对所有用户可见，不受本次保存影响；「受限」菜单仅授权角色可见；停用/隐藏的菜单当前对用户不可见，但授权会保留、恢复后生效。
       </div>
       <Spin spinning={loading}>
         <TreePanel
@@ -172,11 +191,8 @@ const RoleMenuGrantModal: React.FC<RoleMenuGrantModalProps> = ({
           defaultExpandAll
           treeData={decoratedTree}
           checkedKeys={checkedKeys}
-          onCheck={(keys) => {
-            const next = Array.isArray(keys) ? keys : keys.checked;
-            setCheckedKeys(next);
-          }}
-          onCheckAll={() => setCheckedKeys(allIds)}
+          onCheck={setCheckedKeys}
+          onCheckAll={setCheckedKeys}
           onClearAll={() => setCheckedKeys([])}
         />
       </Spin>

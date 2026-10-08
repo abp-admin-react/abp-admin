@@ -242,14 +242,9 @@ const MenuFormModal: React.FC<MenuFormModalProps> = ({
               label="路由地址"
               placeholder="从注册表选择"
               colProps={{ span: 12 }}
-              rules={[
-                ({ getFieldValue }) => ({
-                  validator: (_, value) =>
-                    getFieldValue('type') === MENU_TYPE.Menu && !value
-                      ? Promise.reject(new Error('菜单类型必须选择路由地址'))
-                      : Promise.resolve(),
-                }),
-              ]}
+              // 字段已被 ProFormDependency 收敛到仅 type=Menu 时挂载，
+              // 「类型必须是菜单」的前提由挂载条件保证，这里只判必填
+              rules={[{ required: true, message: '菜单类型必须选择路由地址' }]}
               fieldProps={{ showSearch: true, optionFilterProp: 'label' }}
               options={routeRegistry.map((x) => ({
                 value: x.path,

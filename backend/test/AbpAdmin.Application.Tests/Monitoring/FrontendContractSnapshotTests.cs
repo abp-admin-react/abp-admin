@@ -56,6 +56,10 @@ public class FrontendContractSnapshotTests
         // 用户动态搜索（可用字段元数据 + 结果行；Masked 字段所在 DTO）
         typeof(AbpAdmin.Identity.DynamicSearchFieldDto),
         typeof(AbpAdmin.Identity.IdentityUserSearchItemDto),
+        // 菜单-角色授权双视角（角色页「菜单权限」弹窗消费视图项；parentId 可空是镜像层易漂移点；
+        // 输入 UpdateRoleMenuGrantsDto 的 MenuIds 列表可空性同样登记）
+        typeof(AbpAdmin.Menus.RoleMenuGrantItemDto),
+        typeof(AbpAdmin.Menus.UpdateRoleMenuGrantsDto),
     };
 
     private static readonly NullabilityInfoContext NullabilityCtx = new();

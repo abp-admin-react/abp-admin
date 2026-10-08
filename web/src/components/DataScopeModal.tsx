@@ -17,15 +17,6 @@ type OrganizationUnitDto = {
   displayName?: string;
 };
 
-/** 收集树全部节点 key（全选按钮用）。 */
-function collectOuKeys(nodes: DataNode[], acc: string[] = []): string[] {
-  for (const node of nodes) {
-    acc.push(String(node.key));
-    if (node.children?.length) collectOuKeys(node.children, acc);
-  }
-  return acc;
-}
-
 type DataScopeModalProps = {
   open: boolean;
   title: string;
@@ -201,14 +192,10 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
                 height={300}
                 treeData={ouTree}
                 checkedKeys={checkedOuIds}
-                onCheck={(
-                  keys: React.Key[] | { checked: React.Key[] },
-                ) => {
-                  // 联动模式 antd 返回数组（已级联含子）；不联动模式返回 {checked}
-                  const next = Array.isArray(keys) ? keys : keys.checked;
-                  setCheckedOuIds(next.map(String));
-                }}
-                onCheckAll={() => setCheckedOuIds(collectOuKeys(ouTree))}
+                onCheck={(keys) => setCheckedOuIds(keys.map(String))}
+                onCheckAll={(allKeys) =>
+                  setCheckedOuIds(allKeys.map(String))
+                }
                 onClearAll={() => setCheckedOuIds([])}
                 toolbarExtra={
                   <span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>

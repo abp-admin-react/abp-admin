@@ -108,6 +108,8 @@ export type RoleMenuGrantItemDto = {
   title: string;
   orderNo: number;
   isEnabled: boolean;
+  /** 隐藏菜单：自身不出现在用户侧边栏，勾选树如实透出避免「勾了却不生效」的误导 */
+  isHide: boolean;
   isGranted: boolean;
   isControlled: boolean;
 };

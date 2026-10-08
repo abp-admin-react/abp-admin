@@ -30,19 +30,22 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
     private readonly IIdentityRoleRepository _roleRepository;
     private readonly IPermissionDefinitionManager _permissionDefinitionManager;
     private readonly IStringLocalizerFactory _stringLocalizerFactory;
+    private readonly MenuManager _menuManager;
 
     public MenuAppService(
         IRepository<Menu, Guid> menuRepository,
         IRepository<MenuGrant, Guid> menuGrantRepository,
         IIdentityRoleRepository roleRepository,
         IPermissionDefinitionManager permissionDefinitionManager,
-        IStringLocalizerFactory stringLocalizerFactory)
+        IStringLocalizerFactory stringLocalizerFactory,
+        MenuManager menuManager)
     {
         _menuRepository = menuRepository;
         _menuGrantRepository = menuGrantRepository;
         _roleRepository = roleRepository;
         _permissionDefinitionManager = permissionDefinitionManager;
         _stringLocalizerFactory = stringLocalizerFactory;
+        _menuManager = menuManager;
     }
 
     public virtual async Task<ListResultDto<MenuTreeDto>> GetTreeAsync()
@@ -212,6 +215,13 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
         var role = await _roleRepository.FindAsync(roleId)
                    ?? throw new EntityNotFoundException(typeof(Volo.Abp.Identity.IdentityRole), roleId);
 
+        // 与 MyMenuAppService 同口径：租户首次进入授权视图前懒拷贝全局模板，
+        // 否则新租户在弹窗里看到空树（无菜单可勾）而非完整模板
+        if (CurrentTenant.Id != null)
+        {
+            await _menuManager.EnsureTenantMenusAsync(CurrentTenant.Id.Value);
+        }
+
         var menus = await _menuRepository.GetListAsync();
         var grants = await _menuGrantRepository.GetListAsync(x => x.ProviderName == MenuConsts.RoleProviderName);
 
@@ -232,6 +242,7 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
                 Title = x.Title,
                 OrderNo = x.OrderNo,
                 IsEnabled = x.IsEnabled,
+                IsHide = x.IsHide,
                 IsGranted = grantedMenuIds.Contains(x.Id),
                 IsControlled = controlledMenuIds.Contains(x.Id)
             })
@@ -248,7 +259,7 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
     /// </summary>
     [Authorize(AbpAdminPermissions.Menus.AssignRoles)]
     [OperationLog("菜单管理", "调整角色菜单权限", BizNo = "{{roleId}}",
-        Success = "调整了角色 {{role(roleId)}} 的菜单授权")]
+        Success = "将角色 {{role(roleId)}} 的菜单授权调整为：{{input.menuIds}}")]
     public virtual async Task UpdateRoleMenuGrantsAsync(Guid roleId, UpdateRoleMenuGrantsDto input)
     {
         var role = await _roleRepository.FindAsync(roleId)
@@ -275,9 +286,10 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
 
         foreach (var menuId in targetMenuIds.Where(id => !existingMenuIds.Contains(id)))
         {
+            // 不用 autoSave: true：逐行 SaveChanges 会随勾选规模线性放大 DB 往返，
+            // 同一 UoW 内提交时一次性落库即可
             await _menuGrantRepository.InsertAsync(
-                new MenuGrant(GuidGenerator.Create(), menuId, CurrentTenant.Id, MenuConsts.RoleProviderName, role.Name!),
-                autoSave: true);
+                new MenuGrant(GuidGenerator.Create(), menuId, CurrentTenant.Id, MenuConsts.RoleProviderName, role.Name!));
         }
     }
 

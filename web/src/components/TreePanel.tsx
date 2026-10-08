@@ -4,31 +4,41 @@ import { Tree } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import React, { useEffect, useMemo, useState } from 'react';
 
-export type TreePanelProps = Omit<TreeProps, 'height' | 'expandedKeys'> & {
+export type TreePanelProps = Omit<
+  TreeProps,
+  'height' | 'expandedKeys' | 'onExpand' | 'onCheck' | 'defaultExpandAll'
+> & {
   /** 树区高度（px），默认 420——树在框内滚动，弹窗整体高度稳定（Admin.NET/芋道同款布局） */
   height?: number;
   /** treeData 异步到达后默认全展开（antd defaultExpandAll 对异步数据不生效，须受控重置） */
   defaultExpandAll?: boolean;
   /** 工具条右侧附加区（如数据范围 OU 树的「父子联动」开关） */
   toolbarExtra?: React.ReactNode;
-  /** 全选语义由调用方定义（可选叶子集/过滤前缀等），不传则不显示该按钮 */
-  onCheckAll?: () => void;
-  /** 清空语义同上 */
+  /** 全选：TreePanel 把内部已算好的全量 key 递给调用方（调用方按需过滤，如权限弹窗剔除 group 前缀/不可编辑项） */
+  onCheckAll?: (allKeys: React.Key[]) => void;
+  /** 清空语义由调用方定义（非可编辑项保留等），不传则不显示该按钮 */
   onClearAll?: () => void;
+  /** 勾选变化。TreePanel 统一拆包 antd 的联合返回（checkStrictly 时为 {checked}，否则为数组），调用方只收扁平 key 数组 */
+  onCheck?: (checkedKeys: React.Key[]) => void;
 };
 
-function collectKeys(nodes: DataNode[], acc: React.Key[] = []): React.Key[] {
+/** 深度优先收集整棵树全部节点 key（全选/展开折叠共用）。 */
+export function collectTreeKeys(
+  nodes: DataNode[],
+  acc: React.Key[] = [],
+): React.Key[] {
   for (const node of nodes) {
     acc.push(node.key);
-    if (node.children?.length) collectKeys(node.children, acc);
+    if (node.children?.length) collectTreeKeys(node.children, acc);
   }
   return acc;
 }
 
 /**
  * 带工具条的勾选树面板（授权类弹窗共用基建，借鉴 Admin.NET/芋道的树工具条）：
- * 全选/清空 + 展开/折叠 + 定高滚动。勾选状态（checkedKeys/onCheck/checkStrictly）
- * 完全由调用方受控，展开状态内部管理——调用方只声明业务语义。
+ * 全选/清空 + 展开/折叠 + 定高滚动。勾选业务语义（过滤/级联策略）由调用方通过
+ * onCheck/onCheckAll 声明；展开状态内部管理（含节点级点击展开——expandedKeys 受控
+ * 时必须内部回写 onExpand，否则节点箭头点击不生效）。
  */
 const TreePanel: React.FC<TreePanelProps> = ({
   height = 420,
@@ -36,11 +46,12 @@ const TreePanel: React.FC<TreePanelProps> = ({
   toolbarExtra,
   onCheckAll,
   onClearAll,
+  onCheck,
   treeData,
   ...treeRest
 }) => {
   const allKeys = useMemo(
-    () => collectKeys((treeData as DataNode[]) ?? []),
+    () => collectTreeKeys((treeData as DataNode[]) ?? []),
     [treeData],
   );
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(
@@ -66,7 +77,7 @@ const TreePanel: React.FC<TreePanelProps> = ({
     >
       <Space size={4} style={{ marginBottom: 6 }}>
         {onCheckAll && (
-          <Button size="small" type="link" onClick={onCheckAll}>
+          <Button size="small" type="link" onClick={() => onCheckAll(allKeys)}>
             全选
           </Button>
         )}
@@ -85,7 +96,18 @@ const TreePanel: React.FC<TreePanelProps> = ({
         {toolbarExtra && <span style={{ marginLeft: 8 }}>{toolbarExtra}</span>}
       </Space>
       <div style={{ height, overflow: 'auto' }}>
-        <Tree treeData={treeData} expandedKeys={expandedKeys} {...treeRest} />
+        <Tree
+          treeData={treeData}
+          expandedKeys={expandedKeys}
+          onExpand={(keys) => setExpandedKeys(keys)}
+          onCheck={(keys) => {
+            // antd 联合返回：checkStrictly=true 时为 {checked}，否则为数组——在此统一拆包，
+            // 调用方只处理扁平 key 数组（此前三个消费方各自重复这段拆包）
+            const next = Array.isArray(keys) ? keys : keys.checked;
+            onCheck?.(next);
+          }}
+          {...treeRest}
+        />
       </div>
     </div>
   );

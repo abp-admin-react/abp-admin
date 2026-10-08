@@ -156,10 +156,15 @@ public class RoleMenuGrantItemDto
 
     /// <summary>该菜单是否受角色勾选控制（存在任一角色的授权记录）；false = 公开（对所有用户可见，满足权限时）。</summary>
     public bool IsControlled { get; set; }
+
+    /// <summary>菜单是否隐藏（隐藏节点自身不出现在用户侧边栏，子节点上浮）——勾选树如实透出，避免「勾了却不生效」的误导。</summary>
+    public bool IsHide { get; set; }
 }
 
 public class UpdateRoleMenuGrantsDto
 {
+    /// <summary>勾选集（该角色授权全集）。Required 拒绝显式 null（模型绑定会覆盖 = new() 初始化器，无标注时落到服务端变 NRE→500）。</summary>
+    [Required]
     public List<Guid> MenuIds { get; set; } = new();
 }
 

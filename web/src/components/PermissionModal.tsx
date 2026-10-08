@@ -92,6 +92,32 @@ const PermissionModal: React.FC<PermissionModalProps> = ({
     [groups],
   );
 
+  // isEditable=false 的项（disableCheckbox）不可交互修改：全选/清空必须保持其加载时的
+  // 授予状态，否则工具条按钮会绕过复选框守卫、把不可编辑项的授权一并改掉
+  const editableNames = useMemo(
+    () =>
+      new Set(
+        groups.flatMap((group) =>
+          (group.permissions || [])
+            .filter((item) => item.isEditable !== false)
+            .map((item) => item.name),
+        ),
+      ),
+    [groups],
+  );
+
+  const lockedGrantedNames = useMemo(
+    () =>
+      new Set(
+        groups.flatMap((group) =>
+          (group.permissions || [])
+            .filter((item) => item.isEditable === false && item.isGranted)
+            .map((item) => item.name),
+        ),
+      ),
+    [groups],
+  );
+
   const save = async () => {
     if (!providerKey) {
       return;
@@ -133,13 +159,23 @@ const PermissionModal: React.FC<PermissionModalProps> = ({
           checkedKeys={checkedKeys}
           treeData={treeData}
           onCheck={(keys) => {
-            const next = Array.isArray(keys) ? keys : keys.checked;
             setCheckedKeys(
-              (next as string[]).filter((key) => !key.startsWith('group:')),
+              keys.map(String).filter((key) => !key.startsWith('group:')),
             );
           }}
-          onCheckAll={() => setCheckedKeys(allPermissionNames)}
-          onClearAll={() => setCheckedKeys([])}
+          onCheckAll={(allKeys) => {
+            // 全选只覆盖可编辑项；不可编辑项保持加载时的授予状态
+            setCheckedKeys((prev) => [
+              ...prev.filter((name) => !editableNames.has(name)),
+              ...allKeys
+                .map(String)
+                .filter(
+                  (key) =>
+                    !key.startsWith('group:') && editableNames.has(key),
+                ),
+            ]);
+          }}
+          onClearAll={() => setCheckedKeys([...lockedGrantedNames])}
         />
       </Spin>
     </Modal>

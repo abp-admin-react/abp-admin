@@ -103,9 +103,12 @@ public abstract class ConfirmEmailPhoneTests<TStartupModule> : AbpAdminApplicati
         var code = System.Text.RegularExpressions.Regex.Match(
             emailSender.SentMessages[0].Body ?? string.Empty, @"\d{6}").Value;
 
+        // 变异末位为「与原码必不相同」的数字：固定替换成 '0' 会在原码末位恰为 '0' 时
+        // 等于真码（约 1/10 概率），Should.ThrowAsync 随机性失败——这是测试 flake 非产品缺陷
+        var mutatedLastDigit = code[5] == '0' ? '1' : '0';
         await Should.ThrowAsync<BusinessException>(
             () => _accountProAppService.ConfirmEmailAsync(
-                new ConfirmEmailInput { Email = user.Email!, Code = code[..5] + "0" }));
+                new ConfirmEmailInput { Email = user.Email!, Code = code[..5] + mutatedLastDigit }));
 
         var second = await Should.ThrowAsync<BusinessException>(
             () => _accountProAppService.ConfirmEmailAsync(

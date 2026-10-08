@@ -687,4 +687,64 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         ex.Code.ShouldBe(AbpAdminDomainErrorCodes.Menus.MenuNotFound);
         ex.Data["Count"]!.ToString().ShouldBe("1");
     }
+
+    [Fact]
+    public async Task GetRoleMenuGrants_Should_Mark_OthersRoleGrant_As_NotGranted_But_Controlled()
+    {
+        // (IsGranted=false, IsControlled=true) 象限：菜单只授给了别的角色——本角色视图中
+        // 应显示「受限但未勾选」。若 IsControlled 被误改成只统计本角色授权，此象限会
+        // 坍缩成 (false,false)，徽标静默失真——此测试专门钉住该特性定义性语义。
+        await CleanMenusAsync();
+        var roleA = await EnsureRoleAsync($"rmg-ft-a-{Guid.NewGuid():N}"[..32]);
+        var roleB = await EnsureRoleAsync($"rmg-ft-b-{Guid.NewGuid():N}"[..32]);
+        var menu = await CreateMenuAsync("象限-仅他角授权", "/rmg/ft");
+
+        await WithUnitOfWorkAsync(() => _menuGrantRepository.InsertAsync(
+            new MenuGrant(_guidGenerator.Create(), menu.Id, null, MenuConsts.RoleProviderName, roleB.Name!)));
+
+        var view = await _menuAppService.GetRoleMenuGrantsAsync(roleA.Id);
+        var item = view.Items.Single(x => x.Id == menu.Id);
+        item.IsGranted.ShouldBeFalse();
+        item.IsControlled.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task UpdateRoleMenuGrants_With_Empty_Set_Should_Revoke_All_For_Target_Role_Only()
+    {
+        // 空勾选集（前端「清空」+ 保存）= 全撤销，是新 API 最具破坏性的路径；
+        // 同时验证空集下幽灵校验的 CountAsync 翻译（空 Contains）不异常
+        await CleanMenusAsync();
+        var roleA = await EnsureRoleAsync($"rmg-empty-a-{Guid.NewGuid():N}"[..32]);
+        var roleB = await EnsureRoleAsync($"rmg-empty-b-{Guid.NewGuid():N}"[..32]);
+        var menu = await CreateMenuAsync("空集-既有授权", "/rmg/empty");
+
+        await WithUnitOfWorkAsync(async () =>
+        {
+            await _menuGrantRepository.InsertAsync(
+                new MenuGrant(_guidGenerator.Create(), menu.Id, null, MenuConsts.RoleProviderName, roleA.Name!));
+            await _menuGrantRepository.InsertAsync(
+                new MenuGrant(_guidGenerator.Create(), menu.Id, null, MenuConsts.RoleProviderName, roleB.Name!));
+        });
+
+        await _menuAppService.UpdateRoleMenuGrantsAsync(roleA.Id, new UpdateRoleMenuGrantsDto
+        {
+            MenuIds = new System.Collections.Generic.List<Guid>()
+        });
+
+        var allGrants = await WithUnitOfWorkAsync(() =>
+            _menuGrantRepository.GetListAsync(x => x.ProviderName == MenuConsts.RoleProviderName));
+        allGrants.Where(x => x.ProviderKey == roleA.Name).ShouldBeEmpty();
+        // 其它角色授权不受空集影响
+        allGrants.Where(x => x.ProviderKey == roleB.Name).ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetRoleMenuGrants_Should_Throw_EntityNotFound_For_Unknown_Role()
+    {
+        // 角色不存在（含跨租户 id 被过滤器隔离的情形）→ EntityNotFoundException(404)，
+        // 不静默返回空视图——前端以 404 区分「未配置」与「读失败」
+        var ex = await Should.ThrowAsync<Volo.Abp.Domain.Entities.EntityNotFoundException>(() =>
+            _menuAppService.GetRoleMenuGrantsAsync(Guid.NewGuid()));
+        ex.EntityType.ShouldBe(typeof(Volo.Abp.Identity.IdentityRole));
+    }
 }

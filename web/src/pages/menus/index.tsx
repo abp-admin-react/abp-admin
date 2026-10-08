@@ -49,6 +49,8 @@ const MenuManagement: React.FC = () => {
   const [permissions, setPermissions] = useState<PermissionOptionDto[]>([]);
   const [roles, setRoles] = useState<IdentityRoleDto[]>([]);
   const [roleTarget, setRoleTarget] = useState<MenuTreeDto>();
+  const allRowKeys = useMemo(() => collectAllKeys(tree), [tree]);
+  const allExpanded = allRowKeys.length > 0 && expandedRowKeys.length >= allRowKeys.length;
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -134,13 +136,11 @@ const MenuManagement: React.FC = () => {
               key="expand-toggle"
               onClick={() =>
                 setExpandedRowKeys((keys) =>
-                  keys.length >= collectAllKeys(tree).length ? [] : collectAllKeys(tree),
+                  keys.length >= allRowKeys.length ? [] : allRowKeys,
                 )
               }
             >
-              {expandedRowKeys.length >= collectAllKeys(tree).length
-                ? '折叠全部'
-                : '展开全部'}
+              {allExpanded ? '折叠全部' : '展开全部'}
             </Button>,
             access.canCreateMenus ? (
               <Button
