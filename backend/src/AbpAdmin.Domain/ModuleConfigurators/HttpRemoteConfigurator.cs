@@ -23,9 +23,14 @@ internal static class HttpRemoteConfigurator
 
         // T4.4 Turnstile 校验走命名 HttpClient（开关关闭时不会发请求）；
         // 注册自 CachingAndTenancyConfigurator 迁入（round4 审查 D4：绑定与注册同处，好找）。
-        // Profiler：HttpRemote:Profiler=true 时控制台直出完整报文（默认关——siteverify 报文含密钥字段）
-        services.AddHttpClient(TurnstileHttpClients.SiteVerify)
-            .AddProfilerDelegatingHandler(() => configuration.GetValue("HttpRemote:Profiler", false));
+        services.AddHttpClient(TurnstileHttpClients.SiteVerify);
+
+        // Profiler：HttpRemote:Profiler=true 时【全部】出站客户端（Turnstile / connect/token 回环 /
+        // webhook 投递 / 短信 requester 等，含后续新增消费方）控制台直出完整报文（默认关——报文含密钥字段）。
+        // ConfigureHttpClientDefaults 对所有命名/默认客户端统一生效，新消费方零接线；
+        // 该调用只改 HttpClient 管道，与各客户端注册的先后顺序无关。
+        services.ConfigureHttpClientDefaults(clientBuilder =>
+            clientBuilder.AddProfilerDelegatingHandler(() => configuration.GetValue("HttpRemote:Profiler", false)));
 
         services.AddHttpRemote(builder =>
         {

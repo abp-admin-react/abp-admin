@@ -32,7 +32,7 @@
   - P1 共享 `TreePanel` 组件:全选/清空/展开折叠工具条 + 定高滚动(勾选状态调用方受控、展开内部管理),接入角色菜单权限弹窗、权限弹窗(PermissionModal)、数据范围 OU 树。
   - P1 数据范围 OU 树新增「父子联动」开关(芋道同款):默认不联动=精确集(勾哪个是哪个),打开后勾父自动勾子。
   - P2 菜单表单类型驱动收敛:路由地址字段仅「菜单(页面)」类型渲染(目录隐藏防误填),提交时目录归一清空残留 path;菜单列表工具栏新增「展开全部/折叠全部」总开关。
-- 出站 HTTP(HttpAgent):两个命名客户端(AuthServerTokenExchange/Turnstile)接入 ProfilerDelegatingHandler 报文透视,配置键 `HttpRemote:Profiler`(默认 false——报文含 client_secret/token,仅本地联调临时开启);RecordingHttpHandler 测试替身补 Response.RequestMessage 关联(附加 handler 读报文元数据不再 ArgumentNullException)。
+- 出站 HTTP(HttpAgent):ProfilerDelegatingHandler 报文透视经 `ConfigureHttpClientDefaults` 覆盖【全部】出站客户端(AuthServerTokenExchange / Turnstile / webhook 投递 / 短信 requester 及后续新增消费方,零接线),配置键 `HttpRemote:Profiler`(默认 false——报文含 client_secret/token/签名,仅本地联调临时开启);RecordingHttpHandler 测试替身补 Response.RequestMessage 关联(附加 handler 读报文元数据不再 ArgumentNullException)。
 
 ## 依赖项变更
 
