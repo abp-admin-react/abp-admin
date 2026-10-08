@@ -46,7 +46,7 @@ namespace AbpAdmin.Settings;
 /// 与方法级 Authorize 组合成"两者都须满足"，故 Update 隐含要求读权限）。
 /// 审计：写值入参 Dictionary&lt;string,string&gt; 含明文新密钥，在宿主 AbpAuditingOptions.IgnoredTypes
 /// 里整体不序列化（控制器层和应用服务层共用该开关）；"谁改了什么"的语义轨迹由
-/// _operationLogWriter 手写（上游 SettingUiController 不是自动 API 控制器，
+/// OperationLogCommitter 手写（上游 SettingUiController 不是自动 API 控制器，
 /// [OperationLog] 特性挂不上它的 MethodInfo，只能服务内手写）。
 /// </summary>
 [Dependency(ReplaceServices = true)]
@@ -57,7 +57,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
 {
     private readonly ISettingDefinitionManager _settingDefinitionManager;
     private readonly ISettingManager _settingManager;
-    private readonly IOperationLogWriter _operationLogWriter;
+    private readonly OperationLogCommitter _operationLogCommitter;
     private readonly ICorrelationIdProvider _correlationIdProvider;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
@@ -72,7 +72,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
         ITimezoneProvider timezoneProvider,
         ICurrentTimezoneProvider currentTimezoneProvider,
         IPermissionDefinitionManager permissionDefinitionManager,
-        IOperationLogWriter operationLogWriter,
+        OperationLogCommitter operationLogCommitter,
         ICorrelationIdProvider correlationIdProvider,
         IHttpContextAccessor httpContextAccessor)
         : base(options, localizer, factory, fileProvider, jsonSerializer, settingDefinitionManager,
@@ -81,7 +81,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
         // 基类里这两个依赖是 private，重置流程需要直接用
         _settingDefinitionManager = settingDefinitionManager;
         _settingManager = settingManager;
-        _operationLogWriter = operationLogWriter;
+        _operationLogCommitter = operationLogCommitter;
         // 操作日志的 CorrelationId 与 ABP AuditLog/SecurityLog 同源（ICorrelationIdProvider），
         // 是手动日志与审计日志的 join 键——审计参数已被 IgnoredTypes 关掉，join 不到就成了孤儿轨迹
         _correlationIdProvider = correlationIdProvider;
@@ -135,7 +135,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
             .Select(name => name!)
             .ToList();
 
-        WriteOperationLogOnCommit(new OperationLogEntry
+        _operationLogCommitter.WriteOnCommit(new OperationLogEntry
         {
             Type = "设置管理",
             SubType = "保存设置值",
@@ -225,7 +225,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
             }
         }
 
-        WriteOperationLogOnCommit(new OperationLogEntry
+        _operationLogCommitter.WriteOnCommit(new OperationLogEntry
         {
             Type = "设置管理",
             SubType = "重置设置值",
@@ -257,35 +257,8 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
         return pascalCase.RemovePreFix(SettingUiConst.FormNamePrefix).UnderscoreToDot();
     }
 
-    /// <summary>
-    /// 操作日志统一走 UoW 提交后（OnCompleted）写入，与仓库既有的后置写入同款修法
-    /// （Language/TextTemplate/ScheduledJob 等）：
-    /// requiresNew 写日志在业务事务内执行会与测试基座单写锁内存库死锁。
-    /// 无环境 UoW 时（理论上不会有——PUT 入口必有 UoW 拦截器）退化为 fire-and-forget
-    /// 直接写（`_ =` 丢弃任务：日志链路 fail-open，异常不反噬调用方）。
-    /// </summary>
-    private void WriteOperationLogOnCommit(OperationLogEntry entry)
-    {
-        var uow = UnitOfWorkManager.Current;
-        if (uow == null)
-        {
-            _ = _operationLogWriter.WriteAsync(entry);
-            return;
-        }
-
-        uow.OnCompleted(async () =>
-        {
-            try
-            {
-                await _operationLogWriter.WriteAsync(entry);
-            }
-            catch (Exception ex)
-            {
-                // 日志链路 fail-open：落不了操作日志不能反过来影响已提交的设置变更
-                Logger.LogWarning(ex, "SettingUi 操作日志写入失败（Type={Type}, SubType={SubType}）",
-                    entry.Type, entry.SubType);            }
-        });
-    }
+    // 操作日志经共享提交器 OperationLogCommitter 在 UoW 提交后（OnCompleted）写入——
+    // requiresNew 写日志在业务事务内执行会与测试基座单写锁内存库死锁（后置写入同款修法）。
 
     protected override Task SetSettingAsync(SettingDefinition setting, string value)
     {

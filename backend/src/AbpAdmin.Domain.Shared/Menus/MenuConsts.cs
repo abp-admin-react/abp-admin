@@ -20,7 +20,14 @@ public static class MenuConsts
 
     public const int MaxRemarkLength = 256;
 
-    public const int MaxProviderKeyLength = 64;
+    /// <summary>
+    /// 授权提供者键（ProviderName=R 时存角色名）。必须 ≥ ABP IdentityRole.Name 上限 256——
+    /// 此前 64，角色名 65+ 的授权在插入时撞列宽 500（宽度校验在 ABP 侧，本服务无法前置拦截）。
+    /// </summary>
+    public const int MaxProviderKeyLength = 256;
+
+    /// <summary>授权提供者名（代码常量 "R"/"U"），与键共用常量会让键放宽时跟着虚胖，单列。</summary>
+    public const int MaxProviderNameLength = 8;
 
     /// <summary>同一父级下建议的默认排序值（Admin.NET 惯例：100 起，数字小的在前）。</summary>
     public const int DefaultOrderNo = 100;

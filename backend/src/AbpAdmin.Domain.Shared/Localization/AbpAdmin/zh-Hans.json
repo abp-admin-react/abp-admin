@@ -356,6 +356,7 @@
         "AbpAdmin:MenuParentCycle": "上级菜单不能是自身或其子孙节点。",
         "AbpAdmin:MenuTypeMismatch": "目录类型需要子菜单，菜单类型需要路由地址。",
         "AbpAdmin:MenuRoleNotFound": "角色不存在：{RoleName}",
+        "AbpAdmin:MenuGrantConflict": "菜单授权刚被其他管理员修改（冲突），请刷新后重试。",
         "AbpAdmin:MenuInvalidPath": "菜单路由地址必须是以 / 开头的站内路由，不允许外部链接：{Path}",
         "AbpAdmin:MenuInvalidPermission": "权限不存在，或对当前租户不可用（宿主专属权限）：{PermissionName}",
         "AbpAdmin:MenuHostTemplateMissing": "当前租户上下文无法读取宿主菜单模板（独立数据库租户或模板未播种）。",

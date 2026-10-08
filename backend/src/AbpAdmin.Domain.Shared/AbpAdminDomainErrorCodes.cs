@@ -30,6 +30,13 @@ public static class AbpAdminDomainErrorCodes
         /// <summary>分配菜单时角色不存在。</summary>
         public const string MenuRoleNotFound = "AbpAdmin:MenuRoleNotFound";
 
+        /// <summary>
+        /// 菜单授权写入撞唯一索引（另一管理者并发改了同一角色的授权集）。
+        /// (MenuId, ProviderName, ProviderKey) 唯一索引把并发双写从「静默重复行」
+        /// 转成可捕获冲突；fail-closed 拒绝并提示刷新重试，绝不部分落库。
+        /// </summary>
+        public const string MenuGrantConflict = "AbpAdmin:MenuGrantConflict";
+
         /// <summary>租户上下文读不到宿主菜单模板（独立数据库租户或模板未播种）。</summary>
         public const string HostTemplateMissing = "AbpAdmin:MenuHostTemplateMissing";
 

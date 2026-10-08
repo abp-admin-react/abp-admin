@@ -21,10 +21,10 @@ public interface IMenuAppService : IApplicationService
     Task DeleteAsync(Guid id);
 
     /// <summary>节点当前已分配的角色名列表。</summary>
-    Task<ListResultDto<string>> GetRoleGrantsAsync(Guid menuId);
+    Task<ListResultDto<string>> GetMenuRoleGrantsAsync(Guid menuId);
 
     /// <summary>全量覆盖节点的角色分配（勾选 id 含父节点，Admin.NET 同款语义）。</summary>
-    Task UpdateRoleGrantsAsync(Guid menuId, UpdateMenuGrantsDto input);
+    Task UpdateMenuRoleGrantsAsync(Guid menuId, UpdateMenuGrantsDto input);
 
     /// <summary>可绑定的 ABP 权限树（平铺 name/displayName/parentName，前端组树）。</summary>
     Task<ListResultDto<PermissionOptionDto>> GetPermissionOptionsAsync();

@@ -33,7 +33,7 @@ public class MenuGrantConfig : IEntityTypeConfiguration<MenuGrant>
     {
         b.ToTable(AbpAdminConsts.DbTablePrefix + "MenuGrants", AbpAdminConsts.DbSchema);
         b.ConfigureByConvention();
-        b.Property(x => x.ProviderName).IsRequired().HasMaxLength(MenuConsts.MaxProviderKeyLength);
+        b.Property(x => x.ProviderName).IsRequired().HasMaxLength(MenuConsts.MaxProviderNameLength);
         b.Property(x => x.ProviderKey).IsRequired().HasMaxLength(MenuConsts.MaxProviderKeyLength);
         b.HasIndex(x => new { x.MenuId, x.ProviderName, x.ProviderKey }).IsUnique();
         b.HasIndex(x => new { x.TenantId, x.ProviderName, x.ProviderKey });

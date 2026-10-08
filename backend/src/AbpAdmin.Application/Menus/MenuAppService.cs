@@ -157,7 +157,7 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
     /// <summary>读取与写入同口径：角色分配属管理操作，仅 AssignRoles 可见
     /// （此前只挂类级 Default，任何能打开菜单管理页的用户都能枚举授权明细）。</summary>
     [Authorize(AbpAdminPermissions.Menus.AssignRoles)]
-    public virtual async Task<ListResultDto<string>> GetRoleGrantsAsync(Guid menuId)
+    public virtual async Task<ListResultDto<string>> GetMenuRoleGrantsAsync(Guid menuId)
     {
         await GetMenuAsync(menuId);
         var grants = await _menuGrantRepository.GetListAsync(x => x.MenuId == menuId && x.ProviderName == MenuConsts.RoleProviderName);
@@ -166,7 +166,7 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
 
     [Authorize(AbpAdminPermissions.Menus.AssignRoles)]
     [OperationLog("菜单管理", "调整角色授权", BizNo = "{{menuId}}", Success = "将菜单「{{menu(menuId)}}」的可访问角色调整为：{{input.roleNames}}")]
-    public virtual async Task UpdateRoleGrantsAsync(Guid menuId, UpdateMenuGrantsDto input)
+    public virtual async Task UpdateMenuRoleGrantsAsync(Guid menuId, UpdateMenuGrantsDto input)
     {
         var menu = await GetMenuAsync(menuId);
 
@@ -198,13 +198,38 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
         foreach (var roleName in canonicalNames.Values.Where(x => !existingNames.Contains(x)))
         {
             await _menuGrantRepository.InsertAsync(
-                new MenuGrant(GuidGenerator.Create(), menuId, menu.TenantId, MenuConsts.RoleProviderName, roleName),
-                autoSave: true);
+                new MenuGrant(GuidGenerator.Create(), menuId, menu.TenantId, MenuConsts.RoleProviderName, roleName));
+        }
+
+        await SaveGrantsOrThrowConflictAsync();
+    }
+
+    /// <summary>
+    /// 授权差集应用后立即落库，并把唯一索引冲突转成明确的业务错误（HTTP 403 语义）。
+    /// (MenuId, ProviderName, ProviderKey) 唯一索引把并发双写（角色侧差集 / 菜单侧全量 /
+    /// 级联清理共享一张表）从「静默重复行」转成可捕获冲突——冲突即「另一位管理者刚改过
+    /// 同一份授权」：fail-closed 拒绝本单（事务整体回滚、无部分落库），提示刷新后以最新
+    /// 状态重提，优于裸 500。显式 SaveChanges 是为了在应用层边界内捕获，而非等到
+    /// UoW 提交时异常已脱离本方法。
+    /// </summary>
+    private async Task SaveGrantsOrThrowConflictAsync()
+    {
+        try
+        {
+            await UnitOfWorkManager.Current!.SaveChangesAsync();
+        }
+        // DataException 是 DbUpdateException 的基类——Application 层刻意不引 EF Core
+        // （AuditLogAppService.RestoreEntityChangeAsync 同款手法），用 provider 无关
+        // 基类型接住存储层失败；唯一键冲突的具体判定交给消息里的约束名（跨 PG/SQLite 稳定）
+        catch (System.Data.DataException ex)
+            when (ex.InnerException?.Message?.Contains("IX_AppMenuGrants", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.Menus.MenuGrantConflict);
         }
     }
 
     /// <summary>
-    /// 角色侧菜单授权视图。菜单页的 UpdateRoleGrantsAsync 是「这张菜单给哪些角色」的单向视角；
+    /// 角色侧菜单授权视图。菜单页的 UpdateMenuRoleGrantsAsync 是「这张菜单给哪些角色」的单向视角；
     /// 本视图提供反向视角（「这个角色能看哪些菜单」）——管理员配一个受限角色时在一棵树上勾完，
     /// 不必挨张菜单打开授权。IsControlled 标注节点是否受控：未受控=公开（勾不勾都不影响其可见性），
     /// 受控=仅勾选角色可见——前端以徽标区分，避免把混合授权模型误解成纯授权模型。
@@ -254,7 +279,7 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
     /// <summary>
     /// 以勾选集为该角色的菜单授权全集做差集更新（借鉴 Admin.NET/芋道「角色→菜单树」交互，
     /// 语义适配混合授权模型）：勾上=插入授权，勾掉=删除该角色授权；未受控菜单与其它角色的授权
-    /// 不受影响。与 UpdateRoleGrantsAsync 写同一张 MenuGrant 表，读取侧（MyMenuAppService）
+    /// 不受影响。与 UpdateMenuRoleGrantsAsync 写同一张 MenuGrant 表，读取侧（MyMenuAppService）
     /// 无感。勾选集是逐节点的精确集合（无父子推导）——与菜单可见性的逐节点语义一致。
     /// </summary>
     [Authorize(AbpAdminPermissions.Menus.AssignRoles)]
@@ -287,10 +312,12 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
         foreach (var menuId in targetMenuIds.Where(id => !existingMenuIds.Contains(id)))
         {
             // 不用 autoSave: true：逐行 SaveChanges 会随勾选规模线性放大 DB 往返，
-            // 同一 UoW 内提交时一次性落库即可
+            // 统一在 SaveGrantsOrThrowConflictAsync 一次性落库
             await _menuGrantRepository.InsertAsync(
                 new MenuGrant(GuidGenerator.Create(), menuId, CurrentTenant.Id, MenuConsts.RoleProviderName, role.Name!));
         }
+
+        await SaveGrantsOrThrowConflictAsync();
     }
 
     public virtual async Task<ListResultDto<PermissionOptionDto>> GetPermissionOptionsAsync()

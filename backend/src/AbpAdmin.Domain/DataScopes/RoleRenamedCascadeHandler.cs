@@ -47,12 +47,31 @@ public class RoleRenamedCascadeHandler :
             return;
         }
 
+        // 合并语义而非直接改键：目标名（新角色名）若在同一菜单上已有授权行（历史孤儿或
+        // 竞态残留——角色名唯一约束保证改名时不存在同名在册角色，正常流程撞不上），
+        // 直接 ChangeProviderKey 会撞 (MenuId, ProviderName, ProviderKey) 唯一索引让整个
+        // 改名失败；此处删旧行、保留目标名行——两行表达同一事实（该菜单对该角色名授权）。
         var grants = await _menuGrantRepository.GetListAsync(
             x => x.ProviderName == MenuConsts.RoleProviderName && x.ProviderKey == eventData.OldName);
-        foreach (var grant in grants)
+        if (grants.Count > 0)
         {
-            grant.ChangeProviderKey(eventData.Name);
-            await _menuGrantRepository.UpdateAsync(grant);
+            var targetNameMenuIds = (await _menuGrantRepository.GetListAsync(
+                    x => x.ProviderName == MenuConsts.RoleProviderName && x.ProviderKey == eventData.Name))
+                .Select(x => x.MenuId)
+                .ToHashSet();
+
+            foreach (var grant in grants)
+            {
+                if (targetNameMenuIds.Contains(grant.MenuId))
+                {
+                    await _menuGrantRepository.DeleteAsync(grant);
+                }
+                else
+                {
+                    grant.ChangeProviderKey(eventData.Name);
+                    await _menuGrantRepository.UpdateAsync(grant);
+                }
+            }
         }
 
         var scopes = await _roleDataScopeRepository.GetListAsync(x => x.RoleName == eventData.OldName);

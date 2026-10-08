@@ -188,7 +188,7 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
               <TreePanel
                 checkable
                 checkStrictly={!ouParentLinked}
-                defaultExpandAll
+                expandAllOnDataReady
                 height={300}
                 treeData={ouTree}
                 checkedKeys={checkedOuIds}

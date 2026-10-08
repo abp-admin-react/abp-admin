@@ -193,7 +193,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
             Path = "/x/grant-cascade"
         });
         var role = await EnsureRoleAsync("menu-grant-cascade-role");
-        await _menuAppService.UpdateRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
+        await _menuAppService.UpdateMenuRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
         {
             RoleNames = new[] { role.Name! }.ToList()
         });
@@ -275,27 +275,27 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
 
         // 大小写变体输入：落库必须是角色的规范 Name（读取侧按原始 Name 精确匹配，
         // 原样大小写入库会导致永远匹配不上）
-        await _menuAppService.UpdateRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
+        await _menuAppService.UpdateMenuRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
         {
             RoleNames = new[] { role.Name!.ToUpperInvariant() }.ToList()
         });
 
-        var granted = await _menuAppService.GetRoleGrantsAsync(menu.Id);
+        var granted = await _menuAppService.GetMenuRoleGrantsAsync(menu.Id);
         granted.Items.ShouldContain(role.Name);
 
         // 全量覆盖：换成另一个角色后旧角色消失
         var role2 = await EnsureRoleAsync("menu-test-role-2");
-        await _menuAppService.UpdateRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
+        await _menuAppService.UpdateMenuRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
         {
             RoleNames = new[] { role2.Name! }.ToList()
         });
-        granted = await _menuAppService.GetRoleGrantsAsync(menu.Id);
+        granted = await _menuAppService.GetMenuRoleGrantsAsync(menu.Id);
         granted.Items.ShouldNotContain(role.Name);
         granted.Items.ShouldContain(role2.Name);
 
         await Should.ThrowAsync<BusinessException>(async () =>
         {
-            await _menuAppService.UpdateRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
+            await _menuAppService.UpdateMenuRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
             {
                 RoleNames = new[] { "no-such-role" }.ToList()
             });
@@ -432,7 +432,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
             Path = "/pub/controlled"
         });
         var role = await EnsureRoleAsync("menu-grant-role");
-        await _menuAppService.UpdateRoleGrantsAsync(controlled.Id, new UpdateMenuGrantsDto
+        await _menuAppService.UpdateMenuRoleGrantsAsync(controlled.Id, new UpdateMenuGrantsDto
         {
             RoleNames = new[] { role.Name! }.ToList()
         });
@@ -665,12 +665,22 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
 
         var allGrants = await WithUnitOfWorkAsync(() =>
             _menuGrantRepository.GetListAsync(x => x.ProviderName == MenuConsts.RoleProviderName));
-        var roleAGrants = allGrants.Where(x => x.ProviderKey == roleA.Name).Select(x => x.MenuId).ToHashSet();
-        var roleBGrants = allGrants.Where(x => x.ProviderKey == roleB.Name).Select(x => x.MenuId).ToHashSet();
+        // 集合语义用有序投影断言：Shouldly 的 ShouldBe 对 HashSet 按枚举序逐元素比较，
+        // 枚举序随插入历史/桶布局变化（组合跑测试时即翻转），无序比较是随机 flake
+        var roleAGrants = allGrants
+            .Where(x => x.ProviderKey == roleA.Name)
+            .Select(x => x.MenuId)
+            .OrderBy(x => x)
+            .ToList();
+        var roleBGrants = allGrants
+            .Where(x => x.ProviderKey == roleB.Name)
+            .Select(x => x.MenuId)
+            .OrderBy(x => x)
+            .ToList();
 
-        roleAGrants.ShouldBe(new[] { menu2.Id, menu3.Id }.ToHashSet());
+        roleAGrants.ShouldBe(new[] { menu2.Id, menu3.Id }.OrderBy(x => x).ToList());
         // 其它角色（roleB 在 menu1 的授权）不受差集影响
-        roleBGrants.ShouldBe(new[] { menu1.Id }.ToHashSet());
+        roleBGrants.ShouldBe(new[] { menu1.Id }.OrderBy(x => x).ToList());
     }
 
     [Fact]

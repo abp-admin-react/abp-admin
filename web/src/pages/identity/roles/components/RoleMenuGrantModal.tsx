@@ -6,7 +6,7 @@ import type { IdentityRoleDto } from '@/abp/identity';
 import {
   getRoleMenuGrantView,
   type RoleMenuGrantItemDto,
-  updateRoleMenuGrants,
+  updateRoleMenuGrantSet,
 } from '@/abp/menus';
 import { isNotFound } from '@/requestErrorConfig';
 import TreePanel from '@/components/TreePanel';
@@ -152,7 +152,7 @@ const RoleMenuGrantModal: React.FC<RoleMenuGrantModalProps> = ({
     if (!role) return;
     setSaving(true);
     try {
-      await updateRoleMenuGrants(
+      await updateRoleMenuGrantSet(
         role.id,
         checkedKeys.map((k) => String(k)),
       );
@@ -188,7 +188,7 @@ const RoleMenuGrantModal: React.FC<RoleMenuGrantModalProps> = ({
         <TreePanel
           checkable
           checkStrictly
-          defaultExpandAll
+          expandAllOnDataReady
           treeData={decoratedTree}
           checkedKeys={checkedKeys}
           onCheck={setCheckedKeys}

@@ -6,12 +6,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 export type TreePanelProps = Omit<
   TreeProps,
-  'height' | 'expandedKeys' | 'onExpand' | 'onCheck' | 'defaultExpandAll'
+  'height' | 'expandedKeys' | 'onExpand' | 'onCheck'
 > & {
   /** 树区高度（px），默认 420——树在框内滚动，弹窗整体高度稳定（Admin.NET/芋道同款布局） */
   height?: number;
-  /** treeData 异步到达后默认全展开（antd defaultExpandAll 对异步数据不生效，须受控重置） */
-  defaultExpandAll?: boolean;
+  /** 每次 treeData 到达/变化后全展开（受控重置；antd 的 defaultExpandAll 对异步数据不生效，
+   *  刻意不复用同名 prop——语义是「数据就绪即全展开」而非「初始展开一次」） */
+  expandAllOnDataReady?: boolean;
   /** 工具条右侧附加区（如数据范围 OU 树的「父子联动」开关） */
   toolbarExtra?: React.ReactNode;
   /** 全选：TreePanel 把内部已算好的全量 key 递给调用方（调用方按需过滤，如权限弹窗剔除 group 前缀/不可编辑项） */
@@ -42,7 +43,7 @@ export function collectTreeKeys(
  */
 const TreePanel: React.FC<TreePanelProps> = ({
   height = 420,
-  defaultExpandAll,
+  expandAllOnDataReady,
   toolbarExtra,
   onCheckAll,
   onClearAll,
@@ -55,14 +56,14 @@ const TreePanel: React.FC<TreePanelProps> = ({
     [treeData],
   );
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(
-    () => (defaultExpandAll ? allKeys : []),
+    () => (expandAllOnDataReady ? allKeys : []),
   );
 
   useEffect(() => {
-    if (defaultExpandAll) {
+    if (expandAllOnDataReady) {
       setExpandedKeys(allKeys);
     }
-  }, [allKeys, defaultExpandAll]);
+  }, [allKeys, expandAllOnDataReady]);
 
   const allExpanded =
     allKeys.length > 0 && expandedKeys.length >= allKeys.length;

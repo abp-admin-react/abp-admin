@@ -3,6 +3,7 @@ using System;
 using AbpAdmin.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Volo.Abp.EntityFrameworkCore;
@@ -12,9 +13,11 @@ using Volo.Abp.EntityFrameworkCore;
 namespace AbpAdmin.Migrations
 {
     [DbContext(typeof(AbpAdminDbContext))]
-    partial class AbpAdminDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261008092815_MenuGrant_ProviderKey256")]
+    partial class MenuGrant_ProviderKey256
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

@@ -155,7 +155,7 @@ const PermissionModal: React.FC<PermissionModalProps> = ({
       <Spin spinning={loading}>
         <TreePanel
           checkable
-          defaultExpandAll
+          expandAllOnDataReady
           checkedKeys={checkedKeys}
           treeData={treeData}
           onCheck={(keys) => {

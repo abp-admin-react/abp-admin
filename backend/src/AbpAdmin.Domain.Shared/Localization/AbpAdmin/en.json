@@ -341,6 +341,7 @@
         "AbpAdmin:MenuParentCycle": "The parent menu cannot be itself or one of its children.",
         "AbpAdmin:MenuTypeMismatch": "A catalog requires sub menus, and a menu requires a route path.",
         "AbpAdmin:MenuRoleNotFound": "The role does not exist: {RoleName}",
+        "AbpAdmin:MenuGrantConflict": "The menu grants were just modified by another administrator (conflict). Refresh and retry.",
         "AbpAdmin:MenuInvalidPath": "The menu path must be an in-site route starting with '/' (external links are not allowed): {Path}",
         "AbpAdmin:MenuInvalidPermission": "The permission cannot be bound, or is not available for the current tenant: {PermissionName}",
         "AbpAdmin:MenuHostTemplateMissing": "The host menu template is not available in this tenant context (separate database tenant or template not seeded).",

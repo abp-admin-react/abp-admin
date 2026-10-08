@@ -157,6 +157,47 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
     }
 
     [Fact]
+    public async Task UpdateAsync_Rename_Should_Merge_Grants_When_Target_Name_Has_Orphan_Rows()
+    {
+        // 改名到「曾存在后又删除的角色」的名字：孤儿授权行（历史残留）与改后新名在同一
+        // 菜单上碰撞 (MenuId, ProviderName, ProviderKey) 唯一索引——级联必须走合并语义
+        // （删旧行、保留目标名行）而不是直接改键，否则整个改名 500。
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var sourceName = $"rn-merge-src-{suffix}";
+        var targetName = $"rn-merge-tgt-{suffix}";
+        var role = await CreateRoleAsync(sourceName);
+        var menu = new Menu(Guid.NewGuid(), null, null, MenuTypeEnum.Menu,
+            $"合并-{suffix}", name: $"rn-merge-{suffix}", path: $"/rn-merge/{suffix}");
+        await WithUnitOfWorkAsync(async () =>
+        {
+            await _menuRepository.InsertAsync(menu, autoSave: true);
+            // 当前角色的授权行（应跟随新名）
+            await _menuGrantRepository.InsertAsync(
+                new MenuGrant(Guid.NewGuid(), menu.Id, null, MenuConsts.RoleProviderName, sourceName), autoSave: true);
+            // 目标名的孤儿授权行（角色已删但行残留）
+            await _menuGrantRepository.InsertAsync(
+                new MenuGrant(Guid.NewGuid(), menu.Id, null, MenuConsts.RoleProviderName, targetName), autoSave: true);
+        });
+
+        await _roleAppService.UpdateAsync(role.Id, new IdentityRoleUpdateDto
+        {
+            Name = targetName,
+            IsDefault = false,
+            IsPublic = false,
+            ConcurrencyStamp = role.ConcurrencyStamp
+        });
+
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var rows = await _menuGrantRepository.GetListAsync(
+                x => x.MenuId == menu.Id && x.ProviderKey == targetName);
+            // 合并后目标名恰好一行（旧行删、孤行留），无重复无残留
+            rows.Count.ShouldBe(1);
+            (await _menuGrantRepository.GetListAsync(x => x.ProviderKey == sourceName)).ShouldBeEmpty();
+        });
+    }
+
+    [Fact]
     public async Task GetRoleUsersAsync_Should_Return_Only_Members_Paged()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];

@@ -26,7 +26,7 @@ const viewItem = (over: Partial<menusApi.RoleMenuGrantItemDto>) => ({
 
 const mocks = vi.hoisted(() => ({
   getRoleMenuGrantView: vi.fn(),
-  updateRoleMenuGrants: vi.fn(),
+  updateRoleMenuGrantSet: vi.fn(),
 }));
 
 vi.mock('@/abp/menus', async () => {
@@ -35,7 +35,7 @@ vi.mock('@/abp/menus', async () => {
   return {
     ...actual,
     getRoleMenuGrantView: mocks.getRoleMenuGrantView,
-    updateRoleMenuGrants: mocks.updateRoleMenuGrants,
+    updateRoleMenuGrantSet: mocks.updateRoleMenuGrantSet,
   };
 });
 
@@ -59,7 +59,7 @@ describe('RoleMenuGrantModal', () => {
     renderModal(onClose);
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(mocks.updateRoleMenuGrants).not.toHaveBeenCalled();
+    expect(mocks.updateRoleMenuGrantSet).not.toHaveBeenCalled();
   });
 
   it('保存把勾选集精确映射为 payload（checkStrictly 逐节点语义）', async () => {
@@ -77,7 +77,7 @@ describe('RoleMenuGrantModal', () => {
         viewItem({ id: 'm-2', parentId: 'm-parent' }),
       ],
     });
-    mocks.updateRoleMenuGrants.mockResolvedValue(undefined);
+    mocks.updateRoleMenuGrantSet.mockResolvedValue(undefined);
     const onClose = vi.fn();
     renderModal(onClose);
 
@@ -92,7 +92,7 @@ describe('RoleMenuGrantModal', () => {
     saveBtn.click();
 
     await waitFor(() =>
-      expect(mocks.updateRoleMenuGrants).toHaveBeenCalledWith('role-1', [
+      expect(mocks.updateRoleMenuGrantSet).toHaveBeenCalledWith('role-1', [
         'm-1',
       ]),
     );

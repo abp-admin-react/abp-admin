@@ -76,7 +76,7 @@ export async function deleteMenu(id: string) {
 }
 
 export async function getMenuRoleGrants(menuId: string) {
-  return request<{ items: string[] }>(`${BASE}/role-grants/${menuId}`, {
+  return request<{ items: string[] }>(`${BASE}/menu-role-grants/${menuId}`, {
     method: 'GET',
   });
 }
@@ -85,7 +85,7 @@ export async function updateMenuRoleGrants(
   menuId: string,
   roleNames: string[],
 ) {
-  return request(`${BASE}/role-grants/${menuId}`, {
+  return request(`${BASE}/menu-role-grants/${menuId}`, {
     method: 'PUT',
     data: { roleNames },
   });
@@ -122,8 +122,9 @@ export async function getRoleMenuGrantView(roleId: string) {
   );
 }
 
-/** 以勾选集为该角色的菜单授权全集做差集更新（勾上=插入，勾掉=撤销；其它角色与公开菜单不受影响） */
-export async function updateRoleMenuGrants(
+/** 以勾选集为该角色的菜单授权全集做差集更新（勾上=插入，勾掉=撤销；其它角色与公开菜单不受影响）。
+ *  命名刻意区别于 updateMenuRoleGrants（菜单侧、方向相反）：…GrantSet 尾缀避免换位词对。 */
+export async function updateRoleMenuGrantSet(
   roleId: string,
   menuIds: string[],
 ) {

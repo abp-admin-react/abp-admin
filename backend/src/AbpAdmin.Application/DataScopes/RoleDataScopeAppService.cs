@@ -97,7 +97,7 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
         await EnsureOperatorCanGrantAsync(input);
 
         // 角色名必须是当前租户真实存在的角色，防止「拼错即失效」的脏配置；
-        // 落库用角色的规范 Name（而非客户端原样大小写）——与 MenuAppService.UpdateRoleGrantsAsync
+        // 落库用角色的规范 Name（而非客户端原样大小写）——与 MenuAppService.UpdateMenuRoleGrantsAsync
         // 同一口径：读取侧 CurrentDataScopeProvider 用角色 claim 的原始 Name 做精确匹配，
         // 原样存入会在大小写不一致时永远匹配不上（fail-closed 零行可见）
         var entity = new RoleDataScope(
