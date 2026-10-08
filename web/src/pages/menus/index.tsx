@@ -22,7 +22,7 @@ import {
   type PermissionOptionDto,
 } from '@/abp/menus';
 import MenuFormModal from './components/MenuFormModal';
-import { buildMenuColumns } from './components/menuColumns';
+import { MENU_TABLE_SCROLL_X, buildMenuColumns } from './components/menuColumns';
 import {
   buildPermissionTreeData,
   type MenuEditTarget,
@@ -31,12 +31,18 @@ import {
 } from './components/menuTypes';
 import RoleGrantModal from './components/RoleGrantModal';
 
+/** 收集整棵树的全部节点 id（加载后默认全展开用）。 */
+function collectAllKeys(nodes: MenuTreeDto[]): React.Key[] {
+  return nodes.flatMap((node) => [node.id, ...collectAllKeys(node.children)]);
+}
+
 const MenuManagement: React.FC = () => {
   const { message } = App.useApp();
   const access = useAccess();
   const actionRef = useRef<ActionType | undefined>(undefined);
   const [tree, setTree] = useState<MenuTreeDto[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [editTarget, setEditTarget] = useState<MenuEditTarget>();
   const [permissions, setPermissions] = useState<PermissionOptionDto[]>([]);
   const [roles, setRoles] = useState<IdentityRoleDto[]>([]);
@@ -47,6 +53,9 @@ const MenuManagement: React.FC = () => {
     try {
       const res = await getMenuTree();
       setTree(res.items);
+      // defaultExpandAllRows 对异步加载的数据不生效（首渲染时 dataSource 为空），
+      // 改为每次加载后受控全展开；管理员仍可手动收起
+      setExpandedRowKeys(collectAllKeys(res.items));
     } catch {
       // 请求层已有统一错误提示
     } finally {
@@ -69,8 +78,13 @@ const MenuManagement: React.FC = () => {
   }, [access.canManageMenus]);
 
   const menuTreeData = useMemo<TreeSelectNode[]>(
-    () => toMenuTreeSelectData(tree),
-    [tree],
+    // 编辑态剔除自身及子孙节点，避免选中后成环（后端会拒，但不应给出非法选项）
+    () =>
+      toMenuTreeSelectData(
+        tree,
+        editTarget?.mode === 'edit' ? editTarget.node.id : undefined,
+      ),
+    [tree, editTarget],
   );
 
   const permissionTreeData = useMemo<TreeSelectNode[]>(
@@ -107,7 +121,11 @@ const MenuManagement: React.FC = () => {
         dataSource={tree}
         search={false}
         pagination={false}
-        expandable={{ defaultExpandAllRows: true }}
+        scroll={{ x: MENU_TABLE_SCROLL_X }}
+        expandable={{
+          expandedRowKeys,
+          onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
+        }}
         toolBarRender={() =>
           [
             access.canCreateMenus ? (

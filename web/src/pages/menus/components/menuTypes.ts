@@ -57,12 +57,18 @@ export function buildPermissionTreeData(
   return roots;
 }
 
-/** 菜单树 → TreeSelect 树数据（上级菜单选择用）。 */
-export function toMenuTreeSelectData(tree: MenuTreeDto[]): TreeSelectNode[] {
+/** 菜单树 → TreeSelect 树数据（上级菜单选择用）。
+ * excludeId 连同其整棵子树一起剔除：编辑态禁止把自身/子孙选为上级（选了必成环）。 */
+export function toMenuTreeSelectData(
+  tree: MenuTreeDto[],
+  excludeId?: string,
+): TreeSelectNode[] {
   const toNode = (node: MenuTreeDto): TreeSelectNode => ({
     title: node.title,
     value: node.id,
-    children: node.children.map(toNode),
+    children: node.children
+      .filter((child) => child.id !== excludeId)
+      .map(toNode),
   });
-  return tree.map(toNode);
+  return tree.filter((node) => node.id !== excludeId).map(toNode);
 }

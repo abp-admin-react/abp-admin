@@ -1,13 +1,15 @@
 import {
   ModalForm,
   ProFormDigit,
+  ProFormRadio,
   ProFormSelect,
   ProFormSwitch,
   ProFormText,
+  ProFormTreeSelect,
 } from '@ant-design/pro-components';
-import { App } from 'antd';
-import React, { useMemo } from 'react';
-import { menuIconNames } from '@/abp/menuIcons';
+import { App, Button, Col, Form, Popover, Tooltip } from 'antd';
+import React, { useMemo, useState } from 'react';
+import { menuIconNames, toMenuIcon } from '@/abp/menuIcons';
 import {
   createMenu,
   MENU_TYPE,
@@ -29,8 +31,76 @@ type MenuFormModalProps = {
   onSaved: () => void;
 };
 
-/** 菜单新增/编辑弹窗（12 个表单项），从 index.tsx 抽离。
- * key/destroyOnClose 语义保持原样：不同编辑目标重挂载，避免表单残留旧值。 */
+type IconPickerProps = {
+  value?: string;
+  onChange?: (value: string | null) => void;
+};
+
+/** 图标选择器（借鉴 Admin.NET IconSelector）：面板网格平铺纯图标（8 列 × 32px，
+ * 22 个图标 3 行放完），悬停 tooltip 显示名称，点选选中、再点同一个取消。
+ * 作为受控组件接入 Form.Item（value/onChange 约定），与 ProForm 字段同数据流。 */
+function IconPicker({ value, onChange }: IconPickerProps) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      trigger="click"
+      placement="bottomLeft"
+      styles={{ content: { padding: 8 } }}
+      content={
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(8, 32px)',
+            gap: 4,
+          }}
+        >
+          {menuIconNames.map((name) => (
+            <Tooltip key={name} title={name}>
+              <Button
+                type={value === name ? 'primary' : 'text'}
+                icon={toMenuIcon(name)}
+                onClick={() => {
+                  onChange?.(value === name ? null : name);
+                  setOpen(false);
+                }}
+                style={{
+                  width: 32,
+                  height: 32,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 0,
+                }}
+              />
+            </Tooltip>
+          ))}
+        </div>
+      }
+    >
+      <Button
+        style={{
+          width: '100%',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'flex-start',
+        }}
+      >
+        {value ? (
+          toMenuIcon(value)
+        ) : (
+          <span style={{ color: 'rgba(0,0,0,0.25)' }}>选择图标</span>
+        )}
+      </Button>
+    </Popover>
+  );
+}
+
+/** 菜单新增/编辑弹窗，从 index.tsx 抽离。
+ * 布局借鉴 Admin.NET editMenu.vue：横向标签 + 双列网格（grid + colProps），
+ * 短字段两两一行、开关说明收进 label tooltip，保证 720p 视口下整窗免滚动。
+ * key/destroyOnHidden 语义保持原样：不同编辑目标重挂载，避免表单残留旧值。 */
 const MenuFormModal: React.FC<MenuFormModalProps> = ({
   target,
   menuTreeData,
@@ -105,91 +175,124 @@ const MenuFormModal: React.FC<MenuFormModalProps> = ({
           ? `编辑菜单 - ${target.node.title}`
           : `新增菜单${target?.parent ? `（上级：${target.parent.title}）` : ''}`
       }
-      width={560}
+      width={640}
       open={!!target}
       initialValues={initialValues}
       key={target?.mode === 'edit' ? `edit-${target.node.id}` : 'create'}
+      grid
+      // 横向标签：labelCol 固定宽度对齐最宽标签「国际化 key」，行高较纵向减半，
+      // 这是 720p 免滚动的关键；双列短字段由各字段的 colProps span=12 组成
+      layout="horizontal"
+      labelCol={{ flex: '0 0 108px' }}
+      wrapperCol={{ flex: '1' }}
       modalProps={{
         destroyOnHidden: true,
         onCancel: onClose,
+        centered: true,
       }}
       onFinish={submitForm}
     >
-      <ProFormSelect
+      {/* 上级菜单必须用 TreeSelect：ProFormSelect 的 request 走普通 options 协议，
+          title 不被识别（渲染成裸 id）、children 被拍平（只能选到根节点） */}
+      <ProFormTreeSelect
         name="parentId"
         label="上级菜单"
         placeholder="顶级"
         allowClear
-        request={async () => menuTreeData}
-        fieldProps={{ treeDefaultExpandAll: true, treeLine: true }}
+        colProps={{ span: 24 }}
+        fieldProps={{
+          treeData: menuTreeData,
+          treeDefaultExpandAll: true,
+          treeLine: true,
+        }}
       />
-      <ProFormSelect
+      {/* Admin.NET 同款：类型用 radio 平铺，比下拉少一次点击且始终可见 */}
+      <ProFormRadio.Group
         name="type"
         label="类型"
+        colProps={{ span: 24 }}
+        rules={[{ required: true }]}
         options={[
           { value: MENU_TYPE.Catalog, label: '目录（分组）' },
           { value: MENU_TYPE.Menu, label: '菜单（页面）' },
         ]}
-        rules={[{ required: true }]}
       />
       <ProFormText
         name="title"
         label="显示名"
         placeholder="如：用户"
+        colProps={{ span: 12 }}
         rules={[{ required: true, message: '请输入显示名' }]}
       />
       <ProFormText
         name="name"
-        label="国际化 key（可选）"
-        placeholder="如 users，前端按 menu.{上级}.{name} 查语言包"
+        label="国际化 key"
+        placeholder="如 users（可选）"
+        colProps={{ span: 12 }}
       />
       <ProFormSelect
         name="path"
         label="路由地址"
         placeholder="菜单类型必填，从注册表选择"
+        colProps={{ span: 12 }}
+        // 与后端 MenuTypeMismatch 校验同口径：菜单（页面）必须有路由地址；
+        // 依赖 type，切换类型时重新校验
+        dependencies={['type']}
+        rules={[
+          ({ getFieldValue }) => ({
+            validator: (_, value) =>
+              getFieldValue('type') === MENU_TYPE.Menu && !value
+                ? Promise.reject(new Error('菜单类型必须选择路由地址'))
+                : Promise.resolve(),
+          }),
+        ]}
         fieldProps={{ showSearch: true, optionFilterProp: 'label' }}
         options={routeRegistry.map((x) => ({
           value: x.path,
           label: `${x.label} (${x.path})`,
         }))}
       />
-      <ProFormSelect
-        name="icon"
-        label="图标"
-        placeholder="选择图标"
-        fieldProps={{ showSearch: true }}
-        options={menuIconNames.map((x) => ({ value: x, label: x }))}
+      {/* 自定义图标网格面板：Form.Item 直接绑定 value/onChange，与 ProForm 字段同数据流 */}
+      <Col span={12}>
+        <Form.Item name="icon" label="图标">
+          <IconPicker />
+        </Form.Item>
+      </Col>
+      <ProFormTreeSelect
+        name="permissionName"
+        label="绑定权限"
+        placeholder="可选，绑定后需该权限授予才可见"
+        allowClear
+        colProps={{ span: 12 }}
+        fieldProps={{
+          treeData: permissionTreeData,
+          showSearch: true,
+          treeNodeFilterProp: 'title',
+          treeDefaultExpandAll: true,
+          treeLine: true,
+        }}
       />
       <ProFormDigit
         name="orderNo"
         label="排序"
         min={0}
         max={9999}
+        colProps={{ span: 12 }}
         fieldProps={{ precision: 0 }}
-      />
-      <ProFormSelect
-        name="permissionName"
-        label="绑定权限（可选）"
-        placeholder="绑定后需该权限授予才可见"
-        fieldProps={{
-          showSearch: true,
-          treeData: permissionTreeData,
-          treeDefaultExpandAll: true,
-          treeLine: true,
-          treeNodeFilterProp: 'title',
-        }}
       />
       <ProFormSwitch
         name="isHide"
         label="隐藏"
-        extra="不出现在侧边菜单，但页面路由可达"
+        tooltip="不出现在侧边菜单，但页面路由可达"
+        colProps={{ span: 12 }}
       />
       <ProFormSwitch
         name="isEnabled"
         label="启用"
-        extra="停用后整棵子树不可见"
+        tooltip="停用后整棵子树不可见"
+        colProps={{ span: 12 }}
       />
-      <ProFormText name="remark" label="备注" placeholder="可选" />
+      <ProFormText name="remark" label="备注" placeholder="可选" colProps={{ span: 24 }} />
     </ModalForm>
   );
 };
