@@ -13,7 +13,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <None Remove="appsettings.secrets.json" />
-    <Content Include="appsettings.secrets.json">
+    <!-- 本地密钥文件,.gitignore(**/appsettings.secrets.json)刻意排除,CI 干净 checkout 无此文件;
+         拷贝必须以 Exists 为条件——Program.cs 的 AddJsonFile 本就 optional,无条件拷贝在 CI 报 MSB3030 -->
+    <Content Include="appsettings.secrets.json" Condition="Exists('appsettings.secrets.json')">
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
