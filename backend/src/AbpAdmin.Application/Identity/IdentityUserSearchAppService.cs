@@ -153,11 +153,12 @@ public class IdentityUserSearchAppService : AbpAdminAppService, IIdentityUserSea
         var queryable = await _userRepository.GetQueryableAsync();
 
         // 表达式构建（含值→类型转换）包在业务错里：字段/操作符白名单已过，
-        // 剩余失败只会是值不可转（"garbage" 转 int 等），转 400 而非 500
+        // 剩余失败只会是值不可转（"garbage" 转 int 等），转 400 而非 500。
+        // 白名单同时传给 DynamicQuery（库内 fail-closed 复核，安全契约不依赖本调用方自觉）
         IQueryable<IdentityUser> filtered;
         try
         {
-            filtered = queryable.DynamicQuery(input.Conditions);
+            filtered = queryable.DynamicQuery(input.Conditions, fieldMap.Keys);
         }
         catch (Exception ex) when (ex is not UserFriendlyException
             && (ex is FormatException or InvalidOperationException or ArgumentException or OverflowException))

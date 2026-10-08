@@ -31,8 +31,14 @@ public class ObjectQueryableExtensionsTests
         new("dave", 22, true, null, PersonKind.Admin, Guid.Empty),
     };
 
+    /// <summary>模拟调用方的可筛字段白名单（常规用例全字段放开；白名单拒绝语义由专测用窄白名单钉住）。</summary>
+    private static readonly string[] SearchableFields =
+    {
+        "UserName", "Age", "IsActive", "LastLoginAt", "Kind", "TenantId",
+    };
+
     private static IQueryable<Person> Apply(params DynamicCondition[] conditions)
-        => People.AsQueryable().DynamicQuery(conditions);
+        => People.AsQueryable().DynamicQuery(conditions, SearchableFields);
 
     private static DynamicCondition C(string field, DynamicComparison comparison, string? value = null, DynamicLogic logic = DynamicLogic.And)
         => new() { Field = field, Comparison = comparison, Value = value, Logic = logic };
@@ -128,6 +134,50 @@ public class ObjectQueryableExtensionsTests
         // 字段必须真实存在：fail-closed，不可能借字段名注入
         Should.Throw<ArgumentException>(() =>
             Apply(C("NotExists", DynamicComparison.Equal, "1")).ToList());
+    }
+
+    [Fact]
+    public void Field_Outside_Whitelist_Throws_Even_If_Property_Exists()
+    {
+        // 安全契约内聚：TenantId 是真实存在的属性（PropertyOrField 可解析），
+        // 但不在调用方白名单内即拒绝——防"借任意真实属性/导航链做筛选"的信息暴露面
+        var exception = Should.Throw<ArgumentException>(() =>
+            People.AsQueryable().DynamicQuery(
+                new[] { C("TenantId", DynamicComparison.Equal, Guid.Empty.ToString()) },
+                new[] { "UserName", "Age" }));
+        exception.Message.ShouldContain("TenantId");
+        exception.Message.ShouldContain("白名单");
+    }
+
+    [Fact]
+    public void Whitelist_Match_Is_Case_Sensitive_Ordinal()
+    {
+        // 契约钉住：白名单按 Ordinal 精确匹配（与调用方 fieldMap 字典同语义）。
+        // 若未来"顺手"换成 IgnoreCase，等于静默放大每个调用方的白名单——必须红
+        Should.Throw<ArgumentException>(() =>
+            People.AsQueryable().DynamicQuery(
+                new[] { C("username", DynamicComparison.Equal, "alice") },
+                new[] { "UserName" }));
+    }
+
+    [Fact]
+    public void Null_Field_Throws_Argument_Not_NullReference()
+    {
+        // 契约钉住：Field=null 走白名单 Contains(null) 抛 ArgumentException（fail-closed），
+        // 而不是落到表达式构建阶段变成别的异常形态（AppService 侧 400 映射依赖这个类型）
+        Should.Throw<ArgumentException>(() =>
+            People.AsQueryable().DynamicQuery(
+                new[] { C(null!, DynamicComparison.Equal, "alice") },
+                SearchableFields));
+    }
+
+    [Fact]
+    public void Empty_Whitelist_Throws()
+    {
+        Should.Throw<ArgumentException>(() =>
+            People.AsQueryable().DynamicQuery(
+                new[] { C("UserName", DynamicComparison.Equal, "alice") },
+                Array.Empty<string>()));
     }
 
     [Fact]

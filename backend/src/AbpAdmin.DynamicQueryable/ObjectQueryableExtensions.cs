@@ -10,9 +10,11 @@ namespace AbpAdmin.Linq.DynamicQueryable;
 /// <summary>
 /// 动态查询条件 → 表达式树（移植自 abp-next-admin framework/dynamic-queryable 的
 /// ObjectQueryableExtensions，适配点见 DynamicCondition 注释）。
-/// 字段解析走 Expression.PropertyOrField：字段名必须真实存在于 T，天然免疫注入；
-/// 值按属性真实类型转换（InvariantCulture），转换失败立即抛错——调用方应先把
-/// 字段/值约束在白名单内（见各 AppService 的 available-fields 契约）。
+/// 字段解析走 Expression.PropertyOrField：字段名必须真实存在于 T，天然免疫 SQL 注入；
+/// 值按属性真实类型转换（InvariantCulture），转换失败立即抛错。
+/// 安全契约内聚在此（不再依赖调用方自觉）：字段白名单是必传参数，条件里的 Field
+/// 必须命中白名单，否则 fail-closed 抛错——PropertyOrField 防的是注入，白名单防的是
+/// "借真实存在的任意属性/导航链（如 Tenant 导航）做筛选"的信息暴露面。
 /// </summary>
 public static class ObjectQueryableExtensions
 {
@@ -22,12 +24,15 @@ public static class ObjectQueryableExtensions
     /// Logic 语义：条件按顺序累计结合，<see cref="DynamicLogic.Or"/> 表示与前面累计结果相或，
     /// 后续 And 作用于 "(A ∨ B) ∧ C" 的整体（有测试钉住）。
     /// </summary>
-    private static Expression<Func<T, bool>> BuildPredicate<T>(IReadOnlyList<DynamicCondition> conditions)
+    private static Expression<Func<T, bool>> BuildPredicate<T>(
+        IReadOnlyList<DynamicCondition> conditions, IReadOnlyCollection<string> allowedFields)
     {
         if (conditions.Count == 0)
         {
             throw new ArgumentException("条件组不能为空（空集合请直接返回原查询，见 DynamicQuery）。", nameof(conditions));
         }
+
+        EnsureFieldsAllowed(conditions, allowedFields);
 
         var parameter = Expression.Parameter(typeof(T), "x");
         Expression? body = null;
@@ -45,14 +50,40 @@ public static class ObjectQueryableExtensions
         return Expression.Lambda<Func<T, bool>>(body!, parameter);
     }
 
-    public static IQueryable<T> DynamicQuery<T>(this IQueryable<T> queryable, IReadOnlyList<DynamicCondition> conditions)
+    /// <summary>
+    /// 把 conditions 的字段约束在 allowedFields 内（Ordinal 精确匹配）。
+    /// 白名单必传：未命中的字段在构建表达式前直接拒绝，不依赖调用方先自行校验。
+    /// </summary>
+    private static void EnsureFieldsAllowed(
+        IReadOnlyList<DynamicCondition> conditions, IReadOnlyCollection<string> allowedFields)
+    {
+        if (allowedFields.Count == 0)
+        {
+            throw new ArgumentException("字段白名单不能为空（无字段可筛时不应进入动态查询）。", nameof(allowedFields));
+        }
+
+        foreach (var condition in conditions)
+        {
+            if (!allowedFields.Contains(condition.Field))
+            {
+                throw new ArgumentException(
+                    $"查询字段 {condition.Field} 不在白名单内（允许：{string.Join(", ", allowedFields)}）。",
+                    nameof(conditions));
+            }
+        }
+    }
+
+    public static IQueryable<T> DynamicQuery<T>(
+        this IQueryable<T> queryable,
+        IReadOnlyList<DynamicCondition> conditions,
+        IReadOnlyCollection<string> allowedFields)
     {
         if (conditions.Count == 0)
         {
             return queryable;
         }
 
-        return queryable.Where(BuildPredicate<T>(conditions));
+        return queryable.Where(BuildPredicate<T>(conditions, allowedFields));
     }
 
     private static Expression BuildComparison(Expression parameter, DynamicCondition condition)
