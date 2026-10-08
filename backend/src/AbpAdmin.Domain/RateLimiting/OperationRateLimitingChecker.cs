@@ -247,6 +247,11 @@ public class OperationRateLimitingChecker : IOperationRateLimitingChecker
             partition ??= "unknown";
         }
 
+        // 键长收口（防内存 DoS 的最后一道）：自定义解析器可能绕过各内置解析器的 Bound，
+        // 在拼键前统一钳到 MaxLength——分区键进 Redis 键，无界用户输入即微软限流文档点名的
+        // "unbounded user-controlled input" 反模式。已界的输入此处为无操作。
+        partition = OperationRateLimitingPartitionKeys.Bound(partition);
+
         if (multiTenancy)
         {
             var tenantId = _currentTenant.Id?.ToString() ?? "host";

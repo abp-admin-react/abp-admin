@@ -4,7 +4,7 @@ using Volo.Abp.Users;
 namespace AbpAdmin.RateLimiting.PartitionKeyResolvers;
 
 /// <summary>
-/// 优先 context.Parameter，为空回退 CurrentUser.Email；规范化 ToUpperInvariant()。
+/// 优先 context.Parameter，为空回退 CurrentUser.Email；规范化 ToUpperInvariant() + 有界化截断。
 /// </summary>
 public class EmailOperationRateLimitingPartitionKeyResolver : IOperationRateLimitingPartitionKeyResolver
 {
@@ -22,6 +22,7 @@ public class EmailOperationRateLimitingPartitionKeyResolver : IOperationRateLimi
         {
             value = _currentUser.Email;
         }
-        return Task.FromResult(value?.ToUpperInvariant());
+        // 有界化：登录输入未经验证直通此处，不截断则任意超长输入都生成独立计数键（内存 DoS）
+        return Task.FromResult(OperationRateLimitingPartitionKeys.Bound(value?.ToUpperInvariant()));
     }
 }
