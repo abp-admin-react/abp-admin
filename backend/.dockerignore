@@ -1,0 +1,28 @@
+# 构建上下文瘦身 + 防泄漏：镜像构建只需要 src/ 源码、三个构建属性文件与 NuGet 源声明。
+# 黑名单方式（而非按扩展名白名单）：wwwroot 等静态资产类型多，白名单漏一种就断构建。
+#
+# 安全硬约束：appsettings.secrets.json（本机真实凭据）绝不允许进入构建上下文——
+# 即便构建用不到，进了上下文就可能进镜像层。
+
+# 本地产物 / 工具目录
+**/bin/
+**/obj/
+**/node_modules/
+.vs/
+**/App_Data/
+**/Logs/
+
+# 真实凭据（git 已忽略的本地文件，构建上下文同样不给）
+**/appsettings.secrets.json
+
+# 与镜像构建无关的仓库内容（etc 下只保留 ip2region——Host 镜像随带 IP 归属地库，
+# 见 Host Dockerfile 的 COPY；dockerignore 父目录不能整体排除后重包含，故用 etc/*）
+test/
+etc/*
+!etc/ip2region
+docs/
+*.md
+*.log
+*.db
+*.txt
+.claude/

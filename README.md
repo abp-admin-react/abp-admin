@@ -78,6 +78,23 @@ pnpm start                                             # http://localhost:8000
 - 一次性初始化可执行 `./backend/etc/scripts/initialize-solution.ps1`(编译 + install-libs + 迁移)。
 - 改框架表:改 `AbpAdminDbContext` 后执行 `dotnet ef migrations add`(命令见 `docs/pg-migration-runbook.md`),再跑一次 Migrator。业务模块(样板)同法。已应用的迁移不要改。
 
+### Docker 一键起栈(全栈,前端唯一对外)
+
+不想本机装 PostgreSQL/Redis/.NET/Node,只要 Docker: 仓库根 `docker-compose.yml` 编排五个服务——web 前端(nginx,SPA + 后端反代)、HttpApi.Host、PostgreSQL 16、Redis 7、一次性迁移种子(DbMigrator)。**只有前端对外(默认 http://localhost:8000)**,数据库/缓存/后端全部收在 compose 内网:浏览器只面对前端源,API/OIDC/SignalR 由前端 nginx 反代进内网(路径契约= `web/config/proxy.ts` 的 dev 代理清单;OIDC 授权地址动态取 `window.location.origin`,前端代码零改动)。源码直接出镜像(无需先 `dotnet publish`/`pnpm build`):
+
+```bash
+docker compose up -d --build        # 起栈:db → 迁移/种子 → host → web(自动等待就绪)
+# 前端/登录/API: http://localhost:8000  (纯 HTTP,无证书告警)
+docker compose logs -f migrator host    # 迁移种子与后端日志
+docker compose down                # 停栈(数据卷保留); -v 连数据一起删
+```
+
+- 连接参数与 CI、`appsettings.secrets.json` 开发样本同参(`abpadmin`/`postgres`/`postgres`);端口/口令用仓库根 `.env` 覆盖(可用变量见 compose 文件头注释)。改前端端口时 `WEB_HOST_PORT` 与 `WEB_PUBLIC_URL` 必须成对改(OIDC 回调以 `WEB_PUBLIC_URL` 为基准种入);改 `OPENIDDICT_CERT_PASSPHRASE` 后必须 `--build` 重建 host 镜像。前端端口默认只绑 `127.0.0.1`(栈内置开发默认口令,不默认暴露局域网;`WEB_BIND=0.0.0.0` 放开)。
+- Swagger 不在这套栈的对外路径里(生产姿态默认关闭且反代清单未含 `/swagger/`);确需经前端访问,按 compose 文件头 `App__EnableSwaggerInProduction` 注释同步三处配置。
+- 后端跑 Production 姿态:Redis 缓存/分布式锁/DataProtection 密钥环/SignalR backplane、Quartz 持久化(`qrtz_*` 表由迁移器幂等建表)全部落在这套内联库上。
+- 临时排查内网服务:`docker compose exec db psql -U postgres -d abpadmin`;宿主机 `pnpm start`(dev 模式)仍可直接对接本地后端 `https://localhost:44395`。
+- 生产部署提示见文末「生产部署」;compose 栈面向本机体验。
+
 ### 配置单一来源
 
 `Database:Provider` 与 `ConnectionStrings:Default` 只维护在 `backend/src/AbpAdmin.HttpApi.Host/appsettings.json`(真实凭证放同目录 `appsettings.secrets.json`:入库的是公开安全的开发样本,本机真实凭据改同文件后 `git update-index --skip-worktree` 屏蔽);DbMigrator 与 EF 设计时工具自动跟随读取。生效顺序(后者覆盖前者):

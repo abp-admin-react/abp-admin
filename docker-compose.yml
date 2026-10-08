@@ -1,0 +1,155 @@
+# AbpAdmin 全栈一键编排：web 前端（唯一对外入口）+ HttpApi.Host + PostgreSQL + Redis
+# + 一次性迁移/种子（DbMigrator）。数据库/缓存/后端全部收在 compose 内网，宿主机只
+# 暴露前端端口——浏览器只面对前端源，API/OIDC/SignalR 由前端 nginx 反代进内网
+# （路径契约见 web/nginx.conf 头注释）。
+#
+# 用法（在仓库根目录）：
+#   docker compose up -d --build     # 首次构建 + 起栈
+#   docker compose logs -f migrator host   # 迁移种子与后端日志
+#   docker compose down              # 停栈（数据卷保留）；-v 连数据一起删
+# 起来之后：
+#   前端/登录/API/Swagger：http://localhost:8000 （前端源，纯 HTTP，无证书告警）
+#
+# 可用 backend 同级（仓库根）.env 覆盖的变量（不入库）：
+#   POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+#   OPENIDDICT_CERT_PASSPHRASE / STRING_ENCRYPTION_PASSPHRASE
+#     ⚠ 改 OPENIDDICT_CERT_PASSPHRASE 必须 docker compose build host 重建镜像——
+#     openiddict.pfx 在构建期用该口令烘焙加密，只改运行时会让容器拿新口令解旧证书，
+#     启动即失败。
+#   WEB_HOST_PORT（前端宿主机端口，默认 8000）
+#   WEB_BIND（前端绑定的宿主机地址，默认 127.0.0.1——栈内置开发默认口令，不默认暴露 LAN）
+#   WEB_BIND（前端绑定的宿主机地址，默认 127.0.0.1——栈内置开发默认口令，不默认暴露 LAN）
+#   WEB_PUBLIC_URL（浏览器看到的完整前端源，默认 http://localhost:8000；
+#     改端口两处必须一起改：WEB_HOST_PORT=8100 + WEB_PUBLIC_URL=http://localhost:8100——
+#     OIDC 授权/令牌/发现端点与客户端回调地址都以它为基准）
+#
+# 连接约定与 CI（.github/workflows/ci.yml 的 postgres 服务）、appsettings.secrets.json
+# 开发样本同参（abpadmin / postgres / postgres）——同一套心智模型，改默认值三处要同步。
+
+name: abp-admin
+
+services:
+  # ---- 业务数据库（PostgreSQL 16，仅内网；临时排查用：
+  #      docker compose exec db psql -U postgres -d abpadmin） ----
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-abpadmin}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-abpadmin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # ---- 分布式缓存 / 分布式锁 / DataProtection 密钥环 / SignalR backplane（仅内网） ----
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      # DataProtection 签名密钥环落这里（Production 姿态 Redis:IsEnabled=true）：
+      # 持久化避免每次 down/up 令牌全失效
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # ---- 一次性迁移 + 种子：跑完即退（restart: "no"），后续服务等它成功 ----
+  migrator:
+    build:
+      context: ./backend
+      dockerfile: src/AbpAdmin.DbMigrator/Dockerfile
+    environment:
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=${POSTGRES_DB:-abpadmin};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
+      # ABP 设置项加密口令（种子落库的 isEncrypted 设置项用它加密，Host 侧必须同值才能解）
+      StringEncryption__DefaultPassPhrase: ${STRING_ENCRYPTION_PASSPHRASE:-dev-only-change-me}
+      # OIDC 客户端回调地址种到数据库：SPA/Swagger 的回调都指前端源（浏览器可达的唯一入口）。
+      # 环境 key 覆盖会合并进镜像内烘焙的 Host appsettings.json（OpenIddict:Applications 节）
+      OpenIddict__Applications__AbpAdmin_App__RootUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      OpenIddict__Applications__AbpAdmin_Swagger__RootUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # ---- 后端宿主（仅内网）：容器内 https:44395（自签，仅证书挂载用）/ http:8080（前端反代上游） ----
+  host:
+    build:
+      context: ./backend
+      dockerfile: src/AbpAdmin.HttpApi.Host/Dockerfile
+      args:
+        CERT_PASSPHRASE: ${OPENIDDICT_CERT_PASSPHRASE:-dev-only-change-me}
+    environment:
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=${POSTGRES_DB:-abpadmin};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
+      # Production 姿态（appsettings.Production.json）Redis:IsEnabled=true、SignalR backplane、
+      # Quartz 持久化（qrtz_* 表由迁移器幂等建表）都在这条连接上工作
+      Redis__Configuration: "redis:6379"
+      StringEncryption__DefaultPassPhrase: ${STRING_ENCRYPTION_PASSPHRASE:-dev-only-change-me}
+      AuthServer__CertificatePassPhrase: ${OPENIDDICT_CERT_PASSPHRASE:-dev-only-change-me}
+      ASPNETCORE_Kestrel__Certificates__Default__Password: ${OPENIDDICT_CERT_PASSPHRASE:-dev-only-change-me}
+      # 对外身份 = 前端源：OIDC issuer/发现文档/授权端点全部经前端反代被浏览器访问，
+      # 后端自身不再对外。与 migrator 的回调地址种入值同源（WEB_PUBLIC_URL）
+      AuthServer__Authority: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      App__SelfUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      # IP 归属地库：随 Host 镜像携带（见 Host Dockerfile 的 COPY etc/ip2region），
+      # 容器内路径相对 ContentRoot=/app 解析——覆盖本地开发用的 ../../etc 相对路径
+      IpRegion__DbPath: "etc/ip2region/ip2region_v4.xdb"
+      IpRegion__DbPathV6: "etc/ip2region/ip2region_v6.xdb"
+      # 前端以 HTTP 对外（本机体验栈）：OpenIddict 放宽传输层强制 HTTPS 并启用
+      # X-Forwarded-Proto 处理（模块内既有接线，见 AbpAdminHttpApiHostModule 的
+      # RequireHttpsMetadata 分支）。生产前端上 HTTPS 后保持默认 true 即可
+      AuthServer__RequireHttpsMetadata: "false"
+      # Swagger 在非 Development 环境默认关闭，且 /swagger/ 不在前端反代清单里
+      # （对外入口只暴露业务路径）。确需经前端访问 Swagger：给本服务加
+      # App__EnableSwaggerInProduction=true 并在 web/nginx.conf + web/config/proxy.ts
+      # 的路径清单同步加 /swagger/（两处都要）
+      # 迁移已由 migrator 完成；宿主自迁移开关关掉（多实例生产姿势）。想让 host 单独
+      # 自给自足（不跑 migrator）：删掉本键与 depends_on.migrator 段即可，默认值会自己建表
+      Database__AutoMigrateOnStartup: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    healthcheck:
+      # aspnet 运行时镜像没有 curl/wget；/dev/tcp 是 bash 内建（默认 sh=dash 不支持），
+      # 必须显式 bash -c。探容器内 8080 的健康端点
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health-status HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ---- web 前端：唯一对外服务（SPA + 后端反代，配置见 web/nginx.conf） ----
+  web:
+    build:
+      context: ./web
+    ports:
+      # 默认只绑宿主机回环：栈内置开发默认口令（postgres/postgres、dev-only-change-me），
+      # 不应默认暴露给局域网。要 LAN/外部访问：.env 里 WEB_BIND=0.0.0.0（并自行改掉
+      # 全部默认口令 + 给前端上 HTTPS）
+      - "${WEB_BIND:-127.0.0.1}:${WEB_HOST_PORT:-8000}:80"
+    depends_on:
+      host:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

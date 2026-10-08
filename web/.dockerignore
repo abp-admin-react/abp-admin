@@ -1,0 +1,14 @@
+# 前端镜像构建上下文瘦身（上下文 = web/）。
+# node_modules 必须排除（宿主平台二进制 + 体积巨大，容器内 pnpm install 自装）；
+# dist 是宿主旧构建产物，容器内自己构建；cloudflare-worker 与本镜像无关。
+# 注意：docs/ 不可排除——SPA 页面经 @root 别名导入 docs/cheatsheet.*.md（见 config/config.ts alias）。
+
+node_modules/
+dist/
+.umi/
+.umi-production/
+.cache/
+cloudflare-worker/
+*.log
+web-run.log
+.swagger/
