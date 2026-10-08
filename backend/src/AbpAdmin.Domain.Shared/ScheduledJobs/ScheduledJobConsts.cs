@@ -13,6 +13,12 @@ public static class ScheduledJobConsts
     /// </summary>
     public const string BroadcastNotificationWatchdogJobType = "AbpAdmin.BroadcastNotificationWatchdog";
 
+    /// <summary>
+    /// HTTP 探活作业的 JobType。handler 在 Application 层 Monitoring（要出站 HTTP 并发布失败事件），
+    /// 常量收口到 Domain.Shared（同上条理由：DisplayKey、未来守卫/种子与 handler 三处单一出处）。
+    /// </summary>
+    public const string HttpProbeJobType = "AbpAdmin.HttpProbe";
+
     public const int MaxNameLength = 128;
 
     public const int MaxJobTypeLength = 128;

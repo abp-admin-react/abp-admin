@@ -73,6 +73,11 @@ public class AbpAdminApplicationModule : AbpModule
         // （消费方 TurnstileCaptchaValidator 在 Domain，注册跟随消费方，round4 收敛重复注册）。
         context.Services.AddHttpClient();
 
+        // HTTP 探活作业（Monitoring/HttpProbeJobHandler）的命名客户端（注册跟随消费方）：
+        // 目标 URL 来自作业 Payload，无 BaseAddress/超时可配（超时走 SetTimeout 按次设置）；
+        // 命名是为了测试挂录制替身 + Profiler 全局管道可辨识。
+        context.Services.AddHttpClient(Monitoring.HttpProbeJobHandler.HttpClientName);
+
         // T2.8 SaaS Pro 缺口：租户/版本级功能编辑的授权策略。
         // 开源 FeatureAppService 只对 Host 功能（T + providerKey == null，严格 null 比较）
         // 硬编码 ManageHostFeatures；其余 provider 未配置策略时抛

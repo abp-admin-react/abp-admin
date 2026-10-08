@@ -112,3 +112,8 @@ public sealed class RecordingConnectTokenHandler : RecordingHttpHandler
 public sealed class RecordingTurnstileHandler : RecordingHttpHandler
 {
 }
+
+/// <summary>"AbpAdminHttpProbe" 命名 HttpClient 的替身（HTTP 探活作业）。</summary>
+public sealed class RecordingHttpProbeHandler : RecordingHttpHandler
+{
+}

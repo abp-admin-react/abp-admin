@@ -145,6 +145,7 @@
         "ScheduledJobType:GdprRequestCleanup": "Expired GDPR request cleanup",
         "ScheduledJobType:ScheduledJobExecutionCleanup": "Scheduled job execution history cleanup",
         "ScheduledJobType:ThumbnailBackfill": "Thumbnail backfill",
+        "ScheduledJobType:HttpProbe": "HTTP probe",
         "Saas": "SaaS",
         "DisplayName:AbpAdmin.Saas.EnableTenantBasedConnectionStringManagement": "Enable tenant based connection string management",
         "Description:AbpAdmin.Saas.EnableTenantBasedConnectionStringManagement": "Whether tenants' database connection strings can be managed. When disabled, the UI entry is hidden, connection strings are ignored on tenant creation, and update requests are rejected.",

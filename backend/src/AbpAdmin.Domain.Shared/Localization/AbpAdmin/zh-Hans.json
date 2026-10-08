@@ -251,6 +251,7 @@
         "ScheduledJobType:GdprRequestCleanup": "过期 GDPR 请求清理",
         "ScheduledJobType:ScheduledJobExecutionCleanup": "定时作业执行历史清理",
         "ScheduledJobType:ThumbnailBackfill": "缩略图回填",
+        "ScheduledJobType:HttpProbe": "HTTP 探活",
         "AbpAdmin:SmsChannelNotConfigured": "短信通道未配置，请联系管理员。",
         "TwoFactorVerificationTitle": "双因素验证",
         "TwoFactorVerificationEmailDescription": "您的账户已启用双因素认证，点击下方按钮将验证码发送到您已确认的邮箱。",

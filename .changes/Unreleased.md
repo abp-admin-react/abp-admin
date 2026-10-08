@@ -52,3 +52,4 @@
 | --- | --- | --- | --- |
 | `Serilog:WriteTo[File].Args.configure[0].Args.outputTemplate` | 变更 | File sink 默认模板 + 行尾 ` {LogUniqueId}` | 否 |
 | `Serilog:WriteTo[Console].Args.configure[0].outputTemplate` | 新增 | `[HH:mm:ss Level] Message LogUniqueId` | 否 |
+- 新增 HTTP 探活定时作业(JobType=`AbpAdmin.HttpProbe`,Host/租户均可配):`Application/Monitoring/HttpProbeJobHandler` 对 Payload 指定 Url 发一次 GET(可选 `TimeoutSeconds`≤60 / `ExpectedStatusCode`),成败落定时作业执行记录;失败先发 `HttpProbeFailedEto`(ILocalEventBus,`onUnitOfWorkComplete:false` 立即分发——外层调度 UoW 随后必然回滚,缓冲发布会让失败通知静默丢失)再抛出。Payload 缺失/非法 JSON/非法 URL 快速失败且不发请求。命名客户端 `AbpAdminHttpProbe` 注册跟随消费方(Application 模块)。补监控缺口:此前 Monitoring 仅进程/Redis 本地监控,无 URL 探活。

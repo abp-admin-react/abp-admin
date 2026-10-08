@@ -76,9 +76,12 @@ public class AbpAdminApplicationTestModule : AbpModule
         // 即使某个未挂替身的测试套件意外触达 token 交换，也只是即时 DNS 失败而非真实出网。
         context.Services.AddSingleton<HttpStubs.RecordingConnectTokenHandler>();
         context.Services.AddSingleton<HttpStubs.RecordingTurnstileHandler>();
+        context.Services.AddSingleton<HttpStubs.RecordingHttpProbeHandler>();
         context.Services.AddHttpClient(AbpAdminApplicationModule.AuthServerTokenExchangeHttpClient)
             .ConfigurePrimaryHttpMessageHandler(sp => sp.GetRequiredService<HttpStubs.RecordingConnectTokenHandler>());
         context.Services.AddHttpClient(Captcha.TurnstileHttpClients.SiteVerify)
             .ConfigurePrimaryHttpMessageHandler(sp => sp.GetRequiredService<HttpStubs.RecordingTurnstileHandler>());
+        context.Services.AddHttpClient(Monitoring.HttpProbeJobHandler.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(sp => sp.GetRequiredService<HttpStubs.RecordingHttpProbeHandler>());
     }
 }
