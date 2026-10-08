@@ -59,8 +59,9 @@ public class AnonymousEndpointSweepTests
     private static async Task<WebApplication> CreateInitializedHostAsync()
     {
         // A-block 迁移机制重构后宿主是 PostgreSQL-only（EF 模块无条件 UseNpgsql，
-        // SQLite 分支已删）——SQLite 文件副本隔离不再可行。改为：凭证沿用宿主同一分层源
-        // （appsettings.json → appsettings.secrets.json，与 Program.cs 同序），schema 隔离到
+        // SQLite 分支已删）——SQLite 文件副本隔离不再可行。改为：凭证取真实覆盖层
+        // （环境变量 ConnectionStrings__Default → appsettings.secrets.json；tracked 基座
+        // 占位串不算配置，见 RequiresHostDatabaseFactAttribute），schema 隔离到
         // 专用 abp_admin_hosttest（不存在则创建；宿主启动的 AutoMigrateOnStartup 会在其中
         // 自举迁移+种子），与 dev schema（abp_admin_efm）互不干扰。
         var baseConn = ResolveHostDatabaseConnectionString();
@@ -80,30 +81,16 @@ public class AnonymousEndpointSweepTests
     private static Task<WebApplication> HostTask => LazyHost.Value;
 
     /// <summary>
-    /// 沿用宿主同序的连接串分层（appsettings.json → appsettings.secrets.json；环境变量与
-    /// in-memory 源在 HostUnderTest 内已分层）。测试进程不依赖用户机器的环境变量注入。
+    /// 宿主连接串的真实覆盖：环境变量 ConnectionStrings__Default 优先，其后 HttpApi.Host 的
+    /// appsettings.secrets.json——统一走 <see cref="AbpAdmin.RequiresHostDatabaseFactAttribute.TryResolveOverride"/>
+    /// （tracked 基座 appsettings.json 的 PG 占位串设计为运行期 fail-fast，不算配置）。
+    /// 事实方法已由 <see cref="AbpAdmin.RequiresHostDatabaseFactAttribute"/> 门控，无覆盖时到不了这里；
+    /// 本抛出仅为直调兜底，防止门控被绕过后拿占位串真拨库。
     /// </summary>
     private static string ResolveHostDatabaseConnectionString()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "AbpAdmin.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        if (directory == null)
-        {
-            throw new DirectoryNotFoundException("AbpAdmin.slnx not found above the test binaries.");
-        }
-
-        var hostRoot = Path.Combine(directory.FullName, "src", "AbpAdmin.HttpApi.Host");
-        var configuration = new ConfigurationBuilder()
-            .AddJsonFile(Path.Combine(hostRoot, "appsettings.json"), optional: false)
-            .AddJsonFile(Path.Combine(hostRoot, "appsettings.secrets.json"), optional: true)
-            .Build();
-
-        var conn = configuration.GetConnectionString("Default");
-        if (string.IsNullOrWhiteSpace(conn) || conn.Contains("Data Source=", StringComparison.OrdinalIgnoreCase))
+        var conn = AbpAdmin.RequiresHostDatabaseFactAttribute.TryResolveOverride();
+        if (conn == null)
         {
             throw new InvalidOperationException(
                 "匿名端点扫查需要 PostgreSQL 连接串（宿主已 PG-only）。" +
@@ -231,7 +218,7 @@ public class AnonymousEndpointSweepTests
         "api/abp/application-localization",
     ];
 
-    [Fact]
+    [RequiresHostDatabaseFact]
     public async Task FallbackPolicy_Should_Require_Authenticated_User()
     {
         var app = await HostTask;
@@ -247,7 +234,7 @@ public class AnonymousEndpointSweepTests
                 "FallbackPolicy 必须至少要求已认证（RequireAuthenticatedUser）。");
     }
 
-    [Fact]
+    [RequiresHostDatabaseFact]
     public async Task Every_Anonymous_Endpoint_Must_Be_Declared_In_The_Allowlist()
     {
         var app = await HostTask;
@@ -274,7 +261,7 @@ public class AnonymousEndpointSweepTests
             "要么是有人误加了 [AllowAnonymous]（删掉它）。");
     }
 
-    [Fact]
+    [RequiresHostDatabaseFact]
     public async Task Login_Flow_Endpoints_Must_Actually_Be_Anonymous()
     {
         var app = await HostTask;
@@ -309,7 +296,7 @@ public class AnonymousEndpointSweepTests
             "登录链路端点失去匿名可达性，登录/登出会直接被默认拒绝拦断：\n" + string.Join("\n", broken));
     }
 
-    [Fact]
+    [RequiresHostDatabaseFact]
     public async Task Endpoint_Table_Should_Be_Initialized_Not_Vacuously_Empty()
     {
         var app = await HostTask;

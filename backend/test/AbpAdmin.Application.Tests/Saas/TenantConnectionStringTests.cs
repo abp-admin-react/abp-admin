@@ -191,13 +191,13 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
         databases.ShouldNotContain("Default");
     }
 
-    [Fact]
+    [RequiresHostDatabaseFact]
     public async Task Should_Check_Connection_String_Without_Persisting()
     {
         var tenantId = await CreateTenantAsync();
 
         // A-block 重构后建库/校验是 PostgreSQL-only（CreateConnection 用 Npgsql）。
-        // 合法串 = 宿主同一分层源（appsettings.json → secrets）里的可连接 PG 串
+        // 合法串 = 宿主连接串真实覆盖层（环境变量 → secrets；tracked 基座占位串不算配置）里的可连接 PG 串
         var ok = await _tenantAppService.CheckConnectionStringAsync(tenantId, new CheckTenantConnectionStringInput
         {
             ConnectionString = ResolveHostPgConnectionString()
@@ -219,30 +219,16 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
     }
 
     /// <summary>
-    /// 与宿主/匿名端点扫查同源的分层读法（沿目录向上找 AbpAdmin.slnx，
-    /// 叠加 HttpApi.Host 的 appsettings.json 与 secrets）。连接串校验需要一台可连的 PG。
+    /// 宿主连接串的真实覆盖：环境变量 ConnectionStrings__Default 优先，其后 HttpApi.Host 的
+    /// appsettings.secrets.json——统一走 <see cref="AbpAdmin.RequiresHostDatabaseFactAttribute.TryResolveOverride"/>
+    /// （tracked 基座 appsettings.json 的 PG 占位串设计为运行期 fail-fast，不算配置）。
+    /// 连接串校验需要一台可连的 PG；本用例已由 <see cref="AbpAdmin.RequiresHostDatabaseFactAttribute"/>
+    /// 门控，无覆盖时到不了这里，本抛出仅为直调兜底。
     /// </summary>
     private static string ResolveHostPgConnectionString()
     {
-        var directory = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null && !System.IO.File.Exists(System.IO.Path.Combine(directory.FullName, "AbpAdmin.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        if (directory == null)
-        {
-            throw new System.IO.DirectoryNotFoundException("AbpAdmin.slnx not found above the test binaries.");
-        }
-
-        var hostRoot = System.IO.Path.Combine(directory.FullName, "src", "AbpAdmin.HttpApi.Host");
-        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
-            .AddJsonFile(System.IO.Path.Combine(hostRoot, "appsettings.json"), optional: false)
-            .AddJsonFile(System.IO.Path.Combine(hostRoot, "appsettings.secrets.json"), optional: true)
-            .Build();
-
-        var conn = configuration.GetConnectionString("Default");
-        if (string.IsNullOrWhiteSpace(conn) || conn.Contains("Data Source=", System.StringComparison.OrdinalIgnoreCase))
+        var conn = AbpAdmin.RequiresHostDatabaseFactAttribute.TryResolveOverride();
+        if (conn == null)
         {
             throw new System.InvalidOperationException(
                 "连接串校验用例需要 PostgreSQL 连接串（宿主已 PG-only）。" +
