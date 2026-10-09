@@ -73,6 +73,15 @@
   信息对持 `CacheMonitor.Default` 权限者可见；React 转义，无 XSS 面。
 - **HTTP 错误通知走 `AntdApp.useApp()` 注入桥**：渲染纯度约束（effect 注入、静态回退），
   见 `requestErrorConfig.ts` 注释。
+- **数据范围筛选器存在两份同构实现**（框架 `AbpAdminDbContext` 与自包含模块样板
+  `BizTemplateDbContext` 的复制体——模块自包含取舍，复制模块即带走数据权限能力）：
+  框架侧语义变更时**必须同提交同步模块副本**，模块侧行为由
+  `BizDataScopeDemoFilterTests`（读取/写入两侧 15 用例）钉住；框架原件的写入路径
+  暂无直接用例，变更时以模块测试为准绳人工比对两侧。
+- **模块 Contracts DTO 不进 `FrontendContractSnapshotTests`**（层级隔离：Application.Tests
+  不反向引用业务模块工程，快照机制无法 seed 模块类型）：模块前端镜像（如
+  `web/src/abp/bizDataScopeDemo.ts`）的可空性契约暂由模块侧测试与评审保证；
+  快照机制上提为 TestBase 共享能力留待后续模块消费面扩大时再做。
 
 ## 6. 下游 fork 改造清单（源码模板专属）
 

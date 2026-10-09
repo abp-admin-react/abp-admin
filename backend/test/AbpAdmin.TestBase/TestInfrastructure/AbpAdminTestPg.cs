@@ -16,7 +16,8 @@ namespace AbpAdmin;
 /// <para>
 /// 形态：每个测试进程一个容器（静态懒加载，进程退出后由 Testcontainers 的 Ryuk 守护回收，
 /// 不留垃圾容器）；容器内每个测试程序集一个独立数据库——同进程多程序集（IDE 单进程跑多工程）
-/// 与跨进程（dotnet test 每工程一个 testhost）都天然隔离，互不相扰。
+/// 与跨进程（dotnet test 每工程一个 testhost）都天然隔离，互不相扰。库名截断到 63 字节，
+/// 截断后同名会显式抛错（共享库会互相清表，宁可红不可静默串库）。
 /// </para>
 /// <para>
 /// 两种消费方式：① 模块集成测试（EFCore.Tests / Biz.Template.Tests 的测试模块）经
@@ -37,6 +38,9 @@ public static class AbpAdminTestPg
 
     /// <summary>程序集名 → 已建好的数据库句柄</summary>
     private static readonly ConcurrentDictionary<string, TestPgDatabase> Databases = new(StringComparer.Ordinal);
+
+    /// <summary>库名 → 首个占用该库的程序集全名（截断碰撞守卫）</summary>
+    private static readonly ConcurrentDictionary<string, string> DatabaseOwners = new(StringComparer.Ordinal);
 
     /// <summary>容器默认库（postgres:16 镜像下即镜像自举库）的连接串。</summary>
     public static string ContainerConnectionString => Container.Value.GetConnectionString();
@@ -73,7 +77,7 @@ public static class AbpAdminTestPg
     public static TestPgDatabase GetDatabase(Assembly forAssembly)
     {
         var name = DatabaseName(forAssembly);
-        return Databases.GetOrAdd(name, _ =>
+        var database = Databases.GetOrAdd(name, _ =>
         {
             Gate.Wait();
             try
@@ -86,10 +90,21 @@ public static class AbpAdminTestPg
                 Gate.Release();
             }
         });
+
+        // 截断碰撞守卫：两个程序集净化截断后同名 → 共享库互相清表，静默串库不可接受
+        var owner = DatabaseOwners.GetOrAdd(name, _ => forAssembly.FullName ?? forAssembly.GetName().Name ?? "?");
+        if (!string.Equals(owner, forAssembly.FullName, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"测试库名冲突：程序集 {forAssembly.FullName} 与 {owner} 的净化名截断后同为 \"{name}\"。" +
+                "共享库会让两个程序集的 Respawn 清表互相干扰——请缩短程序集名后重试。");
+        }
+
+        return database;
     }
 
     /// <summary>
-    /// 用例间隔离：Respawn 清空该程序集库的全部业务表（保留三本迁移记账表）。
+    /// 用例间隔离：Respawn 清空该程序集库的全部业务表（保留迁移记账表）。
     /// 未注册库的程序集（纯单测，不碰数据库）零成本直通。放在测试基类 Dispose 里调用——
     /// 下一个用例启动时种子重新播，等价于此前「每用例一座独立内存库」的隔离语义。
     /// </summary>
@@ -105,7 +120,8 @@ public static class AbpAdminTestPg
 
     private static string DatabaseName(Assembly assembly)
     {
-        // PG 库名上限 63 字节；abpadmin_ 前缀 + 程序集名（非字母数字折叠成 _、截断）足够区分且可读
+        // PG 库名上限 63 字节；abpadmin_ 前缀 + 程序集名（非字母数字折叠成 _、截断）足够区分且可读。
+        // 截断碰撞由 GetDatabase 的守卫显式抛错兜底。
         var sanitized = (assembly.GetName().Name ?? "tests").ToLowerInvariant();
         sanitized = new string(sanitized.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
         return ("abpadmin_" + sanitized)[..Math.Min(63, ("abpadmin_" + sanitized).Length)];
@@ -166,29 +182,14 @@ public static class AbpAdminTestPg
 public sealed class TestPgDatabase
 {
     private readonly ConcurrentDictionary<string, byte?> _migrated = new(StringComparer.Ordinal);
-    private readonly Lazy<Respawner> _respawner;
+    private readonly object _migrateGate = new();
+    private Lazy<Respawner> _respawner;
 
     internal TestPgDatabase(string name, string connectionString)
     {
         Name = name;
         ConnectionString = connectionString;
-        // 适配器由 NpgsqlConnection 自动推断（Respawn 7）。删除图（表依赖序）建一次缓存复用，
-        // 每次清表用新连接执行。三本迁移记账表必须活过清表——删了它们，
-        // 下次启动会把已建表当空库重放迁移。
-        _respawner = new Lazy<Respawner>(() =>
-        {
-            using var connection = new NpgsqlConnection(connectionString);
-            connection.Open();
-            return Respawner.CreateAsync(connection, new RespawnerOptions
-            {
-                TablesToIgnore = new Table[]
-                {
-                    "__EFMigrationsHistory",
-                    "__BizTemplate_EFMigrationsHistory",
-                    "__AbpAdminWebhooks_EFMigrationsHistory",
-                },
-            }).GetAwaiter().GetResult();
-        });
+        _respawner = NewRespawnerLazy(connectionString);
     }
 
     public string Name { get; }
@@ -198,6 +199,9 @@ public sealed class TestPgDatabase
     /// <summary>
     /// 进程内一次性迁移守卫：同一库同一 key 只跑一次建表迁移（后续测试实例启动直接跳过，
     /// 迁移记账表保证幂等语义）。key 用 DbContext 名即可——守卫作用域本就限定在该库内。
+    /// 迁移可能新建表（EFCore.Tests 里 Webhooks 上下文的表在基线上下文之后、首个
+    /// Webhooks 用例启动时才建），Respawn 删除图必须随之作废重建——否则后建的表
+    /// 永远不在清表清单里，用例间隔离对这些表静默失效。
     /// </summary>
     public void MigrateOnce(string key, Action migrate)
     {
@@ -206,7 +210,7 @@ public sealed class TestPgDatabase
             return;
         }
 
-        lock (this)
+        lock (_migrateGate)
         {
             if (_migrated.ContainsKey(key))
             {
@@ -215,6 +219,8 @@ public sealed class TestPgDatabase
 
             migrate();
             _migrated[key] = default;
+            // 删除图作废：下次 Reset 用当前 schema 重建（每库每进程至多重建数次，零常态成本）
+            _respawner = NewRespawnerLazy(ConnectionString);
         }
     }
 
@@ -224,5 +230,42 @@ public sealed class TestPgDatabase
         using var connection = new NpgsqlConnection(ConnectionString);
         connection.Open();
         _respawner.Value.ResetAsync(connection).GetAwaiter().GetResult();
+    }
+
+    private static Lazy<Respawner> NewRespawnerLazy(string connectionString) =>
+        new(() =>
+        {
+            using var connection = new NpgsqlConnection(connectionString);
+            connection.Open();
+            return Respawner.CreateAsync(connection, new RespawnerOptions
+            {
+                // 记账表自维护清单：从 information_schema 按 %EFMigrationsHistory 后缀现查——
+                // 复制模块产生第四本账（__BizFoo_EFMigrationsHistory）时无需回来改这里；
+                // 业务表以 App/Biz 前缀命名，不会误命中。空结果回落框架默认表名
+                // （Reset 只在已迁移过的库上发生，正常不可能为空，防御性兜底）。
+                TablesToIgnore = LoadHistoryTables(connection),
+            }).GetAwaiter().GetResult();
+        });
+
+    private static Table[] LoadHistoryTables(NpgsqlConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+              AND table_name LIKE '%EFMigrationsHistory'
+            ORDER BY table_name
+            """;
+        var names = new System.Collections.Generic.List<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names.Count == 0
+            ? new Table[] { "__EFMigrationsHistory" }
+            : names.Select(n => new Table(n)).ToArray();
     }
 }

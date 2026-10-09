@@ -6,10 +6,13 @@ using AbpAdmin.Biz.Template.Entities;
 using AbpAdmin.Biz.Template.Localization;
 using AbpAdmin.Biz.Template.Permissions;
 using AbpAdmin.Biz.Template.Services.Dtos;
+using AbpAdmin.DataScopes;
 using Microsoft.AspNetCore.Authorization;
+using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Domain.Repositories;
+using Volo.Abp.Identity;
 
 namespace AbpAdmin.Biz.Template.Services;
 
@@ -19,15 +22,24 @@ namespace AbpAdmin.Biz.Template.Services;
 /// 过滤条件——GetListAsync 返回的就是当前用户数据范围内可见的行（范围由角色的
 /// RoleDataScope 配置决定，配置入口在框架「身份管理 → 角色 → 数据权限」）。
 /// Auto API：/api/app/biz-data-scope-demo。
+/// 写入侧比框架演示夹具多一道防线（<see cref="EnsureOrganizationUnitAllowedAsync"/>）：
+/// 本模块是可复制的业务样板，客户端提交的 organizationUnitId 不可信。
 /// </summary>
 [Authorize(BizTemplatePermissions.DataScopeDemo.Default)]
 public class BizDataScopeDemoAppService : ApplicationService, IBizDataScopeDemoAppService
 {
     private readonly IRepository<BizDataScopeDemo, Guid> _repository;
+    private readonly IOrganizationUnitRepository _organizationUnitRepository;
+    private readonly ICurrentDataScopeState _dataScopeState;
 
-    public BizDataScopeDemoAppService(IRepository<BizDataScopeDemo, Guid> repository)
+    public BizDataScopeDemoAppService(
+        IRepository<BizDataScopeDemo, Guid> repository,
+        IOrganizationUnitRepository organizationUnitRepository,
+        ICurrentDataScopeState dataScopeState)
     {
         _repository = repository;
+        _organizationUnitRepository = organizationUnitRepository;
+        _dataScopeState = dataScopeState;
         LocalizationResource = typeof(BizTemplateResource);
     }
 
@@ -52,6 +64,8 @@ public class BizDataScopeDemoAppService : ApplicationService, IBizDataScopeDemoA
 
     public async Task<BizDataScopeDemoDto> CreateAsync(CreateBizDataScopeDemoDto input)
     {
+        await EnsureOrganizationUnitAllowedAsync(input.OrganizationUnitId);
+
         var entity = new BizDataScopeDemo(
             GuidGenerator.Create(),
             input.Name,
@@ -66,5 +80,36 @@ public class BizDataScopeDemoAppService : ApplicationService, IBizDataScopeDemoA
     public async Task DeleteAsync(Guid id)
     {
         await _repository.DeleteAsync(id);
+    }
+
+    /// <summary>
+    /// 写入侧数据权限防线：显式指定归属组织时，该组织必须落在当前数据范围内
+    /// （IsAll 例外——但校验组织确实存在）。放行越权归属等于允许把数据种进
+    /// 别人的可见范围（归属伪造：SelfOnly 用户可向任意 OU 植入他人可见的数据），
+    /// 或种进不存在的组织造成全员不可见。留空不在此拦——DbContext 写入侧自动填充
+    /// / 算不出组织抛异常的那套语义照常兜底。
+    /// </summary>
+    private async Task EnsureOrganizationUnitAllowedAsync(Guid? organizationUnitId)
+    {
+        if (organizationUnitId is not { } ouId)
+        {
+            return;
+        }
+
+        if (_dataScopeState.IsAll)
+        {
+            // All 范围没有可见集合可比对，退而校验组织确实存在（fail-closed：不存在即拒）
+            if (await _organizationUnitRepository.FindAsync(ouId) == null)
+            {
+                throw new UserFriendlyException(L["BizDataScope:OrganizationUnitNotFound"]);
+            }
+
+            return;
+        }
+
+        if (!_dataScopeState.OrganizationUnitIds.Contains(ouId))
+        {
+            throw new UserFriendlyException(L["BizDataScope:OrganizationUnitOutOfScope"]);
+        }
     }
 }

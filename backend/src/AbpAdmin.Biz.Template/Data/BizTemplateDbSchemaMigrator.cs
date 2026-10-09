@@ -36,8 +36,8 @@ public class BizTemplateDbSchemaMigrator : IAbpAdminDbSchemaMigrator, ITransient
         await EfCoreLegacySchemaBaseliner.StampIfNeededAsync(
             dbContext.Database.GetDbConnection(),
             _serviceProvider.GetRequiredService<ILogger<BizTemplateDbSchemaMigrator>>(),
-            historyTableName: "__BizTemplate_EFMigrationsHistory",
-            constraintName: "PK___BizTemplate_EFMigrationsHistory",
+            historyTableName: BizTemplateConsts.SchemaHistoryTable,
+            constraintName: "PK_" + BizTemplateConsts.SchemaHistoryTable,
             initialMigrationId: BizTemplateConsts.InitialMigrationId,
             baselineProductVersion: "10.0.9",
             sentinelTableName: "BizProjects");

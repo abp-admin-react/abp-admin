@@ -55,6 +55,7 @@ public static class MenuTemplateDefinition
         new("server-monitor", "system", MenuTypeEnum.Menu, "服务监控", "server-monitor", "/system/server-monitor", "dashboard", 55, "AbpAdmin.ServerMonitor"),
         new("cache-monitor", "system", MenuTypeEnum.Menu, "缓存监控", "cache-monitor", "/system/cache-monitor", "hdd", 60, "AbpAdmin.CacheMonitor"),
         new("data-scope-demo", null, MenuTypeEnum.Menu, "数据权限演示", "data-scope-demo", "/data-scope-demo", "database", 40, "AbpAdmin.DataScopes.Demo"),
+        new("biz-template-data-scope", null, MenuTypeEnum.Menu, "业务模块·数据权限示例", "biz-template-data-scope", "/biz-template/data-scope", "apartment", 45, "BizTemplate.DataScopeDemo"),
         new("current-session", null, MenuTypeEnum.Menu, "当前会话", "current-session", "/current-session", "user", 50),
     };
 }

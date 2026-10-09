@@ -13,6 +13,8 @@
     "BizTemplate": "Biz Template",
     "DisplayName:BizTemplate.Project.MaxProjectsPerUser": "Max projects per user",
     "Description:BizTemplate.Project.MaxProjectsPerUser": "Maximum number of projects a single user can create. 0 means unlimited. Changes made on the settings page take effect immediately, no restart needed.",
-    "BizProject:QuotaExceeded": "Create failed: you have reached your project limit ({0}). Ask an administrator to raise the limit, or clean up unused projects."
+    "BizProject:QuotaExceeded": "Create failed: you have reached your project limit ({0}). Ask an administrator to raise the limit, or clean up unused projects.",
+    "BizDataScope:OrganizationUnitNotFound": "Create failed: the specified organization unit does not exist.",
+    "BizDataScope:OrganizationUnitOutOfScope": "Create failed: data can only be attributed to organization units visible within your current data scope."
   }
 }
