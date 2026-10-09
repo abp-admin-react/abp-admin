@@ -16,6 +16,9 @@ export type BizDataScopeDemoDto = {
 
 export type CreateBizDataScopeDemoDto = {
   name: string;
+  /** 显式指定时后端校验归属合法性：组织必须在当前数据范围内（All 范围退化为校验存在性，
+   * SelfOnly 无可见组织集合则任何显式组织都拒）。越权/不存在会被拒并返回友好错误
+   * （本地化键 BizDataScope:OrganizationUnitNotFound / OrganizationUnitOutOfScope）。 */
   organizationUnitId?: string;
 };
 
@@ -40,7 +43,11 @@ export async function getBizDataScopeDemos(params: {
   });
 }
 
-/** 新建示例数据（不选组织时后端按当前数据范围自动归属） */
+/**
+ * 新建示例数据。组织归属两条路径，与后端写入侧语义一一对齐：
+ * - 留空 organizationUnitId：DbContext 写入侧自动填充当前快照第一个可见组织，算不出组织抛业务异常；
+ * - 显式指定：AppService 校验在当前数据范围内（见 CreateBizDataScopeDemoDto 注释），不在即拒。
+ */
 export async function createBizDataScopeDemo(data: CreateBizDataScopeDemoDto) {
   return request<BizDataScopeDemoDto>('/api/app/biz-data-scope-demo', {
     method: 'POST',

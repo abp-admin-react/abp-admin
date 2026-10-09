@@ -108,6 +108,9 @@ const BizDataScopeDemoPage: React.FC = () => {
     });
   };
 
+  // 组织名映射依赖框架组织单元接口（getOrganizationUnits）的返回；受限角色可能未授该接口
+  // 权限（fetchOuList 静默失败，ouList 为空），此时回退显示原始 GUID——数据可见性不受影响，
+  // 仅该列展示降级（与框架 data-scope-demo 页同款取舍）。
   const getOuName = (ouId?: string) => {
     if (!ouId) return <Tag>无组织</Tag>;
     const ou = ouList.find((o) => o.id === ouId);
