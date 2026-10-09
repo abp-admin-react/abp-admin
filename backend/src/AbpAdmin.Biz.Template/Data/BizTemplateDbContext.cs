@@ -71,6 +71,15 @@ public class BizTemplateDbContext : AbpDbContext<BizTemplateDbContext>
                 .FindProperty(nameof(IHasDataScope.OrganizationUnitId))?.Name
                 ?? nameof(IHasDataScope.OrganizationUnitId);
 
+            // 过滤谓词与 DataScopeTypeEnum 的映射（读侧语义全景，框架 AbpAdminDbContext 同构）：
+            //   !IsDataScopeFilterEnabled        → IDataFilter.Disable<IDataScopeEnabled>（种子/后台作业/DbMigrator 显式旁路）
+            //   IsDataScopeAll                   → All=0
+            //   CurrentDataScopeOuIds.Contains   → CurrentOuAndChildren=1 / CurrentOu=2 / Custom=3
+            //                                       （三种类型在解析链里已折叠为「可见组织集合」，过滤器无感知）
+            //   IsDataScopeSelfOnly && CreatorId == UserId → SelfOnly=4（与机构范围「或」）
+            // 短路顺序即放行优先级：过滤器关 > All > 命中组织 > 本人创建；全不命中即不可见
+            //（fail-closed：无角色配置/空组织集合的登录态看到零行，而不是全部）。
+            // OrganizationUnitId 为 null 的行只有 IsAll 分支放行（Contains 不命中 null）——同样 fail-closed。
             Expression<Func<TEntity, bool>> scopeFilter = e =>
                 !IsDataScopeFilterEnabled
                 || IsDataScopeAll

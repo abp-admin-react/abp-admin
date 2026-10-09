@@ -88,6 +88,8 @@ public class BizDataScopeDemoAppService : ApplicationService, IBizDataScopeDemoA
     /// 别人的可见范围（归属伪造：SelfOnly 用户可向任意 OU 植入他人可见的数据），
     /// 或种进不存在的组织造成全员不可见。留空不在此拦——DbContext 写入侧自动填充
     /// / 算不出组织抛异常的那套语义照常兜底。
+    /// SelfOnly（可见组织集合为空）的成员显式指定任何组织都会被拒：
+    /// 其范围语义是「仅本人创建的行」，指定组织归属整体超出范围——与读取侧 fail-closed 同一口径。
     /// </summary>
     private async Task EnsureOrganizationUnitAllowedAsync(Guid? organizationUnitId)
     {
