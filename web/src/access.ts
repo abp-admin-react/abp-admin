@@ -129,6 +129,8 @@ export default function access(
     canUpdateSettings: !!policies['AbpAdmin.SettingUi.Update'],
     // 数据范围演示（T1.5）
     canManageDataScopeDemo: !!policies['AbpAdmin.DataScopes.Demo'],
+    // 业务模块数据权限示例（AbpAdmin.Biz.Template 自带权限组，/biz-template/data-scope）
+    canManageBizDataScopeDemo: !!policies['BizTemplate.DataScopeDemo'],
     // T2.6 Identity Pro 缺口：用户导入导出
     canImportUsers: !!policies['AbpAdmin.Identity.Users.Import'],
     canExportUsers: !!policies['AbpAdmin.Identity.Users.Export'],

@@ -54,6 +54,7 @@ export default {
   'menu.current-session': '当前会话',
   'menu.account-center': '个人中心',
   'menu.data-scope-demo': '数据权限演示',
+  'menu.biz-template-data-scope': '业务模块·数据权限示例',
   // 菜单层级参照 ABP 官方模板：Administration（Saas → 身份管理 → … → 设置）与 系统
   'menu.administration': '管理',
   'menu.administration.saas': 'SaaS',

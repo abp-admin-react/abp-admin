@@ -55,6 +55,7 @@ export const routeRegistry: RouteRegistryItem[] = [
   { path: '/system/data-dictionary', label: '系统 / 数据字典' },
   { path: '/system/virtual-file-explorer', label: '系统 / 虚拟文件浏览' },
   { path: '/data-scope-demo', label: '数据权限演示' },
+  { path: '/biz-template/data-scope', label: '业务模块·数据权限示例' },
   { path: '/current-session', label: '当前会话' },
 ];
 

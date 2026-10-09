@@ -301,6 +301,15 @@ export default [
     component: './data-scope-demo',
   },
   {
+    // 业务模块数据权限示例：同一能力的自包含模块落地（AbpAdmin.Biz.Template），
+    // 框架 data-scope-demo 退役后由本页承接演示职责
+    path: '/biz-template/data-scope',
+    name: 'biz-template-data-scope',
+    icon: 'apartment',
+    access: 'canManageBizDataScopeDemo',
+    component: './biz-template/data-scope',
+  },
+  {
     path: '/current-session',
     name: 'current-session',
     icon: 'user',

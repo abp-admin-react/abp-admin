@@ -6,6 +6,7 @@
     "Permission:Create": "Create",
     "Permission:Update": "Update",
     "Permission:Delete": "Delete",
+    "Permission:DataScopeDemo": "Data scope demo",
     "Menu:BizTemplate": "Biz Template",
     "Menu:BizProjects": "Projects",
 

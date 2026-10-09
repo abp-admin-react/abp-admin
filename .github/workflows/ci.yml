@@ -11,33 +11,30 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    services:
-      # 与 src/AbpAdmin.HttpApi.Host/appsettings.secrets.json 开发样本同参
-      # （localhost:5432 / abpadmin / postgres-postgres）：真库用例（匿名端点扫查 /
-      # 租户连接串校验）在 CI 真跑而非跳过。改样本连接串必须同步这里，否则必红。
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: abpadmin
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d abpadmin"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - name: Restore dotnet-ef
+        # 三套迁移历史（框架 / Biz.Template / Webhooks）的模型漂移检查用，
+        # 版本钉死在 .config/dotnet-tools.json（与 EF Core 运行时同版）
+        run: dotnet tool restore
+      - name: EF model drift check
+        # 实体/配置改了但没 dotnet ef migrations add 时必红——三本迁移账各查一遍
+        run: |
+          dotnet ef migrations has-pending-model-changes \
+            -p backend/src/AbpAdmin.EntityFrameworkCore -s backend/src/AbpAdmin.DbMigrator -c AbpAdminDbContext
+          dotnet ef migrations has-pending-model-changes \
+            -p backend/src/AbpAdmin.Biz.Template -s backend/src/AbpAdmin.DbMigrator -c BizTemplateDbContext
+          dotnet ef migrations has-pending-model-changes \
+            -p backend/src/AbpAdmin.Webhooks -s backend/src/AbpAdmin.DbMigrator -c WebhooksDbContext
       - name: Test
-        # 含 FrontendContractSnapshotTests（DTO 形状快照）、HostServiceGraphValidationTests
-        # （建图零拨号）、RedisStartupPostureTests（首用 fail-fast，拨 127.0.0.1:1 立即拒绝，
-        # runner 上语义相同）——契约快照未同提交刷新时本步必红
+        # 数据库由测试自起：Testcontainers 拉起 postgres:16（每测试进程一个容器，随进程回收），
+        # runner 自带 Docker，无需服务容器。含 FrontendContractSnapshotTests（DTO 形状快照）、
+        # HostServiceGraphValidationTests（建图零拨号）、RedisStartupPostureTests（首用 fail-fast，
+        # 拨 127.0.0.1:1 立即拒绝，runner 上语义相同）——契约快照未同提交刷新时本步必红
         run: dotnet test backend/AbpAdmin.slnx --nologo
 
   web:

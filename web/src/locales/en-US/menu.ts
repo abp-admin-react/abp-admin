@@ -54,6 +54,7 @@ export default {
   'menu.current-session': 'Current session',
   'menu.account-center': 'Account',
   'menu.data-scope-demo': 'Data Scope Demo',
+  'menu.biz-template-data-scope': 'Biz Module · Data Scope Demo',
   // Menu hierarchy follows the official ABP template: Administration (Saas → Identity → … → Settings) and System
   'menu.administration': 'Administration',
   'menu.administration.saas': 'SaaS',

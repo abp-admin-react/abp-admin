@@ -18,6 +18,9 @@ public class BizTemplatePermissionDefinitionProvider : PermissionDefinitionProvi
         projects.AddChild(BizTemplatePermissions.Projects.Create, L("Permission:Create"));
         projects.AddChild(BizTemplatePermissions.Projects.Update, L("Permission:Update"));
         projects.AddChild(BizTemplatePermissions.Projects.Delete, L("Permission:Delete"));
+
+        // 数据权限示例：消费框架数据范围基建的最小业务面（见 BizDataScopeDemoAppService）
+        group.AddPermission(BizTemplatePermissions.DataScopeDemo.Default, L("Permission:DataScopeDemo"));
     }
 
     private static LocalizableString L(string name)

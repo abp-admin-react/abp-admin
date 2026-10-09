@@ -12,4 +12,10 @@ public static class BizTemplatePermissions
         public const string Update = Default + ".Update";
         public const string Delete = Default + ".Delete";
     }
+
+    /// <summary>数据权限示例（消费框架数据范围基建的最小业务面）</summary>
+    public static class DataScopeDemo
+    {
+        public const string Default = GroupName + ".DataScopeDemo";
+    }
 }

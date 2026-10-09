@@ -137,6 +137,8 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 
 框架迁移循环(`AbpAdminDbMigrationService`)自动枚举所有 `IAbpAdminDbSchemaMigrator` 实现,模块迁移器显式注册一行即被扫到——**业务建表不产生任何框架仓库改动**。
 
+**数据权限示例**:模块内 `BizDataScopeDemo`(实体/服务/迁移)演示业务模块如何消费框架数据权限基建——实体实现 `IHasDataScope` + 模块 DbContext 带同款数据范围筛选器,业务查询零过滤代码;可运行页面在 `web/src/pages/biz-template/data-scope`(路由 `/biz-template/data-scope`,权限 `BizTemplate.DataScopeDemo`),过滤契约测试在 `backend/test/AbpAdmin.Biz.Template.Tests/DataScopes/`。框架侧 `/data-scope-demo` 演示页退役时,引用改指本示例。
+
 配置按三层落位(样板模块内三层都有带注释的实例,照着扩):
 
 1. 基础设施配置(连接串/Redis/端口)只进宿主 `appsettings.json`——框架配置唯一来源,业务模块只读不写

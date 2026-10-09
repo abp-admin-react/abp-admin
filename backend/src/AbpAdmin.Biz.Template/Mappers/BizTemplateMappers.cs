@@ -17,3 +17,12 @@ public partial class BizProjectToDtoMapper : MapperBase<BizProject, BizProjectDt
 
     public override partial void Map(BizProject source, BizProjectDto destination);
 }
+
+/// <summary>数据权限示例实体的 DTO 映射（同上约定）。</summary>
+[Mapper(RequiredMappingStrategy = RequiredMappingStrategy.Target)]
+public partial class BizDataScopeDemoToDtoMapper : MapperBase<BizDataScopeDemo, BizDataScopeDemoDto>
+{
+    public override partial BizDataScopeDemoDto Map(BizDataScopeDemo source);
+
+    public override partial void Map(BizDataScopeDemo source, BizDataScopeDemoDto destination);
+}
