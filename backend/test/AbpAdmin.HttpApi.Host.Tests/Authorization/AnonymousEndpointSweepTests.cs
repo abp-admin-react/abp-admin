@@ -47,9 +47,10 @@ namespace AbpAdmin.Authorization;
 /// 应把本类的 LazyHost 提升为公共基建，而不是再复制一份。
 /// </para>
 /// <para>
-/// 数据库隔离：宿主初始化有真实写库副作用（静态模板同步、后台作业注册），直接指
-/// 仓库根的 dev 库会与运行中的后端抢 SQLite 文件锁——这里把 dev 库复制一份临时文件
-/// 再把连接串覆盖过去，副作用全部落在副本上（ABP 初始化需要已迁移的表结构，空库起不来）。
+/// 数据库隔离：宿主初始化有真实写库副作用（静态模板同步、后台作业注册）。凭证取真实
+/// 覆盖层——本程序集加载时已把 Testcontainers PG 的容器连接串放进环境变量
+/// ConnectionStrings__Default（见 TestPgAssemblyInitializer），宿主在容器默认库的专用
+/// schema abp_admin_hosttest 里自举迁移+种子，副作用全部落在进程容器里，随进程回收。
 /// </para>
 /// </remarks>
 public class AnonymousEndpointSweepTests
@@ -58,10 +59,10 @@ public class AnonymousEndpointSweepTests
 
     private static async Task<WebApplication> CreateInitializedHostAsync()
     {
-        // A-block 迁移机制重构后宿主是 PostgreSQL-only（EF 模块无条件 UseNpgsql，
-        // SQLite 分支已删）——SQLite 文件副本隔离不再可行。改为：凭证取真实覆盖层
+        // 宿主是 PostgreSQL-only（EF 模块无条件 UseNpgsql）。凭证取真实覆盖层
         // （环境变量 ConnectionStrings__Default → appsettings.secrets.json；tracked 基座
-        // 占位串不算配置，见 RequiresHostDatabaseFactAttribute），schema 隔离到
+        // 占位串不算配置，见 RequiresHostDatabaseFactAttribute；本程序集加载时通常已由
+        // TestPgAssemblyInitializer 注入容器连接串），schema 隔离到
         // 专用 abp_admin_hosttest（不存在则创建；宿主启动的 AutoMigrateOnStartup 会在其中
         // 自举迁移+种子），与 dev schema（abp_admin_efm）互不干扰。
         var baseConn = ResolveHostDatabaseConnectionString();

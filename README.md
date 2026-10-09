@@ -176,6 +176,8 @@ git fetch upstream && git merge upstream/main
 
 ## 编译与测试
 
+> 后端测试依赖 **Docker**(Testcontainers 自动拉起 `postgres:16` 容器,每个测试进程一个、随进程回收;镜像可用环境变量 `ABPADMIN_TEST_PG_IMAGE` 覆盖)。跑测试前确认 Docker 已安装且守护进程在运行。
+
 ```bash
 # 后端(backend/)
 dotnet build && dotnet test

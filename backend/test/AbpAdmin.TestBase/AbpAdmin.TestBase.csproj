@@ -32,6 +32,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 共享 Testcontainers PostgreSQL + Respawn 清表（AbpAdminTestPg）：模块集成测试与
+         真库门控用例的统一供库基建，本地/CI 跑测试都要求 Docker 可用。
+         Npgsql 直连建库/清表（Testcontainers 模块包不带驱动） -->
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Respawn" />
+    <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="NSubstitute.Analyzers.CSharp">

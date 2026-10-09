@@ -15,7 +15,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Volo.Abp.EntityFrameworkCore.Sqlite" />
     <!-- xunit/Shouldly 经 TestBase 传递（与 Application.Tests 同款）；TestSdk 必须直接引用，
          否则不生成 testhost.runtimeconfig，dotnet test 静默无运行 -->
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

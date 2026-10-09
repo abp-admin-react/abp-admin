@@ -56,7 +56,6 @@
     <PackageVersion Include="Volo.Abp.Caching.StackExchangeRedis" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.DistributedLocking" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.Emailing" Version="$(AbpVersion)" />
-    <PackageVersion Include="Volo.Abp.EntityFrameworkCore.Sqlite" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.EntityFrameworkCore.PostgreSql" Version="$(AbpVersion)" />
     <!-- 自包含业务模块样板（AbpAdmin.Biz.Template）新增直引包；此前仅作传递依赖存在 -->
     <PackageVersion Include="Volo.Abp.AspNetCore.Mvc" Version="$(AbpVersion)" />
@@ -184,6 +183,10 @@
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.extensibility.execution" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+
+    <!-- 测试供库：Testcontainers 起真 PostgreSQL（每测试进程一个容器）+ Respawn 用例间清表 -->
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.16.0" />
+    <PackageVersion Include="Respawn" Version="7.0.0" />
 
     <!-- EasyAbp（后续批次使用，先定义版本变量） -->
     <PackageVersion Include="EasyAbp.FileManagement.Domain.Shared" Version="$(EasyAbpFileManagementVersion)" />

@@ -148,8 +148,8 @@ public abstract class SettingUiMaskingTests<TStartupModule> : AbpAdminApplicatio
     /// 操作日志纪律（模块五收口）：Set/Reset 各写一条语义日志，
     /// 只记设置名——密钥值与空值项的键名都不得出现（审计参数已被 IgnoredTypes 关掉，
     /// 这条日志是"谁改了什么"的唯一轨迹，泄露值等于审计脱敏白做）。
-    /// 日志经 UoW OnCompleted 在提交后写（SQLite 单写锁，requiresNew 日志 UoW 不能
-    /// 在业务事务内开）——WithUnitOfWorkAsync 的 CompleteAsync 会同步触发断言路径。
+    /// 日志经 UoW OnCompleted 在提交后写（requiresNew 日志 UoW 与业务事务分离，
+    /// 提交后才落笔——不与业务写同事务）——WithUnitOfWorkAsync 的 CompleteAsync 会同步触发断言路径。
     /// </summary>
     [Fact]
     public async Task Set_And_Reset_Should_Write_Operation_Log_With_Names_Only()

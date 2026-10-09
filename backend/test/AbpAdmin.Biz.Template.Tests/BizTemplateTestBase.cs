@@ -4,8 +4,9 @@ using Volo.Abp.Modularity;
 namespace AbpAdmin.Biz.Template;
 
 /// <summary>
-/// 模块测试基类：AbpIntegratedTest 每个测试实例独立启动一次应用（独立内存 SQLite），
-/// 测试之间零共享。启动链：BizTemplateTestModule（建表）→ AbpAdminBizTemplateModule（被测）
+/// 模块测试基类：AbpIntegratedTest 每个测试实例独立启动一次应用（共享 Testcontainers PG
+/// 程序集库，用例间由测试基类 Dispose 里的 Respawn 清表隔离）。启动链：
+/// BizTemplateTestModule（真迁移建表）→ AbpAdminBizTemplateModule（被测）
 /// → AbpAdminTestBaseModule（AlwaysAllow 授权 + IDataSeeder 启动种子）。
 /// </summary>
 public abstract class BizTemplateTestBase : AbpAdminTestBase<BizTemplateTestModule>

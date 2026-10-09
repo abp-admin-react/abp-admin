@@ -114,7 +114,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
     /// （由 SettingUiDateTimePinTests 钉住），故不整方法复制修正——一旦需要 dateTime 项，
     /// 该测试会红，届时必须覆写整个方法并顺手修掉上游 bug。
     /// 操作日志走 OnCompleted（提交后）写：OperationLogWriter 用 requiresNew UoW 开第二个连接，
-    /// 测试基座的单写锁内存库在业务事务还开着时插日志会锁死 30 秒后静默丢弃——与仓库既有的
+    /// 与业务写同事务会互相纠缠——与仓库既有的
     /// OnCompleted 后置写入同款修法（Language/LanguageText/TextTemplate/ScheduledJob 等）。
     /// 失败路径不写操作日志——
     /// ABP 审计对失败调用本身有记录（方法+用户+异常），语义轨迹只在成功提交后落。
@@ -258,7 +258,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
     }
 
     // 操作日志经共享提交器 OperationLogCommitter 在 UoW 提交后（OnCompleted）写入——
-    // requiresNew 写日志在业务事务内执行会与测试基座单写锁内存库死锁（后置写入同款修法）。
+    // requiresNew 写日志在业务事务内执行会与业务写纠缠（后置写入同款修法）。
 
     protected override Task SetSettingAsync(SettingDefinition setting, string value)
     {

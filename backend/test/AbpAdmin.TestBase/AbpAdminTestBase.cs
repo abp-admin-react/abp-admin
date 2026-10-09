@@ -25,6 +25,15 @@ public abstract class AbpAdminTestBase<TStartupModule> : AbpIntegratedTest<TStar
         services.ReplaceConfiguration(builder.Build());
     }
 
+    public override void Dispose()
+    {
+        base.Dispose();
+        // 用例间隔离：接了共享 PG 库的程序集（AbpAdminTestPg.GetDatabase 注册过的）在
+        // 应用释放后 Respawn 清空业务表——下一个用例启动时种子重播，等价于
+        // 「每用例一座独立库」的隔离语义；纯单测程序集（未注册库）零成本直通。
+        AbpAdminTestPg.Reset(typeof(TStartupModule).Assembly);
+    }
+
     protected virtual Task WithUnitOfWorkAsync(Func<Task> func)
     {
         return WithUnitOfWorkAsync(new AbpUnitOfWorkOptions(), func);

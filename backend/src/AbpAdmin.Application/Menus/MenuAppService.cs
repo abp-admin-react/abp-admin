@@ -220,7 +220,8 @@ public class MenuAppService : AbpAdminAppService, IMenuAppService
         }
         // DataException 是 DbUpdateException 的基类——Application 层刻意不引 EF Core
         // （AuditLogAppService.RestoreEntityChangeAsync 同款手法），用 provider 无关
-        // 基类型接住存储层失败；唯一键冲突的具体判定交给消息里的约束名（跨 PG/SQLite 稳定）
+        // 基类型接住存储层失败；唯一键冲突的具体判定交给消息里的约束名（索引名来自
+        // 模型定义，不随存储引擎漂移；宿主与测试同为 PostgreSQL）
         catch (System.Data.DataException ex)
             when (ex.InnerException?.Message?.Contains("IX_AppMenuGrants", StringComparison.OrdinalIgnoreCase) == true)
         {

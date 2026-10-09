@@ -11,7 +11,7 @@
 | BizTemplate 业务模块 | 模块自带 `Migrations/`，同上 | `__BizTemplate_EFMigrationsHistory` |
 
 - **SQLite 支持已移除**：EF 模块不再有 `UseSqlite()` 分支，`Database:Provider` 配置键已移除
-  （运行时 PostgreSQL 单提供程序；测试基座仍用内存 SQLite，见 §3）。
+  （运行时与测试同为 PostgreSQL 单提供程序；测试走 Testcontainers，见 §3）。
 - **启动预检（`PostgresStartupPreflight`）**：宿主与 DbMigrator 启动迁移前先校验 Default 连接串——
   出厂占位串（含 `CHANGE_ME` 标记）、连不上（5 秒探测超时）、目标库不存在（3D000）→ `LogCritical` +
   `AbpInitializationException` 拒绝启动，错误信息含掩码目标（Host/Port/Database/User，密码不回显）与
@@ -53,11 +53,11 @@
 
 | 测试域 | 策略 |
 | --- | --- |
-| Application/Domain/BizTemplate/EFCore 多数 | 内存 SQLite（`AbpUnitTestSqliteDatabase`）+ provider 覆盖；**受上下文级 `UseNpgsql` 影响的上下文须在同层再 `UseSqlite()` 覆盖**（见 `BizTemplateTestModule` 注释） |
+| Application/Domain/BizTemplate/EFCore 多数 | Testcontainers PostgreSQL（`AbpAdminTestPg`，每测试进程一个 `postgres:16` 容器、每程序集一个库）：测试模块注入容器连接串并对相应 DbContext 跑真迁移建表，用例间由测试基类 Respawn 清表隔离——运行期与测试同为 PG 单提供程序，无 provider 覆盖 |
 | 权限定义动态化 | `PermissionDefinitionManagementTestModule` 重开 `IsDynamicPermissionStoreEnabled`（被测能力本身） |
 | 实体回滚前滚闭环 | `EntityRestoreTestModule` 开 `EntityHistorySelectors.AddAllEntities()`（Host 同款） |
 | Saas 租户库接线 | `SaasTestsModule` 用记录式 Fake 替换 `ITenantDatabaseCreator`（Npgsql 建库语义不进被测面） |
-| Host 级（匿名端点扫查） | 真实 PG：专用 schema `abp_admin_hosttest`（测试自建+宿主自举迁移），连接串读宿主同一分层源（appsettings.json → secrets）；**本组测试需要可达的 PG** |
+| Host 级（匿名端点扫查）/ 真库门控用例 | 容器默认库的专用 schema `abp_admin_hosttest`（测试自建+宿主自举迁移）；连接串由程序集加载时注入的 `ConnectionStrings__Default` 环境变量指向本进程容器（`RequiresHostDatabaseFact` 分层回落 secrets 仍可用）；**本组测试需要 Docker** |
 
 ## 4. 遗留与迁移点
 

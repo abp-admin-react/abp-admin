@@ -11,7 +11,7 @@ using Xunit;
 
 namespace AbpAdmin.EntityFrameworkCore.Applications;
 
-/* Webhook 订阅管理集成测试（WebhooksTestsModule 提供内存 SQLite 双上下文）。
+/* Webhook 订阅管理集成测试（WebhooksTestsModule 提供同库双上下文：Testcontainers PG）。
  * 断言点：CRUD 语义、密钥不回传、事件集整体替换、级联删除、订阅筛选（发布路径）。 */
 public abstract class WebhookSubscriptionAppServiceTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
     where TStartupModule : IAbpModule

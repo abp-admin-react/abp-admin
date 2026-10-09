@@ -40,7 +40,7 @@ public abstract class TenantCreationSeedTests<TStartupModule> : AbpAdminApplicat
     public async Task Should_Grant_Permissions_Without_Duplicates_When_Creating_Tenants()
     {
         // 修复前：第一次 CreateAsync 就在 UoW 完成时抛 DbUpdateException
-        // （SQLite Error 19: UNIQUE constraint failed: AbpPermissionGrants...）
+        // （唯一约束冲突：AbpPermissionGrants 重复授权...）
         var first = await _tenantAppService.CreateAsync(new TenantCreateDto
         {
             Name = "seedfix" + Guid.NewGuid().ToString("N")[..8],

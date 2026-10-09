@@ -49,14 +49,13 @@ internal static class HostUnderTest
     /// </param>
     /// <param name="beforeAddApplication">
     /// Runs after the builder exists with its configuration sources but before
-    /// <c>AddApplicationAsync</c>, the seam Program.cs uses for
-    /// <see cref="AbpAdminDbPathNormalizer"/> — module initialization reads the connection string,
+    /// <c>AddApplicationAsync</c>, the seam Program.cs uses to rewrite runtime state
+    /// before module initialization — module initialization reads the connection string,
     /// so anything that has to rewrite it must run in this window. Callers that intend to take the
     /// host all the way to <c>InitializeApplicationAsync</c> must isolate the database here — either
-    /// normalize the path (Program.cs parity, but module init then writes to the real dev database)
-    /// or override <c>ConnectionStrings:Default</c> to a throwaway copy, as
-    /// <c>AnonymousEndpointSweepTests</c> does (init needs a migrated schema, so an empty file
-    /// will not boot).
+    /// point <c>ConnectionStrings:Default</c> at a dedicated database/container of its own (as
+    /// <c>AnonymousEndpointSweepTests</c> does with its dedicated schema, since init needs a
+    /// migrated schema and an empty database will not boot) or accept writes to a real one.
     /// </param>
     /// <remarks>
     /// A fresh builder is returned per call on purpose: Build() makes a ServiceCollection read-only,

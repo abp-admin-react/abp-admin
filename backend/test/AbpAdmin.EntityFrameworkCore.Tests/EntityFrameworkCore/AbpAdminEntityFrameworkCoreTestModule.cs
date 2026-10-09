@@ -1,9 +1,9 @@
+using AbpAdmin.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp;
 using Volo.Abp.Data;
 using Volo.Abp.EntityFrameworkCore;
-using Volo.Abp.EntityFrameworkCore.Sqlite;
 using Volo.Abp.FeatureManagement;
 using Volo.Abp.Modularity;
 using Volo.Abp.PermissionManagement;
@@ -13,18 +13,10 @@ namespace AbpAdmin.EntityFrameworkCore;
 
 [DependsOn(
     typeof(AbpAdminApplicationTestModule),
-    typeof(AbpAdminEntityFrameworkCoreModule),
-    typeof(AbpEntityFrameworkCoreSqliteModule)
+    typeof(AbpAdminEntityFrameworkCoreModule)
 )]
 public class AbpAdminEntityFrameworkCoreTestModule : AbpModule
 {
-    private AbpUnitTestSqliteDatabase? _database;
-
-    public override void PreConfigureServices(ServiceConfigurationContext context)
-    {
-        PreConfigure<AbpSqliteOptions>(x => x.BusyTimeout = null);
-    }
-
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
         Configure<FeatureManagementOptions>(options =>
@@ -39,32 +31,23 @@ public class AbpAdminEntityFrameworkCoreTestModule : AbpModule
         });
         context.Services.AddAlwaysDisableUnitOfWorkTransaction();
 
-        ConfigureInMemorySqlite(context.Services);
-
-    }
-
-    private void ConfigureInMemorySqlite(IServiceCollection services)
-    {
-        _database = new AbpUnitTestSqliteDatabase();
-        _database.CreateTables(
-            new AbpAdminDbContext(new DbContextOptionsBuilder<AbpAdminDbContext>().UseSqlite(_database.ConnectionString).Options));
-
-        services.Configure<AbpDbConnectionOptions>(options =>
+        // Testcontainers PG：本程序集专属库（进程内共享，用例间由测试基类 Respawn 清表隔离）。
+        // 对 AbpAdminDbContext 跑真迁移建表——每次全量测试顺带验证框架迁移链可空库自举
+        //（CI 另有 has-pending-model-changes 守模型漂移）。
+        var database = AbpAdminTestPg.GetDatabase(typeof(AbpAdminEntityFrameworkCoreTestModule).Assembly);
+        database.MigrateOnce("AbpAdminDbContext", () =>
         {
-            options.ConnectionStrings.Default = _database.ConnectionString;
+            using var dbContext = new AbpAdminDbContext(
+                new DbContextOptionsBuilder<AbpAdminDbContext>().UseNpgsql(database.ConnectionString).Options);
+            dbContext.Database.Migrate();
         });
 
-        services.Configure<AbpDbContextOptions>(options =>
+        context.Services.Configure<AbpDbConnectionOptions>(options =>
         {
-            options.Configure(context =>
-            {
-                context.UseSqlite();
-            });
+            options.ConnectionStrings.Default = database.ConnectionString;
         });
-    }
 
-    public override void OnApplicationShutdown(ApplicationShutdownContext context)
-    {
-        _database?.Dispose();
+        // 提供程序无需再覆盖：框架模块注册的 UseNpgsql 即测试提供程序——
+        // 运行期 PG-only 语义在测试里同构成立（共享库多上下文各记各的迁移账）。
     }
 }
