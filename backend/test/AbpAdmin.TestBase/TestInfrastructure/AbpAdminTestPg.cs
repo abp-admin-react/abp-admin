@@ -31,9 +31,14 @@ public static class AbpAdminTestPg
 {
     private const string DefaultImage = "postgres:16";
 
+    // 容器懒加载 + ExecutionAndPublication：全进程只起一次；首启失败的异常会被 Lazy 缓存，
+    // 后续所有消费方拿到同一条清晰错误（而不是各自再试一轮、各自失败一次容器拉起）——
+    // 模块集成测试路径要的就是这种 fail-loud 语义（见 StartContainer 的异常消息）
     private static readonly Lazy<PostgreSqlContainer> Container =
         new(StartContainer, LazyThreadSafetyMode.ExecutionAndPublication);
 
+    // 建库串行化闸门：CREATE DATABASE 与下方 Owner 登记配对进行。DuplicateDatabase 虽有
+    // 吞掉兜底，串行化让「撞名」只剩真实竞态一条路径，失败日志可读、不掩盖别的错误
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
     /// <summary>程序集名 → 已建好的数据库句柄</summary>
@@ -178,7 +183,11 @@ public static class AbpAdminTestPg
     }
 }
 
-/// <summary>一个测试程序集在共享容器里的专属数据库。</summary>
+/// <summary>
+/// 一个测试程序集在共享容器里的专属数据库。
+/// 实例被 <see cref="AbpAdminTestPg.Databases"/> 缓存、进程内所有测试实例共享；
+/// 生命周期随进程（容器由 Testcontainers 的 Ryuk 守护回收），无需显式释放。
+/// </summary>
 public sealed class TestPgDatabase
 {
     private readonly ConcurrentDictionary<string, byte?> _migrated = new(StringComparer.Ordinal);
@@ -224,7 +233,11 @@ public sealed class TestPgDatabase
         }
     }
 
-    /// <summary>Respawn 清空业务表（同步阻塞；调用点在测试 Dispose，无同步上下文死锁面）。</summary>
+    /// <summary>
+    /// Respawn 清空业务表（同步阻塞；调用点在测试 Dispose，xUnit 无同步上下文，无死锁面）。
+    /// 每次新开短连接（Npgsql 池化，开销可忽略）：调用点在测试应用 Dispose 之后，
+    /// 不复用应用侧连接，避免与其释放时序纠缠。
+    /// </summary>
     public void Reset()
     {
         using var connection = new NpgsqlConnection(ConnectionString);

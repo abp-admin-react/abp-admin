@@ -31,6 +31,8 @@ public abstract class AbpAdminTestBase<TStartupModule> : AbpIntegratedTest<TStar
         // 失败会指向错误的用例。接了共享 PG 库的程序集（AbpAdminTestPg.GetDatabase
         // 注册过的）在应用释放后 Respawn 清空业务表，等价于「每用例一座独立库」的
         // 隔离语义；纯单测程序集（未注册库）零成本直通。
+        // 顺序刻意先 base.Dispose 再清表：ABP 应用释放先关掉 UoW 连接与后台任务，
+        // 清表的 DELETE 不会与应用残留的连接/事务互锁。
         try
         {
             base.Dispose();
