@@ -132,9 +132,10 @@ public class HttpProbeJobHandler : IScheduledJobHandler, ITransientDependency
     }
 
     /// <summary>
-    /// SSRF 防线：发送前拦截内网/保留目标（含 DNS 解析后的实际地址；解析失败同样拒绝，
-    /// fail-closed），不发请求、走统一失败路径（失败事件 + 抛出），执行记录里能看到
-    /// 被拒原因与放行开关名。开关判定统一走 SafeHttpUrl 重载（显式 true 才放行）。
+    /// SSRF 防线：发送前拦截内网/保留目标（含 DNS 解析后的实际地址），不发请求、
+    /// 走统一失败路径（失败事件 + 抛出），执行记录里能看到被拒原因与放行开关名。
+    /// DNS 解析失败放行——与 SafeHttpUrl 契约一致（连不上的主机构不成 SSRF，
+    /// 残余风险说明见其类注释）；开关判定统一走 SafeHttpUrl 重载（显式 true 才放行）。
     /// </summary>
     private async Task EnsureTargetAllowedAsync(string url)
     {
