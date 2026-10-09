@@ -46,7 +46,7 @@
 | `IBatch` 只有同步 `Execute()`、无异步版 | SE.Redis 2.7.33/2.9.x 反编译 | 无（注释记录；批处理在 `HydrateKeysAsync`，单测缝短路） |
 | 微软 `AddStackExchangeRedisCache` 的多路复用器不进 DI → 宿主自建四条连接各有归属（缓存/锁+DP/backplane/监控） | rel-10.6 源码核实 | `HostServiceGraphValidationTests` 按名钉住 |
 | 前端代理生成器不可信（可空性丢失，abp#22798/#25176）→ 手写 `src/abp` 镜像 + 快照 | umi/ABP 官方代理均如此 | `FrontendContractSnapshotTests` |
-| Schema 迁移走版本化 SQL 脚本，不用 `dotnet ef migrations` | 本仓库约定（迁移器只认 History 表） | `Database:AutoMigrateOnStartup` 流程 |
+| Schema 迁移走 EF Core 迁移：改实体 → `dotnet ef migrations add` → 提交迁移文件；启动时 `MigrateAsync` 应用（`Database:AutoMigrateOnStartup: true`，与 README 同口径） | 本仓库约定（框架 / Biz.Template / Webhooks 三套独立迁移历史） | CI 三条 `has-pending-model-changes` + 测试 Testcontainers PG 空库自举 |
 
 ## 4. 本宿主的多实例姿态（出厂与生产模板）
 
