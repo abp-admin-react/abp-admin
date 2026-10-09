@@ -70,11 +70,17 @@ public class WebhooksDbSchemaMigrator : IAbpAdminDbSchemaMigrator, ITransientDep
         }
     }
 
-    /// <summary>History 表的 schema 限定 SQL 名（schema 来自模块配置的解析结果，与 DbContext options 同源）。</summary>
-    private static string WebhooksHistoryTableSql =>
+    /// <summary>
+    /// History 表的 schema 限定 SQL 名（schema 来自模块配置的解析结果，与 DbContext options 同源）。
+    /// schema 名做 PG 标识符双引号转义（与 TenantDatabaseCreator 的建库 DDL 同款）：DDL 里的
+    /// 标识符不能走参数化，`"` → `""` 转义后任意字符集都安全。来源虽是管理员配置面
+    /// （连接串 SearchPath 解析），不因信任层级省略防线——配置注入/多租户动态连接串场景下
+    /// 该值即离开受信面。internal 供 AbpAdmin.EntityFrameworkCore.Tests 钉住转义契约。
+    /// </summary>
+    internal static string WebhooksHistoryTableSql =>
         string.IsNullOrWhiteSpace(WebhooksHistorySchema)
             ? $"\"{AbpAdminWebhooksConsts.SchemaHistoryTable}\""
-            : $"\"{WebhooksHistorySchema}\".\"{AbpAdminWebhooksConsts.SchemaHistoryTable}\"";
+            : $"\"{WebhooksHistorySchema.Replace("\"", "\"\"")}\".\"{AbpAdminWebhooksConsts.SchemaHistoryTable}\"";
 
     /// <summary>由宿主模块注入（ConfigureServices 时解析），默认 public。</summary>
     public static string? WebhooksHistorySchema { get; set; }
