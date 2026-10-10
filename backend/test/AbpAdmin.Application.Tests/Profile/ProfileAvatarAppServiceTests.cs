@@ -7,6 +7,7 @@ using Shouldly;
 using Volo.Abp;
 using Volo.Abp.BlobStoring;
 using Volo.Abp.Content;
+using Volo.Abp.Domain.Entities;
 using Volo.Abp.Data;
 using Volo.Abp.Identity;
 using Volo.Abp.Modularity;
@@ -238,8 +239,11 @@ public abstract class ProfileAvatarAppServiceTests<TStartupModule> : AbpAdminApp
             }
         }
 
-        // host 上下文：同一 userId 探测不到（用户仓储按租户过滤 + BLOB 容器按租户隔离）
-        (await _profileAvatarAppService.GetAsync(tenantUser.Id)).ShouldBeNull();
+        // host 上下文：同一 userId 探测不到。安全审计 L-2 起，非本人 id 一律 404
+        //（EntityNotFoundException）——与"不存在的 id"完全同响应，既探不到内容也探不到存在性；
+        // 此前语义是返回 null（同样探测不到，两种口径都成立，此处随实现更新断言）
+        await Should.ThrowAsync<EntityNotFoundException>(
+            () => _profileAvatarAppService.GetAsync(tenantUser.Id));
     }
 
     private async Task EnsureHostAdminExistsAsync()

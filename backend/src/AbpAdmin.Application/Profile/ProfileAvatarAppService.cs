@@ -13,6 +13,7 @@ using Volo.Abp.BlobStoring;
 using Volo.Abp.Content;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
+using Volo.Abp.Domain.Entities;
 using Volo.Abp.Identity;
 using Volo.Abp.Imaging;
 using Volo.Abp.Users;
@@ -152,6 +153,15 @@ public class ProfileAvatarAppService : AbpAdminAppService, IProfileAvatarAppServ
 
     public virtual async Task<IRemoteStreamContent?> GetAsync(Guid id)
     {
+        // 安全审计 L-2：仅允许取本人头像。此前任意已认证用户可按 id 枚举同租户任意用户的
+        // 头像（仓储仅租户过滤、无所有权谓词）；前端唯一调用方是"我的头像"（my-avatar-info
+        // 下发的就是本人 id）。越权/未知 id 一律 404——不区分"存在但无权"与"不存在"，
+        // 顺带消除同租户用户存在性探测面。
+        if (id != CurrentUser.GetId())
+        {
+            throw new EntityNotFoundException(typeof(IdentityUser), id);
+        }
+
         // 必须校验 id 属于当前租户（仓储带租户过滤），防止跨租户探测
         var user = await _identityUserRepository.FindAsync(id);
         if (user is null)
