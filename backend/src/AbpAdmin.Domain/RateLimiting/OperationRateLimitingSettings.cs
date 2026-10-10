@@ -20,6 +20,9 @@ public class OperationRateLimitingSettings
     /// <summary>登录策略：按 IP + 按邮箱双规则。</summary>
     public LoginPolicySettings Login { get; set; } = new();
 
+    /// <summary>令牌端点全 grant 兜底策略（安全审计 M-2）：按 IP 宽阈值。</summary>
+    public TokenEndpointPolicySettings TokenEndpoint { get; set; } = new();
+
     /// <summary>短信验证码发送侧：按手机号（租户隔离）。</summary>
     public SmsVerificationCodePolicySettings SmsVerificationCode { get; set; } = new();
 
@@ -54,6 +57,17 @@ public class LoginPolicySettings
     public int IpDurationMinutes { get; set; } = 15;
     public int EmailMaxCount { get; set; } = 5;
     public int EmailDurationMinutes { get; set; } = 15;
+}
+
+public class TokenEndpointPolicySettings
+{
+    /// <summary>
+    /// IP 兜底阈值：默认 5 分钟 300 次（平均 1 次/秒持续打满才触顶）——防脚本高频打
+    /// /connect/token 消耗资源，同时给 impersonation/token exchange 的服务端自回调
+    /// 与 E2E 测试留余量。password grant 由更严的 Login 策略双计数覆盖。
+    /// </summary>
+    public int IpMaxCount { get; set; } = 300;
+    public int IpDurationMinutes { get; set; } = 5;
 }
 
 public class SmsVerificationCodePolicySettings

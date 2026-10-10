@@ -36,6 +36,14 @@ internal static class RateLimitingConfigurator
                     .WithFixedWindow(TimeSpan.FromMinutes(settings.Login.EmailDurationMinutes), settings.Login.EmailMaxCount)
                     .WithName("LoginByEmail")));
 
+            // 安全审计 M-2：令牌端点全 grant 按 IP 兜底（宽阈值）。password grant 由 Login
+            // 策略双计数覆盖（TokenEndpointRateLimitingMiddleware 同一请求按序检查两策略）；
+            // 其余 grant（refresh_token/authorization_code/扩展授权）此前完全不限流。
+            options.AddPolicy(OperationRateLimitingPolicyNames.TokenEndpoint, policy => policy
+                .AddRule(r => r.PartitionByClientIp()
+                    .WithFixedWindow(TimeSpan.FromMinutes(settings.TokenEndpoint.IpDurationMinutes), settings.TokenEndpoint.IpMaxCount)
+                    .WithName("TokenEndpointByIp")));
+
             // 短信验证码策略：按手机号 1 小时 3 次（租户隔离）
             options.AddPolicy(OperationRateLimitingPolicyNames.SmsVerificationCode, policy => policy
                 .AddRule(r => r.PartitionByPhoneNumber()

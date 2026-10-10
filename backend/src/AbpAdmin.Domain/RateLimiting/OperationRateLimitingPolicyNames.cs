@@ -12,6 +12,10 @@ public static class OperationRateLimitingPolicyNames
     /// <summary>密码登录：按 IP + 按邮箱双规则（防跨账户 password spraying，消费者在 Login 页面）。</summary>
     public const string Login = "Login";
 
+    /// <summary>令牌端点全 grant 兜底：按 IP 宽阈值（安全审计 M-2；消费者 TokenEndpointRateLimitingMiddleware，
+    /// password grant 在此之上叠加 Login 策略双计数）。</summary>
+    public const string TokenEndpoint = "TokenEndpoint";
+
     /// <summary>短信验证码发送侧：按手机号（租户隔离）。</summary>
     public const string SmsVerificationCode = "SmsVerificationCode";
 
