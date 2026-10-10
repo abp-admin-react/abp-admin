@@ -17,6 +17,11 @@ export function getUserManager(): UserManager {
       metadataSeed: {
         authorization_endpoint: `${abpEnv.authority}/connect/authorize`,
         token_endpoint: `${abpEnv.authority}/connect/token`,
+        // revocat（不是 RFC 7009 的 revocation）：这是 ABP 框架注册的真实路径
+        //（abpframework/abp#24390 及 ABP 官方支持帖均按此路径调用；实测本服务
+        // POST /connect/revocat → 200 {}，/connect/revocation 反而 302 未注册）。
+        // 标准客户端以 discovery 文档为准（与本值一致），此 seed 仅作 discovery
+        // 不可达时的兜底，必须与后端实际注册路径一致。
         revocation_endpoint: `${abpEnv.authority}/connect/revocat`,
         end_session_endpoint: `${abpEnv.authority}/connect/endsession`,
         userinfo_endpoint: `${abpEnv.authority}/connect/userinfo`,

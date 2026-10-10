@@ -44,7 +44,7 @@ const PersonalDataTab: React.FC = () => {
       const token = await getGdprDownloadToken(record.id);
       // 第二步：用 token 换 ZIP。新开标签触发下载（与 files 页一致），而非改写
       // window.location.href——下载失败时后者会把 SPA 整页替换成错误 JSON
-      window.open(getGdprDownloadUrl(record.id, token), '_blank', 'noopener');
+      window.open(getGdprDownloadUrl(record.id, token), '_blank', 'noopener,noreferrer');
     } catch {
       // 错误由全局 errorHandler 统一提示
     }

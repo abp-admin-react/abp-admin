@@ -281,7 +281,11 @@ export type UserImportResultDto = {
 /** 同步导出用户（≤1000 条时直接下载文件） */
 export function exportUsers(filter?: string) {
   const params = filter ? `?filter=${encodeURIComponent(filter)}` : '';
-  window.open(`/api/app/identity-user-admin/export${params}`, '_blank');
+  window.open(
+    `/api/app/identity-user-admin/export${params}`,
+    '_blank',
+    'noopener,noreferrer',
+  );
 }
 
 /** 异步导出用户（>1000 条时转后台作业，完成后邮件通知） */
@@ -297,7 +301,11 @@ export async function enqueueExportUsers(filter?: string) {
 
 /** 下载导入模板 */
 export function downloadImportTemplate() {
-  window.open('/api/app/identity-user-admin/import-template', '_blank');
+  window.open(
+    '/api/app/identity-user-admin/import-template',
+    '_blank',
+    'noopener,noreferrer',
+  );
 }
 
 /** 导入用户 */
@@ -316,12 +324,17 @@ export function downloadImportFailureReport(id: string) {
   window.open(
     `/api/app/identity-user-admin/import-failure-report/${id}`,
     '_blank',
+    'noopener,noreferrer',
   );
 }
 
 /** 下载导出文件（按 ID） */
 export function downloadExportFile(id: string) {
-  window.open(`/api/app/identity-user-admin/export-file/${id}`, '_blank');
+  window.open(
+    `/api/app/identity-user-admin/export-file/${id}`,
+    '_blank',
+    'noopener,noreferrer',
+  );
 }
 
 /** 要求用户下次登录时修改密码 */

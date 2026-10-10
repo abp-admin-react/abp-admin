@@ -34,7 +34,9 @@ export function useFileActions() {
           );
           return;
         }
-        window.open(info.downloadUrl, '_blank');
+        // downloadUrl 指向后端签发的外部文件地址（非同源相对路径）：noopener/noreferrer
+        // 防止目标页拿到 window.opener 反向操纵本页
+        window.open(info.downloadUrl, '_blank', 'noopener,noreferrer');
       } catch {
         message.error(
           intl.formatMessage({ id: 'pages.files.download.failed' }),
