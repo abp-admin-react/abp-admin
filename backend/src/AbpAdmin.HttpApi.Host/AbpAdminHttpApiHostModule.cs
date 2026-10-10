@@ -182,6 +182,9 @@ public class AbpAdminHttpApiHostModule : AbpModule
             // T2.8: 登录时校验租户激活状态（Passive/已到期拒绝签发令牌）
             serverBuilder.AddEventHandler(TenantActivationOpenIddictServerHandler.Descriptor);
             serverBuilder.AddEventHandler(IdentitySessionOpenIddictServerHandler.Descriptor);
+            // H-2: end-session 时吊销 IdentitySession（登出后旧 refresh token 立即死亡，
+            // 配合 IdentitySessionOpenIddictServerHandler 对已吊销会话的拒绝）
+            serverBuilder.AddEventHandler(IdentitySessionEndSignOutHandler.Descriptor);
         });
 
         if (!hostingEnvironment.IsDevelopment())

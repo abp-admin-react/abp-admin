@@ -87,14 +87,24 @@ public class IdentitySessionOpenIddictServerHandler : IOpenIddictServerHandler<P
             // 刷新类授权（refresh token 等）重放的是旧 sessionId：走续期语义——
             // 行还在则刷新，行已没了（被吊销/互踢）绝不能重建。否则持有 refresh token
             // 的客户端被踢后靠静默续期原地复活，吊销与防并发登录全部失效（六透镜审查 H1）。
-            // 旧 sessionId 保留在重发的票里，后续 API 请求被会话校验中间件 401（session_revoked）。
             session = await _sessionManager.RenewAsync(
                 userId,
                 existingSessionId,
                 ip);
             if (session == null)
             {
+                // 安全审计 H-2：会话行已删（登出吊销/管理端吊销/互踢）→ 直接拒绝本次签发
+                // （invalid_grant），而不是"继续签发携带已死 session_id 的令牌、留给 API 侧
+                // 会话校验中间件 401"。旧行为下被盗的 refresh token 在用户登出后仍能无限次
+                // 换取新令牌——换出的 access token 虽过不了中间件，但"令牌铸造机不关机"就是
+                // 持续放大的攻击面。拒绝 = 把会话吊销语义贯彻到令牌端点，持有者只能重新登录。
+                // 2026-10-10 实测：管理端吊销会话后旧 refresh → 400 invalid_grant（本文案）；
+                // SPA 登出（end-session 吊销会话行）后旧 refresh 同样 400；存量 access token
+                // 由 IdentitySessionValidationMiddleware 401 session_revoked 即时失效。
                 await uow.CompleteAsync();
+                context.Reject(
+                    OpenIddictConstants.Errors.InvalidGrant,
+                    "The identity session associated with this token has been revoked.");
                 return;
             }
         }
