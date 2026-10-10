@@ -18,6 +18,8 @@ namespace AbpAdmin.OpenIddict;
  */
 public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, IDataSeedContributor, ITransientDependency
 {
+    private readonly IAbpApplicationManager _applicationManager;
+
     public OpenIddictDataSeedContributor(
         IConfiguration configuration,
         IOpenIddictApplicationRepository openIddictApplicationRepository,
@@ -26,6 +28,9 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
         IOpenIddictScopeManager scopeManager)
         : base(configuration, openIddictApplicationRepository, applicationManager, openIddictScopeRepository, scopeManager)
     {
+        // 基类持有的 ApplicationManager 不对外暴露，这里自留一份句柄做种子后的
+        // PKCE requirement 补挂（见 EnsurePkceRequirementAsync）。
+        _applicationManager = applicationManager;
     }
 
     [UnitOfWork]
@@ -59,6 +64,31 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
         }
 
         return rootUrl!;
+    }
+
+    /// <summary>
+    /// 幂等补挂 PKCE requirement：应用已带则跳过；否则 Populate 现值到 descriptor、
+    /// 追加 requirement 后整只更新（保留既有 permissions/settings/凭据）。
+    /// 仅用于公共客户端；swagger-ui 等不发 code_challenge 的工具不要调用。
+    /// </summary>
+    private async Task EnsurePkceRequirementAsync(string clientId)
+    {
+        var application = await _applicationManager.FindByClientIdAsync(clientId);
+        if (application is null)
+        {
+            return;
+        }
+
+        var requirements = await _applicationManager.GetRequirementsAsync(application);
+        if (requirements.Contains(OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange))
+        {
+            return;
+        }
+
+        var descriptor = new OpenIddictApplicationDescriptor();
+        await _applicationManager.PopulateAsync(descriptor, application);
+        descriptor.Requirements.Add(OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange);
+        await _applicationManager.UpdateAsync(application, descriptor);
     }
 
     private async Task CreateApplicationsAsync()
@@ -125,6 +155,14 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                 clientUri: appClientRootUrl,
                 logoUri: "/images/clients/angular.svg"
             );
+
+            // H-1：公共客户端的授权码通道强制 PKCE（前端 oidc-client-ts 对 code flow
+            // 默认发送 code_challenge，服务端强制不改变现有登录行为，只封死"无
+            // code_challenge 兑换授权码"的劫持面；实测种子后 AbpAdmin_App 的
+            // requirePkce=true 已落库，authorize 无 challenge → 400）。ABP 10.6.1 的种子
+            // 基类没有 requirements 参数，种入后在这里幂等补挂（已带该 requirement 则
+            // 跳过，不产生写放大）。
+            await EnsurePkceRequirementAsync(appClientId!);
         }
 
 

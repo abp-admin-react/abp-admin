@@ -185,6 +185,9 @@ public class AbpAdminHttpApiHostModule : AbpModule
             // H-2: end-session 时吊销 IdentitySession（登出后旧 refresh token 立即死亡，
             // 配合 IdentitySessionOpenIddictServerHandler 对已吊销会话的拒绝）
             serverBuilder.AddEventHandler(IdentitySessionEndSignOutHandler.Descriptor);
+            // H-1 补强（极端轮实测）：authorize 默认放行 code_challenge_method=plain，
+            // 该处理器在验证阶段强制 S256
+            serverBuilder.AddEventHandler(OpenIddict.RequireS256CodeChallengeHandler.Descriptor);
         });
 
         if (!hostingEnvironment.IsDevelopment())
@@ -750,6 +753,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     private void ConfigureAuthentication(ServiceConfigurationContext context)
     {
+        var configuration = context.Services.GetConfiguration();
+
         context.Services.ForwardIdentityAuthenticationForBearer(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         context.Services.Configure<AbpClaimsPrincipalFactoryOptions>(options =>
         {
@@ -771,6 +776,21 @@ public class AbpAdminHttpApiHostModule : AbpModule
         // 非 /api 路径（MVC 账户页等）保持原有重定向行为。
         context.Services.ConfigureApplicationCookie(options =>
         {
+            // 安全审计 L-8：Cookie 属性显式加固（此前完全依赖框架默认值；实测登录 POST 的
+            // Set-Cookie 已带全三项）。HttpOnly=True / SameSite=Lax 明确声明；Secure 跟随
+            // RequireHttpsMetadata 姿态——默认 true（HTTPS 部署，含 dev 的 https:44395）一律
+            // 仅安全通道下发，显式 HTTP 内网部署（RequireHttpsMetadata=false，如本地 compose 栈）
+            // 退回 SameAsRequest。SameSite 选 Lax 而非 Strict：Lax 保持"同站导航带 Cookie、
+            // 跨站子资源不带"的标准姿态，对授权码流程（顶层跳转）与防 CSRF 都成立；Strict
+            // 在用户从站外链接/邮件链接进入授权链路时不携带 Cookie，会造成看似随机的重复
+            // 登录，且本系统 dev/compose 形态下 SPA 与后端本就同站（端口不构成跨站），
+            // 收紧到 Strict 无实际收益。
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+            options.Cookie.SecurePolicy = configuration.GetValue("AuthServer:RequireHttpsMetadata", true)
+                ? CookieSecurePolicy.Always
+                : CookieSecurePolicy.SameAsRequest;
+
             options.Events.OnRedirectToLogin = redirectContext =>
             {
                 if (redirectContext.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
