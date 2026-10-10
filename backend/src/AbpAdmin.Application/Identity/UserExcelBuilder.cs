@@ -151,24 +151,25 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
 
         var rows = users.Zip(renderDtos, (x, r) => new Dictionary<string, object?>
         {
-            [UserExportColumnNames.UserName] = x.UserName,
-            [UserExportColumnNames.Name] = x.Name,
-            [UserExportColumnNames.Surname] = x.Surname,
+            // 安全审计 L-4：用户可控文本一律过公式中和（= + - @ 开头加 ' 前缀）
+            [UserExportColumnNames.UserName] = SpreadsheetTextSanitizer.Sanitize(x.UserName),
+            [UserExportColumnNames.Name] = SpreadsheetTextSanitizer.Sanitize(x.Name),
+            [UserExportColumnNames.Surname] = SpreadsheetTextSanitizer.Sanitize(x.Surname),
             // maskSensitive=true（无明文权限）时与响应序列化同一算法脱敏，
             // 防「列表看掩码、Excel 拿明文」的旁路（安全审查 H1）
             [UserExportColumnNames.Email] = maskSensitive
                 ? StringMasker.Mask(x.Email, EmailMaskSpec)
-                : x.Email,
+                : SpreadsheetTextSanitizer.Sanitize(x.Email),
             [UserExportColumnNames.EmailConfirmed] = x.EmailConfirmed ? UserImportBooleanTexts.Yes : UserImportBooleanTexts.No,
             [UserExportColumnNames.PhoneNumber] = maskSensitive
                 ? StringMasker.Mask(x.PhoneNumber, MobileMaskSpec)
-                : x.PhoneNumber,
+                : SpreadsheetTextSanitizer.Sanitize(x.PhoneNumber),
             [UserExportColumnNames.PhoneNumberConfirmed] = x.PhoneNumberConfirmed ? UserImportBooleanTexts.Yes : UserImportBooleanTexts.No,
             // 字典渲染失败时回退到导入端可解析的「是/否」（词汇单一出处，见 UserImportBooleanTexts）
             [UserExportColumnNames.IsActive] = r.IsActiveText ?? (x.IsActive ? UserImportBooleanTexts.Yes : UserImportBooleanTexts.No),
             [UserExportColumnNames.LockoutEnd] = x.LockoutEnd?.ToString("yyyy-MM-dd HH:mm:ss"),
-            [UserExportColumnNames.RoleNames] = string.Join(";", roleNamesById.GetValueOrDefault(x.Id, new List<string>())),
-            [UserExportColumnNames.OrganizationUnits] = string.Join(";", ouDisplayNamesByUserId.GetValueOrDefault(x.Id, new List<string>())),
+            [UserExportColumnNames.RoleNames] = SpreadsheetTextSanitizer.Sanitize(string.Join(";", roleNamesById.GetValueOrDefault(x.Id, new List<string>()))),
+            [UserExportColumnNames.OrganizationUnits] = SpreadsheetTextSanitizer.Sanitize(string.Join(";", ouDisplayNamesByUserId.GetValueOrDefault(x.Id, new List<string>()))),
             [UserExportColumnNames.CreationTime] = x.CreationTime.ToString("yyyy-MM-dd HH:mm:ss"),
             [UserExportColumnNames.LastPasswordChangeTime] = x.LastPasswordChangeTime?.ToString("yyyy-MM-dd HH:mm:ss")
         });

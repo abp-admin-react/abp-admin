@@ -566,19 +566,11 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
 
     /// <summary>
     /// 电子表格公式注入加固（OWASP CSV Injection 的 xlsx 对应物，纵深防御）：
-    /// 失败明细的文本单元格全部来自导入文件原文（攻击者可控），当前 MiniExcel 写
-    /// inline string 不可利用，但一旦输出格式改为 CSV 或写入方式变更即成公式注入面——
-    /// 对以 = + - @ Tab CR 开头的值加 ' 前缀，让危险字符永远以字面量呈现。
+    /// 实现已收拢到 <see cref="SpreadsheetTextSanitizer.Sanitize"/>（L-4 导出构建器复用同一口径），
+    /// 保留本方法作为既有调用点的稳定入口。
     /// </summary>
     protected virtual string SanitizeSpreadsheetText(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return string.Empty;
-        }
-
-        return value[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + value : value;
-    }
+        => SpreadsheetTextSanitizer.Sanitize(value);
 
     /// <summary>
     /// 将异常转换为用户友好的错误消息（非用户友好异常不暴露原始消息）。

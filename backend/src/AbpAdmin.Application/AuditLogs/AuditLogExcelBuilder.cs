@@ -85,15 +85,16 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
         var rows = logs.Select(x => new
         {
             执行时间 = x.ExecutionTime,
-            用户名 = x.UserName,
+            // 安全审计 L-4：用户可控文本（用户名/URL/IP/关联 ID/异常消息可回显用户输入）过公式中和
+            用户名 = SpreadsheetTextSanitizer.Sanitize(x.UserName),
             应用 = x.ApplicationName,
             请求方法 = x.HttpMethod,
-            地址 = x.Url,
+            地址 = SpreadsheetTextSanitizer.Sanitize(x.Url),
             状态码 = x.HttpStatusCode,
             耗时毫秒 = x.ExecutionDuration,
-            客户端IP = x.ClientIpAddress,
-            关联ID = x.CorrelationId,
-            异常 = x.Exceptions
+            客户端IP = SpreadsheetTextSanitizer.Sanitize(x.ClientIpAddress),
+            关联ID = SpreadsheetTextSanitizer.Sanitize(x.CorrelationId),
+            异常 = SpreadsheetTextSanitizer.Sanitize(x.Exceptions)
         });
 
         using var stream = new MemoryStream();
