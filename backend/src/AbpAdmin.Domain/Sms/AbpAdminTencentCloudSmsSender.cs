@@ -1,11 +1,13 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Http;
 using AbpAdmin.Settings;
 using EasyAbp.Abp.TencentCloud.Common;
 using EasyAbp.Abp.TencentCloud.Common.Models;
 using EasyAbp.Abp.TencentCloud.Common.Requester;
 using EasyAbp.Abp.TencentCloud.Sms.SendSms;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
@@ -33,15 +35,18 @@ public class AbpAdminTencentCloudSmsSender : ISmsSender, ITransientDependency
 
     private readonly ISettingProvider _settingProvider;
     private readonly ITencentCloudApiRequester _requester;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<AbpAdminTencentCloudSmsSender> _logger;
 
     public AbpAdminTencentCloudSmsSender(
         ISettingProvider settingProvider,
         ITencentCloudApiRequester requester,
+        IConfiguration configuration,
         ILogger<AbpAdminTencentCloudSmsSender> logger)
     {
         _settingProvider = settingProvider;
         _requester = requester;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -66,6 +71,29 @@ public class AbpAdminTencentCloudSmsSender : ISmsSender, ITransientDependency
         var endPoint = await _settingProvider.GetOrNullAsync(AbpAdminSettings.Sms.TencentCloudEndPoint);
         var sign = await _settingProvider.GetOrNullAsync(AbpAdminSettings.Sms.TencentCloudSign);
         var region = await _settingProvider.GetOrNullAsync(AbpAdminSettings.Sms.TencentCloudRegion);
+
+        // M-5（SSRF 防线）：EndPoint 是管理员可改设置项（默认 sms.tencentcloudapi.com），
+        // 被改成内网/保留地址（如 169.254.169.254）时本服务即成出站跳板。与 Webhook/探活
+        // 同一防线（SafeHttpUrl：IP 字面量直查网段表、域名 DNS 解析后逐个检查）；放行开关
+        // Sms:AllowIntranetTargets 显式 true 才豁免（内网中转网关场景）。EasyAbp requester
+        // 用裸 HttpClient（无禁重定向），端点侧校验是本仓库能加的闸口；发送前逐次校验，
+        // DNS rebinding 残余与 Webhook 同口径（见 SafeHttpUrl 类注释）。
+        // 2026-10-10 极端轮实测：十进制(2130706433)/十六进制(0x7f.0.0.1)/userinfo 伪装
+        // （域名@169.254.169.254）/v4-mapped([::ffff:127.0.0.1]) 四类绕过变体全部被拦
+        //（IPAddress.TryParse/IsIPv4MappedToIPv6 归一后命中网段表）。
+        if (!string.IsNullOrWhiteSpace(endPoint))
+        {
+            var endPointUrl = endPoint.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                              endPoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                ? endPoint
+                : $"https://{endPoint.TrimEnd('/')}/";
+            var blockedHost = await SafeHttpUrl.GetBlockedHostAsync(endPointUrl, _configuration, "Sms:AllowIntranetTargets");
+            if (blockedHost != null)
+            {
+                throw new BusinessException(AbpAdminDomainErrorCodes.Notifications.SmsEndpointBlocked)
+                    .WithData("Host", blockedHost);
+            }
+        }
 
         // 与 EasyAbp 包装包同形的手机号归一化：11 位 1 开头的大陆手机号补 +86
         var phoneNumber = smsMessage.PhoneNumber.StartsWith("1") && smsMessage.PhoneNumber.Length == 11

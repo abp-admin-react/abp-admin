@@ -1,9 +1,11 @@
 using System;
 using System.Net.Http;
 using System.Threading.Tasks;
+using AbpAdmin.Http;
 using AbpAdmin.Settings;
 using EasyAbp.Abp.Aliyun.Common;
 using EasyAbp.Abp.Aliyun.Common.Model;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
@@ -27,6 +29,7 @@ public class SettingBasedAliyunApiRequester : IAliyunApiRequester, ITransientDep
     private readonly IJsonSerializer _jsonSerializer;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IGuidGenerator _guidGenerator;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<SettingBasedAliyunApiRequester> _logger;
 
     public SettingBasedAliyunApiRequester(
@@ -34,12 +37,14 @@ public class SettingBasedAliyunApiRequester : IAliyunApiRequester, ITransientDep
         IJsonSerializer jsonSerializer,
         IHttpClientFactory httpClientFactory,
         IGuidGenerator guidGenerator,
+        IConfiguration configuration,
         ILogger<SettingBasedAliyunApiRequester> logger)
     {
         _settingProvider = settingProvider;
         _jsonSerializer = jsonSerializer;
         _httpClientFactory = httpClientFactory;
         _guidGenerator = guidGenerator;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -60,6 +65,17 @@ public class SettingBasedAliyunApiRequester : IAliyunApiRequester, ITransientDep
         if (!request.IsReady())
         {
             throw new AbpException("阿里云 API 公共参数没有正确配置。");
+        }
+
+        // M-5（SSRF 防线）：url 当前由 EasyAbp 包构造（非管理员可控），但出站 URL 按
+        // "一律过闸"的口径统一——包未来若引入可配置端点，这里已经是闸口。与 Webhook/
+        // 探活/腾讯云 SMS 同一 SafeHttpUrl；放行开关 Sms:AllowIntranetTargets 显式
+        // true 才豁免。
+        var blockedHost = await SafeHttpUrl.GetBlockedHostAsync(url, _configuration, "Sms:AllowIntranetTargets");
+        if (blockedHost != null)
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.Notifications.SmsEndpointBlocked)
+                .WithData("Host", blockedHost);
         }
 
         var client = _httpClientFactory.CreateClient();

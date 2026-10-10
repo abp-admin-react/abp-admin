@@ -299,6 +299,7 @@
         "AbpAdmin:SmsTencentCloudCredentialNotConfigured": "TencentCloud SMS credentials are not configured. Please set SecretId, SecretKey and SmsSdkAppid in settings.",
         "AbpAdmin:SmsTemplateNotConfigured": "SMS template is not configured (missing sign name or template code), or the text is not template-parameter JSON.",
         "AbpAdmin:SmsSendFailed": "Failed to send SMS: {ProviderError}",
+        "AbpAdmin:SmsEndpointBlocked": "The SMS API endpoint resolves to a blocked internal/reserved address (SSRF guard, host: {Host}). Set the endpoint to the provider's public API domain, or explicitly allow intranet targets via Sms:AllowIntranetTargets for internal relay gateways.",
         "AbpAdmin:OnlyFailedNotificationCanRetry": "Only failed notifications can be retried.",
         "AbpAdmin:InvalidBroadcastTarget": "Invalid broadcast target: {TargetType}.",
         "AbpAdmin:InvalidBroadcastMethods": "Invalid broadcast methods: {Methods}.",

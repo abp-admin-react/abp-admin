@@ -447,6 +447,10 @@ public static class AbpAdminDomainErrorCodes
         /// <summary>厂商接口返回失败（WithData("Provider")、WithData("ProviderError")）。</summary>
         public const string SmsSendFailed = "AbpAdmin:SmsSendFailed";
 
+        /// <summary>短信 API 端点命中内网/保留地址被拒（SSRF 防线，WithData("Host")）；
+        /// 内网中转网关场景需显式 Sms:AllowIntranetTargets=true。</summary>
+        public const string SmsEndpointBlocked = "AbpAdmin:SmsEndpointBlocked";
+
         /// <summary>只有失败的通知才能重试。</summary>
         public const string OnlyFailedNotificationCanRetry = "AbpAdmin:OnlyFailedNotificationCanRetry";
 

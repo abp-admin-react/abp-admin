@@ -314,6 +314,7 @@
         "AbpAdmin:SmsTencentCloudCredentialNotConfigured": "腾讯云短信凭据未配置，请在设置中填写 SecretId、SecretKey 与 SmsSdkAppid。",
         "AbpAdmin:SmsTemplateNotConfigured": "短信模板未配置（缺少签名或模板编码），或短信内容不是模板参数 JSON。",
         "AbpAdmin:SmsSendFailed": "短信发送失败：{ProviderError}",
+        "AbpAdmin:SmsEndpointBlocked": "短信 API 端点命中内网/保留地址，已被 SSRF 防线拒绝（主机：{Host}）。请把端点改为厂商公网 API 域名；确需内网中转网关时，经 Sms:AllowIntranetTargets 显式放行。",
         "AbpAdmin:OnlyFailedNotificationCanRetry": "只有发送失败的通知才能重试。",
         "AbpAdmin:InvalidBroadcastTarget": "非法的广播目标：{TargetType}。",
         "AbpAdmin:InvalidBroadcastMethods": "非法的广播渠道：{Methods}。",
