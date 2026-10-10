@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Volo.Abp;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Identity;
@@ -128,6 +129,18 @@ public class AbpAdminDbMigrationService : ITransientDependency
         var adminPassword = _configuration["Identity:AdminPassword"];
         if (string.IsNullOrWhiteSpace(adminPassword))
         {
+            // C-1 fail-fast：模板默认口令全网公开，非开发环境绝不允许带着它建库。
+            // 开发环境的放行开关（Identity:AllowDefaultAdminPassword=true）只存在于
+            // appsettings.Development.json——生产部署加载不到它，走到这里就是事故：
+            // 什么都不注入直接起库，等于把 admin/1q2w3E* 播种进生产。
+            if (!_configuration.GetValue<bool>("Identity:AllowDefaultAdminPassword"))
+            {
+                throw new AbpInitializationException(
+                    "Identity:AdminPassword 未配置：种子 admin 将使用模板公开默认密码（全网已知），已拒绝继续。" +
+                    "生产部署请注入环境变量 Identity__AdminPassword（或 appsettings.secrets.json）。" +
+                    "仅本地开发可用 appsettings.Development.json 里的 Identity:AllowDefaultAdminPassword=true 显式放行。");
+            }
+
             adminPassword = AbpAdminConsts.AdminPasswordDefaultValue;
             Logger.LogWarning(
                 "Identity:AdminPassword 未配置，种子 admin 使用模板默认密码（公开已知，仅限开发环境）。生产部署请通过 appsettings.secrets.json 或环境变量 Identity__AdminPassword 注入强口令。");

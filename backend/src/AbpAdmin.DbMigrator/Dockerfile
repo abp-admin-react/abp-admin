@@ -34,7 +34,11 @@ COPY --from=build /app/publish .
 # 去读 Host 的 appsettings.json（OpenIddict:Applications 客户端清单等，见其 Program.cs
 # 的分层加载说明）。容器里没有那个兄弟目录，这里把源文件摆到它要找的绝对路径上；
 # 数据库连接串等敏感项不进镜像，由 compose 的环境变量（最高优先级）注入。
+# appsettings.Development.json 同步带上：本地体验栈的 migrator 以 DOTNET_ENVIRONMENT=
+# Development 运行，靠它种入开发专属客户端/回调（AbpAdmin_TestCli、demo 子域名）；
+# 生产部署的迁移器不设该环境变量，这份文件在镜像里也不会被加载。
 COPY src/AbpAdmin.HttpApi.Host/appsettings.json /AbpAdmin.HttpApi.Host/appsettings.json
+COPY src/AbpAdmin.HttpApi.Host/appsettings.Development.json /AbpAdmin.HttpApi.Host/appsettings.Development.json
 
 # Serilog 文件 sink 写相对路径 Logs/logs.txt；非 root（$APP_UID）建不了目录——预建并归属
 # 运行用户，否则文件日志静默丢失（迁移是一次性进程，控制台日志才是主通道，兜底而已）。

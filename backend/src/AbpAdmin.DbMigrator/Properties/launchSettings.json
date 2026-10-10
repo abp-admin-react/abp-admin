@@ -1,0 +1,14 @@
+{
+  // 本地 dotnet run 手工跑迁移器时默认按 Development 姿态：加载 Host 的
+  // appsettings.Development.json（开发客户端/回调 + 允许 admin 默认口令）。
+  // 不然 Host.CreateDefaultBuilder 对控制台程序默认 Production——本地建库会被
+  // 默认口令 fail-fast 拦下。容器/CI 不受本文件影响（不通过 dotnet run 启动）。
+  "profiles": {
+    "AbpAdmin.DbMigrator": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

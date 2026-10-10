@@ -74,6 +74,11 @@ services:
       # 环境 key 覆盖会合并进镜像内烘焙的 Host appsettings.json（OpenIddict:Applications 节）
       OpenIddict__Applications__AbpAdmin_App__RootUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
       OpenIddict__Applications__AbpAdmin_Swagger__RootUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      # 本地体验栈按开发姿态种子（栈只绑 127.0.0.1，凭据均为本地默认值）：
+      # 种入 appsettings.Development.json 里的开发专属通道（AbpAdmin_TestCli、demo/多端口
+      # 回调）并允许 admin 默认口令。生产部署绝不设置此变量——生产迁移器必须注入
+      # Identity__AdminPassword，否则 AbpAdminDbMigrationService 对默认口令直接 fail-fast。
+      DOTNET_ENVIRONMENT: Development
     depends_on:
       db:
         condition: service_healthy

@@ -1,1 +1,0 @@
-Host=192.168.10.250;Port=5432;Database=abp_test2;Username=abp_test2;Password=R4YwXtSatK3NzKA7;SearchPath=abp_admin_efm
