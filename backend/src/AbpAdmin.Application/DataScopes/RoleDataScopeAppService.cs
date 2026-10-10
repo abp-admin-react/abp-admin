@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Linq.Dynamic.Core;
 using System.Threading.Tasks;
+using AbpAdmin.Localization;
 using AbpAdmin.OperationLogs;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
@@ -12,12 +13,21 @@ using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 using Volo.Abp.Roles;
+using Volo.Abp.Validation;
 
 namespace AbpAdmin.DataScopes;
 
 [Authorize(AbpAdminPermissions.DataScopes.Manage)]
 public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppService
 {
+    /// <summary>排序白名单（安全审计 M-4）：Sorting 直达 Dynamic LINQ 的字符串 OrderBy，非法值应 400 而非 500。</summary>
+    private static readonly string[] SortableFields =
+    [
+        nameof(RoleDataScope.RoleName),
+        nameof(RoleDataScope.ScopeType),
+        nameof(RoleDataScope.CreationTime)
+    ];
+
     private readonly IRepository<RoleDataScope, Guid> _repository;
     private readonly IIdentityRoleRepository _roleRepository;
     private readonly IRepository<OrganizationUnit, Guid> _ouQueryRepository;
@@ -33,10 +43,16 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
         _roleRepository = roleRepository;
         _ouQueryRepository = ouQueryRepository;
         _currentDataScopeProvider = currentDataScopeProvider;
+        LocalizationResource = typeof(AbpAdminResource);
     }
 
     public async Task<PagedResultDto<RoleDataScopeDto>> GetListAsync(PagedAndSortedResultRequestDto input)
     {
+        if (!SortingWhitelist.IsValid(input.Sorting, SortableFields))
+        {
+            throw new AbpValidationException(L["AbpAdmin:InvalidSortingFormat", input.Sorting ?? string.Empty]);
+        }
+
         var queryable = await _repository.WithDetailsAsync(x => x.CustomOrganizationUnits);
 
         var totalCount = await AsyncExecuter.CountAsync(queryable);

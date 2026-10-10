@@ -15,6 +15,7 @@
         "Permission:Revoke": "Revoke",
         "Permission:AuditLogs": "Audit logs",
         "AbpAdmin:InvalidSorting": "Sorting must be a comma-separated list of field names (ExecutionTime/Duration/Type/SubType/UserName/BizId/Success) with optional asc/desc, got: {0}",
+        "AbpAdmin:InvalidSortingFormat": "Sorting must be a comma-separated list of allowed field names with optional asc/desc, got: {0}",
         "AbpAdmin:EntityChangeNotFound": "Entity change {0} not found",
         "AbpAdmin:EntityChangeEntityMismatch": "The entity change does not belong to the given entity",
         "AbpAdmin:EntityRestoreOnlyUpdated": "Only Updated changes can be restored",

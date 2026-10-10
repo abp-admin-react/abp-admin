@@ -7,12 +7,15 @@ using AbpAdmin.Biz.Template.Localization;
 using AbpAdmin.Biz.Template.Permissions;
 using AbpAdmin.Biz.Template.Services.Dtos;
 using AbpAdmin.DataScopes;
+using AbpAdmin.Localization;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Localization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
+using Volo.Abp.Validation;
 
 namespace AbpAdmin.Biz.Template.Services;
 
@@ -28,23 +31,41 @@ namespace AbpAdmin.Biz.Template.Services;
 [Authorize(BizTemplatePermissions.DataScopeDemo.Default)]
 public class BizDataScopeDemoAppService : ApplicationService, IBizDataScopeDemoAppService
 {
+    /// <summary>排序白名单（安全审计 M-4）：Sorting 直达 Dynamic LINQ 的字符串 OrderBy，非法值应 400 而非 500。</summary>
+    private static readonly string[] SortableFields =
+    [
+        nameof(BizDataScopeDemo.Name),
+        nameof(BizDataScopeDemo.OrganizationUnitId),
+        nameof(BizDataScopeDemo.CreationTime)
+    ];
+
     private readonly IRepository<BizDataScopeDemo, Guid> _repository;
     private readonly IOrganizationUnitRepository _organizationUnitRepository;
     private readonly ICurrentDataScopeState _dataScopeState;
+    private readonly IStringLocalizer<AbpAdminResource> _frameworkLocalizer;
 
     public BizDataScopeDemoAppService(
         IRepository<BizDataScopeDemo, Guid> repository,
         IOrganizationUnitRepository organizationUnitRepository,
-        ICurrentDataScopeState dataScopeState)
+        ICurrentDataScopeState dataScopeState,
+        IStringLocalizer<AbpAdminResource> frameworkLocalizer)
     {
         _repository = repository;
         _organizationUnitRepository = organizationUnitRepository;
         _dataScopeState = dataScopeState;
+        _frameworkLocalizer = frameworkLocalizer;
         LocalizationResource = typeof(BizTemplateResource);
     }
 
     public async Task<PagedResultDto<BizDataScopeDemoDto>> GetListAsync(PagedAndSortedResultRequestDto input)
     {
+        // 白名单键在框架资源（AbpAdminResource）里，本模块资源不继承——用注入的框架本地化器
+        if (!SortingWhitelist.IsValid(input.Sorting, SortableFields))
+        {
+            throw new AbpValidationException(
+                _frameworkLocalizer["AbpAdmin:InvalidSortingFormat", input.Sorting ?? string.Empty]);
+        }
+
         var queryable = await _repository.GetQueryableAsync();
 
         var totalCount = await AsyncExecuter.CountAsync(queryable);

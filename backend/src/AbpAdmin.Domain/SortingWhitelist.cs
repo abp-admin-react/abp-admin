@@ -9,6 +9,8 @@ namespace AbpAdmin;
 /// 未校验的排序串直接进 OrderBy 会被 System.Linq.Dynamic.Core 解析，
 /// 注入载荷（分号拼接表达式、构造函数调用等）解析失败走全局异常处理器返回 500——
 /// 语义应为请求校验错（400）。规则：逗号分隔的「字段名 [asc|desc]」，字段名大小写不敏感。
+/// 放在 Domain（而非 Application）：Application 之外的项目（如 AbpAdmin.Biz.Template
+/// 的 AppService）同样需要这道闸；命名空间保持 AbpAdmin，既有使用方零改动。
 /// </summary>
 public static partial class SortingWhitelist
 {

@@ -47,6 +47,7 @@
         "Permission:Revoke": "撤销",
         "Permission:AuditLogs": "审计日志",
         "AbpAdmin:InvalidSorting": "排序串只允许字段名（ExecutionTime/Duration/Type/SubType/UserName/BizId/Success）加可选 asc/desc 的逗号列表，收到：{0}",
+        "AbpAdmin:InvalidSortingFormat": "排序串只允许「白名单字段名 + 可选 asc/desc」的逗号列表，收到：{0}",
         "AbpAdmin:EntityChangeNotFound": "实体变更记录 {0} 不存在",
         "AbpAdmin:EntityChangeEntityMismatch": "变更记录不属于所声明的实体",
         "AbpAdmin:EntityRestoreOnlyUpdated": "只有 Updated 型变更支持回滚",
