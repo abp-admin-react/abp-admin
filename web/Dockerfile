@@ -21,6 +21,8 @@ RUN pnpm build
 FROM nginx:1.29-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY nginx-proxy-params.conf /etc/nginx/proxy_params_backend.conf
+# SPA 侧安全响应头（CSP 等，被 nginx.conf 的静态/回退 location include）
+COPY security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80
