@@ -115,6 +115,10 @@ services:
       # （对外入口只暴露业务路径）。确需经前端访问 Swagger：给本服务加
       # App__EnableSwaggerInProduction=true 并在 web/nginx.conf + web/config/proxy.ts
       # 的路径清单同步加 /swagger/（两处都要）
+      # 租户子域名通配回调（*.localhost:8000）在非 Development 环境默认关闭（安全默认，
+      # 见 AbpAdminHttpApiHostModule 的 EnableWildcardDomainSupport 门控）；本地体验栈
+      # 需要租户子域名登录，显式打开
+      App__EnableWildcardDomainSupport: "true"
       # 迁移已由 migrator 完成；宿主自迁移开关关掉（多实例生产姿势）。想让 host 单独
       # 自给自足（不跑 migrator）：删掉本键与 depends_on.migrator 段即可，默认值会自己建表
       Database__AutoMigrateOnStartup: "false"

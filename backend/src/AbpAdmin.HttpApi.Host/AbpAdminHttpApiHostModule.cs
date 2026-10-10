@@ -160,14 +160,21 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.SelectAccountPage = "/Account/SelectAccount";
         });
 
-        PreConfigure<AbpOpenIddictWildcardDomainOptions>(options =>
+        // M-1（安全审计）：租户子域名通配回调（*.localhost:8000）默认只在开发环境启用；
+        // 通配域会把 redirect_uri 的接受面扩大到任意子域，生产回调白名单必须精确匹配。
+        // 本地 compose 体验栈需要租户子域名登录，经 App:EnableWildcardDomainSupport=true 显式打开。
+        if (hostingEnvironment.IsDevelopment() ||
+            configuration.GetValue<bool>("App:EnableWildcardDomainSupport"))
         {
-            options.EnableWildcardDomainSupport = true;
-            options.WildcardDomainsFormat.Add("http://{0}.localhost:8000");
-            options.WildcardDomainsFormat.Add("https://{0}.localhost:8000");
-            options.WildcardDomainsFormat.Add("http://{0}.localhost:8000/user/callback");
-            options.WildcardDomainsFormat.Add("http://{0}.localhost:8000/user/login");
-        });
+            PreConfigure<AbpOpenIddictWildcardDomainOptions>(options =>
+            {
+                options.EnableWildcardDomainSupport = true;
+                options.WildcardDomainsFormat.Add("http://{0}.localhost:8000");
+                options.WildcardDomainsFormat.Add("https://{0}.localhost:8000");
+                options.WildcardDomainsFormat.Add("http://{0}.localhost:8000/user/callback");
+                options.WildcardDomainsFormat.Add("http://{0}.localhost:8000/user/login");
+            });
+        }
 
         // T2.7: 注册无密码登录与模拟登录扩展授权类型；LinkAccounts: 关联账号切换
         PreConfigure<OpenIddictServerBuilder>(serverBuilder =>
