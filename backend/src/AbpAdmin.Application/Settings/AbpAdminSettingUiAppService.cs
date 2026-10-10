@@ -122,13 +122,20 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
     [Authorize(AbpAdminPermissions.SettingUi.Update)]
     public override async Task SetSettingValuesAsync(Dictionary<string, string> settingValues)
     {
-        await base.SetSettingValuesAsync(settingValues);
+        // 上游契约（EasyAbp SettingUiAppService 源码核实）：入参键必须是表单键
+        //（Setting_AbpAdmin_Sms_Provider 形态，PascalCase + Setting_ 前缀 + 下划线转点），
+        // 其余键一律 continue 静默丢弃——不报错、不落库、返回 204。
+        // 本仓库前端 SettingGroupPanel 用 info.name（裸设置名 AbpAdmin.Sms.Provider）作键，
+        // 等于设置页"保存"从未生效过（成功提示 + 0 行写入；安全语义上更糟：管理员以为
+        // 改了验证码/短信凭据/锁定策略，实际全都没变）。入口处把裸设置名规范化为表单键，
+        // 两种格式都接受；未知设置名仍走上游的静默跳过口径（整表单提交里混入垃圾键不炸）。
+        var normalized = NormalizeToFormKeys(settingValues);
+        await base.SetSettingValuesAsync(normalized);
 
         // 参数含明文新密钥，ABP 审计参数序列化已被 IgnoredTypes 关掉；
-        // 语义轨迹在这里手写，只记设置名不记值。
-        // 只保留真实提交的项名（表单键还原成 Abp.X.Y 设置名）；前端会把整个表单原样回传
-        // （未改的项值为空串），空值项没有信息量。密钥值永不落库。
-        var changedKeys = settingValues
+        // 语义轨迹在这里手写，只记设置名不记值。基于规范化后的键（裸名调用方也能记全轨迹）；
+        // 前端会把整个表单原样回传（未改的项值为空串），空值项没有信息量。密钥值永不落库。
+        var changedKeys = normalized
             .Where(kv => !string.IsNullOrEmpty(kv.Value))
             .Select(kv => ResolveSettingName(kv.Key))
             .Where(name => name != null)
@@ -255,6 +262,30 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
         }
 
         return pascalCase.RemovePreFix(SettingUiConst.FormNamePrefix).UnderscoreToDot();
+    }
+
+    /// <summary>
+    /// 裸设置名 → 表单键（AbpAdmin.Sms.Provider → Setting_AbpAdmin_Sms_Provider），
+    /// 与上游的 ToPascalCase/RemovePreFix/UnderscoreToDot 变换互逆；已是表单键的原样保留。
+    /// 分段逐段 PascalCase：设置名段本身都是 PascalCase，此变换对正常名幂等。
+    /// </summary>
+    private static Dictionary<string, string> NormalizeToFormKeys(Dictionary<string, string> settingValues)
+    {
+        var normalized = new Dictionary<string, string>(settingValues.Count);
+        foreach (var (key, value) in settingValues)
+        {
+            if (key.ToPascalCase().StartsWith(SettingUiConst.FormNamePrefix))
+            {
+                normalized[key] = value;
+                continue;
+            }
+
+            var segments = key.Split('.', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.ToPascalCase());
+            normalized[SettingUiConst.FormNamePrefix + string.Join("_", segments)] = value;
+        }
+
+        return normalized;
     }
 
     // 操作日志经共享提交器 OperationLogCommitter 在 UoW 提交后（OnCompleted）写入——
