@@ -3,6 +3,7 @@ import { Card, Table, Tag, Typography } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
 import { VaultCheckListDto, getVaultChecks } from '@/abp/chainAdmin';
 import { startChainSignalR, onChainVaultCheck, onChainConnState, ChainConnState } from '@/abp/chainSignalR';
+import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const { Text } = Typography;
 
@@ -57,10 +58,12 @@ export default function VaultPage() {
     { title: '核对时间', dataIndex: 'checkedAt', width: 180, render: (v: string) => fmtTime(v) },
   ];
 
+  const { columns: resizableColumns, components, scrollX } = useResizableColumns(columns);
+
   return (
     <PageContainer>
       <Card title="金库核对留痕（SignalR 实时推送新核对）" extra={<Tag color={connView.color}>{connView.text}</Tag>}>
-        <Table<VaultCheckListDto> rowKey="id" loading={loading} dataSource={data} columns={columns} size="small"
+        <Table<VaultCheckListDto> rowKey="id" loading={loading} dataSource={data} columns={resizableColumns} components={components} scroll={{ x: scrollX }} size="small"
           pagination={{ current: page, pageSize, total, showSizeChanger: false, onChange: (p) => setPage(p) }} />
       </Card>
     </PageContainer>

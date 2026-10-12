@@ -1,4 +1,4 @@
-import { App, Button, Space, Table } from 'antd';
+import { App, Button, Space } from 'antd';
 import React from 'react';
 import {
   getExternalLogins,
@@ -7,6 +7,7 @@ import {
   type UserLoginDto,
 } from '@/abp/accountSecurity';
 import { useAsyncData } from '@/hooks/useAsyncData';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const LINKABLE_PROVIDERS = ['GitHub', 'Microsoft', 'Weixin', 'Google'];
 
@@ -28,15 +29,15 @@ const ExternalLoginsTab: React.FC = () => {
           </Button>
         ))}
       </Space>
-      <Table<UserLoginDto>
+      <ResizableTable<UserLoginDto>
         rowKey={(row) => `${row.loginProvider}:${row.providerKey}`}
         size="small"
         loading={loading}
         dataSource={logins ?? []}
         pagination={false}
         columns={[
-          { title: '提供方', dataIndex: 'loginProvider' },
-          { title: '显示名', dataIndex: 'providerDisplayName' },
+          { title: '提供方', dataIndex: 'loginProvider', width: 140 },
+          { title: '显示名', dataIndex: 'providerDisplayName', width: 180 },
           {
             title: '操作',
             render: (_, record) => (

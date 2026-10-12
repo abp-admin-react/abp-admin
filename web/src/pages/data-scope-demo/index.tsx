@@ -4,18 +4,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
-import {
-  App,
-  Button,
-  Card,
-  Form,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Table,
-  Tag,
-} from 'antd';
+import { App, Button, Card, Form, Input, Modal, Select, Space, Tag,  } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { getOrganizationUnits } from '@/abp/identityAdmin';
 import {
@@ -23,6 +12,7 @@ import {
   getApiAppDataScopeDemo,
   postApiAppDataScopeDemo,
 } from '@/services/abpadmin/dataScopeDemo';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 type DataScopeDemoItem = {
   id: string;
@@ -125,12 +115,14 @@ const DataScopeDemoPage: React.FC = () => {
       title: '所属组织',
       dataIndex: 'organizationUnitId',
       key: 'organizationUnitId',
+      width: 200,
       render: (ouId: string) => getOuName(ouId),
     },
     {
       title: '创建时间',
       dataIndex: 'creationTime',
       key: 'creationTime',
+      width: 180,
       render: (t: string) => new Date(t).toLocaleString(),
     },
     {
@@ -181,7 +173,7 @@ const DataScopeDemoPage: React.FC = () => {
             </Button>
           </Space>
         </div>
-        <Table
+        <ResizableTable
           rowKey="id"
           loading={loading}
           columns={columns}

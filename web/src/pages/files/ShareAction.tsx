@@ -1,16 +1,5 @@
 import { useIntl } from '@umijs/max';
-import {
-  App,
-  Button,
-  DatePicker,
-  Form,
-  InputNumber,
-  Modal,
-  Popconfirm,
-  Space,
-  Table,
-  Typography,
-} from 'antd';
+import { App, Button, DatePicker, Form, InputNumber, Modal, Popconfirm, Space, Typography,  } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -20,6 +9,7 @@ import {
   getAnonymousShareUrl,
   getFileShares,
 } from '@/abp/fileShare';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 /** 后端 FileShareLinkConsts：相对现在最多 30 天 */
 const MAX_EXPIRE_DAYS = 30;
@@ -197,7 +187,7 @@ const ShareAction: React.FC<{
             <Typography.Title level={5} style={{ marginTop: 16 }}>
               {intl.formatMessage({ id: 'pages.files.share.existing' })}
             </Typography.Title>
-            <Table<FileShareLinkDto>
+            <ResizableTable<FileShareLinkDto>
               rowKey="id"
               size="small"
               pagination={false}

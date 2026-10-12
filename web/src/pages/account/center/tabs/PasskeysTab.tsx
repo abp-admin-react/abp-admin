@@ -1,4 +1,4 @@
-import { App, Button, Space, Table } from 'antd';
+import { App, Button, Space } from 'antd';
 import React from 'react';
 import {
   deletePasskey,
@@ -8,6 +8,7 @@ import {
   type UserPasskeyDto,
 } from '@/abp/accountSecurity';
 import { useAsyncData } from '@/hooks/useAsyncData';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 // base64url <-> ArrayBuffer（WebAuthn 凭据字段编解码，自 index.tsx 拆分）
 function b64ToBuf(value: string) {
@@ -80,15 +81,15 @@ const PasskeysTab: React.FC = () => {
       >
         注册 Passkey
       </Button>
-      <Table<UserPasskeyDto>
+      <ResizableTable<UserPasskeyDto>
         rowKey="credentialId"
         size="small"
         loading={loading}
         dataSource={items ?? []}
         pagination={false}
         columns={[
-          { title: '名称', dataIndex: 'name' },
-          { title: '凭证', dataIndex: 'credentialId', ellipsis: true },
+          { title: '名称', dataIndex: 'name', width: 180 },
+          { title: '凭证', dataIndex: 'credentialId', ellipsis: true, width: 240 },
           {
             title: '操作',
             render: (_, record) => (

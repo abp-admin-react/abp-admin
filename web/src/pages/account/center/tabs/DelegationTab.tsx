@@ -1,4 +1,4 @@
-import { App, Button, Select, Space, Table, Typography } from 'antd';
+import { App, Button, Select, Space, Typography } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   createDelegation,
@@ -11,6 +11,7 @@ import {
 import { getUsers } from '@/abp/identity';
 import { applyImpersonatedTokens } from '@/abp/oidc';
 import { useAsyncData } from '@/hooks/useAsyncData';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 /**
  * 默认委托时长（天），与后端 AbpAdminAccountConsts.DefaultDelegationDays 对齐
@@ -57,22 +58,24 @@ const DelegationTab: React.FC = () => {
         </Button>
         <UserPicker value={targetUserId} onChange={setTargetUserId} />
       </Space>
-      <Table
+      <ResizableTable
         size="small"
         loading={loading}
         rowKey="id"
         dataSource={data?.mine ?? []}
         pagination={false}
         columns={[
-          { title: '目标用户', dataIndex: 'targetUserName' },
+          { title: '目标用户', dataIndex: 'targetUserName', width: 150 },
           {
             title: '开始',
             dataIndex: 'startTime',
+            width: 165,
             render: (v: string) => new Date(v).toLocaleString(),
           },
           {
             title: '结束',
             dataIndex: 'endTime',
+            width: 165,
             render: (v: string) => new Date(v).toLocaleString(),
           },
           {
@@ -95,14 +98,14 @@ const DelegationTab: React.FC = () => {
         ]}
       />
       <Typography.Title level={5}>别人委托给我</Typography.Title>
-      <Table
+      <ResizableTable
         size="small"
         loading={loading}
         rowKey="id"
         dataSource={data?.toMe ?? []}
         pagination={false}
         columns={[
-          { title: '来源用户', dataIndex: 'sourceUserName' },
+          { title: '来源用户', dataIndex: 'sourceUserName', width: 150 },
           {
             title: '结束',
             dataIndex: 'endTime',

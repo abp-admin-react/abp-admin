@@ -12,6 +12,11 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import {
+  columnKeyOf,
+  ResizableHeaderCell,
+  useResizableColumns,
+} from './useResizableColumns';
 
 /**
  * 撑满视口剩余高度的 ProTable 封装，统一解决全站列表页四个问题：
@@ -25,10 +30,11 @@ import React, {
  *    width/min-width:100%），列总宽超出容器时出横向滚动条而不是撑开页面。
  *    选择列/展开列等隐形列宽也已计入（见 scrollX 计算）。
  *
- * 3. 表头可拖拽调宽：沿用官网 resizable-column demo 的接线
- *    （components.header.cell + onHeaderCell 注入宽度），拖拽用原生
- *    Pointer Events 实现——react-resizable 依赖 findDOMNode，React 19 已移除。
- *    仅对配置了数字 width 的列生效。
+ * 3. 表头可拖拽调宽：官网 resizable-column demo 的接线——共享实现在
+ *    ./useResizableColumns（components.header.cell + onHeaderCell 注入宽度，
+ *    原生 Pointer Events 拖拽；react-resizable 依赖 findDOMNode，React 19 已移除）。
+ *    裸 antd Table 的页面也用同一共享实现（见该文件头注释）。仅对配置了数字
+ *    width 的列生效。
  *
  * 4. 测量时序防御：挂载瞬间的视口/布局未必就绪——嵌入 webview 初次展开时
  *    window.innerHeight 为 0 或反复跳变（实测 0→720 / 720→0→720），且此间
@@ -57,9 +63,6 @@ import React, {
  *   本组件会在开发环境对违反这两条的情况给出 console.warn。
  */
 
-/** 拖拽调宽的下限 */
-const MIN_COLUMN_WIDTH = 60;
-
 /** 页面内容区（PageContainer）底部的预留间距，默认对齐其 padding-bottom: 32 */
 const DEFAULT_BOTTOM_GAP = 32;
 
@@ -83,15 +86,6 @@ const SETTLE_STABLE_TICKS = 3;
  * 由规范上限兜底；组件级若连方向翻转也计数，1:1 响应的首轮合法修正可能被误杀。 */
 const SELF_CORRECT_MAX_STREAK = 3;
 
-/** ProColumns 的稳定 key：优先 key，其次 dataIndex，兜底下标 */
-const columnKeyOf = <T, V>(col: ProColumns<T, V>, index: number): string => {
-  if (col.key != null) return String(col.key);
-  const { dataIndex } = col;
-  if (typeof dataIndex === 'string') return dataIndex;
-  if (Array.isArray(dataIndex)) return dataIndex.join('.');
-  return `index-${index}`;
-};
-
 /** 元素高度含上下 margin（与官方 demo 的 getHeight 一致） */
 const getOuterHeight = (el: HTMLElement | null | undefined): number => {
   if (!el) return 0;
@@ -103,7 +97,7 @@ const getOuterHeight = (el: HTMLElement | null | undefined): number => {
   );
 };
 
-const useStyles = createStyles(({ token, css }) => ({
+const useStyles = createStyles(({ css }) => ({
   wrap: css`
     position: relative;
     width: 100%;
@@ -113,96 +107,7 @@ const useStyles = createStyles(({ token, css }) => ({
     flex: 1;
     min-height: 0;
   `,
-  resizableTh: css`
-    position: relative;
-  `,
-  resizeHandle: css`
-    position: absolute;
-    top: 0;
-    right: -3px;
-    bottom: 0;
-    width: 7px;
-    z-index: 1;
-    cursor: col-resize;
-    touch-action: none;
-    user-select: none;
-
-    &::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      right: 2px;
-      width: 3px;
-      height: 60%;
-      transform: translateY(-50%);
-      border-radius: ${token.borderRadiusXS}px;
-      background: transparent;
-      transition: background-color ${token.motionDurationFast};
-    }
-
-    &:hover::after {
-      background: ${token.colorPrimary};
-    }
-  `,
 }));
-
-type ResizableHeaderCellProps = React.ThHTMLAttributes<HTMLTableCellElement> & {
-  /** 由 onHeaderCell 注入的当前列宽 */
-  width?: number;
-  /** 由 onHeaderCell 注入的宽度更新回调 */
-  onResize?: (nextWidth: number) => void;
-};
-
-/** 可伸缩表头单元格（官网 resizable-column demo 的 ResizableTitle 替代实现） */
-const ResizableHeaderCell: React.FC<ResizableHeaderCellProps> = (props) => {
-  const { width, onResize, children, ...thProps } = props;
-  const { styles } = useStyles();
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLSpanElement>) => {
-    if (e.button !== 0 || width == null || !onResize) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { startX: e.clientX, startWidth: width };
-  };
-  const handlePointerMove = (e: React.PointerEvent<HTMLSpanElement>) => {
-    const drag = dragRef.current;
-    if (!drag || !onResize) return;
-    e.stopPropagation();
-    onResize(
-      Math.max(MIN_COLUMN_WIDTH, drag.startWidth + e.clientX - drag.startX),
-    );
-  };
-  const handlePointerUp = (e: React.PointerEvent<HTMLSpanElement>) => {
-    if (!dragRef.current) return;
-    dragRef.current = null;
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    }
-  };
-
-  if (width == null || !onResize) {
-    return <th {...thProps}>{children}</th>;
-  }
-
-  return (
-    <th
-      {...thProps}
-      className={`${styles.resizableTh} ${thProps.className ?? ''}`.trim()}
-    >
-      {children}
-      <span
-        className={styles.resizeHandle}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onClick={(e) => e.stopPropagation()}
-      />
-    </th>
-  );
-};
 
 export type AutoHeightProTableProps<
   DataType extends Record<string, any> = Record<string, any>,
@@ -247,7 +152,12 @@ const AutoHeightProTable = <
   const [wrapHeight, setWrapHeight] = useState<number>();
   const [scrollY, setScrollY] = useState<number>();
   const [sectionHeight, setSectionHeight] = useState<number>();
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+
+  /** 表头拖拽调宽：共享实现（./useResizableColumns），列宽按 column.key 记忆 */
+  const {
+    columns: resizableColumns,
+    columnWidths,
+  } = useResizableColumns(columns, resizable);
 
   /** 自校正熔断状态：连续同向不收敛即停用（组件生命周期内不恢复，重挂载复位） */
   const selfCorrectRef = useRef({ dir: 0, streak: 0, disabled: false });
@@ -438,38 +348,6 @@ const AutoHeightProTable = <
     };
   }, [fillViewport, measure]);
 
-  /** 用户拖拽后的列宽覆盖原始 width */
-  const mergedColumns = useMemo(
-    () =>
-      columns?.map((col, index) => {
-        const width = columnWidths[columnKeyOf(col, index)];
-        return width == null ? col : { ...col, width };
-      }),
-    [columns, columnWidths],
-  );
-
-  /** 给配置了数字 width 的列接上 onHeaderCell（官网 resizable-column 的 mergedColumns 步骤）。
-   * onHeaderCell 需要把自定义的 width/onResize 透传给 ResizableHeaderCell，超出 antd
-   * 表头属性类型，故整体按 ProColumns 收窄。 */
-  const finalColumns = useMemo(
-    () =>
-      mergedColumns?.map((col, index) => {
-        if (!resizable || typeof col.width !== 'number') return col;
-        const key = columnKeyOf(col, index);
-        const width = col.width;
-        return {
-          ...col,
-          onHeaderCell: (column: any) => ({
-            width,
-            onResize: (nextWidth: number) =>
-              setColumnWidths((prev) => ({ ...prev, [key]: nextWidth })),
-            ...(col.onHeaderCell?.(column) ?? {}),
-          }),
-        };
-      }) as ProColumns<DataType, ValueType>[],
-    [mergedColumns, resizable],
-  );
-
   /** scroll.x = 各列宽度求和（含拖拽后的宽度），列总宽超出容器时只出横向滚动条。
    * 官网 rowSelection 默认选择列 32px、expandable 展开列默认 48px，
    * 这些"隐形列"不在 columns 里，需按官网默认宽度假补进总宽。 */
@@ -599,7 +477,7 @@ const AutoHeightProTable = <
     >
       <ProTable<DataType, Params, ValueType>
         {...rest}
-        columns={finalColumns}
+        columns={resizableColumns}
         style={{
           height: '100%',
           display: 'flex',

@@ -1,6 +1,7 @@
-import { Drawer, Table, Tag } from 'antd';
+import { Drawer, Tag } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { getExecutions, type ScheduledJobExecution } from '../service';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 interface ExecutionDrawerProps {
   jobId?: string;
@@ -55,7 +56,7 @@ const ExecutionDrawer: React.FC<ExecutionDrawerProps> = ({
       }}
       destroyOnHidden
     >
-      <Table<ScheduledJobExecution>
+      <ResizableTable<ScheduledJobExecution>
         rowKey="id"
         size="small"
         loading={loading}
@@ -70,6 +71,7 @@ const ExecutionDrawer: React.FC<ExecutionDrawerProps> = ({
           {
             title: '开始时间',
             dataIndex: 'startTime',
+            width: 165,
             render: (v: string) => new Date(v).toLocaleString(),
           },
           {

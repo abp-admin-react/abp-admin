@@ -1,13 +1,4 @@
-import {
-  App,
-  Button,
-  Form,
-  Input,
-  Modal,
-  Space,
-  Table,
-  Typography,
-} from 'antd';
+import { App, Button, Form, Input, Modal, Space, Typography,  } from 'antd';
 import React, { useState } from 'react';
 import {
   getLinkedAccounts,
@@ -18,6 +9,7 @@ import {
 } from '@/abp/accountLink';
 import { applyImpersonatedTokens } from '@/abp/oidc';
 import { useAsyncData } from '@/hooks/useAsyncData';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 /**
  * 从 OpenId 错误信封取服务端消息（response.data.error.message），
@@ -114,15 +106,15 @@ const LinkedAccountsTab: React.FC = () => {
       <Button type="primary" onClick={() => setLinkModalOpen(true)}>
         关联其他账号
       </Button>
-      <Table<LinkedAccountDto>
+      <ResizableTable<LinkedAccountDto>
         rowKey="linkId"
         size="small"
         loading={loading}
         dataSource={items ?? []}
         pagination={false}
         columns={[
-          { title: '用户名', dataIndex: 'userName' },
-          { title: '邮箱', dataIndex: 'emailAddress' },
+          { title: '用户名', dataIndex: 'userName', width: 160 },
+          { title: '邮箱', dataIndex: 'emailAddress', width: 220 },
           {
             title: '操作',
             width: 200,

@@ -1,19 +1,6 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import {
-  Alert,
-  App,
-  Button,
-  Card,
-  Drawer,
-  Input,
-  InputNumber,
-  Popconfirm,
-  Space,
-  Table,
-  Tag,
-  Typography,
-} from 'antd';
+import { Alert, App, Button, Card, Drawer, Input, InputNumber, Popconfirm, Space, Tag, Typography,  } from 'antd';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type CacheKeyDto,
@@ -25,6 +12,7 @@ import {
   refreshCacheKey,
   updateCacheValue,
 } from '@/abp/proModules';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const formatBytes = (bytes?: number | null): string => {
   if (bytes == null || Number.isNaN(bytes)) {
@@ -358,7 +346,7 @@ const CacheMonitorPage: React.FC = () => {
           </Space>
         }
       >
-        <Table<CacheKeyDto>
+        <ResizableTable<CacheKeyDto>
           rowKey="key"
           size="small"
           loading={loading}

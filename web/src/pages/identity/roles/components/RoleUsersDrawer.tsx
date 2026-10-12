@@ -1,6 +1,7 @@
-import { App, Drawer, Table, type TableColumnsType, Tag } from 'antd';
+import { App, Drawer, type TableColumnsType, Tag } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
 import { getRoleUsers, type IdentityRoleDto, type RoleUserDto } from '@/abp/identity';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 type RoleUsersDrawerProps = {
   role: IdentityRoleDto | undefined;
@@ -83,7 +84,7 @@ const RoleUsersDrawer: React.FC<RoleUsersDrawerProps> = ({ role, onClose }) => {
       width={720}
       destroyOnHidden
     >
-      <Table<RoleUserDto>
+      <ResizableTable<RoleUserDto>
         rowKey="id"
         size="middle"
         loading={loading}

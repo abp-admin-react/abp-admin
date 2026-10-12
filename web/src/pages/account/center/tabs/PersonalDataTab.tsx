@@ -1,4 +1,4 @@
-import { App, Button, Input, Space, Table, Tag, Typography } from 'antd';
+import { App, Button, Input, Space, Tag, Typography } from 'antd';
 import React, { useRef, useState } from 'react';
 import {
   createGdprRequest,
@@ -10,6 +10,7 @@ import {
   isNewGdprRequestAllowed,
 } from '@/abp/gdpr';
 import { useAsyncData } from '@/hooks/useAsyncData';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 /** GDPR 个人数据 Tab：发起收集请求 → 就绪后两步下载 ZIP → 删除账户（自 index.tsx 拆分，见重构报告问题 4） */
 const PersonalDataTab: React.FC = () => {
@@ -103,7 +104,7 @@ const PersonalDataTab: React.FC = () => {
           </Typography.Text>
         )}
       </Space>
-      <Table<GdprRequestDto>
+      <ResizableTable<GdprRequestDto>
         rowKey="id"
         size="small"
         loading={loading}
@@ -113,16 +114,19 @@ const PersonalDataTab: React.FC = () => {
           {
             title: '请求时间',
             dataIndex: 'creationTime',
+            width: 170,
             render: (v: string) => new Date(v).toLocaleString(),
           },
           {
             title: '就绪时间',
             dataIndex: 'readyTime',
+            width: 170,
             render: (v: string) => new Date(v).toLocaleString(),
           },
           {
             title: '状态',
             key: 'status',
+            width: 110,
             render: (_, record) =>
               new Date(record.readyTime).getTime() <= now ? (
                 <Tag color="success">已就绪</Tag>
@@ -133,6 +137,7 @@ const PersonalDataTab: React.FC = () => {
           {
             title: '操作',
             key: 'actions',
+            width: 90,
             render: (_, record) => (
               <Button
                 type="link"

@@ -34,6 +34,7 @@ import {
   setVaultAddress,
 } from '@/abp/chainAdmin';
 import { startChainSignalR, onChainScanProgress, onChainConnState, ChainScanProgressPayload, ChainConnState } from '@/abp/chainSignalR';
+import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const { Text, Paragraph } = Typography;
 
@@ -187,6 +188,9 @@ export default function NetworkConfigPage() {
       ) },
   ];
 
+  const { columns: tokenResizableColumns, components: tokenComponents, scrollX: tokenScrollX } =
+    useResizableColumns(tokenColumns);
+
   const keyRows: ChainApiKeyDto[] = [...rpcKeys, ...etherscanKeys];
   const keyColumns = [
     { title: '服务商', dataIndex: 'provider', width: 120,
@@ -211,6 +215,9 @@ export default function NetworkConfigPage() {
         </Popconfirm>
       ) },
   ];
+
+  const { columns: keyResizableColumns, components: keyComponents, scrollX: keyScrollX } =
+    useResizableColumns(keyColumns);
 
   return (
     <PageContainer>
@@ -250,7 +257,7 @@ export default function NetworkConfigPage() {
               }
             />
             <Space wrap>
-              <Select value={newKeyProvider} onChange={(v: string) => setNewKeyProvider(v)} style={{ width: 160 }}
+              <Select value={newKeyProvider} onChange={(v: string) => setNewKeyProvider(v)} style={{ width: 200 }} popupMatchSelectWidth={false}
                 options={[
                   { value: 'RpcBsc', label: 'Ankr RPC（扫链）' },
                   { value: 'EtherscanV2', label: 'Etherscan V2（兜底）' },
@@ -262,12 +269,14 @@ export default function NetworkConfigPage() {
                 onChange={(e) => setNewKeyLabel(e.target.value)} style={{ width: 200 }} onPressEnter={submitAddKey} />
               <Button type="primary" loading={newKeySaving} onClick={submitAddKey}>添加</Button>
             </Space>
-            <Table<ChainApiKeyDto> rowKey="id" dataSource={keyRows} columns={keyColumns}
+            <Table<ChainApiKeyDto> rowKey="id" dataSource={keyRows} columns={keyResizableColumns}
+              components={keyComponents} scroll={{ x: keyScrollX }}
               pagination={false} size="small" locale={{ emptyText: '暂无 KEY（使用回退来源）' }} />
           </Space>
         </Card>
         <Card title="代币通道（SignalR 实时推送）">
-          <Table<TokenStatusDto> rowKey="id" dataSource={mergedTokens} columns={tokenColumns} pagination={false} size="small" />
+          <Table<TokenStatusDto> rowKey="id" dataSource={mergedTokens} columns={tokenResizableColumns}
+            components={tokenComponents} scroll={{ x: tokenScrollX }} pagination={false} size="small" />
         </Card>
         {status && (status.scanBehindAlertedAt || status.sweepStuckAlertedAt || status.gasLowAlertedAt) && (
           <Card title="最近告警" size="small">

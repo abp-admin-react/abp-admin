@@ -3,6 +3,7 @@ import { Card, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
 import { SWEEP_STATUS_LABELS, SweepTaskListDto, getSweepTasks } from '@/abp/chainAdmin';
 import { startChainSignalR, onChainSweepChanged, onChainConnState, ChainConnState } from '@/abp/chainSignalR';
+import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const { Text } = Typography;
 
@@ -57,6 +58,8 @@ export default function SweepsPage() {
     { title: '状态变更', dataIndex: 'statusChangedAt', width: 150, render: (v: string) => fmtTime(v) },
   ];
 
+  const { columns: resizableColumns, components, scrollX } = useResizableColumns(columns);
+
   return (
     <PageContainer>
       <Card
@@ -70,7 +73,7 @@ export default function SweepsPage() {
           </Space>
         }
       >
-        <Table<SweepTaskListDto> rowKey="id" loading={loading} dataSource={data} columns={columns} size="small"
+        <Table<SweepTaskListDto> rowKey="id" loading={loading} dataSource={data} columns={resizableColumns} components={components} scroll={{ x: scrollX }} size="small"
           pagination={{ current: page, pageSize, total, showSizeChanger: false, onChange: (p) => setPage(p) }} />
       </Card>
     </PageContainer>

@@ -5,7 +5,7 @@ import {
   type ProColumns,
 } from '@ant-design/pro-components';
 import { useAccess, useModel } from '@umijs/max';
-import { App, Button, Modal, Popconfirm, Table, Tag, Upload } from 'antd';
+import { App, Button, Modal, Popconfirm, Tag, Upload } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
 import { impersonateUser } from '@/abp/account';
 import {
@@ -34,6 +34,7 @@ import ClaimModal from '@/components/ClaimModal';
 import PermissionModal from '@/components/PermissionModal';
 import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 import { ResetPasswordForm, UserForm } from './components/UserForms';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 /**
  * 同步导出阈值（与后端 AuditLogExportConsts.SyncThreshold 一致）：
@@ -431,7 +432,7 @@ const UsersPage: React.FC = () => {
               条
             </p>
             {importResult.errors.length > 0 && (
-              <Table
+              <ResizableTable
                 dataSource={importResult.errors}
                 rowKey="rowNumber"
                 size="small"
