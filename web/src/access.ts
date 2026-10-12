@@ -134,6 +134,8 @@ export default function access(
     // 订单/收款模块（只给 Host 用户：后端应用服务有 Host 守卫，这里只管菜单可见性）
     canViewOrders: !!policies['AbpAdmin.Ordering.Orders'],
     canViewCollections: !!policies['AbpAdmin.Collection.Collections'],
+    // 收付款父组（订单/收付款子页共用入口）：任一子域可见即显示父组
+    canViewTrade: !!policies['AbpAdmin.Ordering.Orders'] || !!policies['AbpAdmin.Collection.Collections'],
     // 链网配置（高危运维：RPC/助记词/金库/上限），独立权限仅授予运维角色
     canAdminNetwork: !!policies['AbpAdmin.Collection.Network.Admin'],
     // T2.6 Identity Pro 缺口：用户导入导出

@@ -310,27 +310,20 @@ export default [
     component: './biz-template/data-scope',
   },
   {
-    // 订单模块（AbpAdmin.Ordering）：只给 Host 用户，后端有 Host 守卫
-    path: '/ordering',
-    name: 'ordering',
-    icon: 'shoppingCart',
-    access: 'canViewOrders',
-    component: './ordering',
-  },
-  {
-    // 收款模块（AbpAdmin.Collection）：只给 Host 用户，后端有 Host 守卫。
-    // 拆四个子页面（参照 exchange 项目）：链网配置/充值单/归集任务/金库核对
+    // 收付款域（AbpAdmin.Ordering + AbpAdmin.Collection）：只给 Host 用户，后端有 Host 守卫。
+    // 整域一个父组，子项按使用频率排：订单（用户侧最高频）→ 充值/归集/金库（运营监控）
+    // → 链网配置（高危运维，独立权限）。父组入口默认落在订单。
     path: '/collection',
     name: 'collection',
     icon: 'payCircle',
-    access: 'canViewCollections',
+    access: 'canViewTrade',
     routes: [
-      { path: '/collection', redirect: '/collection/network' },
+      { path: '/collection', redirect: '/collection/orders' },
       {
-        path: '/collection/network',
-        name: 'collection-network',
-        access: 'canAdminNetwork',
-        component: './collection/network',
+        path: '/collection/orders',
+        name: 'collection-orders',
+        access: 'canViewOrders',
+        component: './ordering',
       },
       {
         path: '/collection/deposits',
@@ -349,6 +342,12 @@ export default [
         name: 'collection-vault',
         access: 'canViewCollections',
         component: './collection/vault',
+      },
+      {
+        path: '/collection/network',
+        name: 'collection-network',
+        access: 'canAdminNetwork',
+        component: './collection/network',
       },
     ],
   },

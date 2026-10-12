@@ -56,14 +56,18 @@ public static class MenuTemplateDefinition
         new("cache-monitor", "system", MenuTypeEnum.Menu, "缓存监控", "cache-monitor", "/system/cache-monitor", "hdd", 60, "AbpAdmin.CacheMonitor"),
         new("data-scope-demo", null, MenuTypeEnum.Menu, "数据权限演示", "data-scope-demo", "/data-scope-demo", "database", 40, "AbpAdmin.DataScopes.Demo"),
         new("biz-template-data-scope", null, MenuTypeEnum.Menu, "业务模块·数据权限示例", "biz-template-data-scope", "/biz-template/data-scope", "apartment", 45, "BizTemplate.DataScopeDemo"),
-        // 收款/订单两个管理端菜单（收款/订单计划第 2、4.3、5.7 节）：只给 Host 用户，
+        // 收付款域（AbpAdmin.Ordering + AbpAdmin.Collection，计划第 2、4.3、5.7 节）：只给 Host 用户，
         // 后端有 Host 守卫；菜单不在模块种子里插入，统一在这里维护。
-        new("ordering", null, MenuTypeEnum.Menu, "订单", "ordering", "/ordering", "shoppingCart", 46, "AbpAdmin.Ordering.Orders"),
-        new("collection", null, MenuTypeEnum.Catalog, "收付款", "collection", "/collection", "payCircle", 47, "AbpAdmin.Collection.Collections"),
-        new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 48, "AbpAdmin.Collection.Network.Admin"),
-        new("collection-deposits", "collection", MenuTypeEnum.Menu, "充值单", "collection-deposits", "/collection/deposits", "deposit", 49, "AbpAdmin.Collection.Collections"),
-        new("collection-sweeps", "collection", MenuTypeEnum.Menu, "归集任务", "collection-sweeps", "/collection/sweeps", "send", 50, "AbpAdmin.Collection.Collections"),
-        new("collection-vault", "collection", MenuTypeEnum.Menu, "金库核对", "collection-vault", "/collection/vault", "audit", 51, "AbpAdmin.Collection.Collections"),
+        // 整域一个父组，子项按使用频率排：订单（用户侧最高频）→ 充值/归集/金库（运营监控）
+        // → 链网配置（高危运维，独立权限）。父组权限位是单值口径（MenuDefinition 不支持 OR）：
+        // 绑订单权限位——只有收付款子域权限的角色看不到父组（子页仍可直达 URL；当前角色
+        // 模型 admin 同时持有两个权限位，实际不受影响）。前端 access.ts 的 canViewTrade 是 OR 口径。
+        new("collection", null, MenuTypeEnum.Catalog, "收付款", "collection", "/collection", "payCircle", 46, "AbpAdmin.Ordering.Orders"),
+        new("collection-orders", "collection", MenuTypeEnum.Menu, "订单", "collection-orders", "/collection/orders", "shoppingCart", 47, "AbpAdmin.Ordering.Orders"),
+        new("collection-deposits", "collection", MenuTypeEnum.Menu, "充值单", "collection-deposits", "/collection/deposits", "deposit", 48, "AbpAdmin.Collection.Collections"),
+        new("collection-sweeps", "collection", MenuTypeEnum.Menu, "归集任务", "collection-sweeps", "/collection/sweeps", "send", 49, "AbpAdmin.Collection.Collections"),
+        new("collection-vault", "collection", MenuTypeEnum.Menu, "金库核对", "collection-vault", "/collection/vault", "audit", 50, "AbpAdmin.Collection.Collections"),
+        new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 51, "AbpAdmin.Collection.Network.Admin"),
         new("current-session", null, MenuTypeEnum.Menu, "当前会话", "current-session", "/current-session", "user", 50),
     };
 }
