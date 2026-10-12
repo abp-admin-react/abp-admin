@@ -1,0 +1,64 @@
+using AbpAdmin.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Volo.Abp.Data;
+using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.Modularity;
+using Volo.Abp.PermissionManagement;
+using Volo.Abp.FeatureManagement;
+
+namespace AbpAdmin.Collection;
+
+/// <summary>
+/// 收款模块测试模块：程序集专属 Testcontainers PG 库真迁移建表（框架 + Collection 两本账）。
+/// 不调 AddAlwaysDisableUnitOfWorkTransaction：CreateAsync/CancelAsync 的验收点就是
+/// requiresNew 提交可见性与状态机事务语义。
+/// </summary>
+[DependsOn(
+    typeof(AbpAdminCollectionModule),
+    typeof(AbpAdminTestBaseModule)
+)]
+public class CollectionTestModule : AbpModule
+{
+    public override void ConfigureServices(ServiceConfigurationContext context)
+    {
+        Configure<FeatureManagementOptions>(options =>
+        {
+            options.SaveStaticFeaturesToDatabase = false;
+            options.IsDynamicFeatureStoreEnabled = false;
+        });
+        Configure<PermissionManagementOptions>(options =>
+        {
+            options.SaveStaticPermissionsToDatabase = false;
+            options.IsDynamicPermissionStoreEnabled = false;
+        });
+
+        var database = AbpAdminTestPg.GetDatabase(typeof(CollectionTestModule).Assembly);
+        database.MigrateOnce("AbpAdminDbContext", () =>
+        {
+            using var dbContext = new AbpAdminDbContext(
+                new DbContextOptionsBuilder<AbpAdminDbContext>().UseNpgsql(database.ConnectionString).Options);
+            dbContext.Database.Migrate();
+        });
+        database.MigrateOnce("CollectionDbContext", () =>
+        {
+            using var dbContext = new Data.CollectionDbContext(
+                new DbContextOptionsBuilder<Data.CollectionDbContext>()
+                    .UseNpgsql(database.ConnectionString, npgsql =>
+                    {
+                        npgsql.MigrationsHistoryTable(CollectionConsts.SchemaHistoryTable);
+                    })
+                    .Options);
+            dbContext.Database.Migrate();
+        });
+
+        context.Services.Configure<AbpDbConnectionOptions>(options =>
+        {
+            options.ConnectionStrings.Default = database.ConnectionString;
+        });
+
+        // 渠道网关假实现：静态双实例（微信/支付宝）单例注册——测试先配置行为再调被测服务
+        context.Services.AddSingleton<Channels.ICollectionChannelGateway>(Fakes.FakeChannelGateway.Wechat);
+        context.Services.AddSingleton<Channels.ICollectionChannelGateway>(Fakes.FakeChannelGateway.Alipay);
+    }
+}

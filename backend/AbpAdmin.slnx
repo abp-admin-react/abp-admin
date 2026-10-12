@@ -10,6 +10,10 @@
         <!-- 自包含业务模块样板：一个工程，建表走模块内 EF 迁移（独立 History 表） -->
         <Project Path="src/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj" />
         <Project Path="src/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj" />
+        <!-- 收款/订单双模块：收款契约（枚举/ETO/集成服务接口）+ 收款实现 + 订单实现（只依赖契约） -->
+        <Project Path="src/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj" />
+        <Project Path="src/AbpAdmin.Collection/AbpAdmin.Collection.csproj" />
+        <Project Path="src/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj" />
         <Project Path="src/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj" />
         <Project Path="src/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts.csproj" />
         <Project Path="src/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj" />
@@ -31,5 +35,8 @@
         <Project Path="test/AbpAdmin.Storage.Tests/AbpAdmin.Storage.Tests.csproj" />
         <!-- 自包含业务模块样板的测试：随模块复制，下游改名后继承全部用例 -->
         <Project Path="test/AbpAdmin.Biz.Template.Tests/AbpAdmin.Biz.Template.Tests.csproj" />
+        <!-- 收款/订单双模块的测试（Testcontainers PG，程序集串行） -->
+        <Project Path="test/AbpAdmin.Collection.Tests/AbpAdmin.Collection.Tests.csproj" />
+        <Project Path="test/AbpAdmin.Ordering.Tests/AbpAdmin.Ordering.Tests.csproj" />
     </Folder>
 </Solution>
