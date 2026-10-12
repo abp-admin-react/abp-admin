@@ -1,0 +1,33 @@
+{
+  "culture": "zh-Hans",
+  "texts": {
+    "AbpAdmin.Collection:InvalidAmount": "金额格式无效；金额必须是普通十进制字符串，最多 18 位小数。",
+    "AbpAdmin.Collection:PendingCollectionConflict": "该业务单已有一笔等待中的收款，且渠道、金额或币种与本次不同。请先取消。",
+    "AbpAdmin.Collection:AmountExceedsChannelLimit": "金额超过该渠道、该币种配置的上限。",
+    "AbpAdmin.Collection:ChannelNotConfigured": "该收款渠道未配置或不可用。",
+    "AbpAdmin.Collection:StripeExpiryTooShort": "Stripe Checkout 会话至少需要 30 分钟有效期，请重新报价后再支付。",
+    "AbpAdmin.Collection:CollectionNotFound": "收款单不存在。",
+    "AbpAdmin.Collection:InsufficientBalance": "余额不足。",
+    "AbpAdmin.Collection:DebitConflict": "该业务单已有未回冲的扣款，且金额或币种与本次不同。",
+    "AbpAdmin.Collection:DepositNotOpen": "充值尚未开放：扫链成功跑过一轮之前不提供充值地址。",
+    "AbpAdmin.Collection:ChannelOutcomeUnknown": "渠道调用超时或结果未知。收款单保持等待中，稍后由补单作业核对。",
+    "AbpAdmin.Collection:ChannelFailed": "渠道拒绝了本次支付请求，收款单已标记为失败；可以重试。",
+    "AbpAdmin.Collection:HostOnly": "该功能仅限宿主用户使用。",
+    "Permission:Collection": "收款",
+    "Permission:Collections": "收款管理",
+    "Menu:Collection": "收款",
+    "Collection": "收款",
+    "DisplayName:Collection.MaxAmount.WechatNativeCny": "微信 Native 单笔收款上限（CNY）",
+    "Description:Collection.MaxAmount.WechatNativeCny": "留空表示不限制。超过上限时创建收款会被拒绝。",
+    "DisplayName:Collection.MaxAmount.AlipayPrecreateCny": "支付宝当面付单笔收款上限（CNY）",
+    "Description:Collection.MaxAmount.AlipayPrecreateCny": "留空表示不限制。超过上限时创建收款会被拒绝。",
+    "DisplayName:Collection.MaxAmount.StripeCheckoutUsd": "Stripe 单笔收款上限（USD）",
+    "Description:Collection.MaxAmount.StripeCheckoutUsd": "留空表示不限制。超过上限时创建收款会被拒绝。",
+    "DisplayName:Collection.Balance.DebitCommandTimeoutSeconds": "扣款命令超时（秒）",
+    "Description:Collection.Balance.DebitCommandTimeoutSeconds": "扣款的余额行锁会留到外层订单事务提交；热点账户排队过长时按此超时失败重试，不无限等待。",
+    "Permission:Network.Admin": "链网运维",
+    "AbpAdmin.Collection:TryAgain": "地址派生进行中，请稍后重试。",
+    "AbpAdmin.Collection:MnemonicResetRefused": "已存在充值地址或未完成归集，禁止重置助记词。",
+    "AbpAdmin.Collection:MasterKeyMissing": "主密钥未配置（Collection:MasterKey），链网运维不可用。"
+  }
+}

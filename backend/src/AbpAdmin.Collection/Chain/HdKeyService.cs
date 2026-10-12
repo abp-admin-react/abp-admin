@@ -1,0 +1,82 @@
+using System;
+using Nethereum.HdWallet;
+using Volo.Abp.Security.Encryption;
+
+namespace AbpAdmin.Collection.Chain;
+
+/// <summary>
+/// HD 密钥派生（计划第 5.6 节）：路径 m/44'/60'/0'/0/i，索引 0 不用、1 = Gas 地址、用户地址从 2 起。
+/// 助记词只在调用现场解密为明文（不落日志、不入库），派生完立即离开作用域。
+/// 私钥不入库——归集时按 MnemonicCipher + AddressIndex 现推。
+/// </summary>
+public static class HdKeyService
+{
+    /// <summary>Gas 地址（index 1）。</summary>
+    public const int GasAddressIndex = 1;
+
+    /// <summary>用户地址起始索引。</summary>
+    public const int FirstUserAddressIndex = 2;
+
+    /// <summary>解密后的助记词句柄：Dispose 抹除明文引用。</summary>
+    public sealed class DecryptedMnemonic : IDisposable
+    {
+        internal string Words { get; private set; }
+
+        public DecryptedMnemonic(string words)
+        {
+            Words = words;
+        }
+
+        public void Dispose()
+        {
+            Words = string.Empty;
+        }
+    }
+
+    /// <summary>解密助记词（cipher = 版本前缀 + 密文；masterKey = Collection:MasterKey）。</summary>
+    public static DecryptedMnemonic Unprotect(string cipher, string masterKey, IStringEncryptionService encryptor)
+    {
+        if (string.IsNullOrEmpty(cipher) || cipher.Length < 2)
+        {
+            throw new InvalidOperationException("Mnemonic cipher is missing or malformed.");
+        }
+
+        if (cipher[0] != '\u0001')
+        {
+            throw new InvalidOperationException($"Unknown mnemonic cipher version: 0x{(byte)cipher[0]:x2}.");
+        }
+
+        return new DecryptedMnemonic(encryptor.Decrypt(cipher[1..], masterKey));
+    }
+
+    /// <summary>加密助记词（版本前缀 0x01：未来换算法/轮换时按前缀分流，本期不做轮换工具）。</summary>
+    public static string Protect(string words, string masterKey, IStringEncryptionService encryptor)
+    {
+        return '\u0001' + encryptor.Encrypt(words, masterKey);
+    }
+
+    public static string DeriveAddress(string words, int index)
+    {
+        return MakeWallet(words).GetAccount(index).Address;
+    }
+
+    /// <summary>现推私钥（归集签名用）；明文不落日志，调用方用完即弃。</summary>
+    public static string DerivePrivateKey(string words, int index)
+    {
+        return MakeWallet(words).GetAccount(index).PrivateKey;
+    }
+
+    /// <summary>已定助记词的钱包（4.29 ctor：mnemonic/password/seedPassword/IRandom）。</summary>
+    private static Wallet MakeWallet(string words)
+    {
+        return new Wallet(words, string.Empty, string.Empty, null);
+    }
+
+    /// <summary>生成 24 词助记词（管理端一次性展示；明文不落日志）。</summary>
+    public static string GenerateMnemonic()
+    {
+        var wallet = new Wallet(NBitcoin.Wordlist.English, NBitcoin.WordCount.TwentyFour,
+            string.Empty, string.Empty, null);
+        return string.Join(' ', wallet.Words);
+    }
+}

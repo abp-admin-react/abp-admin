@@ -1,0 +1,33 @@
+{
+  "culture": "en",
+  "texts": {
+    "AbpAdmin.Collection:InvalidAmount": "Invalid amount format; amounts must be plain decimal strings with at most 18 decimal places.",
+    "AbpAdmin.Collection:PendingCollectionConflict": "This business order already has a pending collection with a different channel, amount or currency. Cancel it first.",
+    "AbpAdmin.Collection:AmountExceedsChannelLimit": "The amount exceeds the configured limit for this channel and currency.",
+    "AbpAdmin.Collection:ChannelNotConfigured": "The payment channel is not configured or available.",
+    "AbpAdmin.Collection:StripeExpiryTooShort": "Stripe Checkout sessions require at least 30 minutes of validity. Re-quote before paying.",
+    "AbpAdmin.Collection:CollectionNotFound": "Collection not found.",
+    "AbpAdmin.Collection:InsufficientBalance": "Insufficient balance.",
+    "AbpAdmin.Collection:DebitConflict": "This business order already has an unreversed debit with a different amount or currency.",
+    "AbpAdmin.Collection:DepositNotOpen": "Deposits are not open yet; charging is disabled until chain scanning has completed a first round.",
+    "AbpAdmin.Collection:ChannelOutcomeUnknown": "The channel call timed out or its outcome is unknown. The collection stays pending and will be reconciled by the background job.",
+    "AbpAdmin.Collection:ChannelFailed": "The channel rejected the payment request. The collection was marked as failed; you may retry.",
+    "AbpAdmin.Collection:HostOnly": "This feature is only available to host users.",
+    "Permission:Collection": "Collection",
+    "Permission:Collections": "Collection management",
+    "Menu:Collection": "Collection",
+    "Collection": "Collection",
+    "DisplayName:Collection.MaxAmount.WechatNativeCny": "WeChat Native max amount per collection (CNY)",
+    "Description:Collection.MaxAmount.WechatNativeCny": "Empty means unlimited. CreateAsync rejects amounts above this limit.",
+    "DisplayName:Collection.MaxAmount.AlipayPrecreateCny": "Alipay precreate max amount per collection (CNY)",
+    "Description:Collection.MaxAmount.AlipayPrecreateCny": "Empty means unlimited. CreateAsync rejects amounts above this limit.",
+    "DisplayName:Collection.MaxAmount.StripeCheckoutUsd": "Stripe Checkout max amount per collection (USD)",
+    "Description:Collection.MaxAmount.StripeCheckoutUsd": "Empty means unlimited. CreateAsync rejects amounts above this limit.",
+    "DisplayName:Collection.Balance.DebitCommandTimeoutSeconds": "Debit command timeout (seconds)",
+    "Description:Collection.Balance.DebitCommandTimeoutSeconds": "The balance row lock is held until the outer order transaction commits; hot accounts fail by this timeout instead of queueing forever.",
+    "Permission:Network.Admin": "Chain network administration",
+    "AbpAdmin.Collection:TryAgain": "Address derivation is in progress; please retry.",
+    "AbpAdmin.Collection:MnemonicResetRefused": "Deposit addresses or unfinished sweeps exist; resetting the mnemonic is refused.",
+    "AbpAdmin.Collection:MasterKeyMissing": "Master key is not configured (Collection:MasterKey); chain administration is unavailable."
+  }
+}
