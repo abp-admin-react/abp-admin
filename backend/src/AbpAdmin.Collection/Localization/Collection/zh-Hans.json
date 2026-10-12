@@ -28,6 +28,11 @@
     "Permission:Network.Admin": "链网运维",
     "AbpAdmin.Collection:TryAgain": "地址派生进行中，请稍后重试。",
     "AbpAdmin.Collection:MnemonicResetRefused": "已存在充值地址或未完成归集，禁止重置助记词。",
-    "AbpAdmin.Collection:MasterKeyMissing": "主密钥未配置（Collection:MasterKey），链网运维不可用。"
+    "AbpAdmin.Collection:MasterKeyMissing": "主密钥未配置（Collection:MasterKey），链网运维不可用。",
+    "AbpAdmin.Collection:InvalidRpcUrl": "RPC 地址非法：必须是 https 地址。",
+    "AbpAdmin.Collection:InvalidVaultAddress": "金库地址非法：需 0x 开头的 40 位十六进制。",
+    "AbpAdmin.Collection:InvalidCap": "扫链响应上限非法：需 ≥ 100。",
+    "AbpAdmin.Collection:InvalidApiKey": "扫链 KEY 格式非法：Ankr 为 64 位十六进制，Etherscan 为 34 位字母数字。",
+    "AbpAdmin.Collection:ApiKeyExists": "同一服务商下该扫链 KEY 已存在。"
   }
 }

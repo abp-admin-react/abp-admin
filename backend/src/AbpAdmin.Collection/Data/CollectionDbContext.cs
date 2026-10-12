@@ -34,6 +34,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
     public DbSet<ColVaultCheck> VaultChecks { get; set; } = default!;
 
+    public DbSet<ColChainApiKey> ChainApiKeys { get; set; } = default!;
+
     public CollectionDbContext(DbContextOptions<CollectionDbContext> options)
         : base(options)
     {
@@ -216,6 +218,20 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.Property(x => x.Difference).HasPrecision(28, 18);
 
             b.HasIndex(x => new { x.TokenId, x.CheckedAt });
+        });
+
+        builder.Entity<ColChainApiKey>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "ChainApiKeys");
+            b.ConfigureByConvention();
+
+            b.Property(x => x.Label).HasMaxLength(64);
+            b.Property(x => x.KeyHash).IsRequired().HasMaxLength(64);
+
+            // 同一把 key（同网络同服务商）不重复入库——判重靠 KeyHash（密文带随机 IV 不可比）
+            b.HasIndex(x => new { x.NetworkId, x.Provider, x.KeyHash }).IsUnique();
+            // 工厂取启用 key 的查询路径
+            b.HasIndex(x => new { x.NetworkId, x.Provider, x.IsEnabled });
         });
     }
 }

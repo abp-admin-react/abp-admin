@@ -127,6 +127,52 @@ namespace AbpAdmin.Collection.Migrations
                     b.ToTable("ColBalanceTxns", (string)null);
                 });
 
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColChainApiKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreationTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("KeyCipher")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("KeyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid>("NetworkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NetworkId", "Provider", "IsEnabled");
+
+                    b.HasIndex("NetworkId", "Provider", "KeyHash")
+                        .IsUnique();
+
+                    b.ToTable("ColChainApiKeys", (string)null);
+                });
+
             modelBuilder.Entity("AbpAdmin.Collection.Entities.ColCollection", b =>
                 {
                     b.Property<Guid>("Id")
@@ -299,10 +345,14 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.HasIndex("Status", "BlockNumber");
 
+                    b.HasIndex("TokenId", "CreationTime");
+
                     b.HasIndex("TokenId", "Status");
 
                     b.HasIndex("TxHash", "LogIndex")
                         .IsUnique();
+
+                    b.HasIndex("UserId", "CreationTime");
 
                     b.ToTable("ColDepositOrders", (string)null);
                 });

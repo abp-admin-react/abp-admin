@@ -48,7 +48,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
         var network = await db.Networks.OrderBy(n => n.CreationTime).FirstOrDefaultAsync(ct);
         if (network == null) return;
 
-        var gateway = CreateGateway(factory, db, network, Logger);
+        var gateway = await CreateGatewayAsync(factory, db, network, Logger);
         if (gateway == null) return;
 
         var tokens = await db.Tokens
@@ -140,10 +140,11 @@ public class SweepWorker : CollectionChainWorkerBase
         var tokens = await db.Tokens
             .Where(t => t.NetworkId == network.Id && t.IsEnabled)
             .ToListAsync(ct);
-        await uow.CompleteAsync();
 
-        var gateway = CreateGateway(factory, db, network, Logger);
+        // 网关在工作单元内组装（key 池查询/LastUsedAt 回写要活的上下文）
+        var gateway = await CreateGatewayAsync(factory, db, network, Logger);
         if (gateway == null) return;
+        await uow.CompleteAsync();
 
         foreach (var token in tokens)
         {

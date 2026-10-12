@@ -61,4 +61,10 @@ public static class CollectionErrorCodes
 
     /// <summary>扫链响应上限数值非法（需 ≥100）。</summary>
     public const string InvalidCap = Namespace + ":InvalidCap";
+
+    /// <summary>扫链 API KEY 格式非法（Ankr 64 位十六进制 / Etherscan 34 位字母数字）。</summary>
+    public const string InvalidApiKey = Namespace + ":InvalidApiKey";
+
+    /// <summary>同一服务商下该 KEY 已存在（按 SHA-256 判重）。</summary>
+    public const string ApiKeyExists = Namespace + ":ApiKeyExists";
 }

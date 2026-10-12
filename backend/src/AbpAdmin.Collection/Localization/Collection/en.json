@@ -28,6 +28,11 @@
     "Permission:Network.Admin": "Chain network administration",
     "AbpAdmin.Collection:TryAgain": "Address derivation is in progress; please retry.",
     "AbpAdmin.Collection:MnemonicResetRefused": "Deposit addresses or unfinished sweeps exist; resetting the mnemonic is refused.",
-    "AbpAdmin.Collection:MasterKeyMissing": "Master key is not configured (Collection:MasterKey); chain administration is unavailable."
+    "AbpAdmin.Collection:MasterKeyMissing": "Master key is not configured (Collection:MasterKey); chain administration is unavailable.",
+    "AbpAdmin.Collection:InvalidRpcUrl": "Invalid RPC URL: must be an https address.",
+    "AbpAdmin.Collection:InvalidVaultAddress": "Invalid vault address: expect 0x + 40 hex chars.",
+    "AbpAdmin.Collection:InvalidCap": "Invalid node log result cap: expect >= 100.",
+    "AbpAdmin.Collection:InvalidApiKey": "Invalid chain API key shape: Ankr keys are 64 hex chars; Etherscan keys are 34 alphanumerics.",
+    "AbpAdmin.Collection:ApiKeyExists": "This chain API key already exists for the provider."
   }
 }

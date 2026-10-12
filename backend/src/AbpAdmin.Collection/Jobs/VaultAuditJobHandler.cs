@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Data;
+using AbpAdmin.Collection.Entities;
 using AbpAdmin.ScheduledJobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -50,9 +51,15 @@ public class VaultAuditJobHandler : IScheduledJobHandler, ITransientDependency
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var network = await dbContext.Networks.OrderBy(n => n.CreationTime).FirstOrDefaultAsync();
-        if (network?.NodeLogResultCap is not int cap || string.IsNullOrEmpty(network.RpcCipher))
+        var hasRpc = network != null && (
+            await dbContext.ChainApiKeys.AnyAsync(
+                k => k.NetworkId == network.Id
+                     && k.Provider == ChainApiKeyProvider.RpcBsc && k.IsEnabled)
+            || !string.IsNullOrEmpty(network.RpcCipher));
+        if (network?.NodeLogResultCap is not int cap || !hasRpc)
         {
-            _logger.LogWarning("金库核对跳过：网络未配置 RPC 或测量上限（{Network}）", network?.Name ?? "(无网络行)");
+            _logger.LogWarning("金库核对跳过：网络未配置扫链 key（池/RpcCipher 均空）或测量上限（{Network}）",
+                network?.Name ?? "(无网络行)");
             await uow.CompleteAsync();
             return;
         }
@@ -60,9 +67,10 @@ public class VaultAuditJobHandler : IScheduledJobHandler, ITransientDependency
         var tokens = await dbContext.Tokens
             .Where(t => t.NetworkId == network.Id && t.IsEnabled)
             .ToListAsync();
-        await uow.CompleteAsync();
 
-        var gateway = _gatewayFactory.Create(network.RpcCipher, cap);
+        // 网关在工作单元内组装（key 池查询/LastUsedAt 回写要活的上下文；池空回退 RpcCipher 在工厂内部）
+        var gateway = await _gatewayFactory.CreateAsync(dbContext, network, cap);
+        await uow.CompleteAsync();
         foreach (var token in tokens)
         {
             try

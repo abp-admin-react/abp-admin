@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Data;
@@ -114,9 +116,12 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
         Logger.LogInformation("{Worker} 已停止", GetType().Name);
     }
 
-    /// <summary>解析链网关（解密 RPC 密文；cap 未配置返回 null 并由调用方跳过——不设缺省上限不开扫链）。</summary>
-    protected static IBscChainGateway? CreateGateway(ChainGatewayFactory factory, CollectionDbContext dbContext,
-        Entities.ColNetwork network, Microsoft.Extensions.Logging.ILogger logger)
+    /// <summary>
+    /// 解析链网关（cap 未配置返回 null 并由调用方跳过——不设缺省上限不开扫链）。
+    /// RPC 来源双轨：扫链 key 池（ColChainApiKeys，管理页维护）优先，池空回退网络行 RpcCipher。
+    /// </summary>
+    protected static async Task<IBscChainGateway?> CreateGatewayAsync(ChainGatewayFactory factory,
+        CollectionDbContext dbContext, Entities.ColNetwork network, Microsoft.Extensions.Logging.ILogger logger)
     {
         if (network.NodeLogResultCap is not int cap || cap <= 0)
         {
@@ -126,23 +131,41 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
             return null;
         }
 
-        if (string.IsNullOrEmpty(network.RpcCipher))
+        var hasPool = await dbContext.ChainApiKeys.AsNoTracking().AnyAsync(
+            k => k.NetworkId == network.Id && k.Provider == Entities.ChainApiKeyProvider.RpcBsc && k.IsEnabled);
+        if (!hasPool && string.IsNullOrEmpty(network.RpcCipher))
         {
-            logger.LogError("网络 {Network} 未配置 RPC（RpcCipher 为空），扫链无法进行", network.Name);
+            logger.LogError("网络 {Network} 未配置扫链 key（key 池为空且 RpcCipher 为空），扫链无法进行", network.Name);
             return null;
         }
 
-        return factory.Create(network.RpcCipher, cap);
+        try
+        {
+            return await factory.CreateAsync(dbContext, network, cap);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "网络 {Network} 组装链网关失败（key 解密失败或池为空）", network.Name);
+            return null;
+        }
     }
 }
 
-/// <summary>网关工厂：解密 RPC 连接串（含项目密钥）并组装网关。HttpClient 由宿主 IHttpClientFactory 提供。</summary>
+/// <summary>
+/// 网关工厂：组装扫链网关，RPC/Etherscan 双通道都支持「key 池优先、旧配置回退」——
+/// 池 = ColChainApiKeys（同服务商多把，管理页增删启停），网关内遇限流/认证错误自动换下一把；
+/// 池空回退网络行 RpcCipher（完整 URL 含 key）/ 宿主配置的 Etherscan 端点（行为与旧版一致）。
+/// 跨轮轮换：进程内递增偏移，每轮从不同 key 起步（Ankr/Etherscan 免费档限流按 key 计）。
+/// HttpClient 由宿主 IHttpClientFactory 提供。
+/// </summary>
 public class ChainGatewayFactory
 {
     private readonly System.Net.Http.HttpClient _http;
     private readonly Volo.Abp.Security.Encryption.IStringEncryptionService _encryptor;
     private readonly string _etherscanEndpoint;
     private readonly Microsoft.Extensions.Logging.ILoggerFactory _loggerFactory;
+    private int _rpcCursor;
+    private int _etherscanCursor;
 
     public ChainGatewayFactory(
         System.Net.Http.HttpClient http,
@@ -158,13 +181,100 @@ public class ChainGatewayFactory
 
     public string? MasterKey { get; set; }
 
-    public IBscChainGateway Create(string rpcCipher, int cap)
+    /// <summary>组网关：取启用 key（按创建序），偏移起步轮换；首选 key 刷 LastUsedAt（运维可见度，失败不影响扫链）。</summary>
+    public virtual async Task<IBscChainGateway> CreateAsync(CollectionDbContext dbContext,
+        Entities.ColNetwork network, int cap)
     {
-        var url = _encryptor.Decrypt(
-            rpcCipher.StartsWith('\u0001') ? rpcCipher[1..] : rpcCipher, MasterKey
-            ?? throw new InvalidOperationException("Collection:MasterKey 未配置，无法解密 RPC 连接串"));
+        var masterKey = MasterKey
+                        ?? throw new InvalidOperationException("Collection:MasterKey 未配置，无法解密扫链 key");
+        var now = DateTime.UtcNow;
+
+        var rpcUrls = new List<string>();
+        var rpcKeys = await dbContext.ChainApiKeys.AsNoTracking()
+            .Where(k => k.NetworkId == network.Id
+                        && k.Provider == Entities.ChainApiKeyProvider.RpcBsc && k.IsEnabled)
+            .OrderBy(k => k.CreationTime).ToListAsync();
+        foreach (var k in rpcKeys)
+        {
+            rpcUrls.Add(AnkrBscChainGateway.AnkrBscRpcUrlBase + Decrypt(k.KeyCipher, masterKey));
+        }
+
+        if (rpcUrls.Count == 0)
+        {
+            // 兼容旧配置：key 池为空时回退网络行 RpcCipher（完整 URL，行为与多 key 之前一致）
+            if (string.IsNullOrEmpty(network.RpcCipher))
+            {
+                throw new InvalidOperationException(
+                    $"网络 {network.Name} 无可用 RPC：key 池为空且 RpcCipher 为空");
+            }
+
+            rpcUrls.Add(Decrypt(network.RpcCipher, masterKey));
+        }
+        else
+        {
+            await TouchLastUsedAsync(dbContext, rpcKeys, _rpcCursor, now);
+        }
+
+        var etherscanUrls = new List<string>();
+        var etherscanKeys = await dbContext.ChainApiKeys.AsNoTracking()
+            .Where(k => k.NetworkId == network.Id
+                        && k.Provider == Entities.ChainApiKeyProvider.EtherscanV2 && k.IsEnabled)
+            .OrderBy(k => k.CreationTime).ToListAsync();
+        if (etherscanKeys.Count > 0)
+        {
+            var etherscanBase = BuildEtherscanBase(_etherscanEndpoint);
+            foreach (var k in etherscanKeys)
+            {
+                etherscanUrls.Add(etherscanBase + Decrypt(k.KeyCipher, masterKey));
+            }
+
+            await TouchLastUsedAsync(dbContext, etherscanKeys, _etherscanCursor, now);
+        }
+        else
+        {
+            // 回退宿主配置端点（secrets 里的完整 URL，可能自带 key）
+            etherscanUrls.Add(_etherscanEndpoint);
+        }
+
         return new AnkrBscChainGateway(
-            _http, url, cap, _etherscanEndpoint,
+            _http, rpcUrls.ToArray(), etherscanUrls.ToArray(), cap,
+            System.Threading.Interlocked.Increment(ref _rpcCursor) - 1,
+            System.Threading.Interlocked.Increment(ref _etherscanCursor) - 1,
             _loggerFactory.CreateLogger<AnkrBscChainGateway>());
+    }
+
+    /// <summary>把本轮起步 key 标个使用时间（管理页展示；AsNoTracking 加载 → ExecuteUpdate 无状态冲突）。</summary>
+    private static async Task TouchLastUsedAsync(CollectionDbContext dbContext,
+        List<Entities.ColChainApiKey> keys, int offset, DateTime now)
+    {
+        try
+        {
+            var chosen = keys[((offset % keys.Count) + keys.Count) % keys.Count];
+            await dbContext.ChainApiKeys
+                .Where(k => k.Id == chosen.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(k => k.LastUsedAt, now));
+        }
+        catch
+        {
+            // 展示用时间戳，任何失败都不挡扫链
+        }
+    }
+
+    /// <summary>配置端点截取到 apikey= 为止的基座（chainid 等参数跟配置走）；没有该参数则补上。</summary>
+    internal static string BuildEtherscanBase(string endpoint)
+    {
+        var param = AnkrBscChainGateway.EtherscanApiKeyParam;
+        var idx = endpoint.IndexOf(param, StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+        {
+            return endpoint[..(idx + param.Length)];
+        }
+
+        return endpoint + (endpoint.Contains('?') ? "&" : "?") + param;
+    }
+
+    private string Decrypt(string cipher, string masterKey)
+    {
+        return _encryptor.Decrypt(cipher.StartsWith('\u0001') ? cipher[1..] : cipher, masterKey);
     }
 }

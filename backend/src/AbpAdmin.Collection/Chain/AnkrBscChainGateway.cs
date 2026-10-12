@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -14,6 +15,8 @@ namespace AbpAdmin.Collection.Chain;
 /// Ankr BSC JSON-RPC 网关（https://rpc.ankr.com/bsc/&#123;project-key&#125;，测量见 docs/collection-chain-runbook）。
 /// getLogs 按 5.6 节口径判「没读完」：节点报错，或条数 ≥ 上限八成（上限由实测得来，进配置）。
 /// 签名广播用 Nethereum 的 LegacyTransaction（EIP-155），JSON-RPC 走本类自写——网关薄、假实现可替。
+/// 多 KEY：同一服务商可挂多把（管理页维护），遇 429/401/403/配额类错误自动切下一把重试；
+/// 其它错误（getLogs 超限、执行回退等）不切——那不是 key 的问题，切了纯浪费且破坏游标纪律。
 /// </summary>
 public class AnkrBscChainGateway : IBscChainGateway
 {
@@ -23,20 +26,36 @@ public class AnkrBscChainGateway : IBscChainGateway
     /// <summary>截断判定的安全系数：返回条数 ≥ Cap×0.8 视为可能没读完（计划第 5.6 节）。</summary>
     public const double TruncateRatio = 0.8;
 
+    /// <summary>Ankr BSC RPC URL 模板（key 池的拼接基座；换服务商=改代码，参考项目同口径）。</summary>
+    public const string AnkrBscRpcUrlBase = "https://rpc.ankr.com/bsc/";
+
+    /// <summary>Etherscan V2 端点里 key 参数名（从配置端点截取基座，chainid 等参数跟配置走）。</summary>
+    public const string EtherscanApiKeyParam = "apikey=";
+
     private readonly HttpClient _http;
     private readonly ILogger<AnkrBscChainGateway> _logger;
-    private readonly string _endpoint;
-    private readonly string _etherscanEndpoint;
+    private readonly string[] _rpcEndpoints;
+    private readonly string[] _etherscanEndpoints;
     private readonly int _nodeLogResultCap;
+    private readonly int _rpcStart;
+    private readonly int _etherscanStart;
 
+    /// <summary>端点数组各 ≥1；起始偏移由工厂按轮递增（同进程跨轮轮着用不同 key 起步）。</summary>
     public AnkrBscChainGateway(
-        HttpClient http, string rpcEndpoint, int nodeLogResultCap,
-        string etherscanV2Endpoint, ILogger<AnkrBscChainGateway> logger)
+        HttpClient http, string[] rpcEndpoints, string[] etherscanEndpoints, int nodeLogResultCap,
+        int rpcStartOffset, int etherscanStartOffset, ILogger<AnkrBscChainGateway> logger)
     {
+        if (rpcEndpoints.Length == 0 || etherscanEndpoints.Length == 0)
+        {
+            throw new ArgumentException("RPC/Etherscan 端点至少各一把");
+        }
+
         _http = http;
-        _endpoint = rpcEndpoint;
+        _rpcEndpoints = rpcEndpoints;
+        _etherscanEndpoints = etherscanEndpoints;
         _nodeLogResultCap = nodeLogResultCap;
-        _etherscanEndpoint = etherscanV2Endpoint;
+        _rpcStart = ((rpcStartOffset % rpcEndpoints.Length) + rpcEndpoints.Length) % rpcEndpoints.Length;
+        _etherscanStart = ((etherscanStartOffset % etherscanEndpoints.Length) + etherscanEndpoints.Length) % etherscanEndpoints.Length;
         _logger = logger;
     }
 
@@ -104,28 +123,62 @@ public class AnkrBscChainGateway : IBscChainGateway
         string contractAddress, string address, long fromBlock, long toBlock,
         int page, int pageSize, CancellationToken ct = default)
     {
-        // Etherscan V2 多链端点（chainid=56）；tokentx 支持区块区间，做 1 块读不完时的按地址兜底
-        var url = $"{_etherscanEndpoint}" +
-                  $"&contractaddress={contractAddress}&address={address}" +
-                  $"&startblock={fromBlock}&endblock={toBlock}" +
-                  $"&page={page}&offset={pageSize}&sort=asc";
-        using var resp = await _http.GetAsync(url, ct);
-        resp.EnsureSuccessStatusCode();
-        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
-        var root = doc.RootElement;
-        var status = root.GetProperty("status").GetString();
-        var items = root.GetProperty("result");
-        if (status != "1")
+        // Etherscan V2 多链端点（chainid=56）；tokentx 支持区块区间，做 1 块读不完时的按地址兜底。
+        // 多 key 轮换：免费档 5 req/s 最容易限流，命中配额/认证类错误就换下一把再试
+        var query = $"&contractaddress={contractAddress}&address={address}" +
+                    $"&startblock={fromBlock}&endblock={toBlock}" +
+                    $"&page={page}&offset={pageSize}&sort=asc";
+        for (var attempt = 0; attempt < _etherscanEndpoints.Length; attempt++)
         {
-            // status=0 且 message=No transactions found 不是错误
-            if (items.ValueKind == JsonValueKind.Array)
+            var idx = (_etherscanStart + attempt) % _etherscanEndpoints.Length;
+            using var resp = await _http.GetAsync(_etherscanEndpoints[idx] + query, ct);
+            if (IsKeyWorthRotating(resp.StatusCode))
             {
-                return new AddressTransferPage(Array.Empty<TokenTransferLog>(), false);
+                if (attempt < _etherscanEndpoints.Length - 1)
+                {
+                    _logger.LogWarning("Etherscan key#{Idx} HTTP {Status}，切下一把", idx, (int)resp.StatusCode);
+                    continue;
+                }
             }
 
-            throw new ChainRpcException("etherscan-v2: " + root.GetProperty("message").GetString());
+            resp.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            var root = doc.RootElement;
+            var status = root.GetProperty("status").GetString();
+            var items = root.GetProperty("result");
+            if (status != "1")
+            {
+                var reason = root.TryGetProperty("message", out var m) ? m.GetString() : null;
+                if (root.TryGetProperty("result", out var r) && r.ValueKind == JsonValueKind.String)
+                {
+                    reason += " " + r.GetString();
+                }
+
+                // 配额/认证类（"Max rate limit reached"/"Invalid API Key"…）→ 换 key 再试
+                if (IsQuotaOrAuthMessage(reason) && attempt < _etherscanEndpoints.Length - 1)
+                {
+                    _logger.LogWarning("Etherscan key#{Idx} 被拒（{Reason}），切下一把", idx, reason);
+                    continue;
+                }
+
+                // status=0 且 message=No transactions found 不是错误
+                if (items.ValueKind == JsonValueKind.Array)
+                {
+                    return new AddressTransferPage(Array.Empty<TokenTransferLog>(), false);
+                }
+
+                throw new ChainRpcException("etherscan-v2: " + reason);
+            }
+
+            return ParseEtherscanTransfers(items, pageSize);
         }
 
+        // 循环必然 return/throw（末次尝试不再 continue）；到达这里说明逻辑有洞，显式失败
+        throw new ChainRpcException("etherscan-v2: 轮换循环意外退出");
+    }
+
+    private AddressTransferPage ParseEtherscanTransfers(JsonElement items, int pageSize)
+    {
         var logs = new List<TokenTransferLog>();
         foreach (var t in items.EnumerateArray())
         {
@@ -211,9 +264,30 @@ public class AnkrBscChainGateway : IBscChainGateway
         return HexWeiToEther(result!.Value.GetString()!) * 1_000_000_000m;
     }
 
-    // ── JSON-RPC 通道 ────────────────────────────────────────────────────────────────────
+    // ── JSON-RPC 通道（多 key 轮换）───────────────────────────────────────────────────────
 
+    /// <summary>从起始偏移开始逐个端点尝试；配额/认证类错误切下一把，其它错误原样上抛。</summary>
     private async Task<JsonElement?> RpcAsync(string method, object[] parameters, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < _rpcEndpoints.Length; attempt++)
+        {
+            var idx = (_rpcStart + attempt) % _rpcEndpoints.Length;
+            try
+            {
+                return await RpcOnceAsync(_rpcEndpoints[idx], method, parameters, ct);
+            }
+            catch (Exception ex) when (IsKeyWorthRotating(ex) && attempt < _rpcEndpoints.Length - 1)
+            {
+                // 只记录 key 序号不打 URL——URL 里含项目密钥
+                _logger.LogWarning("RPC key#{Idx} 调 {Method} 被拒（{Reason}），切下一把",
+                    idx, method, ex.Message);
+            }
+        }
+
+        throw new InvalidOperationException("unreachable: 轮换循环必然 return 或在末次尝试时上抛");
+    }
+
+    private async Task<JsonElement?> RpcOnceAsync(string endpoint, string method, object[] parameters, CancellationToken ct)
     {
         // JSON-RPC 2.0 参数字段名是 params（匿名类型不能叫 params，用字典）——
         // 写成 parameters 时无参方法侥幸能通、带参方法全部 "No more params"（真链 E2E 抓到）
@@ -226,18 +300,65 @@ public class AnkrBscChainGateway : IBscChainGateway
                 ["params"] = parameters,
             }),
             Encoding.UTF8, "application/json");
-        using var resp = await _http.PostAsync(_endpoint, content, ct);
+        using var resp = await _http.PostAsync(endpoint, content, ct);
+        if (IsKeyWorthRotating(resp.StatusCode))
+        {
+            // 带状态码的 HttpRequestException——轮换过滤器按 StatusCode 识别（EnsureSuccessStatusCode 同款）
+            throw new HttpRequestException($"{method}: HTTP {(int)resp.StatusCode}", null, resp.StatusCode);
+        }
+
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
         var root = doc.RootElement;
         if (root.TryGetProperty("error", out var error))
         {
-            throw new ChainRpcException(method + ": " + error.GetProperty("message").GetString());
+            var message = error.GetProperty("message").GetString();
+            if (IsQuotaOrAuthMessage(message))
+            {
+                throw new ChainRpcException(message!);
+            }
+
+            throw new ChainRpcException(method + ": " + message);
         }
 
         // Clone 脱离已释放的 JsonDocument（using 退出后 pooled buffer 失效，实测 E2E 抓到
         // ObjectDisposedException）——克隆是独立拷贝
         return root.TryGetProperty("result", out var result) ? result.Clone() : null;
+    }
+
+    // ── key 轮换判定 ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>HTTP 层配额/认证状态：值得换一把 key 再试（StatusCode 为 nullable，null=不切换）。</summary>
+    internal static bool IsKeyWorthRotating(HttpStatusCode? statusCode)
+    {
+        return statusCode is HttpStatusCode.Unauthorized        // 401 key 无效
+            or HttpStatusCode.Forbidden                          // 403 被禁
+            or HttpStatusCode.TooManyRequests;                   // 429 限流
+    }
+
+    /// <summary>异常是否「换 key 有意义」：HTTP 401/403/429，或节点/浏览器返回的配额认证类消息。</summary>
+    internal static bool IsKeyWorthRotating(Exception ex)
+    {
+        return ex is HttpRequestException hre && IsKeyWorthRotating(hre.StatusCode)
+               || ex is ChainRpcException cre && IsQuotaOrAuthMessage(cre.Message);
+    }
+
+    /// <summary>JSON-RPC/浏览器层错误消息是否配额或认证类（英文消息，大小写不敏感）。</summary>
+    internal static bool IsQuotaOrAuthMessage(string? message)
+    {
+        if (string.IsNullOrEmpty(message))
+        {
+            return false;
+        }
+
+        return message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("too many requests", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("quota", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("credit", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("forbidden", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("invalid api key", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("missing api key", StringComparison.OrdinalIgnoreCase);
     }
 
     // ── 规整工具 ─────────────────────────────────────────────────────────────────────────
