@@ -55,6 +55,12 @@ export default {
   'menu.account-center': 'Account',
   'menu.data-scope-demo': 'Data Scope Demo',
   'menu.biz-template-data-scope': 'Biz Module · Data Scope Demo',
+  'menu.ordering': 'Orders',
+  'menu.collection': 'Payments',
+  'menu.collection-network': 'Chain Network',
+  'menu.collection-deposits': 'Deposits',
+  'menu.collection-sweeps': 'Sweep Tasks',
+  'menu.collection-vault': 'Vault Audit',
   // Menu hierarchy follows the official ABP template: Administration (Saas → Identity → … → Settings) and System
   'menu.administration': 'Administration',
   'menu.administration.saas': 'SaaS',

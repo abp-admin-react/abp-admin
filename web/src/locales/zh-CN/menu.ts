@@ -55,6 +55,12 @@ export default {
   'menu.account-center': '个人中心',
   'menu.data-scope-demo': '数据权限演示',
   'menu.biz-template-data-scope': '业务模块·数据权限示例',
+  'menu.ordering': '订单',
+  'menu.collection': '收付款',
+  'menu.collection-network': '链网配置',
+  'menu.collection-deposits': '充值单',
+  'menu.collection-sweeps': '归集任务',
+  'menu.collection-vault': '金库核对',
   // 菜单层级参照 ABP 官方模板：Administration（Saas → 身份管理 → … → 设置）与 系统
   'menu.administration': '管理',
   'menu.administration.saas': 'SaaS',

@@ -310,6 +310,49 @@ export default [
     component: './biz-template/data-scope',
   },
   {
+    // 订单模块（AbpAdmin.Ordering）：只给 Host 用户，后端有 Host 守卫
+    path: '/ordering',
+    name: 'ordering',
+    icon: 'shoppingCart',
+    access: 'canViewOrders',
+    component: './ordering',
+  },
+  {
+    // 收款模块（AbpAdmin.Collection）：只给 Host 用户，后端有 Host 守卫。
+    // 拆四个子页面（参照 exchange 项目）：链网配置/充值单/归集任务/金库核对
+    path: '/collection',
+    name: 'collection',
+    icon: 'payCircle',
+    access: 'canViewCollections',
+    routes: [
+      { path: '/collection', redirect: '/collection/network' },
+      {
+        path: '/collection/network',
+        name: 'collection-network',
+        access: 'canAdminNetwork',
+        component: './collection/network',
+      },
+      {
+        path: '/collection/deposits',
+        name: 'collection-deposits',
+        access: 'canViewCollections',
+        component: './collection/deposits',
+      },
+      {
+        path: '/collection/sweeps',
+        name: 'collection-sweeps',
+        access: 'canViewCollections',
+        component: './collection/sweeps',
+      },
+      {
+        path: '/collection/vault',
+        name: 'collection-vault',
+        access: 'canViewCollections',
+        component: './collection/vault',
+      },
+    ],
+  },
+  {
     path: '/current-session',
     name: 'current-session',
     icon: 'user',

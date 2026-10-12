@@ -131,6 +131,11 @@ export default function access(
     canManageDataScopeDemo: !!policies['AbpAdmin.DataScopes.Demo'],
     // 业务模块数据权限示例（AbpAdmin.Biz.Template 自带权限组，/biz-template/data-scope）
     canManageBizDataScopeDemo: !!policies['BizTemplate.DataScopeDemo'],
+    // 订单/收款模块（只给 Host 用户：后端应用服务有 Host 守卫，这里只管菜单可见性）
+    canViewOrders: !!policies['AbpAdmin.Ordering.Orders'],
+    canViewCollections: !!policies['AbpAdmin.Collection.Collections'],
+    // 链网配置（高危运维：RPC/助记词/金库/上限），独立权限仅授予运维角色
+    canAdminNetwork: !!policies['AbpAdmin.Collection.Network.Admin'],
     // T2.6 Identity Pro 缺口：用户导入导出
     canImportUsers: !!policies['AbpAdmin.Identity.Users.Import'],
     canExportUsers: !!policies['AbpAdmin.Identity.Users.Export'],
