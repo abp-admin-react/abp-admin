@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Balances;
+using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +38,18 @@ public class BalanceTxnDto
     public string BalanceAfter { get; set; } = default!;
 
     public DateTime CreationTime { get; set; }
+
+    /// <summary>业务类型（TopUp / Order …）；无归因为 null。</summary>
+    public string? BusinessType { get; set; }
+
+    /// <summary>业务单 Id（充值行 = 流水自身 Id；扣款行 = 订单 Id）。前端据此关联展示。</summary>
+    public Guid? BusinessId { get; set; }
+
+    /// <summary>回冲行的原扣款流水 Id（用户侧把回冲关联回原订单用）。</summary>
+    public Guid? RefTxnId { get; set; }
+
+    /// <summary>充值行的链上转账凭证（ColDepositOrders.TxHash 回填；非充值行为 null）。</summary>
+    public string? TxHash { get; set; }
 }
 
 /// <summary>
@@ -79,8 +92,13 @@ public class CollectionBalanceAppService : ApplicationService
         return new ListResultDto<MyBalanceDto>(result);
     }
 
-    /// <summary>我的余额流水（只看自己的，倒序分页）。</summary>
-    public virtual async Task<PagedResultDto<BalanceTxnDto>> GetMyTxnsAsync(int skipCount, int maxResultCount)
+    /// <summary>
+    /// 我的余额流水（只看自己的，倒序分页，可选时间范围）。
+    /// 充值行批量回填链上凭证：贷记的幂等键 = 进款单 Id（CreditCoreAsync 的写入口径），
+    /// 据此查 ColDepositOrders.TxHash——用户对账要能看到链上转账，不只是余额数字。
+    /// </summary>
+    public virtual async Task<PagedResultDto<BalanceTxnDto>> GetMyTxnsAsync(
+        int skipCount, int maxResultCount, DateTime? fromTime = null, DateTime? toTime = null)
     {
         AssertHost();
         var userId = CurrentUser.Id!.Value;
@@ -92,22 +110,68 @@ public class CollectionBalanceAppService : ApplicationService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var query = dbContext.BalanceTxns.AsNoTracking()
             .Where(t => t.UserId == userId);
+        if (fromTime.HasValue)
+        {
+            query = query.Where(t => t.CreationTime >= fromTime.Value);
+        }
+        if (toTime.HasValue)
+        {
+            query = query.Where(t => t.CreationTime < toTime.Value);
+        }
 
         var total = await query.CountAsync();
-        var items = await query
+        var rows = await query
             .OrderByDescending(t => t.Seq)
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
-            .Select(t => new BalanceTxnDto
+            .Select(t => new
             {
-                Id = t.Id,
-                Action = t.Action,
+                t.Id,
+                t.Action,
                 Currency = t.Currency.ToString(),
                 Amount = Contracts.CollectionAmounts.Format(t.Amount),
                 BalanceAfter = Contracts.CollectionAmounts.Format(t.BalanceAfter),
-                CreationTime = t.CreationTime,
+                t.CreationTime,
+                t.BusinessType,
+                t.BusinessId,
+                t.RefTxnId,
+                t.IdempotencyKey,
             })
             .ToListAsync();
+
+        // 充值行回填链上凭证（批量一次查）：贷记的幂等键 = 进款单 Id
+        //（SweepManager 确认入账的写入口径 CreditAsync(order.Id.ToString("D"))），
+        // 据此查 ColDepositOrders.TxHash——用户对账要能看到链上转账，不只是余额数字
+        var depositOrderIds = rows
+            .Where(t => t.Action == BalanceActions.DepositCredit
+                        && Guid.TryParse(t.IdempotencyKey, out _))
+            .Select(t => Guid.Parse(t.IdempotencyKey))
+            .Distinct()
+            .ToList();
+        var txHashByDepositOrderId = depositOrderIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await dbContext.DepositOrders.AsNoTracking()
+                .Where(o => depositOrderIds.Contains(o.Id))
+                .Select(o => new { o.Id, o.TxHash })
+                .ToDictionaryAsync(x => x.Id, x => x.TxHash);
+
+        var items = rows.Select(t => new BalanceTxnDto
+        {
+            Id = t.Id,
+            Action = t.Action,
+            Currency = t.Currency,
+            Amount = t.Amount,
+            BalanceAfter = t.BalanceAfter,
+            CreationTime = t.CreationTime,
+            BusinessType = t.BusinessType,
+            BusinessId = t.BusinessId,
+            RefTxnId = t.RefTxnId,
+            TxHash = t.Action == BalanceActions.DepositCredit
+                     && Guid.TryParse(t.IdempotencyKey, out var depositOrderId)
+                     && txHashByDepositOrderId.TryGetValue(depositOrderId, out var txHash)
+                ? txHash
+                : null,
+        }).ToList();
 
         return new PagedResultDto<BalanceTxnDto>(total, items);
     }

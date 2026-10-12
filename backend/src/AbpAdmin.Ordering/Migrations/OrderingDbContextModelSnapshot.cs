@@ -59,6 +59,10 @@ namespace AbpAdmin.Ordering.Migrations
                     b.Property<Guid?>("BalanceTxnId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ChannelTradeNo")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<int?>("CloseReason")
                         .HasColumnType("integer");
 
@@ -73,6 +77,9 @@ namespace AbpAdmin.Ordering.Migrations
                         .HasColumnType("character varying(8)");
 
                     b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("FulfilledAt")
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("OrderNo")
@@ -101,6 +108,10 @@ namespace AbpAdmin.Ordering.Migrations
 
                     b.Property<Guid?>("QuoteId")
                         .HasColumnType("uuid");
+
+                    b.Property<decimal?>("RefundedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");

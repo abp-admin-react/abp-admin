@@ -65,6 +65,16 @@ public class OrdOrder : BasicAggregateRoot<Guid>
     /// <summary>可空标记。有异常时写入一次，不覆盖；明细在 OrdPaymentAnomalyLines（只追加）。</summary>
     public bool PaymentAnomaly { get; set; }
 
+    /// <summary>致付收款的渠道单号（微信/支付宝交易号、Stripe PaymentIntent/Session id）。
+    /// 标 Paid（渠道版）时随归因一起写入；余额支付的单此列为空。用户对账凭证。</summary>
+    public string? ChannelTradeNo { get; set; }
+
+    /// <summary>标成 Fulfilled 时写入（履约时间；状态时间线用）。</summary>
+    public DateTime? FulfilledAt { get; set; }
+
+    /// <summary>人工退款累计金额（USD，RefundedAmount = Σ 退款异常明细金额）。用户侧可见。</summary>
+    public decimal? RefundedAmount { get; set; }
+
     public DateTime CreationTime { get; set; }
 }
 

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ordering.Data;
@@ -125,7 +126,32 @@ public class OrderAppService : ApplicationService
             .Take(take)
             .ToListAsync();
 
-        return new PagedResultDto<OrderDto>(total, items.Select(o => Map(o, null)).ToList());
+        // 本页异常明细批量装配（退款记录/多笔到账告警，用户侧自己的单自己可见）
+        var linesByOrder = await OrderServiceHelpers.LoadAnomalyLinesBatchedAsync(dbContext, items.Select(o => o.Id));
+
+        return new PagedResultDto<OrderDto>(total,
+            items.Select(o => Map(o, linesByOrder.GetValueOrDefault(o.Id))).ToList());
+    }
+
+    /// <summary>
+    /// 按余额流水 Id 反查自己的订单号（流水页「关联订单」跳转用）：
+    /// 扣款/回冲流水 → 订单。只查 CurrentUser 名下的单，不泄露他人订单号。
+    /// </summary>
+    public virtual async Task<List<OrderRefDto>> GetOrderRefsByBalanceTxnAsync(List<Guid> balanceTxnIds)
+    {
+        AssertHost();
+        if (balanceTxnIds == null || balanceTxnIds.Count == 0)
+        {
+            return new List<OrderRefDto>();
+        }
+
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var refs = await dbContext.Orders.AsNoTracking()
+            .Where(o => o.UserId == CurrentUser.Id!.Value && o.BalanceTxnId != null
+                        && balanceTxnIds.Contains(o.BalanceTxnId.Value))
+            .Select(o => new OrderRefDto { BalanceTxnId = o.BalanceTxnId!.Value, OrderId = o.Id, OrderNo = o.OrderNo })
+            .ToListAsync();
+        return refs;
     }
 
     /// <summary>获取（必要时创建）某支付方式的有效报价。</summary>
@@ -269,6 +295,9 @@ public class OrderAppService : ApplicationService
             PayAmount = order.PayAmount == null ? null : AbpAdmin.Collection.Contracts.CollectionAmounts.Format(order.PayAmount.Value),
             PayCurrency = order.PayCurrency?.ToString(),
             PaidAt = order.PaidAt,
+            ChannelTradeNo = order.ChannelTradeNo,
+            FulfilledAt = order.FulfilledAt,
+            RefundedAmount = order.RefundedAmount == null ? null : AbpAdmin.Collection.Contracts.CollectionAmounts.Format(order.RefundedAmount.Value),
             QuoteId = order.QuoteId,
             CollectionId = order.CollectionId,
             BalanceTxnId = order.BalanceTxnId,

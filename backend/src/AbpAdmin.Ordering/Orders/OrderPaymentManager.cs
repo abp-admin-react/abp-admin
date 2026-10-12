@@ -271,14 +271,14 @@ public class OrderPaymentManager : DomainService
 
                 if (order.CollectionId == collectionId)
                 {
-                    // 同一笔收款完成：标 Paid（条件更新）
-                    await MarkPaidFromChannelAsync(order.Id, collectionId, sourceChannel);
+                    // 同一笔收款完成：标 Paid（条件更新），渠道单号随归因落库（用户对账凭证）
+                    await MarkPaidFromChannelAsync(order.Id, collectionId, sourceChannel, channelTradeNo);
                     return;
                 }
 
                 // 来源不同且订单仍是 PendingPayment、金额币种一致：这笔成为致付来源，
                 // 更新 CollectionId 与 PayChannel，写下 PaidAt，标 Paid（计划第 3.2 节）
-                var marked = await MarkPaidFromChannelAsync(order.Id, collectionId, sourceChannel);
+                var marked = await MarkPaidFromChannelAsync(order.Id, collectionId, sourceChannel, channelTradeNo);
                 if (marked)
                 {
                     // 提交之后再尽力取消其余 Pending 收款，失败由过期作业兜底，
@@ -451,7 +451,9 @@ public class OrderPaymentManager : DomainService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         await dbContext.Orders
             .Where(o => o.Id == order.Id && o.Status == OrderStatus.Paid)
-            .ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, OrderStatus.Fulfilled));
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.Status, OrderStatus.Fulfilled)
+                .SetProperty(o => o.FulfilledAt, _clock.Now));
     }
 
     // ── 异常明细（只追加）────────────────────────────────────────────────────────────────
@@ -481,6 +483,30 @@ public class OrderPaymentManager : DomainService
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.PaymentAnomaly, true));
 
         await dbContext.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// 人工退款记录（管理端动作的落地）：追加一条退款异常明细 + 累加 RefundedAmount。
+    /// 金额为 null 表示只记说明不记金额（此时不累加）。用户侧订单详情可以看到这些
+    /// 明细与累计退款额——退款在用户侧可见，不再只是管理端口径。
+    /// </summary>
+    public virtual async Task AppendManualRefundAsync(
+        Guid orderId, decimal? amount, AbpAdmin.Collection.Contracts.CollectionCurrency? currency, string note)
+    {
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+
+        await AppendAnomalyAsync(orderId, amount, currency, null, null,
+            "Manual refund record: " + note);
+
+        if (amount.HasValue)
+        {
+            await dbContext.Orders
+                .Where(o => o.Id == orderId)
+                .ExecuteUpdateAsync(s => s.SetProperty(
+                    o => o.RefundedAmount,
+                    // 两参重载：第二个 lambda 逐行计算（列引用 o 在这个作用域才有效）
+                    o => (o.RefundedAmount ?? 0m) + amount.Value));
+        }
     }
 
     // ── 内部 ─────────────────────────────────────────────────────────────────────────────
@@ -566,7 +592,8 @@ public class OrderPaymentManager : DomainService
     }
 
     /// <summary>条件更新标 Paid（WHERE Status = 'PendingPayment'）。返回是否生效。</summary>
-    private async Task<bool> MarkPaidFromChannelAsync(Guid orderId, Guid collectionId, OrderingPayChannel channel)
+    private async Task<bool> MarkPaidFromChannelAsync(
+        Guid orderId, Guid collectionId, OrderingPayChannel channel, string? channelTradeNo)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var rows = await dbContext.Orders
@@ -575,7 +602,8 @@ public class OrderPaymentManager : DomainService
                 .SetProperty(o => o.Status, OrderStatus.Paid)
                 .SetProperty(o => o.PaidAt, _clock.Now)
                 .SetProperty(o => o.CollectionId, collectionId)
-                .SetProperty(o => o.PayChannel, channel));
+                .SetProperty(o => o.PayChannel, channel)
+                .SetProperty(o => o.ChannelTradeNo, channelTradeNo));
         return rows > 0;
     }
 

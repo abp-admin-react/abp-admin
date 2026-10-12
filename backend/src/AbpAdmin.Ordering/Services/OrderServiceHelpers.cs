@@ -74,6 +74,25 @@ internal static class OrderServiceHelpers
     }
 
     /// <summary>订单异常明细读取（用户端与管理端共用，单一出处——两类视图不分叉，评审 M 级）。</summary>
+    /// <summary>一批订单的异常明细一次查回分组（用户列表页的退款/多笔到账可见性用）。</summary>
+    public static async Task<System.Collections.Generic.Dictionary<Guid, System.Collections.Generic.List<Dtos.OrderAnomalyLineDto>>>
+        LoadAnomalyLinesBatchedAsync(OrderingDbContext dbContext, System.Collections.Generic.IEnumerable<Guid> orderIds)
+    {
+        var ids = orderIds.ToList();
+        if (ids.Count == 0)
+        {
+            return new();
+        }
+
+        var lines = await dbContext.PaymentAnomalyLines.AsNoTracking()
+            .Where(l => ids.Contains(l.OrderId))
+            .OrderBy(l => l.CreationTime)
+            .ToListAsync();
+        return lines
+            .GroupBy(l => l.OrderId)
+            .ToDictionary(g => g.Key, g => g.Select(Map).ToList());
+    }
+
     public static async Task<System.Collections.Generic.List<Dtos.OrderAnomalyLineDto>> LoadAnomalyLinesAsync(
         OrderingDbContext dbContext, Guid orderId)
     {

@@ -117,8 +117,8 @@ public class OrderAdminAppService : ApplicationService
         }
 
         var order = await LoadAsync(id);
-        await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, currency, null, null,
-            "Manual refund record: " + input.Note.Trim());
+        // 退款明细 + RefundedAmount 累加（用户侧订单详情可见，见 OrderPaymentManager.AppendManualRefundAsync）
+        await _orderPaymentManager.AppendManualRefundAsync(order.Id, amount, currency, input.Note.Trim());
         return OrderAppService.Map(await LoadAsync(id), null);
     }
 

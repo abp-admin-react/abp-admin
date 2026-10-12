@@ -32,6 +32,15 @@ public class OrderDto
 
     public DateTime? PaidAt { get; set; }
 
+    /// <summary>致付收款的渠道单号（微信/支付宝交易号、Stripe 单号）；余额支付为 null。用户对账凭证。</summary>
+    public string? ChannelTradeNo { get; set; }
+
+    /// <summary>履约时间（管理端标履约时写入）。</summary>
+    public DateTime? FulfilledAt { get; set; }
+
+    /// <summary>人工退款累计金额（标价币种字符串；无退款为 null）。</summary>
+    public string? RefundedAmount { get; set; }
+
     public Guid? QuoteId { get; set; }
 
     public Guid? CollectionId { get; set; }
@@ -47,6 +56,16 @@ public class OrderDto
     public DateTime CreationTime { get; set; }
 
     public List<OrderAnomalyLineDto>? AnomalyLines { get; set; }
+}
+
+/// <summary>余额流水 → 订单 的关联（流水页跳转用）。</summary>
+public class OrderRefDto
+{
+    public Guid BalanceTxnId { get; set; }
+
+    public Guid OrderId { get; set; }
+
+    public string OrderNo { get; set; } = default!;
 }
 
 public class OrderAnomalyLineDto
