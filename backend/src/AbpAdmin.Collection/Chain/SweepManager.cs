@@ -415,7 +415,7 @@ public class SweepManager : DomainService
             {
                 await _balanceManager.CreditAsync(
                     order.UserId, MapCurrency(token.Symbol), order.Amount!.Value,
-                    idempotencyKey: order.Id.ToString("D"));
+                    idempotencyKey: BalanceIdempotencyKeys.ForDepositOrder(order.Id));
                 order.Status = DepositOrderStatus.Swept;
             }
 

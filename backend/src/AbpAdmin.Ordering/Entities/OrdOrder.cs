@@ -66,13 +66,21 @@ public class OrdOrder : BasicAggregateRoot<Guid>
     public bool PaymentAnomaly { get; set; }
 
     /// <summary>致付收款的渠道单号（微信/支付宝交易号、Stripe PaymentIntent/Session id）。
-    /// 标 Paid（渠道版）时随归因一起写入；余额支付的单此列为空。用户对账凭证。</summary>
+    /// 所有渠道版标 Paid 的路径都随归因一起写入（含过期关闭复活）；余额支付的单此列为空。
+    /// 用户对账凭证。</summary>
     public string? ChannelTradeNo { get; set; }
 
     /// <summary>标成 Fulfilled 时写入（履约时间；状态时间线用）。</summary>
     public DateTime? FulfilledAt { get; set; }
 
-    /// <summary>人工退款累计金额（USD，RefundedAmount = Σ 退款异常明细金额）。用户侧可见。</summary>
+    /// <summary>标成 Closed 时写入（用户取消 / 过期关闭）。时间线「关闭」节点的时间口径——
+    /// ExpiresAt 只是付款截止，不是实际关闭时刻。</summary>
+    public DateTime? ClosedAt { get; set; }
+
+    /// <summary>
+    /// 人工退款累计金额（币种 = 订单标价币种 Currency，两位小数；
+    /// RefundedAmount = Σ 退款明细金额——币种与两位小数由 RecordManualRefund 入口校验保证）。
+    /// 用户侧可见。</summary>
     public decimal? RefundedAmount { get; set; }
 
     public DateTime CreationTime { get; set; }

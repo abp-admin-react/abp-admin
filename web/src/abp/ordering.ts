@@ -28,6 +28,8 @@ export type OrderDto = {
   channelTradeNo?: string;
   /** 履约时间 */
   fulfilledAt?: string;
+  /** 实际关闭时间（用户取消 / 过期关闭；ExpiresAt 只是付款截止） */
+  closedAt?: string;
   /** 人工退款累计（标价币种字符串）；无退款为 null */
   refundedAmount?: string;
   quoteId?: string;

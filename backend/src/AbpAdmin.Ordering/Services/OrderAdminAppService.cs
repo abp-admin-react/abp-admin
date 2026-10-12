@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ordering.Data;
@@ -45,7 +46,8 @@ public class OrderAdminAppService : ApplicationService
             throw new BusinessException(OrderingErrorCodes.OrderNotFound).WithData("OrderId", id);
         }
 
-        return OrderAppService.Map(order, await OrderServiceHelpers.LoadAnomalyLinesAsync(dbContext, id));
+        var linesByOrder = await OrderServiceHelpers.LoadAnomalyLinesBatchedAsync(dbContext, new[] { id });
+        return OrderAppService.Map(order, linesByOrder.GetValueOrDefault(id));
     }
 
     /// <summary>全部订单；列表可按订单类型、状态和「有异常」过滤（更早的关闭单用这里的过滤查看）。</summary>
@@ -117,6 +119,20 @@ public class OrderAdminAppService : ApplicationService
         }
 
         var order = await LoadAsync(id);
+
+        // 币种必须等于订单标价币种（RefundedAmount 是单币种累计列；混币种累加 = 对用户的错误金额）
+        if (currency.HasValue && !string.Equals(order.Currency, currency.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
+                .WithData("Currency", $"Refund currency must match the order currency ({order.Currency}).");
+        }
+        // 两位小数：RefundedAmount 列是 numeric(18,2)，子分位会让 PG 静默舍入、累计 ≠ Σ 明细
+        if (amount.HasValue && decimal.Round(amount.Value, 2) != amount.Value)
+        {
+            throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
+                .WithData("Amount", "Refund amount supports at most 2 decimal places.");
+        }
+
         // 退款明细 + RefundedAmount 累加（用户侧订单详情可见，见 OrderPaymentManager.AppendManualRefundAsync）
         await _orderPaymentManager.AppendManualRefundAsync(order.Id, amount, currency, input.Note.Trim());
         return OrderAppService.Map(await LoadAsync(id), null);

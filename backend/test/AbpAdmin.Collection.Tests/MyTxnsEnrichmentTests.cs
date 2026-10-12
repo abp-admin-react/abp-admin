@@ -36,7 +36,7 @@ public class MyTxnsEnrichmentTests : CollectionTestBase
         {
             var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
             var networkId = Guid.NewGuid();
-            await dbContext.Networks.AddAsync(new ColNetwork(Guid.NewGuid())
+            await dbContext.Networks.AddAsync(new ColNetwork(networkId)
             {
                 Name = "BSC-TXN-" + Guid.NewGuid().ToString("N")[..8],
                 ChainId = 97,
@@ -63,6 +63,11 @@ public class MyTxnsEnrichmentTests : CollectionTestBase
                 INSERT INTO "ColBalanceTxns" ("Id", "UserId", "Currency", "Action", "Amount", "BalanceAfter", "IdempotencyKey", "BusinessType", "BusinessId", "RefTxnId", "ReversedAt", "CreationTime")
                 VALUES ({Guid.NewGuid()}, {Me}, {(int)CollectionCurrency.Usdt}, {BalanceActions.DepositCredit}, {1m}, {1m}, {depositOrderId.ToString("D")}, {CollectionBusinessTypes.TopUp}, {depositOrderId}, NULL, NULL, {DateTime.UtcNow})
                 """);
+            // 非 Guid 幂等键的充值贷记（历史直连测试数据形态）：不回填凭证、不误连
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "ColBalanceTxns" ("Id", "UserId", "Currency", "Action", "Amount", "BalanceAfter", "IdempotencyKey", "BusinessType", "BusinessId", "RefTxnId", "ReversedAt", "CreationTime")
+                VALUES ({Guid.NewGuid()}, {Me}, {(int)CollectionCurrency.Usdt}, {BalanceActions.DepositCredit}, {7m}, {7m}, {"dep-legacy-" + Guid.NewGuid().ToString("N")[..8]}, {CollectionBusinessTypes.TopUp}, {Guid.NewGuid()}, NULL, NULL, {DateTime.UtcNow})
+                """);
             // 扣款行：BusinessType=Order（OrderingConsts.OrderBusinessType 的口径），金额为负
             await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "ColBalanceTxns" ("Id", "UserId", "Currency", "Action", "Amount", "BalanceAfter", "IdempotencyKey", "BusinessType", "BusinessId", "RefTxnId", "ReversedAt", "CreationTime")
@@ -77,9 +82,11 @@ public class MyTxnsEnrichmentTests : CollectionTestBase
             return await service.GetMyTxnsAsync(0, 50);
         });
 
-        page.TotalCount.ShouldBe(2);
-        var deposit = page.Items.Single(t => t.Action == BalanceActions.DepositCredit);
+        page.TotalCount.ShouldBe(3);
+        var deposit = page.Items.Single(t => t.Action == BalanceActions.DepositCredit && t.TxHash != null);
         deposit.TxHash.ShouldBe(txHash);
+        // 非 Guid 幂等键的充值行：无凭证可回填（不误连、不抛）——原断言空洞（挂在扣款行上）
+        page.Items.Count(t => t.Action == BalanceActions.DepositCredit && t.TxHash == null).ShouldBe(1);
         deposit.BusinessType.ShouldBe(CollectionBusinessTypes.TopUp);
         deposit.BusinessId.ShouldBe(depositOrderId);
         var debit = page.Items.Single(t => t.Action == BalanceActions.BusinessDebit);
@@ -93,13 +100,37 @@ public class MyTxnsEnrichmentTests : CollectionTestBase
             var service = GetRequiredService<CollectionBalanceAppService>();
             return await service.GetMyTxnsAsync(0, 50, fromTime: DateTime.UtcNow.AddHours(-1), toTime: DateTime.UtcNow.AddHours(1));
         });
-        within.TotalCount.ShouldBe(2);
+        within.TotalCount.ShouldBe(3);
         var future = await UowAsync(async () =>
         {
             var service = GetRequiredService<CollectionBalanceAppService>();
             return await service.GetMyTxnsAsync(0, 50, fromTime: DateTime.UtcNow.AddHours(1));
         });
         future.TotalCount.ShouldBe(0);
+
+        // 边界等式契约：fromTime 含端点（>=）、toTime 不含端点（<）。
+        // 边界行放未来 1 小时——已有行都建在“现在”，fromTime 取过去时刻会把它们全部包含，无法隔离
+        var boundary = DateTime.UtcNow.AddHours(1);
+        await UowAsync(async () =>
+        {
+            var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "ColBalanceTxns" ("Id", "UserId", "Currency", "Action", "Amount", "BalanceAfter", "IdempotencyKey", "BusinessType", "BusinessId", "RefTxnId", "ReversedAt", "CreationTime")
+                VALUES ({Guid.NewGuid()}, {Me}, {(int)CollectionCurrency.Usdt}, {BalanceActions.DepositCredit}, {1m}, {1m}, {"boundary-" + Guid.NewGuid().ToString("N")[..8]}, {CollectionBusinessTypes.TopUp}, {Guid.NewGuid()}, NULL, NULL, {boundary})
+                """);
+        });
+        var atFrom = await UowAsync(async () =>
+        {
+            var service = GetRequiredService<CollectionBalanceAppService>();
+            return await service.GetMyTxnsAsync(0, 50, fromTime: boundary);
+        });
+        atFrom.TotalCount.ShouldBe(1);   // >=：等于下界的行计入
+        var atTo = await UowAsync(async () =>
+        {
+            var service = GetRequiredService<CollectionBalanceAppService>();
+            return await service.GetMyTxnsAsync(0, 50, toTime: boundary);
+        });
+        atTo.TotalCount.ShouldBe(3);     // <：等于上界的行不计入
     }
 
     private async Task<T> UowAsync<T>(Func<Task<T>> action)

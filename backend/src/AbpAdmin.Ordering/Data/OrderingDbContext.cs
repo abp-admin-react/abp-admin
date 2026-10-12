@@ -44,6 +44,7 @@ public class OrderingDbContext : AbpDbContext<OrderingDbContext>
             b.Property(x => x.PayAmount).HasPrecision(28, 18);
             b.Property(x => x.ChannelTradeNo).HasMaxLength(OrderingConsts.MaxTradeNoLength);
             b.Property(x => x.RefundedAmount).HasPrecision(18, 2);
+            b.Property(x => x.ClosedAt);
 
             b.HasIndex(x => x.OrderNo).IsUnique();
             b.HasIndex(x => x.UserId);

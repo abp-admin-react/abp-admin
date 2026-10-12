@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Balances;
+using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -42,7 +43,8 @@ public class BalanceTxnDto
     /// <summary>业务类型（TopUp / Order …）；无归因为 null。</summary>
     public string? BusinessType { get; set; }
 
-    /// <summary>业务单 Id（充值行 = 流水自身 Id；扣款行 = 订单 Id）。前端据此关联展示。</summary>
+    /// <summary>业务单 Id（充值行 = 流水自身 Id；扣款行 = 订单 Id）。对账查询原值用；
+    /// 前端的「关联订单」展示走流水 Id 反查端点（order-refs-by-balance-txn），不经此字段。</summary>
     public Guid? BusinessId { get; set; }
 
     /// <summary>回冲行的原扣款流水 Id（用户侧把回冲关联回原订单用）。</summary>
@@ -140,14 +142,18 @@ public class CollectionBalanceAppService : ApplicationService
             .ToListAsync();
 
         // 充值行回填链上凭证（批量一次查）：贷记的幂等键 = 进款单 Id
-        //（SweepManager 确认入账的写入口径 CreditAsync(order.Id.ToString("D"))），
+        //（读写口径唯一定义处 BalanceIdempotencyKeys——写入在 SweepManager 确认入账），
         // 据此查 ColDepositOrders.TxHash——用户对账要能看到链上转账，不只是余额数字
-        var depositOrderIds = rows
-            .Where(t => t.Action == BalanceActions.DepositCredit
-                        && Guid.TryParse(t.IdempotencyKey, out _))
-            .Select(t => Guid.Parse(t.IdempotencyKey))
-            .Distinct()
-            .ToList();
+        var txHashByTxnId = new Dictionary<Guid, Guid>();
+        foreach (var t in rows.Where(x => x.Action == BalanceActions.DepositCredit))
+        {
+            if (BalanceIdempotencyKeys.TryParseDepositOrder(t.IdempotencyKey, out var depositOrderId))
+            {
+                txHashByTxnId[t.Id] = depositOrderId;
+            }
+        }
+
+        var depositOrderIds = txHashByTxnId.Values.Distinct().ToList();
         var txHashByDepositOrderId = depositOrderIds.Count == 0
             ? new Dictionary<Guid, string>()
             : await dbContext.DepositOrders.AsNoTracking()
@@ -167,7 +173,7 @@ public class CollectionBalanceAppService : ApplicationService
             BusinessId = t.BusinessId,
             RefTxnId = t.RefTxnId,
             TxHash = t.Action == BalanceActions.DepositCredit
-                     && Guid.TryParse(t.IdempotencyKey, out var depositOrderId)
+                     && txHashByTxnId.TryGetValue(t.Id, out var depositOrderId)
                      && txHashByDepositOrderId.TryGetValue(depositOrderId, out var txHash)
                 ? txHash
                 : null,

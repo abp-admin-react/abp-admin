@@ -104,7 +104,8 @@ public class OrderAppService : ApplicationService
             throw new BusinessException(OrderingErrorCodes.OrderNotFound).WithData("OrderId", id);
         }
 
-        return Map(order, await OrderServiceHelpers.LoadAnomalyLinesAsync(dbContext, order.Id));
+        var linesByOrder = await OrderServiceHelpers.LoadAnomalyLinesBatchedAsync(dbContext, new[] { order.Id });
+        return Map(order, linesByOrder.GetValueOrDefault(order.Id));
     }
 
     public virtual async Task<PagedResultDto<OrderDto>> GetListAsync(OrderListFilterDto filter)
@@ -145,10 +146,13 @@ public class OrderAppService : ApplicationService
             return new List<OrderRefDto>();
         }
 
+        // 去重 + 上限（合法调用方每页 ≤200；不设防则客户端可拉出任意大的 IN 探测）
+        var probeIds = balanceTxnIds.Distinct().Take(200).ToList();
+
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var refs = await dbContext.Orders.AsNoTracking()
             .Where(o => o.UserId == CurrentUser.Id!.Value && o.BalanceTxnId != null
-                        && balanceTxnIds.Contains(o.BalanceTxnId.Value))
+                        && probeIds.Contains(o.BalanceTxnId.Value))
             .Select(o => new OrderRefDto { BalanceTxnId = o.BalanceTxnId!.Value, OrderId = o.Id, OrderNo = o.OrderNo })
             .ToListAsync();
         return refs;
@@ -297,6 +301,7 @@ public class OrderAppService : ApplicationService
             PaidAt = order.PaidAt,
             ChannelTradeNo = order.ChannelTradeNo,
             FulfilledAt = order.FulfilledAt,
+            ClosedAt = order.ClosedAt,
             RefundedAmount = order.RefundedAmount == null ? null : AbpAdmin.Collection.Contracts.CollectionAmounts.Format(order.RefundedAmount.Value),
             QuoteId = order.QuoteId,
             CollectionId = order.CollectionId,

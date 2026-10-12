@@ -66,6 +66,9 @@ namespace AbpAdmin.Ordering.Migrations
                     b.Property<int?>("CloseReason")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<Guid?>("CollectionId")
                         .HasColumnType("uuid");
 

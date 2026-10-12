@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Users;
+using Volo.Abp;
 using Volo.Abp.Uow;
 using Xunit;
 
@@ -141,7 +142,9 @@ public class OrderCommerceTests : OrderingTestBase
 
         var after = await UowAsync(() => ReloadAsync(order.Id));
         after.RefundedAmount.ShouldBe(8.5m);
-        after.PaymentAnomaly.ShouldBeTrue();
+        // 退款是常规运营动作，不点亮 PaymentAnomaly 异常标（否则干净支付单永远挂红标，
+        // 且过期复活守卫 !PaymentAnomaly 的语义被污染——OCR 评审 design F9）
+        after.PaymentAnomaly.ShouldBeFalse();
 
         // 用户侧自己的详情能看到退款明细（可见性的验收点）
         var dto = await UowAsync(async () =>
@@ -181,6 +184,83 @@ public class OrderCommerceTests : OrderingTestBase
         result.Count.ShouldBe(1);
         result.Single().BalanceTxnId.ShouldBe(txnA);
         result.Single().OrderId.ShouldBe(orderA.Id);
+    }
+
+    [Fact]
+    public async Task Expired_Close_Revive_Persists_TradeNo()
+    {
+        // OCR test F2：复活也是渠道版标 Paid，对账凭证不能缺（修复前此路径丢 ChannelTradeNo）
+        var order = await CreateOrderAsync(Me);
+        var collectionId = Guid.NewGuid();
+        await UowAsync(async () =>
+        {
+            var dbContext = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+            await dbContext.Orders.Where(o => o.Id == order.Id)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(o => o.PayAmount, 10m)
+                    .SetProperty(o => o.PayCurrency, CollectionCurrency.Cny)
+                    .SetProperty(o => o.CollectionId, collectionId)
+                    .SetProperty(o => o.PayChannel, OrderingPayChannel.WechatNative)
+                    .SetProperty(o => o.Status, OrderStatus.Closed)
+                    .SetProperty(o => o.ClosedAt, DateTime.UtcNow)
+                    .SetProperty(o => o.CloseReason, OrderCloseReason.Expired));
+        });
+
+        await UowAsync(() => GetRequiredService<OrderPaymentManager>()
+            .HandleCollectionCompletedAsync(order.Id, collectionId,
+                OrderingPayChannel.WechatNative, 10m, CollectionCurrency.Cny, "wx-trade-revive"));
+
+        var after = await UowAsync(() => ReloadAsync(order.Id));
+        after.Status.ShouldBe(OrderStatus.Paid);
+        after.ChannelTradeNo.ShouldBe("wx-trade-revive");
+    }
+
+    [Fact]
+    public async Task ManualRefund_Note_Only_Does_Not_Accumulate()
+    {
+        // OCR test F1：只记说明不记金额的分支（amount=null → 不累加、不抛）
+        var order = await CreateOrderAsync(Me, 20m);
+        await UowAsync(() => GetRequiredService<OrderPaymentManager>()
+            .AppendManualRefundAsync(order.Id, 5m, CollectionCurrency.Usdt, "real-refund"));
+        await UowAsync(() => GetRequiredService<OrderPaymentManager>()
+            .AppendManualRefundAsync(order.Id, null, null, "note-only"));
+
+        var after = await UowAsync(() => ReloadAsync(order.Id));
+        after.RefundedAmount.ShouldBe(5m);           // null-amount 不动累计
+        after.PaymentAnomaly.ShouldBeFalse();
+
+        var dto = await UowAsync(async () => await GetRequiredService<OrderAppService>().GetAsync(order.Id));
+        dto.AnomalyLines!.Count.ShouldBe(2);          // 两条明细都在，用户可见
+    }
+
+    [Fact]
+    public async Task ManualRefund_Currency_Must_Match_Order_And_Max_Two_Decimals()
+    {
+        // OCR high-1 + M3：币种混入累计列 = 对用户的错误金额；子分位被 PG 静默舍入
+        var order = await CreateOrderAsync(Me); // Currency = USD
+        var service = GetRequiredService<OrderAdminAppService>();
+
+        await Should.ThrowAsync<BusinessException>(async () =>
+            await service.RecordManualRefundAsync(order.Id,
+                new RecordManualRefundInput { Amount = "5.00", Currency = "Cny", Note = "currency mismatch" }));
+
+        await Should.ThrowAsync<BusinessException>(async () =>
+            await service.RecordManualRefundAsync(order.Id,
+                new RecordManualRefundInput { Amount = "0.005", Currency = "USD", Note = "sub-cent" }));
+
+        // 合法路径（币种匹配、两位小数）正常累加
+        await service.RecordManualRefundAsync(order.Id,
+            new RecordManualRefundInput { Amount = "2.25", Currency = "USD", Note = "ok" });
+        var after = await UowAsync(() => ReloadAsync(order.Id));
+        after.RefundedAmount.ShouldBe(2.25m);
+    }
+
+    [Fact]
+    public async Task GetOrderRefs_Empty_Input_Returns_Empty()
+    {
+        var service = GetRequiredService<OrderAppService>();
+        var result = await UowAsync(async () => await service.GetOrderRefsByBalanceTxnAsync(new List<Guid>()));
+        result.Count.ShouldBe(0);
     }
 
     [Fact]

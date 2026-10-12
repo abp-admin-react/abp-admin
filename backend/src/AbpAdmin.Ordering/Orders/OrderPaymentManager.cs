@@ -308,7 +308,8 @@ public class OrderPaymentManager : DomainService
                 if (order.CloseReason == OrderCloseReason.Expired && !order.PaymentAnomaly && amountsMatch)
                 {
                     // 超时关闭且没有任何异常明细、金额币种一致：标回 Paid，并写上这笔的归因
-                    await ReviveFromExpiredCloseAsync(order.Id, collectionId, sourceChannel);
+                    //（渠道单号一并落库——复活也是渠道版标 Paid，对账凭证不能缺）
+                    await ReviveFromExpiredCloseAsync(order.Id, collectionId, sourceChannel, channelTradeNo);
                     return;
                 }
 
@@ -416,6 +417,7 @@ public class OrderPaymentManager : DomainService
             .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, OrderStatus.Closed)
+                .SetProperty(o => o.ClosedAt, _clock.Now)
                 .SetProperty(o => o.CloseReason, OrderCloseReason.UserCancel));
     }
 
@@ -427,6 +429,7 @@ public class OrderPaymentManager : DomainService
             .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, OrderStatus.Closed)
+                .SetProperty(o => o.ClosedAt, _clock.Now)
                 .SetProperty(o => o.CloseReason, OrderCloseReason.Expired));
     }
 
@@ -461,9 +464,13 @@ public class OrderPaymentManager : DomainService
     /// <summary>
     /// 追加异常明细；订单的 PaymentAnomaly 标记写入一次、不覆盖。明细永不更新。
     /// </summary>
+    /// <summary>追加一条明细；<paramref name="markAnomaly"/> 控制是否点亮订单的 PaymentAnomaly
+    /// 异常标——到账类异常（金额不符/多笔到账）要点亮；人工退款走
+    /// <see cref="AppendManualRefundAsync"/>（markAnomaly=false）：退款是常规运营动作，
+    /// 不打异常标（否则干净支付的用户订单永远挂红标，复活守卫 !PaymentAnomaly 的语义也被污染）。</summary>
     public virtual async Task AppendAnomalyAsync(
         Guid orderId, decimal? amount, AbpAdmin.Collection.Contracts.CollectionCurrency? currency,
-        Guid? collectionId, string? channelTradeNo, string note)
+        Guid? collectionId, string? channelTradeNo, string note, bool markAnomaly = true)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
@@ -478,17 +485,23 @@ public class OrderPaymentManager : DomainService
             CreationTime = _clock.Now,
         });
 
-        await dbContext.Orders
-            .Where(o => o.Id == orderId && !o.PaymentAnomaly)
-            .ExecuteUpdateAsync(s => s.SetProperty(o => o.PaymentAnomaly, true));
+        if (markAnomaly)
+        {
+            await dbContext.Orders
+                .Where(o => o.Id == orderId && !o.PaymentAnomaly)
+                .ExecuteUpdateAsync(s => s.SetProperty(o => o.PaymentAnomaly, true));
+        }
 
         await dbContext.SaveChangesAsync();
     }
 
     /// <summary>
-    /// 人工退款记录（管理端动作的落地）：追加一条退款异常明细 + 累加 RefundedAmount。
-    /// 金额为 null 表示只记说明不记金额（此时不累加）。用户侧订单详情可以看到这些
-    /// 明细与累计退款额——退款在用户侧可见，不再只是管理端口径。
+    /// 人工退款记录（管理端动作的落地）：追加一条退款明细（不打异常标）+ 累加 RefundedAmount。
+    /// 金额为 null 表示只记说明不记金额（此时不累加）。币种与两位小数由调用方
+    /// RecordManualRefundAsync 校验（必须等于订单标价币种），保证
+    /// RefundedAmount = Σ 退款明细金额且币种单一。用户侧订单详情可见——退款不再只是管理端口径。
+    /// 契约：明细插入与累加是两条语句，原子性依赖调用方的环境事务
+    /// （Auto API 的 POST 环境工作单元是事务性的；新调用方若非事务须自行包 UoW）。
     /// </summary>
     public virtual async Task AppendManualRefundAsync(
         Guid orderId, decimal? amount, AbpAdmin.Collection.Contracts.CollectionCurrency? currency, string note)
@@ -496,7 +509,7 @@ public class OrderPaymentManager : DomainService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
         await AppendAnomalyAsync(orderId, amount, currency, null, null,
-            "Manual refund record: " + note);
+            "Manual refund record: " + note, markAnomaly: false);
 
         if (amount.HasValue)
         {
@@ -658,7 +671,8 @@ public class OrderPaymentManager : DomainService
     /// 超时关闭订单的复活：条件更新把 CloseReason = Expired、无异常、仍 Closed 的行标回 Paid
     ///（把 CloseReason/PaymentAnomaly 放进 WHERE，避免与并发的异常写入竞争，计划第 3.2 节）。
     /// </summary>
-    private async Task ReviveFromExpiredCloseAsync(Guid orderId, Guid collectionId, OrderingPayChannel channel)
+    private async Task ReviveFromExpiredCloseAsync(
+        Guid orderId, Guid collectionId, OrderingPayChannel channel, string? channelTradeNo)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var rows = await dbContext.Orders
@@ -670,7 +684,8 @@ public class OrderPaymentManager : DomainService
                 .SetProperty(o => o.Status, OrderStatus.Paid)
                 .SetProperty(o => o.PaidAt, _clock.Now)
                 .SetProperty(o => o.CollectionId, collectionId)
-                .SetProperty(o => o.PayChannel, channel));
+                .SetProperty(o => o.PayChannel, channel)
+                .SetProperty(o => o.ChannelTradeNo, channelTradeNo));
 
         if (rows == 0)
         {

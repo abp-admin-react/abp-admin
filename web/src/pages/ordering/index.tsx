@@ -67,20 +67,55 @@ const CLOSE_REASON_LABELS: Record<string, string> = {
 const fmtTime = (v?: string | null) =>
   v ? new Date(v).toLocaleString() : '-';
 
-/** 链上凭证：短哈希 + BscScan 跳转（主网 chainid=56） */
+/** 链上交易哈希形状（写入侧来自链上 log，渲染侧仍守形状——非 0x64hex 只显示文本不出链接） */
+const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+
+/** 链上凭证：短哈希 + BscScan 跳转（主网 chainid=56）；target=_blank 必带 noopener */
 const TxHashLink: React.FC<{ txHash?: string | null }> = ({ txHash }) =>
-  txHash ? (
+  txHash && TX_HASH_RE.test(txHash) ? (
     <Typography.Link
       copyable={{ text: txHash }}
       href={`https://bscscan.com/tx/${txHash}`}
       target="_blank"
+      rel="noopener noreferrer"
       style={{ fontFamily: 'monospace', fontSize: 12 }}
     >
       {`${txHash.slice(0, 10)}...${txHash.slice(-8)}`}
     </Typography.Link>
+  ) : txHash ? (
+    <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{txHash}</Typography.Text>
   ) : (
     '-'
   );
+
+/** 订单事实区（渠道单号 / 退款累计 / 异常与退款明细）——行展开与详情弹窗共用的唯一渲染 */
+const OrderDetailFacts: React.FC<{ order: OrderDto }> = ({ order }) => (
+  <>
+    {order.channelTradeNo && (
+      <Typography.Paragraph style={{ marginBottom: 4 }} type="secondary">
+        渠道单号：
+        <Typography.Text copyable={{ text: order.channelTradeNo }}>{order.channelTradeNo}</Typography.Text>
+      </Typography.Paragraph>
+    )}
+    {order.refundedAmount != null && (
+      <Typography.Paragraph style={{ marginBottom: 4 }}>
+        退款累计：<Typography.Text type="warning">{order.refundedAmount}</Typography.Text>
+      </Typography.Paragraph>
+    )}
+    {order.anomalyLines?.length ? (
+      <ul style={{ margin: 0, paddingLeft: 16 }}>
+        {order.anomalyLines.map((line) => (
+          <li key={line.id}>
+            {fmtTime(line.creationTime)} · {line.amount ?? '-'} {line.currency ?? ''} ·{' '}
+            {line.channelTradeNo ?? ''} · {line.note}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <Typography.Text type="secondary">无异常/退款明细</Typography.Text>
+    )}
+  </>
+);
 
 /** 订单时间线（商城口径：创建 → 支付 → 履约 → 关闭） */
 const OrderTimeline: React.FC<{ order: OrderDto }> = ({ order }) => {
@@ -105,9 +140,9 @@ const OrderTimeline: React.FC<{ order: OrderDto }> = ({ order }) => {
     },
     order.status === 'Closed' && {
       color: 'gray',
-      children: `关闭 · ${fmtTime(order.expiresAt)} · ${
+      children: `关闭 · ${fmtTime(order.closedAt ?? order.expiresAt)} · ${
         CLOSE_REASON_LABELS[order.closeReason ?? ''] ?? order.closeReason ?? ''
-      }`,
+      }${order.closedAt ? '' : '（截止时间，实际关闭时刻未记录）'}`,
     },
   ].filter(Boolean) as { color: string; children: React.ReactNode }[];
   return <Timeline items={items} style={{ margin: '8px 0 0' }} />;
@@ -184,12 +219,18 @@ export default function OrderingPage() {
   // ── 流水页签 ────────────────────────────────────────────────────────────────────────
   const txnActionRef = useRef<ActionType | undefined>(undefined);
   const [txnRange, setTxnRange] = useState<[string | null, string | null]>([null, null]);
+  // request 闭包读 ref 而不是 state：onChange 里 setState+reload 同拍发起的请求
+  // 拿到的还是旧闭包（实测首次过滤失效），ref 立即可见
+  const txnRangeRef = useRef<[string | null, string | null]>([null, null]);
   const [orderDetail, setOrderDetail] = useState<OrderDto | null>(null);
   /** 扣款/回冲行 → 来源订单（request 回调里批量反查后写入；回冲按原扣款流水关联） */
   const [txnRefs, setTxnRefs] = useState<Record<string, { orderId: string; orderNo: string }>>({});
 
-  const txnOrderRef = (t: BalanceTxnDto) =>
-    txnRefs[t.action === 'DebitReverse' ? t.refTxnId ?? t.id : t.id] ?? null;
+  /** 回冲行按原扣款流水（RefTxnId）关联到原订单；其余行用自身 Id——规则唯一出处 */
+  const orderLookupTxnId = (t: BalanceTxnDto) =>
+    t.action === 'DebitReverse' ? t.refTxnId ?? t.id : t.id;
+
+  const txnOrderRef = (t: BalanceTxnDto) => txnRefs[orderLookupTxnId(t)] ?? null;
 
   const txnColumns: ProColumns<BalanceTxnDto>[] = [
     { title: '时间', dataIndex: 'creationTime', width: 170, render: (_, t) => fmtTime(t.creationTime) },
@@ -364,28 +405,7 @@ export default function OrderingPage() {
                   expandedRowRender: (order) => (
                     <div style={{ padding: '4px 0' }}>
                       <OrderTimeline order={order} />
-                      {order.channelTradeNo && (
-                        <Typography.Paragraph style={{ marginBottom: 4 }} type="secondary">
-                          渠道单号：<Typography.Text copyable={{ text: order.channelTradeNo }}>{order.channelTradeNo}</Typography.Text>
-                        </Typography.Paragraph>
-                      )}
-                      {order.refundedAmount != null && (
-                        <Typography.Paragraph style={{ marginBottom: 4 }}>
-                          退款累计：<Typography.Text type="warning">{order.refundedAmount}</Typography.Text>
-                        </Typography.Paragraph>
-                      )}
-                      {order.anomalyLines?.length ? (
-                        <ul style={{ margin: 0, paddingLeft: 16 }}>
-                          {order.anomalyLines.map((line) => (
-                            <li key={line.id}>
-                              {fmtTime(line.creationTime)} · {line.amount ?? '-'} {line.currency ?? ''} ·{' '}
-                              {line.channelTradeNo ?? ''} · {line.note}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <Typography.Text type="secondary">无异常/退款明细</Typography.Text>
-                      )}
+                      <OrderDetailFacts order={order} />
                     </div>
                   ),
                 }}
@@ -405,10 +425,12 @@ export default function OrderingPage() {
                   <DatePicker.RangePicker
                     showTime
                     onChange={(range) => {
-                      setTxnRange([
+                      const next: [string | null, string | null] = [
                         range?.[0]?.toISOString() ?? null,
                         range?.[1]?.toISOString() ?? null,
-                      ]);
+                      ];
+                      txnRangeRef.current = next;
+                      setTxnRange(next);
                       txnActionRef.current?.reload();
                     }}
                   />
@@ -417,13 +439,11 @@ export default function OrderingPage() {
                   const result = await getMyTxns({
                     skipCount: ((params.current || 1) - 1) * (params.pageSize || 10),
                     maxResultCount: params.pageSize || 10,
-                    fromTime: txnRange[0] ?? undefined,
-                    toTime: txnRange[1] ?? undefined,
+                    fromTime: txnRangeRef.current[0] ?? undefined,
+                    toTime: txnRangeRef.current[1] ?? undefined,
                   });
                   // 扣款/回冲行批量反查来源订单号（后端只按当前用户过滤，不泄露他人单号）
-                  const ids = result.items.map((t) =>
-                    t.action === 'DebitReverse' ? t.refTxnId ?? t.id : t.id,
-                  );
+                  const ids = result.items.map(orderLookupTxnId);
                   if (ids.length > 0) {
                     const orderRefs = await getOrderRefsByBalanceTxn(ids).catch(() => []);
                     setTxnRefs(
@@ -515,24 +535,7 @@ export default function OrderingPage() {
               {orderDetail.subject} · 标价 {orderDetail.amount ?? '-'} USD
             </Typography.Paragraph>
             <OrderTimeline order={orderDetail} />
-            {orderDetail.channelTradeNo && (
-              <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
-                渠道单号：
-                <Typography.Text copyable={{ text: orderDetail.channelTradeNo }}>
-                  {orderDetail.channelTradeNo}
-                </Typography.Text>
-              </Typography.Paragraph>
-            )}
-            {orderDetail.anomalyLines?.length ? (
-              <ul style={{ margin: 0, paddingLeft: 16 }}>
-                {orderDetail.anomalyLines.map((line) => (
-                  <li key={line.id}>
-                    {fmtTime(line.creationTime)} · {line.amount ?? '-'} {line.currency ?? ''} ·{' '}
-                    {line.channelTradeNo ?? ''} · {line.note}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            <OrderDetailFacts order={orderDetail} />
           </Space>
         )}
       </Modal>

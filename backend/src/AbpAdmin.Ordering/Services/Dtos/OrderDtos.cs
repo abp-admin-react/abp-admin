@@ -38,6 +38,9 @@ public class OrderDto
     /// <summary>履约时间（管理端标履约时写入）。</summary>
     public DateTime? FulfilledAt { get; set; }
 
+    /// <summary>实际关闭时间（用户取消 / 过期关闭时写入；ExpiresAt 只是付款截止）。</summary>
+    public DateTime? ClosedAt { get; set; }
+
     /// <summary>人工退款累计金额（标价币种字符串；无退款为 null）。</summary>
     public string? RefundedAmount { get; set; }
 
