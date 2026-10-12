@@ -60,6 +60,8 @@
     <!-- 自包含业务模块样板（AbpAdmin.Biz.Template）新增直引包；此前仅作传递依赖存在 -->
     <PackageVersion Include="Volo.Abp.AspNetCore.Mvc" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.Ddd.Application" Version="$(AbpVersion)" />
+    <!-- 收款契约工程（AbpAdmin.Collection.Contracts）：[IntegrationService] 经它间接用到 -->
+    <PackageVersion Include="Volo.Abp.Ddd.Application.Contracts" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.Localization" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.Mapperly" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.FeatureManagement.Application" Version="$(AbpVersion)" />
@@ -254,6 +256,9 @@
     <!-- T4.7 EasyAbp.PaymentService 2.21.0：核心 + 预存款 + 微信支付。明确不引 .Web MVC。 -->
     <PackageVersion Include="EasyAbp.PaymentService.Domain.Shared" Version="$(EasyAbpPaymentServiceVersion)" />
     <PackageVersion Include="EasyAbp.PaymentService.Domain" Version="$(EasyAbpPaymentServiceVersion)" />
+    <!-- 链上（M5）：HD 派生 + EIP-155 签名 + KeyStore；JSON-RPC 走自写 HttpClient 网关（见 Chain/） -->
+    <PackageVersion Include="Nethereum.HdWallet" Version="4.29.0" />
+    <PackageVersion Include="Nethereum.Signer" Version="4.29.0" />
     <PackageVersion Include="EasyAbp.PaymentService.Application.Contracts" Version="$(EasyAbpPaymentServiceVersion)" />
     <PackageVersion Include="EasyAbp.PaymentService.Application" Version="$(EasyAbpPaymentServiceVersion)" />
     <PackageVersion Include="EasyAbp.PaymentService.EntityFrameworkCore" Version="$(EasyAbpPaymentServiceVersion)" />

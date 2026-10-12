@@ -19,6 +19,29 @@ public static class ScheduledJobConsts
     /// </summary>
     public const string HttpProbeJobType = "AbpAdmin.HttpProbe";
 
+    /// <summary>
+    /// 订单补状态作业的 JobType（收款/订单计划第 2、3.3 节）：到账核对、过期关单、第二笔到账
+    /// 与复活检查。handler 在 AbpAdmin.Ordering（要调收款集成服务），常量收口到 Domain.Shared，
+    /// 框架在编译期要看到这些字符串（HostOnlyScheduledJobTypes 与作业种子共用同一出处）。
+    /// Host 专用：这两套表没有租户列，租户上下文不种行、不能改不能启用（ScheduledJobAppService 守卫）。
+    /// 后续里程碑再加：定时关单/渠道补单（M3）、金库核对（M5）。
+    /// </summary>
+    public const string OrderStatusSyncJobType = "AbpAdmin.OrderStatusSync";
+
+    /// <summary>
+    /// 流水合计作业的 JobType（收款/订单计划第 5.5 节）：按用户和币种核对
+    /// 「流水之和 == 余额行」，不等则告警（告警清单里的「账本不平」）。
+    /// handler 在 AbpAdmin.Collection，Host 专用（同 OrderStatusSync 的理由）。
+    /// </summary>
+    public const string BalanceAuditJobType = "AbpAdmin.BalanceAudit";
+
+    /// <summary>
+    /// 金库核对作业的 JobType（收款/订单计划第 57、291 行）：每日按币 balanceOf(金库) vs
+    /// 用户余额合计并追加 ColVaultChecks。handler 在 AbpAdmin.Collection，Host 专用。
+    /// 扫链/归集不是定时作业——是宿主注册的 BackgroundWorker（AddCollectionChainWorkers）。
+    /// </summary>
+    public const string VaultAuditJobType = "AbpAdmin.ChainVaultAudit";
+
     public const int MaxNameLength = 128;
 
     public const int MaxJobTypeLength = 128;

@@ -18,5 +18,12 @@ public static class HostOnlyScheduledJobTypes
     [
         // 广播断链看门狗：ExecuteAsync 关 IMultiTenant 过滤器扫全部租户的 Running 广播并入队续跑。
         ScheduledJobConsts.BroadcastNotificationWatchdogJobType,
+        // 订单补状态（收款/订单计划第 2 节）：扫的是无租户列的 OrdOrders/ColCollections，
+        // 语义上只允许 Host 侧配置与驱动；种子只给 Host 插行（OrderingJobDataSeedContributor）。
+        ScheduledJobConsts.OrderStatusSyncJobType,
+        // 余额流水合计核对（收款/订单计划第 5.5 节）：扫 ColBalances/ColBalanceTxns，同样无租户列。
+        ScheduledJobConsts.BalanceAuditJobType,
+        // 金库核对（收款/订单计划第 57、291 行）：读链 balanceOf + ColBalances，无租户列。
+        ScheduledJobConsts.VaultAuditJobType,
     ];
 }

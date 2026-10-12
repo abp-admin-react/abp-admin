@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin.Collection.Contracts</RootNamespace>
+    <!-- 契约工程：枚举/ETO/集成服务接口/金额助手/错误码。不带本地化（文案在实现工程），
+         所以不需要 GenerateEmbeddedFilesManifest。收款的传递闭包里不能出现
+         EasyAbp、Nethereum、收款实现工程、AbpAdmin.EntityFrameworkCore（架构测试钉住）。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- [IntegrationService] 定义在 Volo.Abp.Core，经 Ddd.Application.Contracts 间接用到，
+         不必直接引用 Core（计划第 2 节）。同进程调用仍是本地 DI。 -->
+    <PackageReference Include="Volo.Abp.Ddd.Application.Contracts" />
+  </ItemGroup>
+
+</Project>
