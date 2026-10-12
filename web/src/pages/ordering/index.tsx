@@ -1,7 +1,22 @@
 import { PlusOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
-import type { ActionType } from '@ant-design/pro-components';
-import { App, Button, Card, Form, Input, Modal, Select, Space, Tag } from 'antd';
+import type { ActionType, ProColumns } from '@ant-design/pro-components';
+import {
+  App,
+  Button,
+  Card,
+  DatePicker,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Tabs,
+  Tag,
+  Timeline,
+  Tooltip,
+  Typography,
+} from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
@@ -9,15 +24,30 @@ import {
   PAY_METHODS,
   cancelOrder,
   createOrder,
+  getOrder,
   getMyOrders,
+  getOrderRefsByBalanceTxn,
   startPay,
 } from '@/abp/ordering';
-import { MyBalanceDto, getMyBalances } from '@/abp/collection';
+import {
+  BalanceTxnDto,
+  MyBalanceDto,
+  BALANCE_ACTION_LABELS,
+  getMyBalances,
+  getMyTxns,
+} from '@/abp/collection';
 
 /**
- * 订单页（/ordering，计划第 4.3 节）：列表、创建、发起支付、取消。
+ * 订单页（/ordering，计划第 4.3 节）：列表、创建、发起支付、取消 + 资金流水。
  * 金额是十进制字符串，不在前端解析成 number。管理端动作（标履约、人工退款记录）
  * 由 Host 管理员在此页按权限操作。
+ *
+ * 两个页签：
+ * - 订单：AutoHeightProTable 服务端分页；行展开是订单时间线（创建→支付→履约→关闭）
+ *   + 渠道单号 + 退款/异常明细——对齐正常商城的订单详情口径。
+ * - 流水：余额资金流水（充值/支付扣款/回冲），充值行带链上凭证（BscScan 跳转），
+ *   扣款/回冲行可查看来源订单；按时间范围过滤。
+ *
  * 列表走全站统一的 AutoHeightProTable：服务端分页（request 回调里
  * current/pageSize → SkipCount/MaxResultCount）、变更后 actionRef.reload()。
  */
@@ -27,6 +57,60 @@ const STATUS_TAGS: Record<string, { color: string; text: string }> = {
   Paid: { color: 'success', text: '已支付' },
   Closed: { color: 'default', text: '已关闭' },
   Fulfilled: { color: 'purple', text: '已履约' },
+};
+
+const CLOSE_REASON_LABELS: Record<string, string> = {
+  UserCancel: '用户取消',
+  Expired: '超时未付',
+};
+
+const fmtTime = (v?: string | null) =>
+  v ? new Date(v).toLocaleString() : '-';
+
+/** 链上凭证：短哈希 + BscScan 跳转（主网 chainid=56） */
+const TxHashLink: React.FC<{ txHash?: string | null }> = ({ txHash }) =>
+  txHash ? (
+    <Typography.Link
+      copyable={{ text: txHash }}
+      href={`https://bscscan.com/tx/${txHash}`}
+      target="_blank"
+      style={{ fontFamily: 'monospace', fontSize: 12 }}
+    >
+      {`${txHash.slice(0, 10)}...${txHash.slice(-8)}`}
+    </Typography.Link>
+  ) : (
+    '-'
+  );
+
+/** 订单时间线（商城口径：创建 → 支付 → 履约 → 关闭） */
+const OrderTimeline: React.FC<{ order: OrderDto }> = ({ order }) => {
+  const items = [
+    order.creationTime && {
+      color: 'blue',
+      children: `创建 · ${fmtTime(order.creationTime)}`,
+    },
+    order.paidAt && {
+      color: 'green',
+      children: `支付 · ${fmtTime(order.paidAt)}${
+        order.channelTradeNo
+          ? ` · 渠道单号 ${order.channelTradeNo}`
+          : order.payChannel?.startsWith('Balance')
+            ? ' · 余额支付'
+            : ''
+      }`,
+    },
+    order.fulfilledAt && {
+      color: 'purple',
+      children: `履约 · ${fmtTime(order.fulfilledAt)}`,
+    },
+    order.status === 'Closed' && {
+      color: 'gray',
+      children: `关闭 · ${fmtTime(order.expiresAt)} · ${
+        CLOSE_REASON_LABELS[order.closeReason ?? ''] ?? order.closeReason ?? ''
+      }`,
+    },
+  ].filter(Boolean) as { color: string; children: React.ReactNode }[];
+  return <Timeline items={items} style={{ margin: '8px 0 0' }} />;
 };
 
 export default function OrderingPage() {
@@ -97,115 +181,267 @@ export default function OrderingPage() {
     </Space>
   );
 
+  // ── 流水页签 ────────────────────────────────────────────────────────────────────────
+  const txnActionRef = useRef<ActionType | undefined>(undefined);
+  const [txnRange, setTxnRange] = useState<[string | null, string | null]>([null, null]);
+  const [orderDetail, setOrderDetail] = useState<OrderDto | null>(null);
+  /** 扣款/回冲行 → 来源订单（request 回调里批量反查后写入；回冲按原扣款流水关联） */
+  const [txnRefs, setTxnRefs] = useState<Record<string, { orderId: string; orderNo: string }>>({});
+
+  const txnOrderRef = (t: BalanceTxnDto) =>
+    txnRefs[t.action === 'DebitReverse' ? t.refTxnId ?? t.id : t.id] ?? null;
+
+  const txnColumns: ProColumns<BalanceTxnDto>[] = [
+    { title: '时间', dataIndex: 'creationTime', width: 170, render: (_, t) => fmtTime(t.creationTime) },
+    {
+      title: '类型',
+      dataIndex: 'action',
+      width: 110,
+      render: (_, t) => BALANCE_ACTION_LABELS[t.action] ?? t.action,
+    },
+    {
+      title: '金额',
+      dataIndex: 'amount',
+      width: 150,
+      render: (_, t) => (
+        <Typography.Text
+          style={{ fontFamily: 'monospace' }}
+          type={t.amount.startsWith('-') ? 'danger' : 'success'}
+        >
+          {t.amount}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: '币种',
+      dataIndex: 'currency',
+      width: 80,
+      render: (_, t) =>
+        t.currency === 'Usdt' ? 'USDT' : t.currency === 'Usdc' ? 'USDC' : t.currency,
+    },
+    {
+      title: '变动后余额',
+      dataIndex: 'balanceAfter',
+      width: 140,
+      render: (_, t) => (
+        <Typography.Text style={{ fontFamily: 'monospace' }}>{t.balanceAfter}</Typography.Text>
+      ),
+    },
+    {
+      title: '关联订单',
+      key: 'orderRef',
+      width: 200,
+      render: (_, t) => {
+        const ref = txnOrderRef(t);
+        return ref ? (
+          <Typography.Link
+            onClick={async () =>
+              setOrderDetail(await getOrder(ref.orderId).catch(() => null))
+            }
+          >
+            {ref.orderNo}
+          </Typography.Link>
+        ) : (
+          '-'
+        );
+      },
+    },
+    {
+      title: '链上凭证',
+      dataIndex: 'txHash',
+      width: 170,
+      render: (_, t) => <TxHashLink txHash={t.txHash} />,
+    },
+  ];
+
   return (
     <PageContainer>
-      <AutoHeightProTable<OrderDto>
-        rowKey="id"
-        actionRef={actionRef}
-        headerTitle={headerTitle}
-        search={false}
-        pagination={{ pageSize: 10 }}
-        request={async (params) => {
-          // 服务端分页（全站惯用法，与 files/audit-logs 等页一致）；
-          // 后端钳制页大小上限 100
-          const result = await getMyOrders({
-            skipCount: ((params.current || 1) - 1) * (params.pageSize || 10),
-            maxResultCount: params.pageSize || 10,
-          });
-          return { data: result.items, total: result.totalCount, success: true };
-        }}
-        toolBarRender={() => [
-          <Button
-            key="create"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setCreateOpen(true)}
-          >
-            创建订单
-          </Button>,
-        ]}
-        columns={[
-          { title: '订单号', dataIndex: 'orderNo', width: 220 },
-          { title: '标题', dataIndex: 'subject', ellipsis: true },
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Space>{headerTitle}</Space>
+      </Card>
+      <Tabs
+        defaultActiveKey="orders"
+        items={[
           {
-            title: '标价 (USD)',
-            dataIndex: 'amount',
-            width: 110,
-            render: (_, record) => record.amount ?? '-',
+            key: 'orders',
+            label: '订单',
+            children: (
+              <AutoHeightProTable<OrderDto>
+                rowKey="id"
+                actionRef={actionRef}
+                search={false}
+                pagination={{ pageSize: 10 }}
+                request={async (params) => {
+                  // 服务端分页（全站惯用法，与 files/audit-logs 等页一致）；
+                  // 后端钳制页大小上限 100
+                  const result = await getMyOrders({
+                    skipCount: ((params.current || 1) - 1) * (params.pageSize || 10),
+                    maxResultCount: params.pageSize || 10,
+                  });
+                  return { data: result.items, total: result.totalCount, success: true };
+                }}
+                toolBarRender={() => [
+                  <Button
+                    key="create"
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={() => setCreateOpen(true)}
+                  >
+                    创建订单
+                  </Button>,
+                ]}
+                columns={[
+                  { title: '订单号', dataIndex: 'orderNo', width: 220 },
+                  { title: '标题', dataIndex: 'subject', ellipsis: true },
+                  {
+                    title: '标价 (USD)',
+                    dataIndex: 'amount',
+                    width: 110,
+                    render: (_, record) => record.amount ?? '-',
+                  },
+                  {
+                    title: '状态',
+                    dataIndex: 'status',
+                    width: 160,
+                    render: (_, record) => {
+                      const tag = STATUS_TAGS[record.status] ?? { color: 'default', text: record.status };
+                      return (
+                        <Space size={4} wrap>
+                          <Tag color={tag.color}>{tag.text}</Tag>
+                          {record.refundedAmount != null && (
+                            <Tooltip title={`人工退款累计 ${record.refundedAmount}`}>
+                              <Tag color="orange">已退款</Tag>
+                            </Tooltip>
+                          )}
+                        </Space>
+                      );
+                    },
+                  },
+                  {
+                    title: '应付',
+                    width: 140,
+                    render: (_, order) =>
+                      order.payAmount
+                        ? `${order.payAmount} ${order.payCurrency ?? ''}`
+                        : '-',
+                  },
+                  {
+                    title: '支付方式',
+                    dataIndex: 'payChannel',
+                    width: 120,
+                    render: (_, record) => record.payChannel ?? '-',
+                  },
+                  {
+                    title: '操作',
+                    width: 160,
+                    render: (_, order) => (
+                      <Space>
+                        <Button
+                          size="small"
+                          type="primary"
+                          disabled={order.status !== 'PendingPayment'}
+                          onClick={() => {
+                            setPayTarget(order);
+                            setPayPayload(null);
+                            setPayMethod(order.payChannel ?? 'WechatNative');
+                          }}
+                        >
+                          支付
+                        </Button>
+                        <Button
+                          size="small"
+                          danger
+                          disabled={order.status !== 'PendingPayment'}
+                          onClick={() => doCancel(order)}
+                        >
+                          取消
+                        </Button>
+                      </Space>
+                    ),
+                  },
+                ]}
+                expandable={{
+                  expandedRowRender: (order) => (
+                    <div style={{ padding: '4px 0' }}>
+                      <OrderTimeline order={order} />
+                      {order.channelTradeNo && (
+                        <Typography.Paragraph style={{ marginBottom: 4 }} type="secondary">
+                          渠道单号：<Typography.Text copyable={{ text: order.channelTradeNo }}>{order.channelTradeNo}</Typography.Text>
+                        </Typography.Paragraph>
+                      )}
+                      {order.refundedAmount != null && (
+                        <Typography.Paragraph style={{ marginBottom: 4 }}>
+                          退款累计：<Typography.Text type="warning">{order.refundedAmount}</Typography.Text>
+                        </Typography.Paragraph>
+                      )}
+                      {order.anomalyLines?.length ? (
+                        <ul style={{ margin: 0, paddingLeft: 16 }}>
+                          {order.anomalyLines.map((line) => (
+                            <li key={line.id}>
+                              {fmtTime(line.creationTime)} · {line.amount ?? '-'} {line.currency ?? ''} ·{' '}
+                              {line.channelTradeNo ?? ''} · {line.note}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <Typography.Text type="secondary">无异常/退款明细</Typography.Text>
+                      )}
+                    </div>
+                  ),
+                }}
+              />
+            ),
           },
           {
-            title: '状态',
-            dataIndex: 'status',
-            width: 100,
-            render: (_, record) => {
-              const tag = STATUS_TAGS[record.status] ?? { color: 'default', text: record.status };
-              return <Tag color={tag.color}>{tag.text}</Tag>;
-            },
-          },
-          {
-            title: '应付',
-            width: 140,
-            render: (_, order) =>
-              order.payAmount
-                ? `${order.payAmount} ${order.payCurrency ?? ''}`
-                : '-',
-          },
-          {
-            title: '支付方式',
-            dataIndex: 'payChannel',
-            width: 120,
-            render: (_, record) => record.payChannel ?? '-',
-          },
-          {
-            title: '异常',
-            dataIndex: 'paymentAnomaly',
-            width: 70,
-            render: (_, record) => (record.paymentAnomaly ? <Tag color="error">异常</Tag> : '-'),
-          },
-          {
-            title: '操作',
-            width: 160,
-            render: (_, order) => (
-              <Space>
-                <Button
-                  size="small"
-                  type="primary"
-                  disabled={order.status !== 'PendingPayment'}
-                  onClick={() => {
-                    setPayTarget(order);
-                    setPayPayload(null);
-                    setPayMethod(order.payChannel ?? 'WechatNative');
-                  }}
-                >
-                  支付
-                </Button>
-                <Button
-                  size="small"
-                  danger
-                  disabled={order.status !== 'PendingPayment'}
-                  onClick={() => doCancel(order)}
-                >
-                  取消
-                </Button>
-              </Space>
+            key: 'txns',
+            label: '流水',
+            children: (
+              <AutoHeightProTable<BalanceTxnDto>
+                rowKey="id"
+                actionRef={txnActionRef}
+                search={false}
+                pagination={{ pageSize: 10 }}
+                headerTitle={
+                  <DatePicker.RangePicker
+                    showTime
+                    onChange={(range) => {
+                      setTxnRange([
+                        range?.[0]?.toISOString() ?? null,
+                        range?.[1]?.toISOString() ?? null,
+                      ]);
+                      txnActionRef.current?.reload();
+                    }}
+                  />
+                }
+                request={async (params) => {
+                  const result = await getMyTxns({
+                    skipCount: ((params.current || 1) - 1) * (params.pageSize || 10),
+                    maxResultCount: params.pageSize || 10,
+                    fromTime: txnRange[0] ?? undefined,
+                    toTime: txnRange[1] ?? undefined,
+                  });
+                  // 扣款/回冲行批量反查来源订单号（后端只按当前用户过滤，不泄露他人单号）
+                  const ids = result.items.map((t) =>
+                    t.action === 'DebitReverse' ? t.refTxnId ?? t.id : t.id,
+                  );
+                  if (ids.length > 0) {
+                    const orderRefs = await getOrderRefsByBalanceTxn(ids).catch(() => []);
+                    setTxnRefs(
+                      Object.fromEntries(
+                        orderRefs.map((r) => [
+                          r.balanceTxnId,
+                          { orderId: r.orderId, orderNo: r.orderNo },
+                        ]),
+                      ),
+                    );
+                  }
+                  return { data: result.items, total: result.totalCount, success: true };
+                }}
+                columns={txnColumns}
+              />
             ),
           },
         ]}
-        expandable={{
-          expandedRowRender: (order) =>
-            order.anomalyLines?.length ? (
-              <ul style={{ margin: 0, paddingLeft: 16 }}>
-                {order.anomalyLines.map((line) => (
-                  <li key={line.id}>
-                    {line.creationTime} · {line.amount ?? '-'} {line.currency ?? ''} ·{' '}
-                    {line.channelTradeNo ?? ''} · {line.note}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              '无异常明细'
-            ),
-        }}
       />
 
       <Modal
@@ -256,6 +492,49 @@ export default function OrderingPage() {
             </Card>
           )}
         </Space>
+      </Modal>
+
+      <Modal
+        title={`订单详情 · ${orderDetail?.orderNo ?? ''}`}
+        open={orderDetail != null}
+        footer={null}
+        onCancel={() => setOrderDetail(null)}
+        width={560}
+      >
+        {orderDetail && (
+          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            <Space wrap>
+              <Tag color={STATUS_TAGS[orderDetail.status]?.color ?? 'default'}>
+                {STATUS_TAGS[orderDetail.status]?.text ?? orderDetail.status}
+              </Tag>
+              {orderDetail.refundedAmount != null && (
+                <Tag color="orange">退款累计 {orderDetail.refundedAmount}</Tag>
+              )}
+            </Space>
+            <Typography.Paragraph style={{ marginBottom: 0 }}>
+              {orderDetail.subject} · 标价 {orderDetail.amount ?? '-'} USD
+            </Typography.Paragraph>
+            <OrderTimeline order={orderDetail} />
+            {orderDetail.channelTradeNo && (
+              <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
+                渠道单号：
+                <Typography.Text copyable={{ text: orderDetail.channelTradeNo }}>
+                  {orderDetail.channelTradeNo}
+                </Typography.Text>
+              </Typography.Paragraph>
+            )}
+            {orderDetail.anomalyLines?.length ? (
+              <ul style={{ margin: 0, paddingLeft: 16 }}>
+                {orderDetail.anomalyLines.map((line) => (
+                  <li key={line.id}>
+                    {fmtTime(line.creationTime)} · {line.amount ?? '-'} {line.currency ?? ''} ·{' '}
+                    {line.channelTradeNo ?? ''} · {line.note}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </Space>
+        )}
       </Modal>
     </PageContainer>
   );

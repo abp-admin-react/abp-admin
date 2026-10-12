@@ -64,6 +64,14 @@ export type BalanceTxnDto = {
   amount: string;
   balanceAfter: string;
   creationTime: string;
+  /** 业务类型（TopUp / Order …）；无归因为 null */
+  businessType?: string;
+  /** 业务单 Id（充值行 = 流水自身 Id；扣款行 = 订单 Id） */
+  businessId?: string;
+  /** 回冲行的原扣款流水 Id */
+  refTxnId?: string;
+  /** 充值行的链上转账凭证（ColDepositOrders.TxHash 回填） */
+  txHash?: string;
 };
 
 /** 余额动作（与后端 BalanceActions 对齐） */
@@ -80,8 +88,20 @@ export async function getMyBalances(): Promise<MyBalanceDto[]> {
 }
 
 /** 我的余额流水（分页、倒序） */
-export async function getMyTxns(params: { skipCount?: number; maxResultCount?: number }) {
-  return request<PagedResult<BalanceTxnDto>>('/api/app/collection-balance/my-txns', { params });
+export async function getMyTxns(params: {
+  skipCount?: number;
+  maxResultCount?: number;
+  fromTime?: string;
+  toTime?: string;
+}) {
+  return request<PagedResult<BalanceTxnDto>>('/api/app/collection-balance/my-txns', {
+    params: {
+      SkipCount: params.skipCount ?? 0,
+      MaxResultCount: params.maxResultCount ?? 20,
+      FromTime: params.fromTime,
+      ToTime: params.toTime,
+    },
+  });
 }
 
 type PagedResult<T> = { totalCount: number; items: T[] };

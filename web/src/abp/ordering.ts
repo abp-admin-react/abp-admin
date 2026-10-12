@@ -24,6 +24,12 @@ export type OrderDto = {
   payAmount?: string;
   payCurrency?: string;
   paidAt?: string;
+  /** 致付收款的渠道单号（微信/支付宝交易号、Stripe 单号）；余额支付为 null */
+  channelTradeNo?: string;
+  /** 履约时间 */
+  fulfilledAt?: string;
+  /** 人工退款累计（标价币种字符串）；无退款为 null */
+  refundedAmount?: string;
   quoteId?: string;
   collectionId?: string;
   balanceTxnId?: string;
@@ -138,6 +144,23 @@ export async function startPay(orderId: string, payMethod: string) {
 /** 用户取消（CloseReason = UserCancel，只对待支付订单） */
 export async function cancelOrder(id: string) {
   return request<OrderDto>(`/api/app/order/${id}/cancel`, { method: 'POST' });
+}
+
+/** 余额流水 → 订单 的关联（流水页跳转用） */
+export type OrderRefDto = {
+  balanceTxnId: string;
+  orderId: string;
+  orderNo: string;
+};
+
+/** 按余额流水 Id 反查自己的订单号（只返回当前用户名下的订单）。
+ * List<Guid> 绑定按「重复的查询键」（balanceTxnIds=a&balanceTxnIds=b）——CSV 串和
+ * umi 默认的 ids[]=x 括号风格都绑不上（实测 400），这里手工拼查询串 */
+export async function getOrderRefsByBalanceTxn(balanceTxnIds: string[]) {
+  const qs = balanceTxnIds.map((id) => `balanceTxnIds=${encodeURIComponent(id)}`).join('&');
+  return request<OrderRefDto[]>(`/api/app/order/order-refs-by-balance-txn?${qs}`, {
+    method: 'GET',
+  });
 }
 
 // ── 管理端（Host；全部订单、标履约、人工退款记录）────────────────────────────────────
