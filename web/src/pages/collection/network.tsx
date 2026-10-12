@@ -8,6 +8,8 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
+  Select,
   Space,
   Switch,
   Table,
@@ -18,7 +20,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   NetworkStatusDto,
   TokenStatusDto,
+  ChainApiKeyDto,
   getNetworkStatus,
+  getApiKeys,
+  addApiKey,
+  removeApiKey,
+  setApiKeyEnabled,
   generateMnemonic,
   setMinDeposit,
   setNodeLogResultCap,
@@ -56,9 +63,26 @@ export default function NetworkConfigPage() {
   const [minDepSaving, setMinDepSaving] = useState(false);
   const [mnemonicResult, setMnemonicResult] = useState<string | null>(null);
 
+  // 扫链 KEY 池（同服务商多把，网关遇限流/认证错误自动轮换）
+  const [rpcKeys, setRpcKeys] = useState<ChainApiKeyDto[]>([]);
+  const [etherscanKeys, setEtherscanKeys] = useState<ChainApiKeyDto[]>([]);
+  const [rpcFallbackMasked, setRpcFallbackMasked] = useState<string | null>(null);
+  const [etherscanFallbackPresent, setEtherscanFallbackPresent] = useState(false);
+  const [newKeyProvider, setNewKeyProvider] = useState<string>('RpcBsc');
+  const [newKeyValue, setNewKeyValue] = useState('');
+  const [newKeyLabel, setNewKeyLabel] = useState('');
+  const [newKeySaving, setNewKeySaving] = useState(false);
+
   const reload = useCallback(async () => {
     setLoading(true);
     try { setStatus(await getNetworkStatus()); } catch { /* interceptor */ } finally { setLoading(false); }
+    try {
+      const keys = await getApiKeys();
+      setRpcKeys(keys.rpcKeys ?? []);
+      setEtherscanKeys(keys.etherscanKeys ?? []);
+      setRpcFallbackMasked(keys.rpcFallbackMasked ?? null);
+      setEtherscanFallbackPresent(keys.etherscanFallbackPresent);
+    } catch { /* interceptor */ }
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
@@ -114,14 +138,32 @@ export default function NetworkConfigPage() {
     });
   };
 
+  const submitAddKey = async () => {
+    const k = newKeyValue.trim();
+    if (newKeyProvider === 'RpcBsc' && !/^[0-9a-fA-F]{64}$/.test(k)) { message.warning('Ankr 项目密钥为 64 位十六进制'); return; }
+    if (newKeyProvider === 'EtherscanV2' && !/^[A-Za-z0-9]{34}$/.test(k)) { message.warning('Etherscan API Key 为 34 位字母数字'); return; }
+    setNewKeySaving(true);
+    try {
+      await addApiKey(newKeyProvider, k, newKeyLabel.trim() || undefined);
+      message.success('KEY 已添加并进入轮换（下一轮扫链生效）');
+      setNewKeyValue(''); setNewKeyLabel('');
+      reload();
+    } catch { /* interceptor */ } finally { setNewKeySaving(false); }
+  };
+  const doRemoveKey = async (row: ChainApiKeyDto) => {
+    try { await removeApiKey(row.id); message.success('KEY 已删除'); reload(); } catch { /* interceptor */ }
+  };
+  const doToggleKey = async (row: ChainApiKeyDto, checked: boolean) => {
+    try { await setApiKeyEnabled(row.id, checked); message.success(`KEY 已${checked ? '启用' : '停用'}`); reload(); } catch { /* interceptor */ }
+  };
+
   const fmtBlock = (v?: number) => (v == null ? '-' : Number(v).toLocaleString());
   const fmtTime = (v?: string) => { if (!v) return '-'; const d = new Date(v); return isNaN(d.getTime()) ? v : d.toLocaleString(); };
   const connView = connState === 'connected' ? { color: 'success' as const, text: '实时推送：已连接' }
     : connState === 'connecting' ? { color: 'warning' as const, text: '实时推送：连接中…连上后自动更新' }
     : { color: 'error' as const, text: '实时推送：已断开，自动重连中' };
 
-  const tokenColumns = [
-    { title: '代币', dataIndex: 'symbol', width: 80 },
+  const tokenColumns = [    { title: '代币', dataIndex: 'symbol', width: 80 },
     { title: '合约', dataIndex: 'contractAddress', width: 140, ellipsis: true,
       render: (v: string) => <Text copyable={{ text: v }} style={{ fontSize: 12 }}>{`${v.slice(0, 10)}...${v.slice(-6)}`}</Text> },
     { title: '最低充值', dataIndex: 'minDeposit', width: 100,
@@ -142,6 +184,31 @@ export default function NetworkConfigPage() {
         <Switch checked={v} size="small" onChange={async (checked: boolean) => {
           try { await setTokenEnabled(row.symbol, checked); message.success(`${row.symbol} 已${checked ? '启用' : '停用'}`); reload(); } catch { /* interceptor */ }
         }} />
+      ) },
+  ];
+
+  const keyRows: ChainApiKeyDto[] = [...rpcKeys, ...etherscanKeys];
+  const keyColumns = [
+    { title: '服务商', dataIndex: 'provider', width: 120,
+      render: (v: string) => v === 'RpcBsc'
+        ? <Tag color="purple">Ankr RPC</Tag>
+        : <Tag color="geekblue">Etherscan V2</Tag> },
+    { title: '备注', dataIndex: 'label', width: 140, render: (v?: string | null) => v || '-' },
+    { title: 'KEY（掩码）', dataIndex: 'maskedKey', width: 140,
+      render: (v: string) => <Text style={{ fontFamily: 'monospace' }}>{v}</Text> },
+    { title: '启用', dataIndex: 'isEnabled', width: 70,
+      render: (v: boolean, row: ChainApiKeyDto) => (
+        <Switch checked={v} size="small" onChange={(checked: boolean) => doToggleKey(row, checked)} />
+      ) },
+    { title: '限流次数', dataIndex: 'consecutiveFailures', width: 90,
+      render: (v: number) => (v > 0 ? <Tag color="warning">{v}</Tag> : <Tag>0</Tag>) },
+    { title: '最近使用', dataIndex: 'lastUsedAt', width: 150, render: (v?: string | null) => fmtTime(v ?? undefined) },
+    { title: '添加时间', dataIndex: 'creationTime', width: 150, render: (v: string) => fmtTime(v) },
+    { title: '操作', width: 70,
+      render: (_: unknown, row: ChainApiKeyDto) => (
+        <Popconfirm title={`确定删除 KEY ${row.maskedKey}？`} onConfirm={() => doRemoveKey(row)} okText="删除" cancelText="取消">
+          <Button size="small" type="link" danger>删除</Button>
+        </Popconfirm>
       ) },
   ];
 
@@ -169,6 +236,35 @@ export default function NetworkConfigPage() {
               <Descriptions.Item label="归集心跳">{fmtTime(status.sweepHeartbeatAt)}</Descriptions.Item>
             </Descriptions>
           )}
+        </Card>
+        <Card title="扫链 KEY 池（同服务商多把，限流自动轮换）">
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Alert
+              type="info" showIcon
+              message={
+                <>
+                  扫链 RPC 与 Etherscan 各自可挂多把 KEY：网关遇 429/401/403 或配额类错误自动切下一把，逐轮从不同 KEY 起步分摊限流。
+                  {rpcKeys.length === 0 && rpcFallbackMasked && <> 当前 RPC 池为空，使用回退地址 <Text code>{rpcFallbackMasked}</Text>（网络状态里的 RPC 地址）。</>}
+                  {etherscanKeys.length === 0 && etherscanFallbackPresent && <> Etherscan 池为空，使用宿主配置端点回退。</>}
+                </>
+              }
+            />
+            <Space wrap>
+              <Select value={newKeyProvider} onChange={(v: string) => setNewKeyProvider(v)} style={{ width: 160 }}
+                options={[
+                  { value: 'RpcBsc', label: 'Ankr RPC（扫链）' },
+                  { value: 'EtherscanV2', label: 'Etherscan V2（兜底）' },
+                ]}
+              />
+              <Input.Password placeholder="粘贴 KEY（明文只传不存）" value={newKeyValue}
+                onChange={(e) => setNewKeyValue(e.target.value)} style={{ width: 380, fontFamily: 'monospace' }} onPressEnter={submitAddKey} />
+              <Input placeholder="备注（如 ankr-backup）" value={newKeyLabel}
+                onChange={(e) => setNewKeyLabel(e.target.value)} style={{ width: 200 }} onPressEnter={submitAddKey} />
+              <Button type="primary" loading={newKeySaving} onClick={submitAddKey}>添加</Button>
+            </Space>
+            <Table<ChainApiKeyDto> rowKey="id" dataSource={keyRows} columns={keyColumns}
+              pagination={false} size="small" locale={{ emptyText: '暂无 KEY（使用回退来源）' }} />
+          </Space>
         </Card>
         <Card title="代币通道（SignalR 实时推送）">
           <Table<TokenStatusDto> rowKey="id" dataSource={mergedTokens} columns={tokenColumns} pagination={false} size="small" />

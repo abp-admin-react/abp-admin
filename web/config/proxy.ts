@@ -3,15 +3,18 @@
  * @doc https://umijs.org/docs/guides/proxy
  */
 
-const target = 'https://localhost:44395';
+// 后端端口：44395 被同框架的 MobileDot.ai 项目占用（同为 launchSettings 默认口），
+// 本项目固定走 44396（后端用 --urls https://localhost:44396 启动），避免端口互抢
+const target = 'https://localhost:44396';
 
 function rewriteLocation(proxyRes: { headers: Record<string, unknown> }) {
   const location = proxyRes.headers.location;
   if (typeof location !== 'string') {
     return;
   }
+  // 443XX 通配：后端换端口无需改这里（issuer 绝对地址一律改写成相对路径）
   proxyRes.headers.location = location.replace(
-    /https?:\/\/localhost:44395/gi,
+    /https?:\/\/localhost:443\d+/gi,
     '',
   );
 }

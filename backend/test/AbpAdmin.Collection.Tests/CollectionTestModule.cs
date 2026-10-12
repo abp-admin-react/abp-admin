@@ -1,6 +1,9 @@
 using AbpAdmin.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Volo.Abp;
 using Volo.Abp.Data;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Modularity;
@@ -56,6 +59,19 @@ public class CollectionTestModule : AbpModule
         {
             options.ConnectionStrings.Default = database.ConnectionString;
         });
+
+        // 链网管理服务从 IConfiguration 读 Collection:MasterKey（解密助记词/RPC/KEY 密文）——
+        // 测试用与 HdKeyService.Protect 相同的 "test-master-key"，叠加在既有配置之上
+        var testConfig = new ConfigurationBuilder()
+            .AddConfiguration(context.Services.GetConfiguration())
+            .AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
+            {
+                ["Collection:MasterKey"] = "test-master-key",
+            })
+            .Build();
+        context.Services.Replace(
+            ServiceDescriptor.Singleton<
+                Microsoft.Extensions.Configuration.IConfiguration>(testConfig));
 
         // 渠道网关假实现：静态双实例（微信/支付宝）单例注册——测试先配置行为再调被测服务
         context.Services.AddSingleton<Channels.ICollectionChannelGateway>(Fakes.FakeChannelGateway.Wechat);
