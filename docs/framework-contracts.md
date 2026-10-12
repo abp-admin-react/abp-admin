@@ -18,6 +18,9 @@
 | `DistributedCacheKeyShapeTests` | ABP 10.6.1 键规范化输出（`c:{Name},k:{Prefix}{key}`、租户 `t:{id},` 包裹） | 监控守卫/扫描锚定静默失配（漏键或越界） |
 | `MonitoringAppServiceTests` / `CacheMonitorScanPaginationTests` | 缓存键空间硬边界（c:/t: + 隔离前缀）、SCAN 分页协议（溢出缓冲/合成游标/熔断/后置过滤）、删除守卫 | 共享 Redis 上误删/误读其它应用数据；翻页丢键 |
 | `TenantRegionStoreTests`（Domain.Tests） | 租户地域归属：ExtraProperties 持久化往返、未标注回落 DefaultRegion | 方案二按租户分区搬迁时丢失归属标记（租户落错机房） |
+| `ModuleBoundaryContractTests`（Ordering.Tests） | 收款契约工程传递闭包无 EasyAbp/Nethereum/收款实现/EF 工程；订单工程直接引用只含契约+框架；两个模块 DbContext 的 `ConnectionStringName` 都是 `Default`（Default 才有共享事务，否则扣款+标支付静默分家） | 模块边界被悄悄击穿；共享事务静默消失 |
+| `SharedTransactionRollbackTests`（Ordering.Tests） | 同一工作单元写两边模块的行，失败一起回滚（收款/订单计划 M1 第一条测试） | 扣款与订单状态分家提交 |
+| `QuoteFeeMathTests` / `RefundGuardSourcePurityTests`（模块测试） | X_min 表驱动（分母≤0 拒绝、分子≤0 无下限、CNY/USD 比较基准）；`AbpAdmin.Application` 源码不出现收款/订单模块名（退款拦截只经 `IPaymentRefundGuard` 扩展点）；金额字段一律十进制字符串（`CollectionAmounts` 助手，业务代码不直接 decimal.Parse） | 费率下限算错货币基准；框架反向依赖业务模块；金额 JSON 数字精度丢失 |
 | `.github/workflows/ci.yml` | 以上全部 + 前端 `tsc`/vitest，push/PR 必跑 | fork 后保留此文件即继承全部保证 |
 
 ## 2. 部署身份与共享 Redis 基线
@@ -46,7 +49,7 @@
 | `IBatch` 只有同步 `Execute()`、无异步版 | SE.Redis 2.7.33/2.9.x 反编译 | 无（注释记录；批处理在 `HydrateKeysAsync`，单测缝短路） |
 | 微软 `AddStackExchangeRedisCache` 的多路复用器不进 DI → 宿主自建四条连接各有归属（缓存/锁+DP/backplane/监控） | rel-10.6 源码核实 | `HostServiceGraphValidationTests` 按名钉住 |
 | 前端代理生成器不可信（可空性丢失，abp#22798/#25176）→ 手写 `src/abp` 镜像 + 快照 | umi/ABP 官方代理均如此 | `FrontendContractSnapshotTests` |
-| Schema 迁移走 EF Core 迁移：改实体 → `dotnet ef migrations add` → 提交迁移文件；启动时 `MigrateAsync` 应用（`Database:AutoMigrateOnStartup: true`，与 README 同口径） | 本仓库约定（框架 / Biz.Template / Webhooks 三套独立迁移历史） | CI 三条 `has-pending-model-changes` + 测试 Testcontainers PG 空库自举 |
+| Schema 迁移走 EF Core 迁移：改实体 → `dotnet ef migrations add` → 提交迁移文件；启动时 `MigrateAsync` 应用（`Database:AutoMigrateOnStartup: true`，与 README 同口径） | 本仓库约定（框架 / Biz.Template / Webhooks / Collection / Ordering 五套独立迁移历史） | CI 五条 `has-pending-model-changes` + 测试 Testcontainers PG 空库自举 |
 
 ## 4. 本宿主的多实例姿态（出厂与生产模板）
 
@@ -90,8 +93,13 @@
 业务模块（`AbpAdmin.Biz.*`）；部署时设 `App:InstanceDiscriminator`（共享 Redis 场景）。
 
 克隆时可整体剔除的模板遗留（不影响框架能力）：`web/cloudflare-worker`（antd pro 演示
-mock API，前端无引用，见其目录 README）、Payment 三件套（EasyAbp
-PaymentService/Prepayment/WeChatPay，无支付业务时）。
+mock API，前端无引用，见其目录 README）。
+
+**Payment 三件套（EasyAbp PaymentService/Prepayment/WeChatPay）已不可整体剔除**：
+收款模块（AbpAdmin.Collection）依赖其中的微信支付能力（Payment/PaymentItem 行、
+`CloseWeChatPayOrderJob`、退款拦截按 ItemType 前缀拒绝），且 `PaymentAdminAppService` 的
+退款入口要询问 `IPaymentRefundGuard`。无支付业务但保留收款/订单模块时，三件套随宿主加载；
+连收款/订单模块一并剔除时，退回到「无支付业务」形态（守卫无实现即放行）。
 
 别动：§1 表中的保证测试与被它们钉住的实现；守卫（`AssertAbpKey`/`IsAllowedKey`/
 `BuildScanPattern`）、键名构造（`BuildDataProtectionKeyName`）、姿态判定——改这些先改

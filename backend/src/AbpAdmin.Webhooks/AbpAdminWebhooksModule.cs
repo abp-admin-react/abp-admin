@@ -42,14 +42,14 @@ public class AbpAdminWebhooksModule : AbpModule
 
         // 上下文级 UseNpgsql + 独立 History 表（运行期 PG-only；测试同为 PG、同款注册，
         // 仅注入 Testcontainers 容器连接串，不再有 provider 覆盖层）。
-        // History 表 schema 从连接串 SearchPath 显式解析（见 WebhooksHistorySchemaResolver）：
+        // History 表 schema 从连接串 SearchPath 显式解析（解析器已上提到框架 EF 基建层
+        // AbpAdmin.EntityFrameworkCore.MigrationHistorySchemaResolver，Webhooks/Collection/Ordering
+        // 三个自包含模块共用，模块间不互相引用）：
         // 省略 schema 时 Npgsql 的 applied-migrations 查询不吃 search_path，
         // DbMigrator 写入的记账行宿主读不回，启动即 42P07 "already exists"
         // 连接串（含 SearchPath）供数据表落位；History 表 schema 显式传入（解析器）。
-        // 背景：省略 schema 时 Npgsql 的 applied-migrations 查询不吃 search_path，
-        // DbMigrator 写入的记账行宿主读不回，启动即 42P07 "already exists"
         var configuration = context.Services.GetConfiguration();
-        var (historySchema, _) = EntityFrameworkCore.WebhooksHistorySchemaResolver.Resolve(
+        var (historySchema, _) = AbpAdmin.EntityFrameworkCore.MigrationHistorySchemaResolver.Resolve(
             configuration.GetConnectionString(AbpAdminWebhooksConsts.ConnectionStringName)
             ?? string.Empty);
         // 迁移器确保 History 表存在时用同一 schema（静态注入，仅迁移路径使用）

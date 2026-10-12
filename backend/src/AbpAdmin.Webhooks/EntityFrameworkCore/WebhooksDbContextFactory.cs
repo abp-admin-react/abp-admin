@@ -32,7 +32,7 @@ public class WebhooksDbContextFactory : IDesignTimeDbContextFactory<WebhooksDbCo
             ?? throw new InvalidOperationException(
                 "设计时迁移需要 ConnectionStrings:Default（HttpApi.Host/appsettings.json）。");
 
-        var (historySchema, baseConn) = WebhooksHistorySchemaResolver.Resolve(connectionString);
+        var (historySchema, baseConn) = AbpAdmin.EntityFrameworkCore.MigrationHistorySchemaResolver.Resolve(connectionString);
         var optionsBuilder = new DbContextOptionsBuilder<WebhooksDbContext>()
             .UseNpgsql(baseConn, npgsql =>
             {

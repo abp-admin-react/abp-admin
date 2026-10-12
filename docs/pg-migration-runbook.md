@@ -9,6 +9,9 @@
 | --- | --- | --- |
 | 框架库 schema | `AbpAdminDbContext.Database.MigrateAsync()`（`EntityFrameworkCoreAbpAdminDbSchemaMigrator`） | `__EFMigrationsHistory` |
 | BizTemplate 业务模块 | 模块自带 `Migrations/`，同上 | `__BizTemplate_EFMigrationsHistory` |
+| Webhooks 模块 | 模块自带 `Migrations/`，同上 | `__AbpAdminWebhooks_EFMigrationsHistory` |
+| 收款模块（AbpAdmin.Collection） | 模块自带 `Migrations/`，同上 | `__AbpAdminCollection_EFMigrationsHistory` |
+| 订单模块（AbpAdmin.Ordering） | 模块自带 `Migrations/`，同上 | `__AbpAdminOrdering_EFMigrationsHistory` |
 
 - **SQLite 支持已移除**：EF 模块不再有 `UseSqlite()` 分支，`Database:Provider` 配置键已移除
   （运行时与测试同为 PostgreSQL 单提供程序；测试走 Testcontainers，见 §3）。
