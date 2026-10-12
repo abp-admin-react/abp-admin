@@ -67,6 +67,7 @@ using Volo.Abp.Security.Claims;
 using AbpAdmin.TextTemplates;
 using AbpAdmin.Controllers;
 using AbpAdmin.Desensitization;
+using AbpAdmin.Collection.Chain;
 using AbpAdmin.ExtensionGrants;
 using AbpAdmin.ExternalLogins;
 using AbpAdmin.Gdpr;
@@ -106,6 +107,8 @@ namespace AbpAdmin;
     // 业务模块挂接点：每新增一个业务模块加一行（Auto API/权限/本地化随模块自动生效）
     typeof(AbpAdminBizTemplateModule),
     typeof(AbpAdmin.Webhooks.AbpAdminWebhooksModule), // Webhook 模块（业务模块挂接点同款：一行）
+    typeof(AbpAdmin.Collection.AbpAdminCollectionModule), // 收款模块（订单只依赖其契约工程）
+    typeof(AbpAdmin.Ordering.AbpAdminOrderingModule),     // 订单模块（依赖 Collection.Contracts）
     typeof(AbpCachingStackExchangeRedisModule),
     typeof(AbpAccountWebOpenIddictModule),
     typeof(AbpSwashbuckleModule),
@@ -260,6 +263,24 @@ public class AbpAdminHttpApiHostModule : AbpModule
     {
         var configuration = context.Services.GetConfiguration();
         var hostingEnvironment = context.Services.GetHostingEnvironment();
+
+        // 链上 worker（M5 计划第 59 行）：扫链/归集 BackgroundService 只在宿主注册（DbMigrator 不调）；
+        // 开关默认关（不配置即不跑）；开启时守卫强制 Redis 支撑的分布式锁（扩展内抛 AbpInitializationException）
+        context.Services.AddHttpClient("collection-chain")
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(60));
+        context.Services.AddSingleton<ChainGatewayFactory>(sp =>
+        {
+            var options = CollectionChainWorkerOptions.FromConfiguration(configuration);
+            return new ChainGatewayFactory(
+                sp.GetRequiredService<System.Net.Http.IHttpClientFactory>().CreateClient("collection-chain"),
+                sp.GetRequiredService<Volo.Abp.Security.Encryption.IStringEncryptionService>(),
+                options.EtherscanV2Endpoint ?? "https://api.etherscan.io/v2/api",
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>())
+            {
+                MasterKey = options.MasterKey,
+            };
+        });
+        context.Services.AddCollectionChainWorkers(configuration);
 
         // 默认安全（问题3 修复）：PII 日志改白名单语义——仅开发环境或显式开启 App:EnablePiiLogging 时输出
         // （排查 JWT 错误用）。原 App:DisablePII 默认 false → 取反后生产默认全开，双重反直觉。

@@ -69,6 +69,8 @@
     <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
     <!-- Webhook 模块（自包含：订阅/投递/发送记录，独立 History 表） -->
     <ProjectReference Include="..\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
   </ItemGroup>
 
   <ItemGroup>

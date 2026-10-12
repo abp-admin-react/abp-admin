@@ -23,6 +23,8 @@
     <!-- 业务模块：引用后其 IAbpAdminDbSchemaMigrator 实现进入容器，被迁移循环自动枚举 -->
     <ProjectReference Include="..\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
     <ProjectReference Include="..\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
   </ItemGroup>
 
   <ItemGroup>
