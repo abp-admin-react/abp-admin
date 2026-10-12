@@ -314,6 +314,13 @@ public static class AbpAdminDomainErrorCodes
 
         /// <summary>该支付单已有一个退款操作正在处理（分布式锁占用中）。</summary>
         public const string RefundInProgress = "AbpAdmin:PaymentRefundInProgress";
+
+        /// <summary>
+        /// 退款被守卫拒绝（IPaymentRefundGuard 的某个实现拒绝，如收款模块按 ItemType 前缀
+        /// 拒绝自己的支付行——渠道退了钱、收款单和订单仍显示已支付）。WithData 记录拒绝的
+        /// 实现名（Guard）与理由（Reason）。
+        /// </summary>
+        public const string RefundRefusedByGuard = "AbpAdmin:PaymentRefundRefusedByGuard";
     }
 
     /// <summary>

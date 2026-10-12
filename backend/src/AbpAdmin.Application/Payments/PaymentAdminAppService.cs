@@ -19,15 +19,18 @@ public class PaymentAdminAppService : AbpAdminAppService, IPaymentAdminAppServic
     private readonly IPaymentManager _paymentManager;
     private readonly IPaymentRepository _paymentRepository;
     private readonly IAbpDistributedLock _distributedLock;
+    private readonly IEnumerable<IPaymentRefundGuard> _refundGuards;
 
     public PaymentAdminAppService(
         IPaymentManager paymentManager,
         IPaymentRepository paymentRepository,
-        IAbpDistributedLock distributedLock)
+        IAbpDistributedLock distributedLock,
+        IEnumerable<IPaymentRefundGuard> refundGuards)
     {
         _paymentManager = paymentManager;
         _paymentRepository = paymentRepository;
         _distributedLock = distributedLock;
+        _refundGuards = refundGuards;
     }
 
     /// <summary>
@@ -63,6 +66,21 @@ public class PaymentAdminAppService : AbpAdminAppService, IPaymentAdminAppServic
             if (payment == null)
             {
                 throw new EntityNotFoundException(typeof(Payment), id);
+            }
+
+            // 退款守卫（收款/订单计划第 2 节）：询问全部实现，任一拒绝即拒绝，并记下是哪个实现。
+            // 没有任何实现时放行（框架源码不出现模块名——实现由收款模块注册，
+            // 按 ItemType 前缀拒绝自己的支付行，语义是「这笔已存在的支付不能退」，不在创建前拒绝）。
+            foreach (var guard in _refundGuards)
+            {
+                var decision = await guard.CheckRefundAsync(id);
+                if (decision.Refused)
+                {
+                    throw new BusinessException(AbpAdminDomainErrorCodes.Payments.RefundRefusedByGuard)
+                        .WithData("PaymentId", id)
+                        .WithData("Guard", guard.GetType().Name)
+                        .WithData("Reason", decision.Reason ?? "refused by guard");
+                }
             }
 
             // null = 全额退款：金额完全由服务端按行项剩余可退计算
