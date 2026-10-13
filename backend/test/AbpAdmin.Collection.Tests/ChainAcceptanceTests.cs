@@ -398,6 +398,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var task = (await DbAsync()).SweepTasks.Single(t => t.AddressId == addressId);
         task.Status.ShouldBe(SweepTaskStatus.Failed);
         task.Retryable.ShouldBeFalse();
+        task.FailReason.ShouldNotBeNull();
         task.FailReason.ShouldContain("拒绝盲目归集");
         gateway.BroadcastCount.ShouldBe(0); // 拒绝盲目归集：不广播真金
     }

@@ -127,11 +127,13 @@ public class OrderPaymentManager : DomainService
             };
         }
 
+        var createdOrder = await ReloadAsync(order.Id)
+            ?? throw new InvalidOperationException($"Order {order.Id} vanished right after channel creation.");
         return new StartPayResult
         {
             Outcome = StartPayOutcome.ChannelCreated,
             Collection = created,
-            Order = await ReloadAsync(order.Id),
+            Order = createdOrder,
         };
     }
 

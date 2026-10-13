@@ -241,10 +241,10 @@ public class OrderStatusSyncJobTests : OrderingStubTestBase
 
         // 阈值 2：第一轮计数 1，第二轮达阈值告警并清零重计
         await ExecuteJobAsync(payload: "{\"SkipAlertThreshold\":2}");
-        (await ReadSkippedJsonAsync()).ShouldContain($"\"{bad}\":1");
+        (await ReadSkippedJsonAsync())!.ShouldContain($"\"{bad}\":1");
 
         await ExecuteJobAsync(payload: "{\"SkipAlertThreshold\":2}");
-        (await ReadSkippedJsonAsync()).ShouldContain($"\"{bad}\":0"); // 告警后重新计数
+        (await ReadSkippedJsonAsync())!.ShouldContain($"\"{bad}\":0"); // 告警后重新计数
 
         // 坏金额行不产生充值订单
         (await ReadAsync(async dbContext =>

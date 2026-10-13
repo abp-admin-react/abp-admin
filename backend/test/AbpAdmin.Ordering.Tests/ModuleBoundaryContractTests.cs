@@ -120,6 +120,7 @@ public class ModuleBoundaryContractTests
             var current = queue.Dequeue();
             foreach (var referenced in current.GetReferencedAssemblies())
             {
+                if (referenced.Name == null) continue;
                 if (referenced.Name.StartsWith("System", StringComparison.OrdinalIgnoreCase)
                     || referenced.Name.StartsWith("Microsoft", StringComparison.OrdinalIgnoreCase)
                     || referenced.Name == "netstandard"

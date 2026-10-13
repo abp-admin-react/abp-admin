@@ -164,8 +164,7 @@ public static class AbpAdminTestPg
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
         var image = Environment.GetEnvironmentVariable("ABPADMIN_TEST_PG_IMAGE");
-        var container = new PostgreSqlBuilder()
-            .WithImage(string.IsNullOrWhiteSpace(image) ? DefaultImage : image!)
+        var container = new PostgreSqlBuilder(string.IsNullOrWhiteSpace(image) ? DefaultImage : image!)
             .Build();
         try
         {

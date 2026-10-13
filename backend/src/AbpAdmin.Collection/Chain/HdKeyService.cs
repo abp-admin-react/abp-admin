@@ -46,7 +46,14 @@ public static class HdKeyService
             throw new InvalidOperationException($"Unknown mnemonic cipher version: 0x{(byte)cipher[0]:x2}.");
         }
 
-        return new DecryptedMnemonic(encryptor.Decrypt(cipher[1..], masterKey));
+        var words = encryptor.Decrypt(cipher[1..], masterKey);
+        // 解密结果 null/空 = masterKey 不对或密文损坏：fail-closed（派生地址绝不能基于空助记词）
+        if (string.IsNullOrEmpty(words))
+        {
+            throw new InvalidOperationException("Mnemonic decryption produced no plaintext; master key mismatch?");
+        }
+
+        return new DecryptedMnemonic(words);
     }
 
     /// <summary>加密助记词（版本前缀 0x01：未来换算法/轮换时按前缀分流，本期不做轮换工具）。</summary>

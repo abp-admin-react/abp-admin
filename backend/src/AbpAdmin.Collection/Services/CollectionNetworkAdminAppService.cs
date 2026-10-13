@@ -575,6 +575,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
         try
         {
             var url = _encryptor.Decrypt(cipher.StartsWith('\u0001') ? cipher[1..] : cipher, RequireMasterKey());
+            if (url == null) throw new InvalidOperationException("decrypt returned null");
             var idx = url.IndexOf('/', "https://".Length);
             return idx < 0 ? url : url[..idx] + "/***";
         }
@@ -623,6 +624,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
         {
             var plain = _encryptor.Decrypt(
                 k.KeyCipher.StartsWith('\u0001') ? k.KeyCipher[1..] : k.KeyCipher, masterKey);
+            plain ??= string.Empty;
             masked = plain.Length <= 4 ? "****" : "****" + plain[^4..];
         }
         catch

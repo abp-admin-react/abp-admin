@@ -3,6 +3,9 @@
     <LangVersion>latest</LangVersion>
     <Version>1.0.0</Version>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- NU1608：Nethereum 4.29 声明 Logging.Abstractions <10.0.0，实际与 10.x 兼容
+         （依赖约束未更新）；等 Nethereum 出新版后移除此抑制 -->
+    <NoWarn>$(NoWarn);CS1591;NU1608</NoWarn>
     <NuGetAudit>false</NuGetAudit>
 	<AbpProjectType>app</AbpProjectType>
   </PropertyGroup>

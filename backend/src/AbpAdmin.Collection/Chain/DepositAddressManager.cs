@@ -158,6 +158,12 @@ public class DepositAddressManager : DomainService
                         .Where(n => n.Id == networkId)
                         .Select(n => n.MnemonicCipher)
                         .FirstAsync();
+                    // 重置竞态下密文可能被清空：null 直接抛（外层 catch 走冷却重试）
+                    if (cipherNow == null)
+                    {
+                        throw new InvalidOperationException("Mnemonic cipher cleared by concurrent reset; retrying.");
+                    }
+
                     using var mnemonic = HdKeyService.Unprotect(cipherNow, MasterKey, _encryptor);
                     var address = HdKeyService.DeriveAddress(mnemonic.Words, nextIndex);
 

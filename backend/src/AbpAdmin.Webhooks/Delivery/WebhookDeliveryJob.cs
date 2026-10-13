@@ -70,7 +70,8 @@ public class WebhookDeliveryJob : AsyncBackgroundJob<WebhookDeliveryJobArgs>, IT
     private readonly IClock _clock;
     private readonly IConfiguration _configuration;
 
-    public ILogger<WebhookDeliveryJob> Logger { get; set; } = NullLogger<WebhookDeliveryJob>.Instance;
+    // ABP 后台作业的属性注入 Logger；基类 AsyncBackgroundJob 也有同名属性，用 new 显式声明有意遮蔽
+    public new ILogger<WebhookDeliveryJob> Logger { get; set; } = NullLogger<WebhookDeliveryJob>.Instance;
 
     public WebhookDeliveryJob(
         IServiceProvider serviceProvider,

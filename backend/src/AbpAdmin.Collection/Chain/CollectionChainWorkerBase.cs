@@ -196,7 +196,12 @@ public class ChainGatewayFactory
             .OrderBy(k => k.CreationTime).ToListAsync();
         foreach (var k in rpcKeys)
         {
-            rpcUrls.Add(AnkrBscChainGateway.AnkrBscRpcUrlBase + Decrypt(k.KeyCipher, masterKey));
+            var keyUrl = AnkrBscChainGateway.AnkrBscRpcUrlBase + Decrypt(k.KeyCipher, masterKey);
+            // Decrypt 解不开（口令轮换/密文损坏）返回 null：该 key 跳过，不让坏 key 混进池
+            if (keyUrl != null)
+            {
+                rpcUrls.Add(keyUrl);
+            }
         }
 
         if (rpcUrls.Count == 0)
@@ -208,7 +213,11 @@ public class ChainGatewayFactory
                     $"网络 {network.Name} 无可用 RPC：key 池为空且 RpcCipher 为空");
             }
 
-            rpcUrls.Add(Decrypt(network.RpcCipher, masterKey));
+            var legacyUrl = Decrypt(network.RpcCipher, masterKey);
+            if (legacyUrl != null)
+            {
+                rpcUrls.Add(legacyUrl);
+            }
         }
         else
         {
@@ -273,8 +282,10 @@ public class ChainGatewayFactory
         return endpoint + (endpoint.Contains('?') ? "&" : "?") + param;
     }
 
-    private string Decrypt(string cipher, string masterKey)
+    private string? Decrypt(string? cipher, string masterKey)
     {
-        return _encryptor.Decrypt(cipher.StartsWith('\u0001') ? cipher[1..] : cipher, masterKey);
+        // 调用方 CreateGatewayAsync 已确保池或 RpcCipher 至少一个非空；null 时返回 null（仅日志排查用途）
+        if (cipher == null) return null;
+        return _encryptor.Decrypt(cipher.StartsWith('') ? cipher[1..] : cipher, masterKey);
     }
 }

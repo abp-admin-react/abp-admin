@@ -606,7 +606,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
      * 3) 勾选集混入已删除菜单 id 时整单拒绝（fail-closed）。
      */
 
-    private async Task<Menu> CreateMenuAsync(string title, string path = null, int orderNo = 100)
+    private async Task<Menu> CreateMenuAsync(string title, string? path = null, int orderNo = 100)
     {
         var menu = new Menu(_guidGenerator.Create(), null, null,
             path == null ? MenuTypeEnum.Catalog : MenuTypeEnum.Menu,

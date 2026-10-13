@@ -548,9 +548,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
         if (!string.IsNullOrWhiteSpace(certificatePath))
         {
             var certificatePassword = configuration["DataProtection:CertificatePassword"];
-            dataProtection.ProtectKeysWithCertificate(new System.Security.Cryptography.X509Certificates.X509Certificate2(
-                certificatePath,
-                string.IsNullOrEmpty(certificatePassword) ? null : certificatePassword));
+            // SYSLIB0057：X509Certificate2 构造函数已过时，改用 X509CertificateLoader
+            //（PFX/PKCS12 按密码加载；KeyStorageFlags 默认 Ephemeral，加载即用不落盘）
+            dataProtection.ProtectKeysWithCertificate(
+                System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12FromFile(
+                    certificatePath,
+                    string.IsNullOrEmpty(certificatePassword) ? null : certificatePassword));
         }
     }
 

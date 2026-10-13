@@ -79,7 +79,8 @@ public class AnkrBscChainGateway : IBscChainGateway
         JsonElement result;
         try
         {
-            result = (await RpcAsync("eth_getLogs", new object[] { parameters }, ct)).Value;
+            // GetLogs 恒有 result（错误走 error 分支抛 ChainRpcException）；null 视为协议异常由下方 catch 处理
+            result = (await RpcAsync("eth_getLogs", new object[] { parameters }, ct))!.Value;
         }
         catch (Exception ex) when (ex is ChainRpcException || ex is InvalidOperationException)
         {
@@ -223,7 +224,7 @@ public class AnkrBscChainGateway : IBscChainGateway
     public async Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default)
     {
         var result = await RpcAsync("eth_getTransactionReceipt", new object[] { txHash }, ct);
-        if (result.Value.ValueKind == JsonValueKind.Null)
+        if (result is null || result.Value.ValueKind == JsonValueKind.Null)
         {
             return new TransactionReceipt(txHash, null, null);
         }
