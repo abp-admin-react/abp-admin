@@ -5,7 +5,8 @@ import {
   ProTable,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button } from 'antd';
+import { App, Button, Tooltip } from 'antd';
+import { QuestionCircleOutlined } from '@ant-design/icons';
 import React, {
   useCallback,
   useEffect,
@@ -118,7 +119,27 @@ const MenuManagement: React.FC = () => {
     <PageContainer>
       <ProTable<MenuTreeDto>
         rowKey="id"
-        headerTitle="菜单树"
+        headerTitle={
+          <span>
+            菜单树&nbsp;
+            <Tooltip
+              title={
+                <div style={{ lineHeight: 1.8 }}>
+                  在此页改名、排序（OrderNo）、隐藏（IsHide）、启停、勾选角色后
+                  <b>立即写库生效</b>，用户下次刷新侧边栏即见，无需改代码或重启后端。
+                  <br />
+                  可见性 = 启用 且 未隐藏 且（未绑权限或权限已授予）且（admin 或
+                  未受角色勾选控制 或 角色命中勾选）——停用整棵子树剔除，隐藏节点子级上浮。
+                  <br />
+                  本页只改运行态数据库；代码里的 MenuTemplateDefinition 仅供新环境首次播种，
+                  两边不会自动同步（新环境出厂默认以模板为准）。
+                </div>
+              }
+            >
+              <QuestionCircleOutlined style={{ color: '#8c8c8c', cursor: 'help' }} />
+            </Tooltip>
+          </span>
+        }
         loading={loading}
         actionRef={actionRef}
         columns={columns}
