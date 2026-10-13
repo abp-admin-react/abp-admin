@@ -61,6 +61,13 @@ export default {
   'menu.collection-deposits': '充值单',
   'menu.collection-sweeps': '归集任务',
   'menu.collection-vault': '金库核对',
+  // 运行时侧边栏由 my-menu 下发，app.tsx toMenuData 沿树拼 locale 键（menu.collection.<子页名>）；
+  // 上方扁平键供 my-menu 请求返回前的静态路由兜底菜单使用，两套都要有
+  'menu.collection.collection-orders': '订单',
+  'menu.collection.collection-deposits': '充值单',
+  'menu.collection.collection-sweeps': '归集任务',
+  'menu.collection.collection-vault': '金库核对',
+  'menu.collection.collection-network': '链网配置',
   // 菜单层级参照 ABP 官方模板：Administration（Saas → 身份管理 → … → 设置）与 系统
   'menu.administration': '管理',
   'menu.administration.saas': 'SaaS',

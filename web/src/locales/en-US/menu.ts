@@ -61,6 +61,14 @@ export default {
   'menu.collection-deposits': 'Deposits',
   'menu.collection-sweeps': 'Sweep Tasks',
   'menu.collection-vault': 'Vault Audit',
+  // Runtime sidebar comes from my-menu; app.tsx toMenuData builds the locale key along the
+  // tree (menu.collection.<child>). The flat keys above only serve the static-route fallback
+  // menu before the my-menu request resolves — keep both sets.
+  'menu.collection.collection-orders': 'Orders',
+  'menu.collection.collection-deposits': 'Deposits',
+  'menu.collection.collection-sweeps': 'Sweep Tasks',
+  'menu.collection.collection-vault': 'Vault Audit',
+  'menu.collection.collection-network': 'Chain Network',
   // Menu hierarchy follows the official ABP template: Administration (Saas → Identity → … → Settings) and System
   'menu.administration': 'Administration',
   'menu.administration.saas': 'SaaS',
