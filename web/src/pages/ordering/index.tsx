@@ -170,7 +170,14 @@ export default function OrderingPage() {
 
   const submitCreate = async () => {
     const values = await form.validateFields();
-    await createOrder(values);
+    try {
+      await createOrder(values);
+    } catch {
+      // 后端拒绝（如金额格式非法）时保持弹窗打开；全局拦截器已有错误提示，
+      // 这里兜底提示，避免静默无反馈让用户以为没点上
+      message.error('订单创建失败，请检查金额格式（两位小数）后重试');
+      return;
+    }
     message.success('订单已创建');
     setCreateOpen(false);
     form.resetFields();
