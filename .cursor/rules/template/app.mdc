@@ -174,11 +174,11 @@ builder.Entity<Book>(b =>
 ### 8. 改表 & Run DbMigrator
 ```bash
 # 改表 = 追加版本化 Sql 脚本（本仓库不用 dotnet ef migrations，产物不会被迁移器消费）：
-# 框架表：backend/src/AbpAdmin.EntityFrameworkCore/Sql/{postgresql,sqlite}/ 各追加一个编号脚本
+# 框架表：backend/framework/AbpAdmin.EntityFrameworkCore/Sql/{postgresql,sqlite}/ 各追加一个编号脚本
 # （003_xxx.sql 起零填充递增，全量 IF NOT EXISTS 幂等，已应用脚本不可改名/删除）
 # 业务表：在业务模块自己的 Sql/{provider}/ 追加编号脚本
 
-cd backend/src/AbpAdmin.DbMigrator
+cd backend/framework/AbpAdmin.DbMigrator
 dotnet run
 ```
 
@@ -190,7 +190,7 @@ Console application for:
 
 Run before first launch:
 ```bash
-dotnet run --project backend/src/AbpAdmin.DbMigrator
+dotnet run --project backend/framework/AbpAdmin.DbMigrator
 ```
 
 ## Best Practices

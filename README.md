@@ -19,7 +19,7 @@
 | 前端 | React 19 · antd 6 · Ant Design Pro v6 · Umi Max 4 · pnpm 10 · Vitest · Biome |
 | 认证 | OpenIddict(OIDC,前后端分离,SPA 独立部署) |
 
-默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库 PostgreSQL(连接串在 `backend/src/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 开发样本中指向本地默认库,本机真实凭据直接改该文件并用 skip-worktree 屏蔽,见文件头注释)。默认管理员 `admin` / `1q2w3E*`。
+默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库 PostgreSQL(连接串在 `backend/framework/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 开发样本中指向本地默认库,本机真实凭据直接改该文件并用 skip-worktree 屏蔽,见文件头注释)。默认管理员 `admin` / `1q2w3E*`。
 
 ## 内置能力
 
@@ -63,8 +63,8 @@ ABP 官方 Layered 模板的 **Host + 独立 SPA 变体**(以 `HttpApi.Host` 承
 # 1) 后端(backend/ 为解决方案根目录)
 cd backend
 dotnet build
-cd src/AbpAdmin.DbMigrator && dotnet run && cd ../..   # 迁移 + 种子（库需已存在，见 docs/pg-migration-runbook.md）
-cd src/AbpAdmin.HttpApi.Host && dotnet run             # API: https://localhost:44395/swagger
+cd framework/AbpAdmin.DbMigrator && dotnet run && cd ../..   # 迁移 + 种子（库需已存在，见 docs/pg-migration-runbook.md）
+cd framework/AbpAdmin.HttpApi.Host && dotnet run             # API: https://localhost:44395/swagger
 
 # 2) 前端
 cd web
@@ -97,7 +97,7 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 
 ### 配置单一来源
 
-`Database:Provider` 与 `ConnectionStrings:Default` 只维护在 `backend/src/AbpAdmin.HttpApi.Host/appsettings.json`(真实凭证放同目录 `appsettings.secrets.json`:入库的是公开安全的开发样本,本机真实凭据改同文件后 `git update-index --skip-worktree` 屏蔽);DbMigrator 与 EF 设计时工具自动跟随读取。生效顺序(后者覆盖前者):
+`Database:Provider` 与 `ConnectionStrings:Default` 只维护在 `backend/framework/AbpAdmin.HttpApi.Host/appsettings.json`(真实凭证放同目录 `appsettings.secrets.json`:入库的是公开安全的开发样本,本机真实凭据改同文件后 `git update-index --skip-worktree` 屏蔽);DbMigrator 与 EF 设计时工具自动跟随读取。生效顺序(后者覆盖前者):
 
 1. `HttpApi.Host/appsettings.json`(共享基座)
 2. `HttpApi.Host/appsettings.secrets.json`(共享凭证)
@@ -110,9 +110,9 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 
 | 要改什么 | 文件 |
 | --- | --- |
-| 端口、CORS、连接串、Redis、OpenIddict 客户端回调 | `backend/src/AbpAdmin.HttpApi.Host/appsettings.json` |
-| 后端启动 URL | `backend/src/AbpAdmin.HttpApi.Host/Properties/launchSettings.json` |
-| 管理员默认密码 | `backend/src/AbpAdmin.Domain/AbpAdminConsts.cs`(改后需重跑 Migrator) |
+| 端口、CORS、连接串、Redis、OpenIddict 客户端回调 | `backend/framework/AbpAdmin.HttpApi.Host/appsettings.json` |
+| 后端启动 URL | `backend/framework/AbpAdmin.HttpApi.Host/Properties/launchSettings.json` |
+| 管理员默认密码 | `backend/framework/AbpAdmin.Domain/AbpAdminConsts.cs`(改后需重跑 Migrator) |
 | 前端开发代理目标 | `web/config/proxy.ts` |
 | OIDC 授权地址 / ClientId / Scope | `web/src/abp/env.ts`(ClientId 须与 Host `OpenIddict` 节一致) |
 | 路由 / 菜单、布局主题 | `web/config/routes.ts`、`web/config/defaultSettings.ts` |
@@ -131,13 +131,13 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 
 新增业务三步:
 
-1. 复制 `AbpAdmin.Biz.Template` 这一个工程,替换 `BizTemplate` 词根(工程名/目录/RootNamespace/常量)
+1. 复制 `backend/modules/AbpAdmin.Biz.Template` 这一个工程(测试工程一并复制到 `backend/test/modules/`),替换 `BizTemplate` 词根(工程名/目录/RootNamespace/常量)
 2. 改表时执行 `dotnet ef migrations add`(命令同上,`--project` 指向模块工程、`--context BizTemplateDbContext`),不要改已经应用的迁移
 3. 宿主接线:`AbpAdmin.HttpApi.Host` 与 `AbpAdmin.DbMigrator` 各加一行 csproj 引用 + `DependsOn` 一行
 
 框架迁移循环(`AbpAdminDbMigrationService`)自动枚举所有 `IAbpAdminDbSchemaMigrator` 实现,模块迁移器显式注册一行即被扫到——**业务建表不产生任何框架仓库改动**。
 
-**数据权限示例**:模块内 `BizDataScopeDemo`(实体/服务/迁移)演示业务模块如何消费框架数据权限基建——实体实现 `IHasDataScope` + 模块 DbContext 带同款数据范围筛选器,业务查询零过滤代码,写入侧校验显式归属组织必须在当前数据范围内;可运行页面在 `web/src/pages/biz-template/data-scope`(路由 `/biz-template/data-scope`,权限 `BizTemplate.DataScopeDemo`),过滤契约测试在 `backend/test/AbpAdmin.Biz.Template.Tests/DataScopes/`。框架侧 `/data-scope-demo` 演示页退役时,引用改指本示例。**整模块移除时的前端足迹清单**:`web/config/routes.ts`、`web/src/access.ts`(canManageBizDataScopeDemo)、`web/src/locales/{zh-CN,en-US}/menu.ts`、`web/src/pages/menus/routeRegistry.ts`、`MenuTemplateDefinition.cs` 的 `biz-template-data-scope` 节点、`web/src/abp/bizDataScopeDemo.ts` 与页面目录本身。
+**数据权限示例**:模块内 `BizDataScopeDemo`(实体/服务/迁移)演示业务模块如何消费框架数据权限基建——实体实现 `IHasDataScope` + 模块 DbContext 带同款数据范围筛选器,业务查询零过滤代码,写入侧校验显式归属组织必须在当前数据范围内;可运行页面在 `web/src/pages/biz-template/data-scope`(路由 `/biz-template/data-scope`,权限 `BizTemplate.DataScopeDemo`),过滤契约测试在 `backend/test/modules/AbpAdmin.Biz.Template.Tests/DataScopes/`。框架侧 `/data-scope-demo` 演示页退役时,引用改指本示例。**整模块移除时的前端足迹清单**:`web/config/routes.ts`、`web/src/access.ts`(canManageBizDataScopeDemo)、`web/src/locales/{zh-CN,en-US}/menu.ts`、`web/src/pages/menus/routeRegistry.ts`、`MenuTemplateDefinition.cs` 的 `biz-template-data-scope` 节点、`web/src/abp/bizDataScopeDemo.ts` 与页面目录本身。
 
 配置按三层落位(样板模块内三层都有带注释的实例,照着扩):
 
@@ -183,7 +183,7 @@ git fetch upstream && git merge upstream/main
 ```bash
 # 后端(backend/)
 dotnet build && dotnet test
-dotnet publish backend/src/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj -c Release -o ./publish/host
+dotnet publish backend/framework/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj -c Release -o ./publish/host
 
 # 前端(web/)
 pnpm build      # 产物 web/dist

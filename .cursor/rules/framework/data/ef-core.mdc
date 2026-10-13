@@ -142,10 +142,10 @@ public static class BookEfCoreQueryableExtensions
 
 ```bash
 # 改表 = 追加编号脚本（在 Sql/postgresql/ 与 Sql/sqlite/ 各写一份，DDL 用 IF NOT EXISTS 幂等）
-# 框架表：backend/src/AbpAdmin.EntityFrameworkCore/Sql/<provider>/
+# 框架表：backend/framework/AbpAdmin.EntityFrameworkCore/Sql/<provider>/
 # 业务表：业务模块自己的 Sql/<provider>/（不碰框架基线）
 
-dotnet run --project backend/src/AbpAdmin.DbMigrator   # 迁移 + 种子
+dotnet run --project backend/framework/AbpAdmin.DbMigrator   # 迁移 + 种子
 ```
 
 > **契约**：编号零填充递增（002_、010_……Ordinal 序，100_ 排在 20_ 前）；已应用脚本不可
