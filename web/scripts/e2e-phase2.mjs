@@ -71,7 +71,7 @@ async function loginViaAbp(page, origin = FRONT) {
   await page.waitForFunction(() => {
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
-      if (key && key.includes('oidc.user') && localStorage.getItem(key)) {
+      if (key?.includes('oidc.user') && localStorage.getItem(key)) {
         return true;
       }
     }
