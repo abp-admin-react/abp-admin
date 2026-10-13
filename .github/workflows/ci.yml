@@ -22,18 +22,19 @@ jobs:
         # 版本钉死在 .config/dotnet-tools.json（与 EF Core 运行时同版）
         run: dotnet tool restore
       - name: EF model drift check
-        # 实体/配置改了但没 dotnet ef migrations add 时必红——五本迁移账各查一遍
+        # 实体/配置改了但没 dotnet ef migrations add 时必红——五本迁移账各查一遍。
+        # -p 分两区：框架级 backend/framework/，业务模块 backend/modules/；startup 统一走 DbMigrator
         run: |
           dotnet ef migrations has-pending-model-changes \
-            -p backend/src/AbpAdmin.EntityFrameworkCore -s backend/src/AbpAdmin.DbMigrator -c AbpAdminDbContext
+            -p backend/framework/AbpAdmin.EntityFrameworkCore -s backend/framework/AbpAdmin.DbMigrator -c AbpAdminDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/src/AbpAdmin.Biz.Template -s backend/src/AbpAdmin.DbMigrator -c BizTemplateDbContext
+            -p backend/modules/AbpAdmin.Biz.Template -s backend/framework/AbpAdmin.DbMigrator -c BizTemplateDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/src/AbpAdmin.Webhooks -s backend/src/AbpAdmin.DbMigrator -c WebhooksDbContext
+            -p backend/framework/AbpAdmin.Webhooks -s backend/framework/AbpAdmin.DbMigrator -c WebhooksDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/src/AbpAdmin.Collection -s backend/src/AbpAdmin.DbMigrator -c CollectionDbContext
+            -p backend/modules/AbpAdmin.Collection -s backend/framework/AbpAdmin.DbMigrator -c CollectionDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/src/AbpAdmin.Ordering -s backend/src/AbpAdmin.DbMigrator -c OrderingDbContext
+            -p backend/modules/AbpAdmin.Ordering -s backend/framework/AbpAdmin.DbMigrator -c OrderingDbContext
       - name: Test
         # 数据库由测试自起：Testcontainers 拉起 postgres:16（每测试进程一个容器，随进程回收），
         # runner 自带 Docker，无需服务容器。含 FrontendContractSnapshotTests（DTO 形状快照）、

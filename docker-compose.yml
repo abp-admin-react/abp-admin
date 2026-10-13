@@ -65,7 +65,7 @@ services:
   migrator:
     build:
       context: ./backend
-      dockerfile: src/AbpAdmin.DbMigrator/Dockerfile
+      dockerfile: framework/AbpAdmin.DbMigrator/Dockerfile
     environment:
       ConnectionStrings__Default: "Host=db;Port=5432;Database=${POSTGRES_DB:-abpadmin};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
       # ABP 设置项加密口令（种子落库的 isEncrypted 设置项用它加密，Host 侧必须同值才能解）
@@ -88,7 +88,7 @@ services:
   host:
     build:
       context: ./backend
-      dockerfile: src/AbpAdmin.HttpApi.Host/Dockerfile
+      dockerfile: framework/AbpAdmin.HttpApi.Host/Dockerfile
       args:
         CERT_PASSPHRASE: ${OPENIDDICT_CERT_PASSPHRASE:-dev-only-change-me}
     environment:
