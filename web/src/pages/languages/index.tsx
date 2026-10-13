@@ -143,7 +143,9 @@ const LanguagesPage: React.FC = () => {
                   record.isEnabled && (
                     <a
                       key="default"
-                      onClick={() => handleSetAsDefault(record.id!)}
+                      onClick={() => {
+                        if (record.id) handleSetAsDefault(record.id);
+                      }}
                     >
                       设为默认
                     </a>
@@ -152,7 +154,9 @@ const LanguagesPage: React.FC = () => {
                   <Popconfirm
                     key="delete"
                     title="确定删除此语言？"
-                    onConfirm={() => handleDelete(record.id!)}
+                    onConfirm={() => {
+                      if (record.id) handleDelete(record.id);
+                    }}
                   >
                     <a style={{ color: 'red' }}>删除</a>
                   </Popconfirm>

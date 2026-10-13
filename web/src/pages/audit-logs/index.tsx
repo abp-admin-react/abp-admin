@@ -32,7 +32,7 @@ const formatHandledAt = (value?: string | null) =>
 const splitExecutionTimeRange = (
   range?: unknown[] | null,
 ): { startTime?: string; endTime?: string } => {
-  if (!range || range.length !== 2 || !range.every(dayjs.isDayjs)) {
+  if (range?.length !== 2 || !range.every(dayjs.isDayjs)) {
     return {};
   }
   const [start, end] = range as [Dayjs, Dayjs];

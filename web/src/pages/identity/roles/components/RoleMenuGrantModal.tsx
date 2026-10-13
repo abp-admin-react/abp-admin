@@ -39,7 +39,8 @@ function buildTree(
 
   const roots: DataNode[] = [];
   for (const item of items) {
-    const node = nodes.get(item.id)!;
+    const node = nodes.get(item.id);
+    if (!node) continue;
     const parent = item.parentId ? nodes.get(item.parentId) : undefined;
     if (parent) {
       parent.children = parent.children || [];

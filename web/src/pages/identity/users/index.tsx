@@ -402,7 +402,9 @@ const UsersPage: React.FC = () => {
             <Button
               key="download-failures"
               onClick={() => {
-                downloadImportFailureReport(importResult.failureReportId!);
+                if (importResult?.failureReportId) {
+                  downloadImportFailureReport(importResult.failureReportId);
+                }
               }}
             >
               下载失败明细

@@ -317,7 +317,7 @@ const PermissionDefinitionsPage: React.FC = () => {
         onCancel={() => setGroupModalOpen(false)}
         destroyOnHidden
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <div>
             <div style={{ marginBottom: 4 }}>组名{editingGroup ? '（不可修改）' : ''}</div>
             <Input
@@ -345,7 +345,7 @@ const PermissionDefinitionsPage: React.FC = () => {
         onCancel={() => setDefinitionModalOpen(false)}
         destroyOnHidden
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <div>
             <div style={{ marginBottom: 4 }}>权限全名{editingDefinition ? '（不可修改）' : ''}</div>
             <Input

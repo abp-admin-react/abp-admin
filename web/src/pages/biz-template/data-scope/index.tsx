@@ -8,7 +8,7 @@ import { App, Alert, Button, Card, Form, Input, Modal, Select, Space, Tag,  } fr
 import React, { useEffect, useState } from 'react';
 import { getOrganizationUnits } from '@/abp/identityAdmin';
 import {
-  BizDataScopeDemoDto,
+  type BizDataScopeDemoDto,
   createBizDataScopeDemo,
   deleteBizDataScopeDemo,
   getBizDataScopeDemos,
@@ -56,7 +56,7 @@ const BizDataScopeDemoPage: React.FC = () => {
     try {
       const res = await getOrganizationUnits();
       setOuList((res || []) as OrganizationUnitItem[]);
-    } catch (e: any) {
+    } catch {
       // ignore
     }
   };

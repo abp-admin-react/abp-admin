@@ -58,7 +58,7 @@ const DataScopeDemoPage: React.FC = () => {
     try {
       const res = await getOrganizationUnits();
       setOuList((res || []) as OrganizationUnitItem[]);
-    } catch (e) {
+    } catch {
       // ignore
     }
   };

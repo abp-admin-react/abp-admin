@@ -8,7 +8,7 @@ import {
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm, Space, Tag, Tree } from 'antd';
+import { App, Button, Popconfirm, Tree } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import React, { useRef, useState } from 'react';
 import { toMenuIcon as iconOf } from '@/abp/menuIcons';

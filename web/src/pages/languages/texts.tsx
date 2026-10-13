@@ -1,5 +1,5 @@
 import { RollbackOutlined, SaveOutlined } from '@ant-design/icons';
-import { PageContainer, ProTable } from '@ant-design/pro-components';
+import { PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import {
   Button,
@@ -72,11 +72,12 @@ const LanguageTextsPage: React.FC = () => {
   // 覆盖保存：写入当前上下文（host 或本租户）的覆盖行，空值=显式标记未翻译。
   // 成功后 reload 当页：生效值与 isOverridden 都以下一次列表查询的最新口径为准。
   const handleSave = async (record: API.LanguageTextDto) => {
+    if (!record.resourceName || !record.cultureName || !record.name) return;
     try {
       await putApiAppLanguageText({
-        resourceName: record.resourceName!,
-        cultureName: record.cultureName!,
-        name: record.name!,
+        resourceName: record.resourceName,
+        cultureName: record.cultureName,
+        name: record.name,
         value: editingValue,
       });
       message.success('保存成功');
@@ -91,11 +92,12 @@ const LanguageTextsPage: React.FC = () => {
   // 与列表 isOverridden（当前层口径）同口径——按钮仅在 true 时可点，点击必然删除覆盖行；
   // 但若覆盖值恰好等于下层提供值，显示值可能不变（存储变化 ≠ 显示变化）。
   const handleRestore = async (record: API.LanguageTextDto) => {
+    if (!record.resourceName || !record.cultureName || !record.name) return;
     try {
       await postApiAppLanguageTextRestoreToDefault({
-        resourceName: record.resourceName!,
-        cultureName: record.cultureName!,
-        name: record.name!,
+        resourceName: record.resourceName,
+        cultureName: record.cultureName,
+        name: record.name,
       });
       message.success('已恢复默认');
       tableRef.current?.reload();
@@ -123,8 +125,8 @@ const LanguageTextsPage: React.FC = () => {
         value={value}
         onChange={onChange}
         options={languages.map((lang) => ({
-          value: lang.cultureName!,
-          label: lang.displayName ?? lang.cultureName!,
+          value: lang.cultureName ?? '',
+          label: lang.displayName ?? lang.cultureName,
         }))}
         allowClear={false}
       />

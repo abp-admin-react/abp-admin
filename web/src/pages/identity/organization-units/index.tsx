@@ -461,7 +461,8 @@ function collectDescendantIds(
   const descendants: string[] = [];
   const stack = childrenByParent.get(unit.id) ?? [];
   while (stack.length > 0) {
-    const id = stack.pop()!;
+    const id = stack.pop();
+    if (id === undefined) break;
     descendants.push(id);
     const grandchildren = childrenByParent.get(id);
     if (grandchildren) {

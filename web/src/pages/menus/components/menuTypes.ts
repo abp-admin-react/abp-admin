@@ -46,7 +46,8 @@ export function buildPermissionTreeData(
   }
   const roots: TreeSelectNode[] = [];
   for (const opt of options) {
-    const node = nodes.get(opt.name)!;
+    const node = nodes.get(opt.name);
+    if (!node) continue;
     const parent = opt.parentName ? nodes.get(opt.parentName) : undefined;
     if (parent) {
       parent.children.push(node);

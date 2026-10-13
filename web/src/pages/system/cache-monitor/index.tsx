@@ -453,7 +453,7 @@ const CacheMonitorPage: React.FC = () => {
             {access.canManageCache && valueTarget && (
               <Card type="inner" title="写值 / 改期" style={{ marginTop: 16 }}>
                 {valueTarget.type === 'hash' || valueTarget.type === 'string' ? (
-                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                  <Space orientation="vertical" style={{ width: '100%' }} size="small">
                     <Typography.Text type="secondary">
                       {valueTarget.type === 'hash'
                         ? '写值写入 data 字段（ABP 缓存条目为 JSON 信封，须保持可反序列化）；改期重写过期元数据，滑动过期从现在重新起算。'

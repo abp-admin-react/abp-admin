@@ -160,7 +160,7 @@ const TwoFactorVerification: React.FC = () => {
               type="primary"
               block
               loading={loading}
-              disabled={!code || code.length !== 6}
+              disabled={code?.length !== 6}
               onClick={handleVerify}
             >
               验证

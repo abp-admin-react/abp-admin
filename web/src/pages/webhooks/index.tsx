@@ -265,7 +265,7 @@ const WebhooksPage: React.FC = () => {
         onCancel={() => setSubModalOpen(false)}
         destroyOnHidden
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <div>
             <div style={{ marginBottom: 4 }}>Webhook 地址</div>
             <Input

@@ -52,7 +52,7 @@ const TextTemplatesPage: React.FC = () => {
       setEditContent(data.content || '');
       setSelectedCulture(culture);
       setEditModalVisible(true);
-    } catch (error) {
+    } catch {
       message.error('加载模板内容失败');
     } finally {
       setLoading(false);
@@ -164,7 +164,7 @@ const TextTemplatesPage: React.FC = () => {
             ],
           },
         ]}
-        request={async (params, _sorter, filter) => {
+        request={async (_params, _sorter, filter) => {
           // 生成的客户端已带类型化参数对象（getApiAppTextTemplateParams），filter 直接透传
           const items = await getApiAppTextTemplate({
             filter:
