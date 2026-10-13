@@ -15,7 +15,7 @@
          Storage/ 真库集成测试(RequiresEnvFact 环境变量门控,未配置显示 Skipped,CI 可区分跳过与通过);
          TestInfrastructure/ 测试基础设施(RequiresEnvFact 特性),非用例目录。
          目录约定:后续第三存储接入时单测按 store 加目录,集成测试同入 Storage/。 -->
-    <ProjectReference Include="..\..\src\AbpAdmin.Elasticsearch\AbpAdmin.Elasticsearch.csproj" />
+    <ProjectReference Include="..\..\framework\AbpAdmin.Elasticsearch\AbpAdmin.Elasticsearch.csproj" />
   </ItemGroup>
 
   <ItemGroup>

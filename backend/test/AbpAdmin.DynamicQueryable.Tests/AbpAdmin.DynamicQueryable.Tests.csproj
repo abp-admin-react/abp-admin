@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AbpAdmin.DynamicQueryable\AbpAdmin.DynamicQueryable.csproj" />
+    <ProjectReference Include="..\..\framework\AbpAdmin.DynamicQueryable\AbpAdmin.DynamicQueryable.csproj" />
   </ItemGroup>
 
   <ItemGroup>

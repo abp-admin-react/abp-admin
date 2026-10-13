@@ -194,7 +194,7 @@ public class RedisStartupPostureTests
         directory.ShouldNotBeNull("测试程序集应位于仓库内，向上能找到 AbpAdmin.slnx");
 
         var productionJson = Path.Combine(
-            directory.FullName, "src", "AbpAdmin.HttpApi.Host", "appsettings.Production.json");
+            directory.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.Production.json");
         File.Exists(productionJson).ShouldBeTrue();
 
         var configuration = new ConfigurationBuilder()

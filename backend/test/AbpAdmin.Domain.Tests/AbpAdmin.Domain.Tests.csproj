@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AbpAdmin.Domain\AbpAdmin.Domain.csproj" />
+    <ProjectReference Include="..\..\framework\AbpAdmin.Domain\AbpAdmin.Domain.csproj" />
     <ProjectReference Include="..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
   </ItemGroup>
 

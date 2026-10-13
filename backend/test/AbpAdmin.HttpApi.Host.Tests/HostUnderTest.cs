@@ -123,6 +123,6 @@ internal static class HostUnderTest
                 "so the host content root cannot be located.");
         }
 
-        return Path.Combine(directory.FullName, "src", "AbpAdmin.HttpApi.Host");
+        return Path.Combine(directory.FullName, "framework", "AbpAdmin.HttpApi.Host");
     }
 }

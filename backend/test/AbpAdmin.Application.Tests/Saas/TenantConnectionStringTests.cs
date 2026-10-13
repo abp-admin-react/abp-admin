@@ -232,7 +232,7 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
         {
             throw new System.InvalidOperationException(
                 "连接串校验用例需要 PostgreSQL 连接串（宿主已 PG-only）。" +
-                "请在 src/AbpAdmin.HttpApi.Host/appsettings.secrets.json 配置 ConnectionStrings:Default。");
+                "请在 framework/AbpAdmin.HttpApi.Host/appsettings.secrets.json 配置 ConnectionStrings:Default。");
         }
 
         return conn;

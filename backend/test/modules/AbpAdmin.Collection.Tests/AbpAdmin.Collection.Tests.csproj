@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin.Collection</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 被测模块：收款实现 + 源码纯度测试要读 AbpAdmin.Application 的源文件 -->
+    <ProjectReference Include="..\..\..\modules\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
+    <ProjectReference Include="..\..\..\framework\AbpAdmin.Application\AbpAdmin.Application.csproj" />
+    <ProjectReference Include="..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- xunit/Shouldly 经 TestBase 传递；TestSdk 必须直接引用 -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+  </ItemGroup>
+
+</Project>

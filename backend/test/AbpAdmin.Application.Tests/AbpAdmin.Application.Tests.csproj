@@ -9,9 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AbpAdmin.Application\AbpAdmin.Application.csproj" />
+    <ProjectReference Include="..\..\framework\AbpAdmin.Application\AbpAdmin.Application.csproj" />
     <!-- T2.1：导出下载端点的跨用户 403 语义测试需要手动构造 AuditLogExportController -->
-    <ProjectReference Include="..\..\src\AbpAdmin.HttpApi\AbpAdmin.HttpApi.csproj" />
+    <ProjectReference Include="..\..\framework\AbpAdmin.HttpApi\AbpAdmin.HttpApi.csproj" />
     <ProjectReference Include="..\AbpAdmin.Domain.Tests\AbpAdmin.Domain.Tests.csproj" />
   </ItemGroup>
 

@@ -2,27 +2,32 @@
     <Configurations>
         <Platform Name="Any CPU" />
     </Configurations>
-    <Folder Name="/src/">
-        <Project Path="src/AbpAdmin.DynamicQueryable/AbpAdmin.DynamicQueryable.csproj" />
-        <Project Path="src/AbpAdmin.Domain/AbpAdmin.Domain.csproj" />
-        <Project Path="src/AbpAdmin.Application/AbpAdmin.Application.csproj" />
-        <Project Path="src/AbpAdmin.EntityFrameworkCore/AbpAdmin.EntityFrameworkCore.csproj" />
-        <!-- 自包含业务模块样板：一个工程，建表走模块内 EF 迁移（独立 History 表） -->
-        <Project Path="src/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj" />
-        <Project Path="src/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj" />
-        <!-- 收款/订单双模块：收款契约（枚举/ETO/集成服务接口）+ 收款实现 + 订单实现（只依赖契约） -->
-        <Project Path="src/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj" />
-        <Project Path="src/AbpAdmin.Collection/AbpAdmin.Collection.csproj" />
-        <Project Path="src/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj" />
-        <Project Path="src/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj" />
-        <Project Path="src/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts.csproj" />
-        <Project Path="src/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj" />
-        <Project Path="src/AbpAdmin.HttpApi.Client/AbpAdmin.HttpApi.Client.csproj" />
-        <Project Path="src/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj" />
-        <Project Path="src/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj" />
+    <!-- 框架级区：ABP 分层骨架 + 宿主 + 基础设施（ABP 官方仓库 framework/ vs modules/ 的同款分区） -->
+    <Folder Name="/framework/">
+        <Project Path="framework/AbpAdmin.DynamicQueryable/AbpAdmin.DynamicQueryable.csproj" />
+        <Project Path="framework/AbpAdmin.Domain/AbpAdmin.Domain.csproj" />
+        <Project Path="framework/AbpAdmin.Application/AbpAdmin.Application.csproj" />
+        <Project Path="framework/AbpAdmin.EntityFrameworkCore/AbpAdmin.EntityFrameworkCore.csproj" />
+        <Project Path="framework/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj" />
+        <Project Path="framework/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj" />
+        <Project Path="framework/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts.csproj" />
+        <Project Path="framework/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj" />
+        <Project Path="framework/AbpAdmin.HttpApi.Client/AbpAdmin.HttpApi.Client.csproj" />
+        <Project Path="framework/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj" />
+        <Project Path="framework/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj" />
         <!-- T5：ES 辅助存储 -->
-        <Project Path="src/AbpAdmin.Elasticsearch/AbpAdmin.Elasticsearch.csproj" />
+        <Project Path="framework/AbpAdmin.Elasticsearch/AbpAdmin.Elasticsearch.csproj" />
     </Folder>
+    <!-- 业务板块区：自包含业务模块（工程自带迁移/本地化/设置）；新增业务模块复制 modules/AbpAdmin.Biz.Template -->
+    <Folder Name="/modules/">
+        <!-- 自包含业务模块样板：一个工程，建表走模块内 EF 迁移（独立 History 表） -->
+        <Project Path="modules/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj" />
+        <!-- 收款/订单双模块：收款契约（枚举/ETO/集成服务接口）+ 收款实现 + 订单实现（只依赖契约） -->
+        <Project Path="modules/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj" />
+        <Project Path="modules/AbpAdmin.Collection/AbpAdmin.Collection.csproj" />
+        <Project Path="modules/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj" />
+    </Folder>
+    <!-- 框架级测试（对应 /framework/ 分区；业务模块的测试在 /test/modules/） -->
     <Folder Name="/test/">
         <Project Path="test/AbpAdmin.DynamicQueryable.Tests/AbpAdmin.DynamicQueryable.Tests.csproj" />
         <Project Path="test/AbpAdmin.Application.Tests/AbpAdmin.Application.Tests.csproj" />
@@ -33,10 +38,12 @@
         <Project Path="test/AbpAdmin.HttpApi.Client.ConsoleTestApp/AbpAdmin.HttpApi.Client.ConsoleTestApp.csproj" />
         <!-- T5：存储基础设施测试(单测 + 真库集成) -->
         <Project Path="test/AbpAdmin.Storage.Tests/AbpAdmin.Storage.Tests.csproj" />
-        <!-- 自包含业务模块样板的测试：随模块复制，下游改名后继承全部用例 -->
-        <Project Path="test/AbpAdmin.Biz.Template.Tests/AbpAdmin.Biz.Template.Tests.csproj" />
+    </Folder>
+    <!-- 业务板块模块的测试（与 /modules/ 分区对称）：随模块复制，下游改名后继承全部用例 -->
+    <Folder Name="/test/modules/">
+        <Project Path="test/modules/AbpAdmin.Biz.Template.Tests/AbpAdmin.Biz.Template.Tests.csproj" />
         <!-- 收款/订单双模块的测试（Testcontainers PG，程序集串行） -->
-        <Project Path="test/AbpAdmin.Collection.Tests/AbpAdmin.Collection.Tests.csproj" />
-        <Project Path="test/AbpAdmin.Ordering.Tests/AbpAdmin.Ordering.Tests.csproj" />
+        <Project Path="test/modules/AbpAdmin.Collection.Tests/AbpAdmin.Collection.Tests.csproj" />
+        <Project Path="test/modules/AbpAdmin.Ordering.Tests/AbpAdmin.Ordering.Tests.csproj" />
     </Folder>
 </Solution>

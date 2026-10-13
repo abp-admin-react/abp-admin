@@ -9,8 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="..\..\src\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
+    <ProjectReference Include="..\..\framework\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\framework\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
     <ProjectReference Include="..\AbpAdmin.Application.Tests\AbpAdmin.Application.Tests.csproj" />
   </ItemGroup>
 

@@ -83,14 +83,14 @@ public class ChainWorkerRegistrationTests
             .Build();
     }
 
-    /// <summary>从测试程序集位置向上找到含 src/AbpAdmin.HttpApi.Host 的仓库层（路径算术不炸）。</summary>
+    /// <summary>从测试程序集位置向上找到含 framework/AbpAdmin.HttpApi.Host 的仓库层（路径算术不炸）。</summary>
     private static string LocateHostDirectory()
     {
         var dir = new System.IO.DirectoryInfo(System.IO.Path.GetDirectoryName(
             typeof(ChainWorkerRegistrationTests).Assembly.Location)!);
         while (dir != null)
         {
-            var candidate = System.IO.Path.Combine(dir.FullName, "src", "AbpAdmin.HttpApi.Host");
+            var candidate = System.IO.Path.Combine(dir.FullName, "framework", "AbpAdmin.HttpApi.Host");
             if (System.IO.File.Exists(System.IO.Path.Combine(candidate, "appsettings.json")))
             {
                 return candidate;

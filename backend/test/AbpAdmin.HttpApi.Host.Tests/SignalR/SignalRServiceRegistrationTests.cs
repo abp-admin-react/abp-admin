@@ -91,7 +91,7 @@ public class SignalRServiceRegistrationTests
 
         // ConnectionFactory 必须保持 null（SignalR 自建 ConnectionMultiplexer），
         // 不允许复用 ABP 缓存/锁那条 multiplexer——性能隔离，订阅背压不能牵连缓存延迟。
-        // 对应验收：rg "ConnectionFactory" src/AbpAdmin.HttpApi.Host 无结果。
+        // 对应验收：rg "ConnectionFactory" framework/AbpAdmin.HttpApi.Host 无结果。
         options.ConnectionFactory.ShouldBeNull();
     }
 
