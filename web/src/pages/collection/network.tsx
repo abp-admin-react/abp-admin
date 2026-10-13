@@ -18,9 +18,9 @@ import {
 } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  NetworkStatusDto,
-  TokenStatusDto,
-  ChainApiKeyDto,
+  type NetworkStatusDto,
+  type TokenStatusDto,
+  type ChainApiKeyDto,
   getNetworkStatus,
   getApiKeys,
   addApiKey,
@@ -29,11 +29,13 @@ import {
   generateMnemonic,
   setMinDeposit,
   setNodeLogResultCap,
-  setRpcUrl,
+  // 组件内有同名 useState setter（rpcUrl 输入框），别名避免遮蔽——
+  // 不别名的话 submitRpc 里 await 的是 setter，后端接口永远不会被调用
+  setRpcUrl as setRpcUrlApi,
   setTokenEnabled,
   setVaultAddress,
 } from '@/abp/chainAdmin';
-import { startChainSignalR, onChainScanProgress, onChainConnState, ChainScanProgressPayload, ChainConnState } from '@/abp/chainSignalR';
+import { startChainSignalR, onChainScanProgress, onChainConnState, type ChainScanProgressPayload, type ChainConnState } from '@/abp/chainSignalR';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const { Text, Paragraph } = Typography;
@@ -112,7 +114,7 @@ export default function NetworkConfigPage() {
   const submitRpc = async () => {
     if (!rpcUrl.startsWith('https://')) { message.warning('RPC 地址必须以 https:// 开头'); return; }
     setRpcSaving(true);
-    try { await setRpcUrl(rpcUrl); message.success('RPC 已配置'); setRpcOpen(false); setRpcUrl(''); reload(); } finally { setRpcSaving(false); }
+    try { await setRpcUrlApi(rpcUrl); message.success('RPC 已配置'); setRpcOpen(false); setRpcUrl(''); reload(); } finally { setRpcSaving(false); }
   };
   const submitCap = async () => {
     if (capVal < 100) { message.warning('上限必须不小于 100'); return; }
@@ -126,7 +128,7 @@ export default function NetworkConfigPage() {
   };
   const submitMinDep = async () => {
     const v = parseFloat(minDepVal);
-    if (isNaN(v) || v <= 0) { message.warning('最低充值额必须为正数'); return; }
+    if (Number.isNaN(v) || v <= 0) { message.warning('最低充值额必须为正数'); return; }
     setMinDepSaving(true);
     try { await setMinDeposit(minDepSymbol, minDepVal); message.success('最低充值额已更新'); setMinDepOpen(false); reload(); } finally { setMinDepSaving(false); }
   };
@@ -159,7 +161,7 @@ export default function NetworkConfigPage() {
   };
 
   const fmtBlock = (v?: number) => (v == null ? '-' : Number(v).toLocaleString());
-  const fmtTime = (v?: string) => { if (!v) return '-'; const d = new Date(v); return isNaN(d.getTime()) ? v : d.toLocaleString(); };
+  const fmtTime = (v?: string) => { if (!v) return '-'; const d = new Date(v); return Number.isNaN(d.getTime()) ? v : d.toLocaleString(); };
   const connView = connState === 'connected' ? { color: 'success' as const, text: '实时推送：已连接' }
     : connState === 'connecting' ? { color: 'warning' as const, text: '实时推送：连接中…连上后自动更新' }
     : { color: 'error' as const, text: '实时推送：已断开，自动重连中' };
@@ -221,7 +223,7 @@ export default function NetworkConfigPage() {
 
   return (
     <PageContainer>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <Alert type="info" showIcon message="链网配置（高危运维）：RPC、助记词、金库、扫链上限全部在此页面管理。扫链进度由 SignalR 实时推送，无需刷新。" />
         <div><Tag color={connView.color}>{connView.text}</Tag></div>
         <Card title="网络状态" loading={loading}>
@@ -245,7 +247,7 @@ export default function NetworkConfigPage() {
           )}
         </Card>
         <Card title="扫链 KEY 池（同服务商多把，限流自动轮换）">
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={12}>
             <Alert
               type="info" showIcon
               message={
@@ -280,7 +282,7 @@ export default function NetworkConfigPage() {
         </Card>
         {status && (status.scanBehindAlertedAt || status.sweepStuckAlertedAt || status.gasLowAlertedAt) && (
           <Card title="最近告警" size="small">
-            <Space direction="vertical">
+            <Space orientation="vertical">
               {status.scanBehindAlertedAt && <Text type="warning">扫链落后告警：{fmtTime(status.scanBehindAlertedAt)}</Text>}
               {status.sweepStuckAlertedAt && <Text type="danger">归集卡住告警：{fmtTime(status.sweepStuckAlertedAt)}</Text>}
               {status.gasLowAlertedAt && <Text type="warning">Gas 不足告警：{fmtTime(status.gasLowAlertedAt)}</Text>}

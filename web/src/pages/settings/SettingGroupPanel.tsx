@@ -52,7 +52,7 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
     for (const info of settingInfos) {
       const g2 = getSettingGroup2(info);
       if (!map.has(g2)) map.set(g2, []);
-      map.get(g2)!.push(info);
+      map.get(g2)?.push(info);
     }
     return Array.from(map.entries());
   }, [settingInfos]);
@@ -120,7 +120,6 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
             placeholder="留空表示不修改"
           />
         );
-      case SettingUiComponentTypes.Text:
       default:
         return <ProFormText key={info.name} {...common} />;
     }
@@ -171,6 +170,9 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
         canUpdate
           ? {
               searchConfig: { submitText: '保存' },
+              // saving 只在 handleFinish 写入、唯一消费点就是这里的保存按钮 loading
+              //（与下方重置按钮 loading=resetting 同口径）；漏接时保存期间按钮无反馈
+              submitButtonProps: { loading: saving },
               resetButtonProps: { style: { display: 'none' } },
               render: (_, dom) => (
                 <Space>
