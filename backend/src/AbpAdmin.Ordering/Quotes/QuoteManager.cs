@@ -1,3 +1,4 @@
+using Npgsql;
 using System;
 using System.Threading.Tasks;
 using AbpAdmin.Ordering.Data;
@@ -135,8 +136,22 @@ public class QuoteManager : DomainService
         };
 
         await dbContext.Quotes.AddAsync(quote);
-        await dbContext.SaveChangesAsync();
-        return quote;
+        try
+        {
+            await dbContext.SaveChangesAsync();
+            return quote;
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException is PostgresException pg && pg.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            // 并发 start-pay 双击：两个请求同时读到"无 Active 报价"并各自插入，
+            // (OrderId, PayMethod) WHERE Active 部分唯一索引裁决——赢者已落库，
+            // 这里改为读回赢者，把 500 变成幂等成功（报价内容对同一输入是确定性的）
+            dbContext.Entry(quote).State = EntityState.Detached;
+            var winner = await dbContext.Quotes.AsNoTracking().FirstAsync(q =>
+                q.OrderId == order.Id && q.PayMethod == method && q.Status == QuoteStatus.Active);
+            return winner;
+        }
     }
 
     /// <summary>按方式读费率并算报价基数（微信/支付宝 = Amount × UsdCnyRate；Stripe/余额 = Amount）。</summary>
