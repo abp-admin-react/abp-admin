@@ -20,7 +20,7 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
-  OrderDto,
+  type OrderDto,
   PAY_CHANNEL_META,
   PAY_METHOD_GROUPS,
   currencyLabel,
@@ -33,8 +33,8 @@ import {
   startPay,
 } from '@/abp/ordering';
 import {
-  BalanceTxnDto,
-  MyBalanceDto,
+  type BalanceTxnDto,
+  type MyBalanceDto,
   BALANCE_ACTION_LABELS,
   getMyBalances,
   getMyTxns,
@@ -228,7 +228,7 @@ export default function OrderingPage() {
 
   // ── 流水页签 ────────────────────────────────────────────────────────────────────────
   const txnActionRef = useRef<ActionType | undefined>(undefined);
-  const [txnRange, setTxnRange] = useState<[string | null, string | null]>([null, null]);
+  const [, setTxnRange] = useState<[string | null, string | null]>([null, null]);
   // request 闭包读 ref 而不是 state：onChange 里 setState+reload 同拍发起的请求
   // 拿到的还是旧闭包（实测首次过滤失效），ref 立即可见
   const txnRangeRef = useRef<[string | null, string | null]>([null, null]);
@@ -382,7 +382,9 @@ export default function OrderingPage() {
                     render: (_, record) => {
                       const label = payChannelLabel(record);
                       if (!label) return '-';
-                      const meta = PAY_CHANNEL_META[record.payChannel!];
+                      const meta = record.payChannel
+                        ? PAY_CHANNEL_META[record.payChannel]
+                        : undefined;
                       return <Tag color={meta?.color ?? 'default'}>{label}</Tag>;
                     },
                   },
@@ -513,7 +515,7 @@ export default function OrderingPage() {
         }}
         destroyOnClose
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Select
             style={{ width: '100%' }}
             value={payMethod}
@@ -546,7 +548,7 @@ export default function OrderingPage() {
         width={560}
       >
         {orderDetail && (
-          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={8}>
             <Space wrap>
               <Tag color={STATUS_TAGS[orderDetail.status]?.color ?? 'default'}>
                 {STATUS_TAGS[orderDetail.status]?.text ?? orderDetail.status}

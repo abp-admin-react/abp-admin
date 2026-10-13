@@ -3,10 +3,10 @@ import { Card, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   DEPOSIT_STATUS_LABELS,
-  DepositOrderListDto,
+  type DepositOrderListDto,
   getDepositOrders,
 } from '@/abp/chainAdmin';
-import { startChainSignalR, onChainDepositChanged, onChainConnState, ChainConnState } from '@/abp/chainSignalR';
+import { startChainSignalR, onChainDepositChanged, onChainConnState, type ChainConnState } from '@/abp/chainSignalR';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const { Text } = Typography;
@@ -47,7 +47,7 @@ export default function DepositsPage() {
     return () => { offConn(); offDeposit(); };
   }, [reload]);
 
-  const fmtTime = (v: string) => { const d = new Date(v); return isNaN(d.getTime()) ? v : d.toLocaleString(); };
+  const fmtTime = (v: string) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? v : d.toLocaleString(); };
   const connView = connState === 'connected' ? { color: 'success' as const, text: '实时推送：已连接' }
     : connState === 'connecting' ? { color: 'warning' as const, text: '连接中…' }
     : { color: 'error' as const, text: '已断开，重连中' };

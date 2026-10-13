@@ -1,8 +1,8 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { Card, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
-import { SWEEP_STATUS_LABELS, SweepTaskListDto, getSweepTasks } from '@/abp/chainAdmin';
-import { startChainSignalR, onChainSweepChanged, onChainConnState, ChainConnState } from '@/abp/chainSignalR';
+import { SWEEP_STATUS_LABELS, type SweepTaskListDto, getSweepTasks } from '@/abp/chainAdmin';
+import { startChainSignalR, onChainSweepChanged, onChainConnState, type ChainConnState } from '@/abp/chainSignalR';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const { Text } = Typography;
@@ -36,7 +36,7 @@ export default function SweepsPage() {
     return () => { offConn(); offSweep(); };
   }, [reload]);
 
-  const fmtTime = (v: string) => { const d = new Date(v); return isNaN(d.getTime()) ? v : d.toLocaleString(); };
+  const fmtTime = (v: string) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? v : d.toLocaleString(); };
   const connView = connState === 'connected' ? { color: 'success' as const, text: '实时推送：已连接' }
     : connState === 'connecting' ? { color: 'warning' as const, text: '连接中…' }
     : { color: 'error' as const, text: '已断开，重连中' };
