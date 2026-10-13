@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { useIntl } from '@umijs/max';
-import { Badge, Button, Drawer, Empty, List, Tooltip } from 'antd';
+import { Badge, Button, Drawer, Empty, Listy, Spin, Tooltip } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useEffect, useState } from 'react';
@@ -120,45 +120,46 @@ export default function NotificationBell() {
         }
       >
         {items.length > 0 ? (
-          <List
-            loading={isLoading}
-            dataSource={items}
-            loadMore={
-              hasNextPage ? (
-                <div style={{ textAlign: 'center', marginTop: 12 }}>
-                  <Button
-                    size="small"
-                    loading={isFetchingNextPage}
-                    onClick={() => fetchNextPage()}
-                  >
-                    {intl.formatMessage({
-                      id: 'component.notification.loadMore',
-                    })}
-                  </Button>
+          // antd 6 起 List 废弃，Listy 是替代（虚拟化列表 API：items/rowKey/itemRender）。
+          // 未读徽标 + 标题/描述两行结构沿用原 List.Item.Meta 的视觉口径（内边距、分隔线、灰色描述）。
+          <Spin spinning={!!isLoading}>
+            <Listy
+              rowKey="id"
+              items={items}
+              virtual={false}
+              itemRender={(item) => (
+                <div
+                  style={{
+                    padding: '12px 0',
+                    borderBottom: '1px solid #f0f0f0',
+                  }}
+                >
+                  <div style={{ color: 'rgba(0,0,0,0.88)', fontSize: 14 }}>
+                    {!item.isRead && <Badge status="processing" />} {item.title}
+                  </div>
+                  <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 14 }}>
+                    <div>{item.body}</div>
+                    <div style={{ fontSize: 12 }}>
+                      {dayjs(item.creationTime).fromNow()}
+                    </div>
+                  </div>
                 </div>
-              ) : null
-            }
-            renderItem={(item) => (
-              <List.Item>
-                <List.Item.Meta
-                  title={
-                    <>
-                      {!item.isRead && <Badge status="processing" />}{' '}
-                      {item.title}
-                    </>
-                  }
-                  description={
-                    <>
-                      <div>{item.body}</div>
-                      <div style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
-                        {dayjs(item.creationTime).fromNow()}
-                      </div>
-                    </>
-                  }
-                />
-              </List.Item>
-            )}
-          />
+              )}
+            />
+            {hasNextPage ? (
+              <div style={{ textAlign: 'center', marginTop: 12 }}>
+                <Button
+                  size="small"
+                  loading={isFetchingNextPage}
+                  onClick={() => fetchNextPage()}
+                >
+                  {intl.formatMessage({
+                    id: 'component.notification.loadMore',
+                  })}
+                </Button>
+              </div>
+            ) : null}
+          </Spin>
         ) : (
           <Empty
             description={intl.formatMessage({

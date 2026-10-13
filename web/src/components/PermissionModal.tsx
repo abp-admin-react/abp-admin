@@ -30,7 +30,8 @@ function buildPermissionTree(permissions: PermissionGrantInfo[]): DataNode[] {
 
   const roots: DataNode[] = [];
   for (const item of permissions) {
-    const node = nodes.get(item.name)!;
+    const node = nodes.get(item.name);
+    if (!node) continue;
     const parent = item.parentName ? nodes.get(item.parentName) : undefined;
     if (parent) {
       parent.children = parent.children || [];

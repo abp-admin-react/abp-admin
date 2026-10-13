@@ -99,17 +99,17 @@ const IdleSessionWatcher: React.FC = () => {
 
     arm(readLastActivity());
     window.addEventListener('storage', onStorage);
-    ACTIVITY_EVENTS.forEach((eventName) =>
-      window.addEventListener(eventName, markActivity, { passive: true }),
-    );
+    ACTIVITY_EVENTS.forEach((eventName) => {
+      window.addEventListener(eventName, markActivity, { passive: true });
+    });
     return () => {
       if (timerRef.current) {
         window.clearTimeout(timerRef.current);
       }
       window.removeEventListener('storage', onStorage);
-      ACTIVITY_EVENTS.forEach((eventName) =>
-        window.removeEventListener(eventName, markActivity),
-      );
+      ACTIVITY_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, markActivity);
+      });
     };
   }, [initialState?.currentUser?.userid, minutes, message]);
 

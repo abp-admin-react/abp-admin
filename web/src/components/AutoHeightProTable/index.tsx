@@ -1,6 +1,5 @@
 import type {
   ProCardProps,
-  ProColumns,
   ProTableProps,
 } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';

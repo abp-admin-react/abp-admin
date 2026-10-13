@@ -71,12 +71,14 @@ let startRetry = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 最近一轮进度快照（晚订阅页面回放） */
-let lastProgress = new Map<string, ChainScanProgressPayload>();
+const lastProgress = new Map<string, ChainScanProgressPayload>();
 
 const setConn = (s: ChainConnState) => {
   if (connState === s) return;
   connState = s;
-  connListeners.forEach((fn) => fn(s));
+  connListeners.forEach((fn) => {
+    fn(s);
+  });
 };
 
 const scheduleRetry = () => {
@@ -124,19 +126,27 @@ const ensureConn = () => {
   connection.on('ChainScanProgress', (item: ChainScanProgressPayload) => {
     if (!item?.symbol) return;
     lastProgress.set(item.symbol, item);
-    progressListeners.forEach((fn) => fn(item));
+    progressListeners.forEach((fn) => {
+      fn(item);
+    });
   });
   connection.on('ChainDepositChanged', (item: ChainDepositChangedPayload) => {
     if (!item) return;
-    depositListeners.forEach((fn) => fn(item));
+    depositListeners.forEach((fn) => {
+      fn(item);
+    });
   });
   connection.on('ChainSweepChanged', (item: ChainSweepChangedPayload) => {
     if (!item) return;
-    sweepListeners.forEach((fn) => fn(item));
+    sweepListeners.forEach((fn) => {
+      fn(item);
+    });
   });
   connection.on('ChainVaultCheck', (item: ChainVaultCheckPayload) => {
     if (!item) return;
-    vaultListeners.forEach((fn) => fn(item));
+    vaultListeners.forEach((fn) => {
+      fn(item);
+    });
   });
 
   return connection;

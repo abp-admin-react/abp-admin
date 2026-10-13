@@ -34,6 +34,7 @@ export function syncCultureCookie(locale: string): void {
   if (typeof document === 'undefined') {
     return;
   }
+  // biome-ignore lint/suspicious/noDocumentCookie: ABP 文化 cookie（.AspNetCore.Culture）只能由前端直写，无对应接口
   document.cookie = `.AspNetCore.Culture=${formatCultureCookie(
     toAbpCulture(locale),
   )}; path=/; samesite=lax`;

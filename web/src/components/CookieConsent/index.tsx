@@ -66,6 +66,7 @@ const CookieConsent: React.FC = () => {
       // 即使接口失败也先隐藏横幅，cookie 由前端兜底写入
       const days = config.expirationDays ?? FALLBACK_EXPIRATION_DAYS;
       const expires = new Date(Date.now() + days * 86400000).toUTCString();
+      // biome-ignore lint/suspicious/noDocumentCookie: 接口失败时的前端兜底同意 cookie，属刻意直写
       document.cookie = `${CONSENT_COOKIE_NAME}=accepted; expires=${expires}; path=/; samesite=lax`;
     }
     setDismissed(true);

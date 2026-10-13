@@ -27,8 +27,9 @@ type DataScopeModalProps = {
 function buildOuTree(items: OrganizationUnitDto[]): DataNode[] {
   const nodes = new Map<string, DataNode>();
   for (const item of items) {
-    nodes.set(item.id!, {
-      key: item.id!,
+    if (!item.id) continue;
+    nodes.set(item.id, {
+      key: item.id,
       title: item.displayName,
       children: [],
     });
@@ -36,9 +37,11 @@ function buildOuTree(items: OrganizationUnitDto[]): DataNode[] {
 
   const roots: DataNode[] = [];
   for (const item of items) {
-    const node = nodes.get(item.id!)!;
-    if (item.parentId && nodes.has(item.parentId)) {
-      const parent = nodes.get(item.parentId)!;
+    if (!item.id) continue;
+    const node = nodes.get(item.id);
+    if (!node) continue;
+    const parent = item.parentId ? nodes.get(item.parentId) : undefined;
+    if (parent) {
       parent.children = parent.children || [];
       parent.children.push(node);
     } else {
