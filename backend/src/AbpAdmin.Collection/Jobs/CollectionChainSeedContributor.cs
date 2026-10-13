@@ -47,12 +47,12 @@ public class CollectionChainSeedContributor : IDataSeedContributor, ITransientDe
             return;
         }
 
-        var network = await _networkRepository.FirstOrDefaultAsync(n => n.Name == "BSC");
+        var network = await _networkRepository.FirstOrDefaultAsync(n => n.Name == CollectionConsts.BscNetworkName);
         if (network == null)
         {
             network = new ColNetwork(_guidGenerator.Create())
             {
-                Name = "BSC",
+                Name = CollectionConsts.BscNetworkName,
                 ChainId = 56,
                 CreationTime = _clock.Now,
             };

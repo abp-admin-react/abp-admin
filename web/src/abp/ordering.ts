@@ -99,19 +99,19 @@ export type PayChannelCategory = 'Fiat' | 'Web3' | 'Balance';
 /** 渠道元数据（与后端 OrderingPayChannel 对齐）——全站渠道显示的唯一出处 */
 export const PAY_CHANNEL_META: Record<
   string,
-  { category: PayChannelCategory; label: string; color: string; available: boolean }
+  { category: PayChannelCategory; label: string; color: string }
 > = {
-  WechatNative: { category: 'Fiat', label: '微信 Native', color: 'green', available: false },
-  AlipayPrecreate: { category: 'Fiat', label: '支付宝当面付', color: 'blue', available: false },
-  StripeCheckout: { category: 'Fiat', label: 'Stripe Checkout', color: 'purple', available: false },
-  BalanceUsdt: { category: 'Balance', label: '余额 USDT', color: 'default', available: true },
-  BalanceUsdc: { category: 'Balance', label: '余额 USDC', color: 'default', available: true },
+  WechatNative: { category: 'Fiat', label: '微信 Native', color: 'green' },
+  AlipayPrecreate: { category: 'Fiat', label: '支付宝当面付', color: 'blue' },
+  StripeCheckout: { category: 'Fiat', label: 'Stripe Checkout', color: 'purple' },
+  BalanceUsdt: { category: 'Balance', label: '余额 USDT', color: 'default' },
+  BalanceUsdc: { category: 'Balance', label: '余额 USDC', color: 'default' },
 };
 
 /** 当前唯一支付网络（与后端 ColNetwork 种子一致）；多链上线后此兜底移除、以 payNetwork 为准 */
 const DEFAULT_NETWORK = 'BSC';
 
-const currencyLabel = (c?: string) =>
+export const currencyLabel = (c?: string) =>
   c === 'Usdt' ? 'USDT' : c === 'Usdc' ? 'USDC' : c === 'Cny' ? 'CNY' : c === 'Usd' ? 'USD' : c ?? '';
 
 /**
@@ -133,31 +133,25 @@ export function payChannelLabel(order: Pick<OrderDto, 'payChannel' | 'payCurrenc
   return order.payCurrency ? `${meta.label}·${currencyLabel(order.payCurrency)}` : meta.label;
 }
 
-/** 支付方式三组（发起支付下拉用）；法币渠道 M3/M4 实装前不可真实支付（开发态 Fake 网关） */
-export const PAY_METHOD_GROUPS: { category: PayChannelCategory; groupLabel: string; methods: { value: string; label: string; note?: string }[] }[] = [
+/** 支付方式三组（发起支付下拉用）；label 一律回指 PAY_CHANNEL_META（单一出处），
+ * 法币渠道 M3/M4 实装前不可真实支付（开发态 Fake 网关，下拉里标注）。 */
+export const PAY_METHOD_GROUPS: { groupLabel: string; methods: { value: string; label: string; note?: string }[] }[] = [
   {
-    category: 'Web3',
-    groupLabel: 'Web3（链上余额支付）',
+    groupLabel: '余额支付（账本划扣）',
     methods: [
-      { value: 'BalanceUsdt', label: '余额 · USDT' },
-      { value: 'BalanceUsdc', label: '余额 · USDC' },
+      { value: 'BalanceUsdt', label: PAY_CHANNEL_META.BalanceUsdt.label },
+      { value: 'BalanceUsdc', label: PAY_CHANNEL_META.BalanceUsdc.label },
     ],
   },
   {
-    category: 'Fiat',
     groupLabel: '法币渠道',
     methods: [
-      { value: 'WechatNative', label: '微信 Native', note: 'M3' },
-      { value: 'AlipayPrecreate', label: '支付宝当面付', note: 'M3' },
+      { value: 'WechatNative', label: PAY_CHANNEL_META.WechatNative.label, note: 'M3' },
+      { value: 'AlipayPrecreate', label: PAY_CHANNEL_META.AlipayPrecreate.label, note: 'M3' },
       { value: 'StripeCheckout', label: 'Stripe Checkout (USD)', note: 'M4' },
     ],
   },
 ];
-
-/** 兼容旧引用：平铺方式列表（分组展示请用 PAY_METHOD_GROUPS） */
-export const PAY_METHODS = PAY_METHOD_GROUPS.flatMap((g) =>
-  g.methods.map((m) => ({ value: m.value, label: m.label })),
-);
 
 /** 创建业务单 */
 export async function createOrder(data: CreateOrderInput) {

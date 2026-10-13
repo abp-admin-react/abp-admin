@@ -298,6 +298,7 @@ public class OrderAppService : ApplicationService
             PayChannel = order.PayChannel?.ToString(),
             PayAmount = order.PayAmount == null ? null : AbpAdmin.Collection.Contracts.CollectionAmounts.Format(order.PayAmount.Value),
             PayCurrency = order.PayCurrency?.ToString(),
+            PayNetwork = order.PayNetwork,
             PaidAt = order.PaidAt,
             ChannelTradeNo = order.ChannelTradeNo,
             FulfilledAt = order.FulfilledAt,

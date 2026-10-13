@@ -35,6 +35,9 @@ public class OrderDto
     /// <summary>致付收款的渠道单号（微信/支付宝交易号、Stripe 单号）；余额支付为 null。用户对账凭证。</summary>
     public string? ChannelTradeNo { get; set; }
 
+    /// <summary>支付网络（Web3/余额渠道如 "BSC"；法币渠道为 null）。前端按「网络·币种」组合显示。</summary>
+    public string? PayNetwork { get; set; }
+
     /// <summary>履约时间（管理端标履约时写入）。</summary>
     public DateTime? FulfilledAt { get; set; }
 

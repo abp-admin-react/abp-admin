@@ -104,7 +104,9 @@ public class OrderStatusSyncJobTests : OrderingStubTestBase
         topUps.Count.ShouldBe(2); // 每笔已入账充值一条 Paid 充值订单，停在 Paid（计划第 2 节）
         topUps.ShouldAllBe(o => o.Status == OrderStatus.Paid);
         topUps.Single(o => o.BalanceTxnId == txnA).PayChannel.ShouldBe(OrderingPayChannel.BalanceUsdt);
+        topUps.Single(o => o.BalanceTxnId == txnA).PayNetwork.ShouldBe("BSC");   // 渠道模型：充值单带来源网络
         topUps.Single(o => o.BalanceTxnId == txnB).PayChannel.ShouldBe(OrderingPayChannel.BalanceUsdc);
+        topUps.Single(o => o.BalanceTxnId == txnB).PayNetwork.ShouldBe("BSC");
 
         // 幂等：重跑不重复插（余额流水重扫会再次带回，按充值订单存在性去重）
         await ExecuteJobAsync();
@@ -132,6 +134,7 @@ public class OrderStatusSyncJobTests : OrderingStubTestBase
         var current = await ReloadAsync(orderId);
         current.Status.ShouldBe(OrderStatus.Paid);
         current.PayChannel.ShouldBe(OrderingPayChannel.BalanceUsdt);
+        current.PayNetwork.ShouldBe("BSC");   // 渠道模型：复活单带来源网络
         current.BalanceTxnId.ShouldNotBeNull();
     }
 

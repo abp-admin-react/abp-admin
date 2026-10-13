@@ -23,6 +23,7 @@ import {
   OrderDto,
   PAY_CHANNEL_META,
   PAY_METHOD_GROUPS,
+  currencyLabel,
   payChannelLabel,
   cancelOrder,
   createOrder,
@@ -212,7 +213,7 @@ export default function OrderingPage() {
     <Space>
       {balances.map((b) => (
         <Tag key={b.currency} color={b.currency === 'Usdt' ? 'green' : 'blue'}>
-          {b.currency === 'Usdt' ? 'USDT' : 'USDC'} 余额 {b.balance}
+          {currencyLabel(b.currency)} 余额 {b.balance}
         </Tag>
       ))}
     </Space>
@@ -259,8 +260,7 @@ export default function OrderingPage() {
       title: '币种',
       dataIndex: 'currency',
       width: 80,
-      render: (_, t) =>
-        t.currency === 'Usdt' ? 'USDT' : t.currency === 'Usdc' ? 'USDC' : t.currency,
+      render: (_, t) => currencyLabel(t.currency),
     },
     {
       title: '变动后余额',

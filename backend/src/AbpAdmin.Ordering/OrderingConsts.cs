@@ -28,7 +28,9 @@ public static class OrderingConsts
     /// </summary>
     public const string OrderBusinessType = "Order";
 
-    /// <summary>当前唯一支付网络名（与 ColNetwork.Name 种子一致）：余额/充值订单 PayNetwork 的取值。
+    /// <summary>当前唯一支付网络名：余额/充值订单 PayNetwork 的取值。
+    /// 镜像常量 CollectionConsts.BscNetworkName（Ordering 不引用 Collection 实现程序集，
+    /// 跨模块复制是边界所迫，两处必须同值；DB 的 ColNetwork.Name 为事实源头）。
     /// 多链上线时由渠道定义携带网络名，逐步替换此单链常量的引用点。</summary>
     public const string BscNetworkName = "BSC";
 }

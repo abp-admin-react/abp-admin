@@ -181,6 +181,7 @@ public class OrderPaymentManager : DomainService
                     .SetProperty(o => o.PayAmount, quote.PayAmount)
                     .SetProperty(o => o.PayCurrency, quote.PayCurrency)
                     .SetProperty(o => o.PayChannel, quote.PayMethod)
+                    .SetProperty(o => o.PayNetwork, OrderingConsts.BscNetworkName)
                     .SetProperty(o => o.QuoteId, quote.Id)
                     .SetProperty(o => o.BalanceTxnId, debit.BalanceTxnId));
 
@@ -617,6 +618,8 @@ public class OrderPaymentManager : DomainService
                 .SetProperty(o => o.PaidAt, _clock.Now)
                 .SetProperty(o => o.CollectionId, collectionId)
                 .SetProperty(o => o.PayChannel, channel)
+                // 法币渠道无网络概念（PayNetwork 保持 null）；将来若加链上直付渠道，
+                // 由渠道定义携带网络名写入（与余额路径的 OrderingConsts.BscNetworkName 同口径）
                 .SetProperty(o => o.ChannelTradeNo, channelTradeNo));
         return rows > 0;
     }
@@ -665,6 +668,7 @@ public class OrderPaymentManager : DomainService
                 .SetProperty(o => o.PayChannel, currency == AbpAdmin.Collection.Contracts.CollectionCurrency.Usdc
                     ? OrderingPayChannel.BalanceUsdc
                     : OrderingPayChannel.BalanceUsdt)
+                .SetProperty(o => o.PayNetwork, OrderingConsts.BscNetworkName)
                 .SetProperty(o => o.BalanceTxnId, balanceTxnId));
         return rows > 0;
     }
