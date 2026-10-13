@@ -256,6 +256,43 @@ public class OrderCommerceTests : OrderingTestBase
     }
 
     [Fact]
+    public async Task Balance_Paid_And_TopUp_Orders_Carry_Bsc_Network()
+    {
+        // 渠道模型：Web3/余额类订单写 PayNetwork（当前单链 BSC），法币渠道单为 null
+        var order = await CreateOrderAsync(Me);
+        await UowAsync(() => GetRequiredService<OrderPaymentManager>()
+            .MarkPaidFromDebitAsync(order.Id, Guid.NewGuid(), CollectionCurrency.Usdt));
+
+        var after = await UowAsync(() => ReloadAsync(order.Id));
+        after.PayChannel.ShouldBe(OrderingPayChannel.BalanceUsdt);
+        after.PayNetwork.ShouldBe("BSC");
+    }
+
+    [Fact]
+    public async Task Channel_Paid_Order_Has_No_Network()
+    {
+        var order = await CreateOrderAsync(Me);
+        var collectionId = Guid.NewGuid();
+        await UowAsync(async () =>
+        {
+            var dbContext = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+            await dbContext.Orders.Where(o => o.Id == order.Id)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(o => o.PayAmount, 10m)
+                    .SetProperty(o => o.PayCurrency, CollectionCurrency.Cny)
+                    .SetProperty(o => o.CollectionId, collectionId)
+                    .SetProperty(o => o.PayChannel, OrderingPayChannel.WechatNative));
+        });
+
+        await UowAsync(() => GetRequiredService<OrderPaymentManager>()
+            .HandleCollectionCompletedAsync(order.Id, collectionId,
+                OrderingPayChannel.WechatNative, 10m, CollectionCurrency.Cny, "wx-net-probe"));
+
+        var after = await UowAsync(() => ReloadAsync(order.Id));
+        after.PayNetwork.ShouldBeNull();   // 法币渠道无网络概念
+    }
+
+    [Fact]
     public async Task GetOrderRefs_Empty_Input_Returns_Empty()
     {
         var service = GetRequiredService<OrderAppService>();

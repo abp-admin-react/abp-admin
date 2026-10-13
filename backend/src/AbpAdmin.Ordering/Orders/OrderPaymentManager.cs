@@ -352,6 +352,7 @@ public class OrderPaymentManager : DomainService
             PayChannel = currency == AbpAdmin.Collection.Contracts.CollectionCurrency.Usdt
                 ? OrderingPayChannel.BalanceUsdt
                 : OrderingPayChannel.BalanceUsdc,
+            PayNetwork = OrderingConsts.BscNetworkName,
             Status = OrderStatus.Paid,
             PaidAt = creditedAt,
             BalanceTxnId = balanceTxnId,
@@ -637,6 +638,7 @@ public class OrderPaymentManager : DomainService
                 .SetProperty(o => o.PayChannel, currency == AbpAdmin.Collection.Contracts.CollectionCurrency.Usdc
                     ? OrderingPayChannel.BalanceUsdc
                     : OrderingPayChannel.BalanceUsdt)
+                .SetProperty(o => o.PayNetwork, OrderingConsts.BscNetworkName)
                 .SetProperty(o => o.BalanceTxnId, balanceTxnId));
         return rows > 0;
     }

@@ -67,6 +67,8 @@ public class DepositOrderListDto
     public string? Amount { get; set; }
     public string RawAmount { get; set; } = default!;
     public string Symbol { get; set; } = default!;
+    /// <summary>来源网络名（ColNetwork.Name，如 "BSC"）——多链就绪的网络维度列。</summary>
+    public string NetworkName { get; set; } = default!;
     public long BlockNumber { get; set; }
     public string Status { get; set; } = default!;
     public Guid? SweepTaskId { get; set; }
@@ -212,6 +214,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var symbols = await dbContext.Tokens.ToDictionaryAsync(t => t.Id, t => t.Symbol);
+        var networkNames = await dbContext.Networks.ToDictionaryAsync(n => n.Id, n => n.Name);
         var query = dbContext.DepositOrders.AsNoTracking();
 
         if (!string.IsNullOrEmpty(status) && Enum.TryParse<DepositOrderStatus>(status, true, out var st))
@@ -244,6 +247,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
             Amount = o.Amount == null ? null : CollectionAmounts.Format(o.Amount.Value),
             RawAmount = o.RawAmount,
             Symbol = symbols.TryGetValue(o.TokenId, out var s) ? s : "?",
+            NetworkName = networkNames.TryGetValue(o.NetworkId, out var n) ? n : "?",
             BlockNumber = o.BlockNumber,
             Status = o.Status.ToString(),
             SweepTaskId = o.SweepTaskId,

@@ -21,7 +21,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
   OrderDto,
-  PAY_METHODS,
+  PAY_CHANNEL_META,
+  PAY_METHOD_GROUPS,
+  payChannelLabel,
   cancelOrder,
   createOrder,
   getOrder,
@@ -129,7 +131,7 @@ const OrderTimeline: React.FC<{ order: OrderDto }> = ({ order }) => {
       children: `支付 · ${fmtTime(order.paidAt)}${
         order.channelTradeNo
           ? ` · 渠道单号 ${order.channelTradeNo}`
-          : order.payChannel?.startsWith('Balance')
+          : PAY_CHANNEL_META[order.payChannel ?? '']?.category === 'Balance'
             ? ' · 余额支付'
             : ''
       }`,
@@ -369,8 +371,13 @@ export default function OrderingPage() {
                   {
                     title: '支付方式',
                     dataIndex: 'payChannel',
-                    width: 120,
-                    render: (_, record) => record.payChannel ?? '-',
+                    width: 150,
+                    render: (_, record) => {
+                      const label = payChannelLabel(record);
+                      if (!label) return '-';
+                      const meta = PAY_CHANNEL_META[record.payChannel!];
+                      return <Tag color={meta?.color ?? 'default'}>{label}</Tag>;
+                    },
                   },
                   {
                     title: '操作',
@@ -504,8 +511,18 @@ export default function OrderingPage() {
             style={{ width: '100%' }}
             value={payMethod}
             onChange={setPayMethod}
-            options={PAY_METHODS.map((m) => ({ value: m.value, label: m.label }))}
+            options={PAY_METHOD_GROUPS.map((g) => ({
+              label: g.groupLabel,
+              options: g.methods.map((m) => ({
+                value: m.value,
+                label: m.note ? `${m.label}（${m.note} 实装前不可真实支付）` : m.label,
+                disabled: false,
+              })),
+            }))}
           />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            法币渠道（微信/支付宝/Stripe）在 M3/M4 实装前为开发态假网关，仅联调路径可用。
+          </Typography.Text>
           {payPayload && (
             <Card size="small" title="支付凭据（扫码 / 跳转）">
               <div style={{ wordBreak: 'break-all' }}>{payPayload}</div>

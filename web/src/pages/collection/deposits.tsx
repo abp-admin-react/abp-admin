@@ -58,6 +58,8 @@ export default function DepositsPage() {
     { title: 'Log#', dataIndex: 'logIndex', width: 60, align: 'center' as const },
     { title: '用户', dataIndex: 'userId', width: 120, ellipsis: true,
       render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{`${v.slice(0, 8)}...`}</Text> },
+    { title: '网络', dataIndex: 'networkName', width: 80,
+      render: (v: string) => <Tag color="cyan">{v}</Tag> },
     { title: '代币', dataIndex: 'symbol', width: 70 },
     { title: '金额', dataIndex: 'amount', width: 110, align: 'right' as const,
       render: (v: string | null, row: DepositOrderListDto) => v ?? <Tooltip title={row.rawAmount}><Tag color="warning">超精度</Tag></Tooltip> },

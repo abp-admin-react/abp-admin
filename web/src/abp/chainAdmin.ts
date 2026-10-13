@@ -44,6 +44,8 @@ export interface DepositOrderListDto {
   amount?: string;
   rawAmount: string;
   symbol: string;
+  /** 网络名（ColNetwork.Name，如 BSC） */
+  networkName: string;
   blockNumber: number;
   status: string;
   sweepTaskId?: string;

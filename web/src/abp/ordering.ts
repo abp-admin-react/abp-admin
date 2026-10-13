@@ -26,6 +26,8 @@ export type OrderDto = {
   paidAt?: string;
   /** 致付收款的渠道单号（微信/支付宝交易号、Stripe 单号）；余额支付为 null */
   channelTradeNo?: string;
+  /** 支付网络（Web3 渠道如 "BSC"；法币渠道为 null） */
+  payNetwork?: string;
   /** 履约时间 */
   fulfilledAt?: string;
   /** 实际关闭时间（用户取消 / 过期关闭；ExpiresAt 只是付款截止） */
@@ -91,14 +93,71 @@ export type PagedResult<T> = {
   totalCount: number;
 };
 
-/** 支付方式（与后端 OrderingPayChannel 对齐；余额按币种是两个方式） */
-export const PAY_METHODS = [
-  { value: 'WechatNative', label: '微信 Native' },
-  { value: 'AlipayPrecreate', label: '支付宝当面付' },
-  { value: 'StripeCheckout', label: 'Stripe Checkout (USD)' },
-  { value: 'BalanceUsdt', label: '余额 USDT' },
-  { value: 'BalanceUsdc', label: '余额 USDC' },
-] as const;
+/** 渠道大类：法币 / Web3 链上 / 账户余额（账本划扣，非外部渠道） */
+export type PayChannelCategory = 'Fiat' | 'Web3' | 'Balance';
+
+/** 渠道元数据（与后端 OrderingPayChannel 对齐）——全站渠道显示的唯一出处 */
+export const PAY_CHANNEL_META: Record<
+  string,
+  { category: PayChannelCategory; label: string; color: string; available: boolean }
+> = {
+  WechatNative: { category: 'Fiat', label: '微信 Native', color: 'green', available: false },
+  AlipayPrecreate: { category: 'Fiat', label: '支付宝当面付', color: 'blue', available: false },
+  StripeCheckout: { category: 'Fiat', label: 'Stripe Checkout', color: 'purple', available: false },
+  BalanceUsdt: { category: 'Balance', label: '余额 USDT', color: 'default', available: true },
+  BalanceUsdc: { category: 'Balance', label: '余额 USDC', color: 'default', available: true },
+};
+
+/** 当前唯一支付网络（与后端 ColNetwork 种子一致）；多链上线后此兜底移除、以 payNetwork 为准 */
+const DEFAULT_NETWORK = 'BSC';
+
+const currencyLabel = (c?: string) =>
+  c === 'Usdt' ? 'USDT' : c === 'Usdc' ? 'USDC' : c === 'Cny' ? 'CNY' : c === 'Usd' ? 'USD' : c ?? '';
+
+/**
+ * 订单支付方式的组合显示标签：
+ * - 法币渠道：渠道名（+币种，如 微信 Native·CNY）
+ * - Web3/余额：网络·币种（如 BSC·USDT / 余额·USDT）
+ * 网络读 order.payNetwork，缺失按单链兜底 BSC（余额单网络含义是「余额来源链」）。
+ */
+export function payChannelLabel(order: Pick<OrderDto, 'payChannel' | 'payCurrency' | 'payNetwork'>): string | null {
+  if (!order.payChannel) return null;
+  const meta = PAY_CHANNEL_META[order.payChannel];
+  if (!meta) return order.payChannel;
+  if (meta.category === 'Balance') {
+    return `余额·${currencyLabel(order.payCurrency)}`;
+  }
+  if (meta.category === 'Web3') {
+    return `${order.payNetwork ?? DEFAULT_NETWORK}·${currencyLabel(order.payCurrency)}`;
+  }
+  return order.payCurrency ? `${meta.label}·${currencyLabel(order.payCurrency)}` : meta.label;
+}
+
+/** 支付方式三组（发起支付下拉用）；法币渠道 M3/M4 实装前不可真实支付（开发态 Fake 网关） */
+export const PAY_METHOD_GROUPS: { category: PayChannelCategory; groupLabel: string; methods: { value: string; label: string; note?: string }[] }[] = [
+  {
+    category: 'Web3',
+    groupLabel: 'Web3（链上余额支付）',
+    methods: [
+      { value: 'BalanceUsdt', label: '余额 · USDT' },
+      { value: 'BalanceUsdc', label: '余额 · USDC' },
+    ],
+  },
+  {
+    category: 'Fiat',
+    groupLabel: '法币渠道',
+    methods: [
+      { value: 'WechatNative', label: '微信 Native', note: 'M3' },
+      { value: 'AlipayPrecreate', label: '支付宝当面付', note: 'M3' },
+      { value: 'StripeCheckout', label: 'Stripe Checkout (USD)', note: 'M4' },
+    ],
+  },
+];
+
+/** 兼容旧引用：平铺方式列表（分组展示请用 PAY_METHOD_GROUPS） */
+export const PAY_METHODS = PAY_METHOD_GROUPS.flatMap((g) =>
+  g.methods.map((m) => ({ value: m.value, label: m.label })),
+);
 
 /** 创建业务单 */
 export async function createOrder(data: CreateOrderInput) {

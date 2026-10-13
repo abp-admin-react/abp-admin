@@ -106,6 +106,10 @@ namespace AbpAdmin.Ordering.Migrations
                     b.Property<int?>("PayCurrency")
                         .HasColumnType("integer");
 
+                    b.Property<string>("PayNetwork")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<bool>("PaymentAnomaly")
                         .HasColumnType("boolean");
 

@@ -45,6 +45,14 @@ public class OrdOrder : BasicAggregateRoot<Guid>
 
     public AbpAdmin.Collection.Contracts.CollectionCurrency? PayCurrency { get; set; }
 
+    /// <summary>
+    /// 支付网络名（与 ColNetwork.Name 同口径，如 "BSC"）。Web3 渠道（链上/余额）支付时写入；
+    /// 法币渠道与余额业务单为 null？不——余额是 BSC 充值归集而来，按当前单链口径也写 "BSC"
+    ///（账本按币种记账，余额的来源链在账本层不可溯源；多链上线时此口径升级为「余额渠道
+    /// 不写网络」或按币种映射多条网络，由渠道定义带出）。法币渠道（微信/支付宝/Stripe）无网络概念，恒 null。
+    /// </summary>
+    public string? PayNetwork { get; set; }
+
     /// <summary>标成 Paid 时写入。补状态作业用它限定最近 7 天。</summary>
     public DateTime? PaidAt { get; set; }
 
