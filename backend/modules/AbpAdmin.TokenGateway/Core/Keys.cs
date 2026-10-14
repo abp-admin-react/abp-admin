@@ -22,6 +22,7 @@ public sealed class AbpKeyProtector(IStringEncryptionService enc) : IKeyProtecto
 /// <summary>每用户一把长期 hb-（登录复用，库里存哈希 + 密文），外加有时限会话 hbs-（只存哈希）。</summary>
 public class KeyStore(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider clock, IKeyProtector protector, IOptions<TokenGatewayOptions> options)
 {
+    /// <summary>已有则解密返回原 Key（登录复用，不轮换）；没有则新建。明文 Key 只在返回值里，不落日志。</summary>
     public async Task<string> IssueOrReuseKeyAsync(Guid userId)
     {
         await using var db = await dbf.CreateDbContextAsync();
@@ -44,6 +45,7 @@ public class KeyStore(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider
         }
     }
 
+    /// <summary>吊销该用户的长期 hb- Key（删行）；下次登录会签发新 Key。会话 hbs- 不受影响，到期自然失效。</summary>
     public async Task RevokeKeyAsync(Guid userId)
     {
         await using var db = await dbf.CreateDbContextAsync();

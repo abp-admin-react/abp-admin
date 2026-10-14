@@ -23,6 +23,12 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
         return Ok(new { @object = "list", data });
     }, log);
 
+    /// <summary>
+    /// 对话代理。顺序：鉴权（仅 hb-，会话 hbs- 不认 → 401 INVALID_KEY）→ 预占（不足 → 402 INSUFFICIENT_BALANCE）
+    /// → 转发 one-api → 结算（按 usage；流式缺 usage 时按字符粗估，最多扣到预占额）。
+    /// 任一步失败且已预占：全额解冻（不是退款）。上游原文（模型/渠道/URL/错误文本）一律不出本方法。
+    /// 流式已开始后出错：不能再改状态码，改为追加一帧 data:{error:{code,message}} 后结束。
+    /// </summary>
     [HttpPost("chat/completions")]
     public async Task Completions()
     {
@@ -41,7 +47,8 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             using var resp = await upstream.SendAsync(ticket.UpstreamBody, HttpContext.RequestAborted);
             if (!resp.IsSuccessStatusCode)
             {
-                // 原文只进内部日志，对外统一改写。
+                // 内部日志只记状态码 + 对外别名 + 内部模型名（排障用），上游响应体不读、不记；
+                // 对外统一改写：429 → RATE_LIMITED，其余 → UPSTREAM_UNAVAILABLE（见 UpstreamErrors）。
                 log.LogWarning("gateway upstream status {Status} alias {Alias} model {Model}", (int)resp.StatusCode, ticket.Alias.Alias, ticket.Alias.Model);
                 throw UpstreamErrors.FromStatus((int)resp.StatusCode);
             }
@@ -100,9 +107,13 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
         }
         catch (Exception e)
         {
+            // ticket 非空 = 已预占未结算：先全额解冻，保证每单只关一次（Wallet 内条件 UPDATE 兜底）。
             if (ticket is not null) await billing.FailAsync(ticket);
+            // 客户端断开：已解冻，无人接收响应，静默结束。
             if (HttpContext.RequestAborted.IsCancellationRequested) return;
             var ge = UpstreamErrors.FromException(e);
+            // GatewayException 是预期业务错误（余额不足/限流/上游映射），不记 Error；
+            // 其他异常记 Error 带堆栈，仅进内部日志，对外只给映射后的错误码与文案。
             if (e is not GatewayException) log.LogError(e, "gateway chat failed");
             if (started)
             {

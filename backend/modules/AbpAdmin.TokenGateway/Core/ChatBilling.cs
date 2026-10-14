@@ -9,9 +9,14 @@ public sealed record ChatTicket(Guid User, Guid Reservation, AliasOption Alias, 
 /// <summary>对话计费：选型（别名→内部模型）、reserve、settle、用量记录。</summary>
 public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOptions> options)
 {
+    /// <summary>单用户同时在途对话上限（进程内计数，单实例口径）；超出 → 429 RATE_LIMITED，且不预占。</summary>
     public const int MaxInflightPerUser = 4;
     private readonly ConcurrentDictionary<Guid, int> _inflight = new();
 
+    /// <summary>
+    /// 选别名（未知/缺省 → DefaultAlias）→ 限并发 → 按「输入粗估 + max_tokens」预占（至少 1）→ 生成上游请求体：
+    /// model 换成内部模型、去掉 user、流式强制 include_usage。返回的 ResponseId 是本次固定的 hb- id。
+    /// </summary>
     public async Task<ChatTicket> BeginAsync(Guid user, JsonObject request, string? bot)
     {
         var o = options.Value;
@@ -46,6 +51,7 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
         }
     }
 
+    /// <summary>按实际用量结算（Wallet 内最多扣到预占额，差额解冻）并记一条成功用量；返回实扣代币。</summary>
     public async Task<long> SettleAsync(ChatTicket t, long promptTokens, long completionTokens)
     {
         Done(t.User);
