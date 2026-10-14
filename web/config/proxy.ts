@@ -3,9 +3,9 @@
  * @doc https://umijs.org/docs/guides/proxy
  */
 
-// 后端端口：44395 被同框架的 MobileDot.ai 项目占用（同为 launchSettings 默认口），
-// 本项目固定走 44396（后端用 --urls https://localhost:44396 启动），避免端口互抢
-const target = 'https://localhost:44396';
+// 后端 HTTPS 端口须在 IIS Express 证书段 44300–44399 内；默认对齐 launchSettings 的 44300。
+// 后端换端口时用 ABP_TARGET=https://localhost:xxxxx 覆盖，不改这里。
+const target = process.env.ABP_TARGET || 'https://localhost:44300';
 
 function rewriteLocation(proxyRes: { headers: Record<string, unknown> }) {
   const location = proxyRes.headers.location;

@@ -13,6 +13,9 @@ export default function access(
     | undefined,
 ) {
   const policies = initialState?.grantedPolicies ?? {};
+  const financeShell =
+    typeof localStorage !== 'undefined' &&
+    localStorage.getItem('finance.shellAccess') === '1';
   const isHost = !initialState?.currentTenant?.isAvailable;
   return {
     canAdmin: !!policies['AbpIdentity.Users'],
@@ -172,5 +175,37 @@ export default function access(
       !!policies['AbpAdmin.TenantPackages.Update'] && isHost,
     canDeleteTenantPackages:
       !!policies['AbpAdmin.TenantPackages.Delete'] && isHost,
+
+    // 基础财务层（定稿 §5.2 · FinancePermissions）
+    // localStorage finance.shellAccess=1：仅放开前端菜单/按钮看壳；接口权限始终由后端判定（403），不是绕权。
+    // ApproveOwn / Scope.Agent 不受该开关影响。
+    canViewFinanceLedger: !!policies['Finance.Ledger.View'] || financeShell,
+    canExportFinanceLedger: !!policies['Finance.Ledger.Export'] || financeShell,
+    canManageFinanceAccounts: !!policies['Finance.Account.Manage'] || financeShell,
+    canViewFinanceRules: !!policies['Finance.Rule.View'] || financeShell,
+    canViewFinanceVouchers: !!policies['Finance.Voucher.View'] || financeShell,
+    canReverseFinanceVouchers: !!policies['Finance.Voucher.Reverse'] || financeShell,
+    canCreateFinanceAdjust: !!policies['Finance.Adjust.Create'] || financeShell,
+    canApproveFinanceAdjust: !!policies['Finance.Adjust.Approve'] || financeShell,
+    canSubmitFinanceAdjust: !!policies['Finance.Adjust.Submit'] || financeShell,
+    canRejectFinanceAdjust: !!policies['Finance.Adjust.Reject'] || financeShell,
+    canReverseFinanceAdjust: !!policies['Finance.Adjust.Reverse'] || financeShell,
+    canApproveOwnFinanceAdjust: !!policies['Finance.Adjust.ApproveOwn'],
+    canRunFinanceReconcile: !!policies['Finance.Reconcile.Run'] || financeShell,
+    canViewFinancePeriod: !!policies['Finance.Period.View'] || financeShell,
+    canViewFinanceBizDocs: !!policies['Finance.BizDoc.View'] || financeShell,
+    canViewFinanceBalances: !!policies['Finance.Balance.View'] || financeShell,
+    canFinanceScopeAgent: !!policies['Finance.Scope.Agent'],
+    // 财务总菜单：产品口径看 Finance.Ledger.View；子页各看各的码、不叠两层。
+    // 代理只有 BizDoc/Balance.View，Umi 父路由 access=false 会连带隐藏子菜单，
+    // 所以父级取「任一子页可见」，等价于不叠加父级校验。
+    canViewFinance:
+      !!policies['Finance.Ledger.View'] ||
+      !!policies['Finance.Rule.View'] ||
+      !!policies['Finance.Voucher.View'] ||
+      !!policies['Finance.Period.View'] ||
+      !!policies['Finance.BizDoc.View'] ||
+      !!policies['Finance.Balance.View'] ||
+      financeShell,
   };
 }
