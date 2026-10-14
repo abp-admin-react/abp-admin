@@ -1,8 +1,22 @@
 /**
  * 财务 / Ledger 接口封装（定稿 §5）。
- * 默认走真接口（/api/app/fin-*）；仅 localStorage finance.useMock=1 时走内存假数据（形状对齐 §5.3，
- * 只用于离线看壳）。页面只认这里导出的函数和错误映射，换接口只改本文件。
- * 时间：接口 DateTime 一律 UTC（带 Z）；展示/筛选转换见 @/utils/time。
+ *
+ * ## 边界
+ * - 页面只认本文件导出的函数、DTO、错误映射与权限相关辅助；换路径/错误码只改这里。
+ * - 默认走真接口 `/api/app/fin-*`；不在此写死主机——走相对路径，由 proxy.ts / nginx 转到 Host。
+ * - 时间：接口 DateTime 一律 UTC（带 Z 或无偏移当 UTC）；展示/筛选见 `@/utils/time`。
+ *
+ * ## 浏览器本地开关（非仓库配置；勿提交到 git）
+ * | localStorage 键 | 取值 | 作用 | 改错/误开后果 |
+ * | --- | --- | --- | --- |
+ * | `finance.useMock` | `1` 开，其它关 | 内存假数据看壳，不打真 API | 联调时数据「假成功」；验收前必须关掉 |
+ * | `finance.shellAccess` | `1` 开 | 前端菜单/按钮放行（access.ts）；**接口仍按后端权限 403** | 只能看壳，不能当授权；ApproveOwn / Scope.Agent 不受此键影响 |
+ *
+ * ## 不变量（与后端契约对齐）
+ * - 错误码在 `error.code`，附加数据在 `error.data`（Code / ParentId / Id / Field…）。
+ * - 科目 NotFound：认 `Finance:AccountNotFound` 与兼容态 `Finance:Account:NotFound`。
+ * - 调账五态：Draft → Pending → Posted|Rejected；Posted → Reversed；术语与 ADJUST_STATUS_LABEL 一致。
+ * - 自批禁止：真码 `Finance:Adjust:SelfApproveNotAllowed`（403）；Legacy 仅兼容旧 mock。
  */
 import { request } from '@umijs/max';
 
@@ -166,11 +180,16 @@ export type FinOverviewDto = {
 };
 
 /**
- * ABP 约定前缀 /api/app/fin-*（F1 已确认）：
- * - A1 GET fin-overview；A2b GET fin-posting-rule（只读）；A4 GET fin-period/current
- * - 调账动作 POST fin-manual-adjust/{id}/submit|approve|reject|reopen；reject body {rejectReason}
- * - A5 includeDemo query bool，默认 false
- * 具体段名以 F1 路径表为准，改时只改这里。
+ * ABP 约定前缀 `/api/app/fin-*`（F1 已确认）。相对路径，主机由代理决定。
+ * - A1 GET fin-overview
+ * - A2 CRUD fin-account；写操作需 `Finance.Account.Manage`
+ * - A2b GET fin-posting-rule（只读）
+ * - A3 fin-voucher / fin-manual-adjust；调账动作 POST `{id}/submit|approve|reject|reopen`；
+ *   reject body `{ rejectReason }`（缺 reason → RejectReasonRequired）
+ * - A4 GET fin-period/current
+ * - A5 fin-reconcile；includeDemo 默认 false
+ * - A6 fin-biz-doc；A7 fin-ledger/sub-account-balances
+ * 改路径只改本表，页面不要拼字符串。
  */
 export const API = {
   overview: '/api/app/fin-overview',
@@ -184,8 +203,15 @@ export const API = {
   balanceProjection: '/api/app/fin-ledger/sub-account-balances',
 } as const;
 
+/**
+ * 与后端 `FinanceErrorCodes` 对齐的错误码常量（取自响应 `error.code`）。
+ * 展示文案走 `accountErrorText` / `financeErrorText`，页面不要直接把码弹给用户。
+ * 后端若改码：先改这里再改映射函数；A2 NotFound 两种码都要继续认。
+ */
 export const FINANCE_ERROR = {
+  /** 自批禁止（现行真码，通常 HTTP 403） */
   SelfApproveForbidden: 'Finance:Adjust:SelfApproveNotAllowed',
+  /** 旧 mock / 历史码，仅兼容，新后端不应再发 */
   SelfApproveLegacy: 'Finance:Adjust:SelfApproveForbidden',
   SubmitDenied: 'Finance:Adjust:SubmitDenied',
   RejectDenied: 'Finance:Adjust:RejectDenied',
@@ -193,17 +219,25 @@ export const FINANCE_ERROR = {
   NotApplicant: 'Finance:Adjust:NotApplicant',
   CreateDenied: 'Finance:Adjust:CreateDenied',
   ApproveDenied: 'Finance:Adjust:ApproveDenied',
+  /** 五态流转不允许的动作（如对 Posted 再 submit） */
   InvalidStatus: 'Finance:Adjust:InvalidStatus',
   ReopenDenied: 'Finance:Adjust:ReopenDenied',
+  /** 驳回未带 rejectReason */
   RejectReasonRequired: 'Finance:Adjust:RejectReasonRequired',
+  /** 系统科目不可改删启停；data.Code */
   AccountSystemReadOnly: 'Finance:Account:SystemReadOnly',
+  /** 有分录不可删/不可改类型方向；data.Code */
   AccountHasEntries: 'Finance:Account:HasEntries',
   AccountDisableOnly: 'Finance:Account:DisableOnly',
+  /** 科目编号重复；data.Code */
   AccountCodeDuplicate: 'Finance:Account:CodeDuplicate',
+  /** 有子科目不可删 */
   AccountHasChildren: 'Finance:Account:HasChildren',
-  /** 后端常量 FinanceErrorCodes.AccountNotFound 实值为 Finance:AccountNotFound（无中间段） */
+  /** 真源：FinanceErrorCodes.AccountNotFound = Finance:AccountNotFound（无中间 Account 段） */
   AccountNotFound: 'Finance:AccountNotFound',
+  /** 兼容态；与 AccountNotFound 同等处理 */
   AccountNotFoundAlt: 'Finance:Account:NotFound',
+  /** 缺必填等；看 data.Field，页面标红，不弹通用 toast */
   InvalidEvent: 'Finance:InvalidEvent',
 } as const;
 

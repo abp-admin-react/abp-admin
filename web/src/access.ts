@@ -1,8 +1,12 @@
 import type { AppCurrentUser } from './app';
 
 /**
+ * Umi access 插件：把 ABP `grantedPolicies` 映射成路由/按钮用的布尔开关。
+ * - 权限字符串 = 后端权限名，禁止「前端自创码」。
+ * - isHost：无可用租户时才为 true；Host-only 功能（OpenIddict、Editions…）必须带 isHost。
+ * - 财务壳开关见返回值旁注释；与 `src/abp/finance.ts` 文件头 localStorage 表一致。
  * @see https://umijs.org/docs/max/access#access
- * */
+ */
 export default function access(
   initialState:
     | {
@@ -176,9 +180,11 @@ export default function access(
     canDeleteTenantPackages:
       !!policies['AbpAdmin.TenantPackages.Delete'] && isHost,
 
-    // 基础财务层（定稿 §5.2 · FinancePermissions）
-    // localStorage finance.shellAccess=1：仅放开前端菜单/按钮看壳；接口权限始终由后端判定（403），不是绕权。
-    // ApproveOwn / Scope.Agent 不受该开关影响。
+    // —— 基础财务层（定稿 §5.2 · 后端 FinancePermissions）——
+    // 权限码字符串必须与后端权限定义一字不差；改名先改后端再改这里与 routes access。
+    // localStorage finance.shellAccess=1：仅放开前端菜单/按钮看壳；接口仍 403，不是绕权。
+    // 不变量：canApproveOwnFinanceAdjust / canFinanceScopeAgent 故意不吃 shellAccess。
+    // 调账动作与五态：Create/Submit/Approve/Reject/Reverse + ApproveOwn（自批，默认关）。
     canViewFinanceLedger: !!policies['Finance.Ledger.View'] || financeShell,
     canExportFinanceLedger: !!policies['Finance.Ledger.Export'] || financeShell,
     canManageFinanceAccounts: !!policies['Finance.Account.Manage'] || financeShell,
@@ -196,9 +202,9 @@ export default function access(
     canViewFinanceBizDocs: !!policies['Finance.BizDoc.View'] || financeShell,
     canViewFinanceBalances: !!policies['Finance.Balance.View'] || financeShell,
     canFinanceScopeAgent: !!policies['Finance.Scope.Agent'],
-    // 财务总菜单：产品口径看 Finance.Ledger.View；子页各看各的码、不叠两层。
-    // 代理只有 BizDoc/Balance.View，Umi 父路由 access=false 会连带隐藏子菜单，
-    // 所以父级取「任一子页可见」，等价于不叠加父级校验。
+    // 财务总菜单可见性：产品主口径是 Finance.Ledger.View；子页各绑各的码。
+    // 代理若只有 BizDoc/Balance.View，父路由 access=false 会整枝藏掉子菜单，
+    // 故父级用「任一子页权限 ∪ shellAccess」并集；细权仍在子路由 / 按钮上。
     canViewFinance:
       !!policies['Finance.Ledger.View'] ||
       !!policies['Finance.Rule.View'] ||
