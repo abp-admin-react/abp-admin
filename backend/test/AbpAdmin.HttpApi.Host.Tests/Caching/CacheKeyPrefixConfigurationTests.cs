@@ -49,16 +49,29 @@ public class CacheKeyPrefixConfigurationTests
     [Fact]
     public async Task Instance_Discriminator_Is_The_Default_When_KeyPrefix_Not_Configured()
     {
-        // 部署身份三接线之一（缓存 KeyPrefix 默认值；另两处：DP 密钥环键名、ChannelPrefix）：
-        // 只配 App:InstanceDiscriminator 也能完成缓存隔离——部署身份一处声明、三处生效
+        // Clear shipped KeyPrefix so InstanceDiscriminator fallback is what we assert.
+        // Cache.json ships KeyPrefix=abpadmin:; without clearing, this test would see that.
         var services = await HostUnderTest.CreateServiceCollectionAsync(
         [
+            new KeyValuePair<string, string?>("DistributedCache:KeyPrefix", ""),
             new KeyValuePair<string, string?>("App:InstanceDiscriminator", "shop-a"),
         ]);
         await using var provider = services.BuildServiceProvider();
 
         provider.GetRequiredService<IOptions<AbpDistributedCacheOptions>>()
             .Value.KeyPrefix.ShouldBe("shop-a");
+    }
+
+
+    [Fact]
+    public async Task Shipped_Configuration_Uses_Abpadmin_Prefix()
+    {
+        // Shipped intent: Configuration/Cache.json sets DistributedCache:KeyPrefix=abpadmin:
+        var services = await HostUnderTest.CreateServiceCollectionAsync();
+        await using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IOptions<AbpDistributedCacheOptions>>()
+            .Value.KeyPrefix.ShouldBe("abpadmin:");
     }
 
     [Fact]

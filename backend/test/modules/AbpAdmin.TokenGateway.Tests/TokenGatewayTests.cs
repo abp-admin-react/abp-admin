@@ -178,7 +178,9 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     public async Task Invalid_or_missing_key_is_rejected_and_key_is_reused()
     {
         var keys = NewKeys();
-        (await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(null, true))).Code.ShouldBe("INVALID_KEY");
+        var missing = await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(null, true));
+        missing.Code.ShouldBe("INVALID_KEY");
+        missing.Status.ShouldBe(401);
         (await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync("hb-nope", true))).Status.ShouldBe(401);
         var key = await keys.IssueOrReuseKeyAsync(U);
         key.ShouldStartWith("hb-");

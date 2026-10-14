@@ -199,6 +199,23 @@ public class AnonymousEndpointSweepTests
                  || e.DisplayName.StartsWith("AbpAdmin.Controllers.GdprDownloadController.DownloadAsync", StringComparison.Ordinal)
                  || e.DisplayName.StartsWith("AbpAdmin.Files.FileShareAppService.DownloadByTokenAsync", StringComparison.Ordinal)
                  || e.DisplayName.StartsWith("AbpAdmin.Gdpr.GdprRequestAppService.DownloadAsync", StringComparison.Ordinal)),
+        new(
+            "TokenGateway: framework [AllowAnonymous] on GatewayControllerBase bypasses host OIDC FallbackPolicy; "
+            + "app-level hb-/hbs- KeyStore auth applies. "
+            + "api/auth/login = password -> session+hb-; "
+            + "v1/models & v1/chat/completions = no Key => 401 (TokenGatewayTests.Invalid_or_missing_key); "
+            + "api/wallet/balance|plans|orders|usage = Me()/ResolveAsync, no Key => 401; "
+            + "notify/* = payment callback slots (501 stub until live); "
+            + "simulate-paid = Development+Stub only else 404, still Me(); "
+            + "qr.svg = stub QR for img tag, no auth, no secrets.",
+            e => e.DisplayName.StartsWith("AbpAdmin.TokenGateway.", StringComparison.Ordinal)),
+
+        new(
+            "Post-login account status (GetCurrentAccountStatusAsync): [AllowAnonymous] bypasses class-level "
+            + "Users.Update so any signed-in user can call it; method checks CurrentUser.IsAuthenticated and "
+            + "throws if anonymous. DTO is only ShouldChangePassword+Reason — no PII/secrets.",
+            e => e.Template is "api/app/identity-user-admin/current-account-status"),
+
     ];
 
     /// <summary>
