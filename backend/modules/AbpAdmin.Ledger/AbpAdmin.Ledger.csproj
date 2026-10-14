@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin.Ledger</RootNamespace>
+    <!-- 瘦 Ledger：科目/凭证/分录/对账/调账表骨架 + 权限 + 种子。过账引擎 F1。
+         迁移记账表 __AbpAdminLedger_EFMigrationsHistory。 -->
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\framework\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\AbpAdmin.Ledger.Integration.Contracts\AbpAdmin.Ledger.Integration.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.Ddd.Application" />
+    <PackageReference Include="Volo.Abp.AspNetCore.Mvc" />
+    <PackageReference Include="Volo.Abp.Authorization" />
+    <PackageReference Include="Volo.Abp.Localization" />
+    <PackageReference Include="Volo.Abp.VirtualFileSystem" />
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />
+    <PackageReference Include="Volo.Abp.SettingManagement.Domain" />
+    <PackageReference Include="EasyAbp.Abp.SettingUi.Domain" />
+    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Domain" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\Ledger\*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Configuration\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
