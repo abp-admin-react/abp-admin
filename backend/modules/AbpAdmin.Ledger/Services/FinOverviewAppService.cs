@@ -45,8 +45,13 @@ public class FinOverviewAppService : FinanceAppServiceBase
         var available = await SumProjectionAsync(db, FinanceAccountCodes.UserAvailable);
         var frozen = await SumProjectionAsync(db, FinanceAccountCodes.UserFrozen);
         var unearned = await SumProjectionAsync(db, FinanceAccountCodes.Unearned);
-        var income = await SumProjectionAsync(db, FinanceAccountCodes.ServiceIncome)
-                   + await SumProjectionAsync(db, FinanceAccountCodes.RentIncome);
+        // 已确认收入 = 全部收入类科目合计（框架只有 6002，业务模块种的收入科目自动计入）
+        var income = await (
+            from p in db.BalanceProjections.AsNoTracking()
+            join s in db.SubAccounts.AsNoTracking() on p.SubAccountId equals s.Id
+            join a in db.Accounts.AsNoTracking() on s.AccountId equals a.Id
+            where a.Type == FinAccountType.Income
+            select p.Balance).SumAsync();
 
         var unreconciled = await db.ReconcileRuns.AsNoTracking().CountAsync(r => r.HasDiff && !r.IncludeDemo);
 
