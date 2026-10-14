@@ -45,6 +45,16 @@ COPY --from=build /app/publish .
 # appsettings.Development.json 同步带上：本地体验栈的 migrator 以 DOTNET_ENVIRONMENT=
 # Development 运行，靠它种入开发专属客户端/回调（AbpAdmin_TestCli、demo 子域名）；
 # 生产部署的迁移器不设该环境变量，这份文件在镜像里也不会被加载。
+
+# Host Configuration/*.json = SelfUrl/Cors/OpenIddict/AuthServer source (Program.cs reads here first).
+# Skip Database/Security secrets (.example only on disk); compose injects connection via env.
+# Without these files AbpAdmin_App:ClientId is empty and the seed block is skipped entirely.
+COPY framework/AbpAdmin.HttpApi.Host/Configuration/App.json /AbpAdmin.HttpApi.Host/Configuration/App.json
+COPY framework/AbpAdmin.HttpApi.Host/Configuration/Cache.json /AbpAdmin.HttpApi.Host/Configuration/Cache.json
+COPY framework/AbpAdmin.HttpApi.Host/Configuration/Cors.json /AbpAdmin.HttpApi.Host/Configuration/Cors.json
+COPY framework/AbpAdmin.HttpApi.Host/Configuration/OpenIddict.json /AbpAdmin.HttpApi.Host/Configuration/OpenIddict.json
+COPY framework/AbpAdmin.HttpApi.Host/Configuration/Quartz.json /AbpAdmin.HttpApi.Host/Configuration/Quartz.json
+
 COPY framework/AbpAdmin.HttpApi.Host/appsettings.json /AbpAdmin.HttpApi.Host/appsettings.json
 COPY framework/AbpAdmin.HttpApi.Host/appsettings.Development.json /AbpAdmin.HttpApi.Host/appsettings.Development.json
 

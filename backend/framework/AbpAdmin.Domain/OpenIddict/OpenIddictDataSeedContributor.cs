@@ -29,7 +29,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
         : base(configuration, openIddictApplicationRepository, applicationManager, openIddictScopeRepository, scopeManager)
     {
         // 基类持有的 ApplicationManager 不对外暴露，这里自留一份句柄做种子后的
-        // PKCE requirement 补挂（见 EnsurePkceRequirementAsync）。
+        // PKCE requirement / 回调白名单补挂（见 EnsurePkceRequirementAsync / EnsureRedirectUrisAsync）。
         _applicationManager = applicationManager;
     }
 
@@ -51,7 +51,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     }
 
     /// <summary>
-    /// 配置了 ClientId 却漏配 RootUrl 时，后续 redirect URI 拼接会产生空引用——
+    /// 配置了 ClientId 却漏了 RootUrl 时，后续 redirect URI 拼接会产生空引用——
     /// 该代码跑在 DbMigrator/Host 启动路径，NRE 会中断整个迁移，改为带明确配置指引的业务异常。
     /// </summary>
     private static string GetRequiredRootUrl(IConfiguration configuration, string clientSectionName)
@@ -67,7 +67,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     }
 
     /// <summary>
-    /// 幂等补挂 PKCE requirement：应用已带则跳过；否则 Populate 现值到 descriptor、
+    /// 幂等补挂 PKCE requirement：应用已带则跳过；否则 Populate 现值到 descriptor，
     /// 追加 requirement 后整只更新（保留既有 permissions/settings/凭据）。
     /// 仅用于公共客户端；swagger-ui 等不发 code_challenge 的工具不要调用。
     /// </summary>
@@ -88,6 +88,65 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
         var descriptor = new OpenIddictApplicationDescriptor();
         await _applicationManager.PopulateAsync(descriptor, application);
         descriptor.Requirements.Add(OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange);
+        await _applicationManager.UpdateAsync(application, descriptor);
+    }
+
+    /// <summary>
+    /// 幂等同步回调白名单：以配置拼出的 redirect/post-logout 列表整表覆盖库内值。
+    /// 端口/源只来自 OpenIddict:Applications:AbpAdmin_App:RootUrl + Extra*（Host Configuration），
+    /// 本方法不硬编码任何端口。CreateOrUpdate 对已有客户端的 URI 集合更新在部分路径上不可靠，
+    /// 这里用 Populate + 清空 + 再写入，保证 compose 改 WEB_PUBLIC_URL 后重跑种子立即生效。
+    /// </summary>
+    private async Task EnsureRedirectUrisAsync(
+        string clientId,
+        IReadOnlyList<string> redirectUris,
+        IReadOnlyList<string> postLogoutRedirectUris)
+    {
+        var application = await _applicationManager.FindByClientIdAsync(clientId);
+        if (application is null)
+        {
+            return;
+        }
+
+        var descriptor = new OpenIddictApplicationDescriptor();
+        await _applicationManager.PopulateAsync(descriptor, application);
+
+        descriptor.RedirectUris.Clear();
+        foreach (var raw in redirectUris)
+        {
+            if (raw.IsNullOrWhiteSpace())
+            {
+                continue;
+            }
+
+            if (!Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri) || !uri.IsWellFormedOriginalString())
+            {
+                throw new BusinessException(AbpAdminDomainErrorCodes.OpenIddict.SeedRootUrlMissing)
+                    .WithData("client", clientId)
+                    .WithData("redirectUri", raw);
+            }
+
+            descriptor.RedirectUris.Add(uri);
+        }
+
+        descriptor.PostLogoutRedirectUris.Clear();
+        foreach (var raw in postLogoutRedirectUris)
+        {
+            if (raw.IsNullOrWhiteSpace())
+            {
+                continue;
+            }
+
+            if (!Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri) || !uri.IsWellFormedOriginalString())
+            {
+                throw new BusinessException(AbpAdminDomainErrorCodes.OpenIddict.SeedRootUrlMissing)
+                    .WithData("client", clientId)
+                    .WithData("postLogoutRedirectUri", raw);
+            }
+
+            descriptor.PostLogoutRedirectUris.Add(uri);
+        }
+
         await _applicationManager.UpdateAsync(application, descriptor);
     }
 
@@ -141,7 +200,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                 grantTypes: new List<string> {
                     OpenIddictConstants.GrantTypes.AuthorizationCode,
                     OpenIddictConstants.GrantTypes.RefreshToken,
-                    // ROPC（grant_type=password）已从 SPA 客户端移除：OAuth 2.0 Security BCP 禁用、
+                    // ROPC（grant_type=password）已从 SPA 客户端移除：OAuth 2.0 Security BCP 禁用，
                     // OAuth 2.1 移除；SPA 实际走授权码+PKCE。移除后 Turnstile 保护的登录页
                     // 不再能被令牌端点旁路。脚本化/E2E 通道改走下方 AbpAdmin_TestCli（机密客户端）。
                     // T2.7: 无密码登录与模拟登录扩展授权；LinkAccounts: 关联账号切换
@@ -156,13 +215,15 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                 logoUri: "/images/clients/angular.svg"
             );
 
-            // H-1：公共客户端的授权码通道强制 PKCE（前端 oidc-client-ts 对 code flow
-            // 默认发送 code_challenge，服务端强制不改变现有登录行为，只封死"无
-            // code_challenge 兑换授权码"的劫持面；实测种子后 AbpAdmin_App 的
+            // H-1：公共客户端的授权码通道强制 PKCE（前端 oidc-client-ts 的 code flow
+            // 默认发出 code_challenge，服务端强制不改变现有登录行为，只封住「无
+            // code_challenge 兑换授权码」的劫持面；实测种子后 AbpAdmin_App 的
             // requirePkce=true 已落库，authorize 无 challenge → 400）。ABP 10.6.1 的种子
             // 基类没有 requirements 参数，种入后在这里幂等补挂（已带该 requirement 则
             // 跳过，不产生写放大）。
             await EnsurePkceRequirementAsync(appClientId!);
+            // 回调白名单以 Host Configuration（RootUrl + Extra*）为准整表覆盖，端口不写死在种子里。
+            await EnsureRedirectUrisAsync(appClientId!, redirectUris, postLogoutRedirectUris);
         }
 
 

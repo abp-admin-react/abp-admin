@@ -74,6 +74,9 @@ services:
       # 环境 key 覆盖会合并进镜像内烘焙的 Host appsettings.json（OpenIddict:Applications 节）
       OpenIddict__Applications__AbpAdmin_App__RootUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
       OpenIddict__Applications__AbpAdmin_Swagger__RootUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      # Frontend port single source = WEB_PUBLIC_URL (CORS + redirect allowlist + OIDC RootUrl).
+      App__CorsOrigins: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      App__RedirectAllowedUrls: ${WEB_PUBLIC_URL:-http://localhost:8000}
       # 本地体验栈按开发姿态种子（栈只绑 127.0.0.1，凭据均为本地默认值）：
       # 种入 appsettings.Development.json 里的开发专属通道（AbpAdmin_TestCli、demo/多端口
       # 回调）并允许 admin 默认口令。生产部署绝不设置此变量——生产迁移器必须注入
@@ -103,6 +106,9 @@ services:
       # 后端自身不再对外。与 migrator 的回调地址种入值同源（WEB_PUBLIC_URL）
       AuthServer__Authority: ${WEB_PUBLIC_URL:-http://localhost:8000}
       App__SelfUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      # Same source as migrator OIDC RootUrl: change WEB_PUBLIC_URL (+ WEB_HOST_PORT) only.
+      App__CorsOrigins: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      App__RedirectAllowedUrls: ${WEB_PUBLIC_URL:-http://localhost:8000}
       # IP 归属地库：随 Host 镜像携带（见 Host Dockerfile 的 COPY etc/ip2region），
       # 容器内路径相对 ContentRoot=/app 解析——覆盖本地开发用的 ../../etc 相对路径
       IpRegion__DbPath: "etc/ip2region/ip2region_v4.xdb"

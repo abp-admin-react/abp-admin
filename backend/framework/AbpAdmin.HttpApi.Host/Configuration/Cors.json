@@ -4,7 +4,7 @@
   // -----------------------------------------------------------------------------
   // 真源：本文件 + appsettings.Development.json（开发额外端口如 8002 整键覆盖，非 append）。
   // launchSettings 不是真源。改前端端口：本文件 → Dev → OpenIddict ExtraRedirectUris → 库 RedirectUris。
-  // 环境变量：App__CorsOrigins、App__RedirectAllowedUrls（逗号分隔）。
+  // 环境变量：App__CorsOrigins、App__RedirectAllowedUrls（逗号分隔）。 compose uses WEB_PUBLIC_URL for CorsOrigins+RedirectAllowedUrls+OpenIddict RootUrl (single port source).
   // =============================================================================
 
   "App": {
