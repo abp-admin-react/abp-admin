@@ -310,6 +310,64 @@ export default [
     component: './biz-template/data-scope',
   },
   {
+    // 基础财务层 A1–A7（定稿 §5 / §6）；权限码对齐 FinancePermissions
+    path: '/finance',
+    name: 'finance',
+    icon: 'accountBook',
+    access: 'canViewFinance',
+    routes: [
+      { path: '/finance', redirect: '/finance/overview' },
+      {
+        path: '/finance/overview',
+        name: 'finance-overview',
+        access: 'canViewFinanceLedger',
+        component: './finance/overview',
+      },
+      {
+        path: '/finance/accounts',
+        name: 'finance-accounts',
+        access: 'canViewFinanceLedger',
+        component: './finance/accounts',
+      },
+      {
+        path: '/finance/rules',
+        name: 'finance-rules',
+        access: 'canViewFinanceRules',
+        component: './finance/rules',
+      },
+      {
+        path: '/finance/vouchers',
+        name: 'finance-vouchers',
+        access: 'canViewFinanceVouchers',
+        component: './finance/vouchers',
+      },
+      {
+        path: '/finance/period',
+        name: 'finance-period',
+        access: 'canViewFinancePeriod',
+        component: './finance/period',
+      },
+      {
+        path: '/finance/reconcile',
+        name: 'finance-reconcile',
+        access: 'canViewFinanceLedger',
+        component: './finance/reconcile',
+      },
+      {
+        path: '/finance/biz-docs',
+        name: 'finance-biz-docs',
+        access: 'canViewFinanceBizDocs',
+        component: './finance/biz-docs',
+      },
+      {
+        path: '/finance/balances',
+        name: 'finance-balances',
+        access: 'canViewFinanceBalances',
+        component: './finance/balances',
+      },
+    ],
+  },
+  {
     // 收付款域（AbpAdmin.Ordering + AbpAdmin.Collection）：只给 Host 用户，后端有 Host 守卫。
     // 整域一个父组，子项按使用频率排：订单（用户侧最高频）→ 充值/归集/金库（运营监控）
     // → 链网配置（高危运维，独立权限）。父组入口默认落在订单。
