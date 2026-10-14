@@ -348,7 +348,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
         ConfigureStudio(hostingEnvironment);
         ConfigureAuthentication(context);
-        ConfigureAntiforgery();
+        ConfigureAntiforgery(configuration);
         ConfigureUrls(configuration);
         ConfigureMultiTenancy();
         ConfigureBundles(hostingEnvironment);
@@ -927,7 +927,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
         });
     }
 
-    private void ConfigureAntiforgery()
+    private void ConfigureAntiforgery(IConfiguration configuration)
     {
         // ABP 官方默认（AutoValidate = true）：请求带认证 Cookie 时强制校验防伪令牌——
         // 会话 Cookie 可直呼 API（ForwardIdentityAuthenticationForBearer 的设计意图），
@@ -938,6 +938,10 @@ public class AbpAdminHttpApiHostModule : AbpModule
         Configure<AbpAntiForgeryOptions>(options =>
         {
             options.AutoValidate = true;
+            // ABP defaults XSRF-TOKEN to SameSite=None; browsers drop None without Secure on http.
+            var https = (configuration["App:SelfUrl"] ?? string.Empty).StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+            options.TokenCookie.SameSite = https ? Microsoft.AspNetCore.Http.SameSiteMode.None : Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+            options.TokenCookie.SecurePolicy = https ? Microsoft.AspNetCore.Http.CookieSecurePolicy.Always : Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
         });
     }
 

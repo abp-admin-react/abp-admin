@@ -210,9 +210,15 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
     /// 获取当前登录账户状态。
     /// ABP 动态 API 路由：GET /api/app/identity-user-admin/current-account-status
     /// </summary>
-    [Authorize]
+    // Class-level Users.Update would also apply; any signed-in user (e.g. finance roles) must reach this.
+    [AllowAnonymous]
     public virtual async Task<AccountStatusDto> GetCurrentAccountStatusAsync()
     {
+        if (!CurrentUser.IsAuthenticated)
+        {
+            throw new Volo.Abp.Authorization.AbpAuthorizationException();
+        }
+
         var user = await _userManager.GetByIdAsync(CurrentUser.GetId());
 
         // 管理员强制改密
