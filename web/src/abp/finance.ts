@@ -36,6 +36,7 @@ export type FinAccountDto = {
   code: string;
   name: string;
   type: AccountType;
+  /** 余额方向；后端字段名 direction（FinNormalSide），normalizeAccount 统一成 normalSide */
   normalSide: 'Debit' | 'Credit';
   isSystem: boolean;
   enabled: boolean;
@@ -198,6 +199,12 @@ export const FINANCE_ERROR = {
   AccountSystemReadOnly: 'Finance:Account:SystemReadOnly',
   AccountHasEntries: 'Finance:Account:HasEntries',
   AccountDisableOnly: 'Finance:Account:DisableOnly',
+  AccountCodeDuplicate: 'Finance:Account:CodeDuplicate',
+  AccountHasChildren: 'Finance:Account:HasChildren',
+  /** 后端常量 FinanceErrorCodes.AccountNotFound 实值为 Finance:AccountNotFound（无中间段） */
+  AccountNotFound: 'Finance:AccountNotFound',
+  AccountNotFoundAlt: 'Finance:Account:NotFound',
+  InvalidEvent: 'Finance:InvalidEvent',
 } as const;
 
 export const ADJUST_STATUS_LABEL: Record<AdjustStatus, { text: string; color: string }> = {
@@ -208,21 +215,126 @@ export const ADJUST_STATUS_LABEL: Record<AdjustStatus, { text: string; color: st
   Reversed: { text: '已红冲', color: 'error' },
 };
 
-/**
- * A2 accounts write switch. v1 = read-only (GET /api/app/fin-account only).
- * Future: system accounts read-only; accounts with entries can only be disabled, not deleted.
+/*
+ * A2 科目写规则（与 FinAccountAppService 一致，前端只做按钮可点性，后端兜底）：
+ * - 系统科目（isSystem）不能改、删、停用/启用 → SystemReadOnly
+ * - 有分录（hasEntries）不能删、不能改编码/类型/方向，只能改名或停用 → HasEntries
+ * - 有子科目不能删 → HasChildren
  */
-export const FIN_ACCOUNT_WRITE_ENABLED = false;
-
-/** Future rule stub: whether an account may be deleted (else disable only). */
+export function canEditAccount(a: { isSystem?: boolean }): boolean {
+  return !a.isSystem;
+}
 export function canDeleteAccount(a: { isSystem?: boolean; hasEntries?: boolean }): boolean {
-  return FIN_ACCOUNT_WRITE_ENABLED && !a.isSystem && !a.hasEntries;
+  return !a.isSystem && !a.hasEntries;
 }
 
+/** 后端未配 JsonStringEnumConverter，枚举按数字收发（FinAccountType / FinNormalSide 的序号）。 */
+const ACCOUNT_TYPES: AccountType[] = ['Asset', 'Liability', 'Equity', 'Income', 'Expense'];
+const NORMAL_SIDES: FinAccountDto['normalSide'][] = ['Debit', 'Credit'];
+function enumName<T extends string>(v: unknown, names: T[], fallback: T): T {
+  if (typeof v === 'number') return names[v] ?? fallback;
+  if (typeof v === 'string' && (names as string[]).includes(v)) return v as T;
+  return fallback;
+}
 
-function normalizeAccount(a: FinAccountDto): FinAccountDto {
-  const enabled = a.enabled ?? a.isActive ?? true;
-  return { ...a, enabled, isActive: a.isActive ?? enabled };
+function normalizeAccount(raw: FinAccountDto & { direction?: unknown }): FinAccountDto {
+  const enabled = raw.enabled ?? raw.isActive ?? true;
+  return {
+    ...raw,
+    type: enumName(raw.type, ACCOUNT_TYPES, 'Asset'),
+    normalSide: enumName(raw.normalSide ?? raw.direction, NORMAL_SIDES, 'Debit'),
+    enabled,
+    isActive: raw.isActive ?? enabled,
+  };
+}
+
+/** 新建/修改 body：{code,name,type,direction,parentId?}，枚举转序号 */
+export type FinAccountInput = {
+  code: string;
+  name: string;
+  type: AccountType;
+  normalSide: FinAccountDto['normalSide'];
+  parentId?: string | null;
+};
+function toLiveAccountBody(input: FinAccountInput) {
+  return {
+    code: input.code?.trim(),
+    name: input.name?.trim(),
+    type: ACCOUNT_TYPES.indexOf(input.type),
+    direction: NORMAL_SIDES.indexOf(input.normalSide),
+    parentId: input.parentId || null,
+  };
+}
+
+/** error.data 里的值（ABP 原样带 WithData 的键，大小写都兼容） */
+export function financeErrorData(error: unknown, key: string): string | undefined {
+  const e = error as any;
+  const d = e?.response?.data?.error?.data ?? e?.info?.data ?? {};
+  const v = d[key] ?? d[key.charAt(0).toLowerCase() + key.slice(1)];
+  return v == null ? undefined : String(v);
+}
+
+export type AccountOp = 'create' | 'update' | 'delete' | 'toggle';
+
+/**
+ * A2 科目错误 → 中文（不露错误码）。{code} 取 error.data.Code。
+ * NotFound：data.Id 是本条不存在；data.ParentId 是上级非法——等于自己时提示「不能选自己」，
+ * 后端选自己/成环也走这个码（带 ParentId），所以用 selfId 比对区分。
+ * InvalidEvent 返回 null，由页面按 data.Field 在输入框下标红。
+ */
+export function accountErrorText(error: unknown, op: AccountOp, selfId?: string): string | null {
+  const code = financeErrorCode(error);
+  const c = financeErrorData(error, 'Code') ?? '';
+  switch (code) {
+    case FINANCE_ERROR.AccountSystemReadOnly:
+      return `系统科目 ${c} 不能修改或删除`;
+    case FINANCE_ERROR.AccountHasEntries:
+      return op === 'delete'
+        ? `科目 ${c} 已有记账记录，不能删除，可以停用`
+        : `科目 ${c} 已有记账记录，不能改类型或方向`;
+    case FINANCE_ERROR.AccountCodeDuplicate:
+      return `科目编号 ${c} 已存在`;
+    case FINANCE_ERROR.AccountHasChildren:
+      return '这个科目下面还有子科目，请先删除或移走子科目';
+    case FINANCE_ERROR.AccountNotFound:
+    case FINANCE_ERROR.AccountNotFoundAlt: {
+      const parentId = financeErrorData(error, 'ParentId');
+      if (parentId) {
+        return selfId && parentId.toLowerCase() === selfId.toLowerCase()
+          ? '不能选自己做上级科目'
+          : '上级科目不存在，请刷新后重选';
+      }
+      return '科目不存在，请刷新后重试';
+    }
+    case FINANCE_ERROR.InvalidEvent:
+      return null;
+    default:
+      if (isFinanceForbidden(error)) return '没有科目管理权限';
+      return '操作失败，请稍后重试';
+  }
+}
+
+/**
+ * 缺必填 → 表单字段名。两条来源：
+ * - 业务校验 InvalidEvent + data.Field（code / name / type/direction）
+ * - 模型绑定先拦（Code/Name 非空 string 为隐式 Required）：error.validationErrors[].members
+ * direction 对应表单的 normalSide。
+ */
+export function accountInvalidFields(error: unknown): string[] {
+  const toForm = (f: string) => {
+    const k = f.trim().toLowerCase();
+    if (k === 'type/direction') return ['type', 'normalSide'];
+    if (k === 'direction') return ['normalSide'];
+    return ['code', 'name', 'type', 'parentid'].includes(k) ? [k === 'parentid' ? 'parentId' : k] : [];
+  };
+  if (financeErrorCode(error) === FINANCE_ERROR.InvalidEvent) {
+    return toForm(financeErrorData(error, 'Field') || '');
+  }
+  const errObj = (error as any)?.response?.data?.error;
+  const members: string[] = Array.isArray(errObj?.validationErrors)
+    ? errObj.validationErrors.flatMap((v: any) => (Array.isArray(v?.members) ? v.members.map(String) : []))
+    : [];
+  return Array.from(new Set(members.flatMap(toForm)));
 }
 function useMock(): boolean {
   // 默认走真接口；仅 localStorage finance.useMock=1 时用假数据
@@ -441,9 +553,9 @@ function mapFinanceErrorMessage(code?: string, fallback?: string) {
     case FINANCE_ERROR.NotApplicant:
       return '只有申请人本人可操作';
     case FINANCE_ERROR.AccountSystemReadOnly:
-      return '系统科目只读，不可修改或删除';
+      return '系统科目不能修改或删除';
     case FINANCE_ERROR.AccountHasEntries:
-      return '科目已有分录，只能停用不能删除';
+      return '科目已有记账记录，不能删除，可以停用';
     case FINANCE_ERROR.AccountDisableOnly:
       return '有分录的科目只能停用';
     default:
@@ -520,6 +632,11 @@ async function livePut<T>(url: string, data?: unknown) {
 async function liveDelete<T>(url: string) {
   return request<T>(url, { method: 'DELETE' });
 }
+/**
+ * A2 科目写接口专用：skipErrorHandler 关掉全局「HTTP 400 + 后端原文」通知，
+ * 只留页面 accountErrorText 的中文提示（产品口径：不露错误码、不出两条提示）。
+ */
+const ACCOUNT_REQ = { skipErrorHandler: true } as const;
 
 export async function getFinanceOverview(): Promise<FinOverviewDto> {
   if (!useMock()) return liveGet(API.overview);
@@ -542,31 +659,63 @@ export async function getAccounts(q: FinanceListQuery = {}): Promise<PagedResult
   return pageOf(list, q);
 }
 
-export async function createAccount(input: Partial<FinAccountDto>): Promise<FinAccountDto> {
-  if (!useMock()) return livePost(API.account, input);
+export async function getAccount(id: string): Promise<FinAccountDto> {
+  if (!useMock()) return normalizeAccount(await liveGet(API.account + '/' + id));
+  const row = mockAccounts.find((x) => x.id === id);
+  if (!row) abpError(FINANCE_ERROR.AccountNotFound, '科目不存在', 404);
+  return row;
+}
+
+/** POST /api/app/fin-account（Finance.Account.Manage） */
+export async function createAccount(input: FinAccountInput): Promise<FinAccountDto> {
+  if (!useMock()) {
+    return normalizeAccount(await request(API.account, { method: 'POST', data: toLiveAccountBody(input), ...ACCOUNT_REQ }));
+  }
   const row: FinAccountDto = {
-    id: uid('a'), code: input.code || '', name: input.name || '',
-    type: (input.type as AccountType) || 'Asset', normalSide: input.normalSide || 'Debit',
-    isSystem: false, enabled: true, hasEntries: false,
+    id: uid('a'), code: input.code, name: input.name, type: input.type, normalSide: input.normalSide,
+    parentId: input.parentId ?? null, isSystem: false, enabled: true, hasEntries: false,
   };
   mockAccounts.push(row);
   return row;
 }
 
-export async function updateAccount(id: string, input: Partial<FinAccountDto>): Promise<FinAccountDto> {
-  if (!useMock()) return livePut(API.account + '/' + id, input);
+/** PUT /api/app/fin-account/{id}：整份 body，同 create */
+export async function updateAccount(id: string, input: FinAccountInput): Promise<FinAccountDto> {
+  if (!useMock()) {
+    return normalizeAccount(
+      await request(API.account + '/' + id, { method: 'PUT', data: toLiveAccountBody(input), ...ACCOUNT_REQ }),
+    );
+  }
   const i = mockAccounts.findIndex((x) => x.id === id);
-  if (i < 0) abpError('Finance:Account:NotFound', '科目不存在', 404);
+  if (i < 0) abpError(FINANCE_ERROR.AccountNotFound, '科目不存在', 404);
   mockAccounts[i] = { ...mockAccounts[i], ...input, id };
   return mockAccounts[i];
 }
 
-export async function deleteAccount(id: string): Promise<void> {
-  if (!useMock()) return liveDelete(API.account + '/' + id);
+/** POST /{id}/disable | /{id}/enable；系统科目后端拒 SystemReadOnly */
+export async function setAccountActive(id: string, active: boolean): Promise<FinAccountDto> {
+  if (!useMock()) {
+    return normalizeAccount(
+      await request(API.account + '/' + id + (active ? '/enable' : '/disable'), { method: 'POST', ...ACCOUNT_REQ }),
+    );
+  }
   const row = mockAccounts.find((x) => x.id === id);
-  if (!row) abpError('Finance:Account:NotFound', '科目不存在', 404);
+  if (!row) abpError(FINANCE_ERROR.AccountNotFound, '科目不存在', 404);
+  row.enabled = active;
+  row.isActive = active;
+  return row;
+}
+
+/** DELETE /{id}：有分录或被调账引用 → HasEntries；有子科目 → HasChildren */
+export async function deleteAccount(id: string): Promise<void> {
+  if (!useMock()) {
+    await request(API.account + '/' + id, { method: 'DELETE', ...ACCOUNT_REQ });
+    return;
+  }
+  const row = mockAccounts.find((x) => x.id === id);
+  if (!row) abpError(FINANCE_ERROR.AccountNotFound, '科目不存在', 404);
   if (row.isSystem) abpError(FINANCE_ERROR.AccountSystemReadOnly, '系统科目不可删');
-  if (row.hasEntries) abpError('Finance:Account:HasEntries', '有分录的科目不可删，只能停用');
+  if (row.hasEntries) abpError(FINANCE_ERROR.AccountHasEntries, '有分录的科目不可删，只能停用');
   const idx = mockAccounts.findIndex((x) => x.id === id);
   mockAccounts.splice(idx, 1);
 }
