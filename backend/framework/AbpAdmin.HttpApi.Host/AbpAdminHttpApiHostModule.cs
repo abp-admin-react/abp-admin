@@ -111,6 +111,7 @@ namespace AbpAdmin;
     typeof(AbpAdmin.Webhooks.AbpAdminWebhooksModule), // Webhook 模块（业务模块挂接点同款：一行）
     typeof(AbpAdmin.Collection.AbpAdminCollectionModule), // 收款模块（订单只依赖其契约工程）
     typeof(AbpAdmin.Ordering.AbpAdminOrderingModule),     // 订单模块（依赖 Collection.Contracts）
+    typeof(AbpAdmin.TokenGateway.AbpAdminTokenGatewayModule), // HarnessBot 路线 C 外层
     typeof(AbpAdminLedgerModule),                        // 瘦 Ledger（财务总账 F1：调账/科目/对账）
     typeof(AbpCachingStackExchangeRedisModule),
     typeof(AbpAccountWebOpenIddictModule),

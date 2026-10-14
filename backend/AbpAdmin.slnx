@@ -28,6 +28,7 @@
         <Project Path="modules/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj" />
         <Project Path="modules/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj" />
         <Project Path="modules/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj" />
+        <Project Path="modules/AbpAdmin.TokenGateway/AbpAdmin.TokenGateway.csproj" />
     </Folder>
     <!-- 框架级测试（对应 /framework/ 分区；业务模块的测试在 /test/modules/） -->
     <Folder Name="/test/">
@@ -48,5 +49,6 @@
         <Project Path="test/modules/AbpAdmin.Collection.Tests/AbpAdmin.Collection.Tests.csproj" />
         <Project Path="test/modules/AbpAdmin.Ordering.Tests/AbpAdmin.Ordering.Tests.csproj" />
         <Project Path="test/modules/AbpAdmin.Ledger.Tests/AbpAdmin.Ledger.Tests.csproj" />
+        <Project Path="test/modules/AbpAdmin.TokenGateway.Tests/AbpAdmin.TokenGateway.Tests.csproj" />
     </Folder>
 </Solution>

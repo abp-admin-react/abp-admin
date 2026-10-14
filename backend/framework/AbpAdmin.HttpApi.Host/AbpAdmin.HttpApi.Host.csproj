@@ -72,6 +72,7 @@
     <ProjectReference Include="..\..\modules\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
     <ProjectReference Include="..\..\modules\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
     <ProjectReference Include="..\..\modules\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
+    <ProjectReference Include="..\..\modules\AbpAdmin.TokenGateway\AbpAdmin.TokenGateway.csproj" />
   </ItemGroup>
 
   <ItemGroup>
