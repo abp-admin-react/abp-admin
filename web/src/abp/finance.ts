@@ -655,20 +655,25 @@ export function financeErrorText(error: unknown): string {
 async function liveGet<T>(url: string, params?: Record<string, unknown>) {
   return request<T>(url, { method: 'GET', params });
 }
-async function livePost<T>(url: string, data?: unknown) {
-  return request<T>(url, { method: 'POST', data });
+async function livePost<T>(url: string, data?: unknown, opts?: Record<string, unknown>) {
+  return request<T>(url, { method: 'POST', data, ...opts });
 }
-async function livePut<T>(url: string, data?: unknown) {
-  return request<T>(url, { method: 'PUT', data });
+async function livePut<T>(url: string, data?: unknown, opts?: Record<string, unknown>) {
+  return request<T>(url, { method: 'PUT', data, ...opts });
 }
-async function liveDelete<T>(url: string) {
-  return request<T>(url, { method: 'DELETE' });
+async function liveDelete<T>(url: string, opts?: Record<string, unknown>) {
+  return request<T>(url, { method: 'DELETE', ...opts });
 }
 /**
  * A2 科目写接口专用：skipErrorHandler 关掉全局「HTTP 400 + 后端原文」通知，
  * 只留页面 accountErrorText 的中文提示（产品口径：不露错误码、不出两条提示）。
  */
 const ACCOUNT_REQ = { skipErrorHandler: true } as const;
+/**
+ * 调账写接口专用：页面 onActionError 已按错误码弹中文（如「没有调账创建权限」），
+ * skipErrorHandler 关掉全局 403/400 提示，避免同一次失败弹两条。
+ */
+export const ADJUST_REQ = { skipErrorHandler: true } as const;
 
 export async function getFinanceOverview(): Promise<FinOverviewDto> {
   if (!useMock()) return liveGet(API.overview);
@@ -912,7 +917,7 @@ export async function createAdjust(input: CreateUpdateFinManualAdjustInput & {
   applicantName?: string;
 }): Promise<FinManualAdjustDto> {
   if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust, toLiveAdjustBody(input));
+    const raw = await livePost<Record<string, unknown>>(API.manualAdjust, toLiveAdjustBody(input), ADJUST_REQ);
     return fromLiveAdjust(raw);
   }
   const debitCode = input.debitAccountCode || input.lines?.[0]?.accountCode || '1002';
@@ -958,6 +963,7 @@ export async function updateAdjust(
     const raw = await livePut<Record<string, unknown>>(
       API.manualAdjust + '/' + id,
       toLiveAdjustBody(input as CreateUpdateFinManualAdjustInput),
+      ADJUST_REQ,
     );
     return fromLiveAdjust(raw);
   }
@@ -969,7 +975,7 @@ export async function updateAdjust(
 }
 
 export async function deleteAdjust(id: string): Promise<void> {
-  if (!useMock()) return liveDelete(API.manualAdjust + '/' + id);
+  if (!useMock()) return liveDelete(API.manualAdjust + '/' + id, ADJUST_REQ);
   const i = findAdjust(id);
   requireDraft(mockAdjusts[i]);
   mockAdjusts.splice(i, 1);
@@ -985,7 +991,7 @@ export async function getAdjust(id: string): Promise<FinManualAdjustDto> {
 
 export async function submitAdjust(id: string): Promise<FinManualAdjustDto> {
   if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/submit');
+    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/submit', undefined, ADJUST_REQ);
     return fromLiveAdjust(raw);
   }
   const i = findAdjust(id);
@@ -1000,7 +1006,7 @@ export async function approveAdjust(
   auditor: { id: string; name: string },
 ): Promise<FinManualAdjustDto> {
   if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/approve');
+    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/approve', undefined, ADJUST_REQ);
     return fromLiveAdjust(raw);
   }
   const i = findAdjust(id);
@@ -1055,7 +1061,7 @@ export async function rejectAdjust(
   rejectReason: string,
 ): Promise<FinManualAdjustDto> {
   if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reject', { rejectReason });
+    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reject', { rejectReason }, ADJUST_REQ);
     return fromLiveAdjust(raw);
   }
   if (!rejectReason || !rejectReason.trim()) {
@@ -1092,7 +1098,7 @@ export async function reopenAdjust(
   me: { id: string; canCreate: boolean },
 ): Promise<FinManualAdjustDto> {
   if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reopen');
+    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reopen', undefined, ADJUST_REQ);
     return fromLiveAdjust(raw);
   }
   const i = findAdjust(id);
@@ -1113,7 +1119,7 @@ export async function reopenAdjust(
 /** Posted -> Reversed（F1：POST /api/app/fin-manual-adjust/{id}/reverse） */
 export async function reverseAdjust(id: string): Promise<FinManualAdjustDto> {
   if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reverse');
+    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reverse', undefined, ADJUST_REQ);
     return fromLiveAdjust(raw);
   }
   const i = findAdjust(id);
