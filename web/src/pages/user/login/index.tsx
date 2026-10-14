@@ -1,3 +1,13 @@
+/**
+ * 登录入口：OIDC 跳转、租户选择/子域名、Magic Link/OTP 落地。
+ *
+ * - 普通登录：startLogin() → IdP → /user/callback；本页不持有密码表单（密码在后端 Account）。
+ * - Magic Link：query 带 magicLinkToken+email → loginWithMagicLink → applyTokensForNewSession
+ *   → window.location.replace(DEFAULT_LANDING_PATH)；成功 toast「登录成功，正在进入系统…」。
+ * - 切租户后若已有 SignalR 连接，必须 hasRealTimeConnection() 门闸后再 restartRealTime()，
+ *   勿用 isRealTimeAvailable()（乐观默认 true 会误触发未登录建连）。
+ * - 已知体验：OIDC 回调后可能短暂停在登录页再进壳（缺落地页），属待办，不在本文件改产品行为。
+ */
 import { Helmet, history } from '@umijs/max';
 import { Alert, App, Button, Card, Input, Space, Spin, Typography } from 'antd';
 import { createStyles } from 'antd-style';

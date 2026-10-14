@@ -1,3 +1,10 @@
+/**
+ * OIDC 授权码回调页（redirect_uri = /user/callback）。
+ *
+ * - completeLogin() 用 query 换令牌并写入 userStore；失败回登录并提示。
+ * - 成功后 consumeIntendedRedirect() 回跳（非法 redirect 落 DEFAULT_LANDING_PATH=/welcome）。
+ * - 勿在此再调 startLogin，避免循环跳转。
+ */
 import { history } from '@umijs/max';
 import { Result, Spin } from 'antd';
 import React, { useEffect, useState } from 'react';
