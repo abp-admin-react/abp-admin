@@ -282,6 +282,9 @@ public class FinReconcileRunDto : EntityDto<Guid>
 /// <summary>A6 业务单据只读（演示凭证按 BizType/BizRefId 联查）。</summary>
 public class FinBizDocListInput : FinListInput
 {
+    /// <summary>Default false: hide vouchers whose BizType only has Deprecated posting rules (e.g. demo.commission).</summary>
+    public bool IncludeDeprecated { get; set; }
+
     public Guid? AgentId { get; set; }
     public bool? IsDemo { get; set; }
     public string? BizType { get; set; }

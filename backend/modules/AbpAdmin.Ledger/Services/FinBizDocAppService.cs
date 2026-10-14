@@ -2,12 +2,14 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Data;
+using AbpAdmin.Ledger.Integration.Contracts;
 using AbpAdmin.Ledger.Permissions;
 using AbpAdmin.Ledger.Services.Dtos;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.MultiTenancy;
 
 namespace AbpAdmin.Ledger.Services;
 
@@ -32,6 +34,21 @@ public class FinBizDocAppService : FinanceAppServiceBase
         if (agentId != null) q = q.Where(v => v.AgentId == agentId);
         if (input.IsDemo != null) q = q.Where(v => v.IsDemo == input.IsDemo);
         if (!string.IsNullOrWhiteSpace(input.BizType)) q = q.Where(v => v.BizType == input.BizType);
+        if (!input.IncludeDeprecated)
+        {
+            var tenantId = CurrentTenant.Id;
+            using (DataFilter.Disable<IMultiTenant>())
+            {
+                var rules = await db.PostingRules.AsNoTracking()
+                    .Where(r => r.TenantId == tenantId || r.TenantId == null)
+                    .Select(r => new { r.BizType, r.Status })
+                    .ToListAsync();
+                var deprecatedOnly = rules.GroupBy(r => r.BizType)
+                    .Where(g => g.All(r => r.Status == FinPostingRuleStatus.Deprecated))
+                    .Select(g => g.Key).ToList();
+                if (deprecatedOnly.Count > 0) q = q.Where(v => !deprecatedOnly.Contains(v.BizType));
+            }
+        }
         if (input.StartTime != null) q = q.Where(v => v.CreationTime >= input.StartTime);
         if (input.EndTime != null) q = q.Where(v => v.CreationTime < input.EndTime);
         if (!string.IsNullOrWhiteSpace(input.Filter))
