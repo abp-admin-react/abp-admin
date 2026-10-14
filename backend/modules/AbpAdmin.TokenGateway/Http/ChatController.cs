@@ -43,7 +43,7 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             {
                 // 原文只进内部日志，对外统一改写。
                 log.LogWarning("gateway upstream status {Status} alias {Alias} model {Model}", (int)resp.StatusCode, ticket.Alias.Alias, ticket.Alias.Model);
-                throw GatewayException.UpstreamUnavailable();
+                throw UpstreamErrors.FromStatus((int)resp.StatusCode);
             }
 
             var isStream = ticket.UpstreamBody["stream"]?.GetValue<bool>() == true;
@@ -51,6 +51,7 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             {
                 var json = JsonNode.Parse(await resp.Content.ReadAsStringAsync(HttpContext.RequestAborted)) as JsonObject
                            ?? throw GatewayException.UpstreamUnavailable();
+                if (UpstreamErrors.FromBody(json) is { } bodyError) throw bodyError;
                 var (p, c) = ReadUsage(json);
                 Scrub(json, ticket.Alias.Alias, ticket.ResponseId);
                 await billing.SettleAsync(ticket, p, c);
@@ -76,6 +77,7 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
                     break;
                 }
                 if (JsonNode.Parse(payload) is not JsonObject chunk) continue;
+                if (UpstreamErrors.FromBody(chunk) is { } chunkError) throw chunkError;
                 if (chunk["usage"] is JsonObject)
                 {
                     (prompt, completion) = ReadUsage(chunk);
@@ -100,7 +102,7 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
         {
             if (ticket is not null) await billing.FailAsync(ticket);
             if (HttpContext.RequestAborted.IsCancellationRequested) return;
-            var ge = e as GatewayException ?? GatewayException.Internal();
+            var ge = UpstreamErrors.FromException(e);
             if (e is not GatewayException) log.LogError(e, "gateway chat failed");
             if (started)
             {
