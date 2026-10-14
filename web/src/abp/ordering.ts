@@ -1,3 +1,9 @@
+/**
+ * 订单域 API 封装。
+ *
+ * - 相对路径与分页口径与其它 abp/* 一致（SkipCount/MaxResultCount）。
+ * - 支付结果展示以后端状态机为准，前端不做乐观「已支付」终态。
+ */
 import { request } from '@umijs/max';
 
 /**

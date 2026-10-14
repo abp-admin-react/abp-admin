@@ -1,3 +1,9 @@
+/**
+ * 收款/归集业务 API（collection 域）。
+ *
+ * - 相对路径 `/api/app/...`；错误码与权限以后端 Contracts 为准。
+ * - 页面只依赖本文件导出，勿散写 URL。
+ */
 import { request } from '@umijs/max';
 
 /**

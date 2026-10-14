@@ -1,3 +1,10 @@
+/**
+ * OpenIddict 应用（客户端）管理 API。Client 密钥只在创建/轮换时提交，列表不回传明文。
+ *
+ * - 仅 Host（access.canManageOpenIddict 类开关 + isHost）。
+ * - 与浏览器 SPA 的 env.clientId（AbpAdmin_App）不是同一条配置链：那边是本管理端自己，
+ *   这里是后台登记的全部客户端。
+ */
 import { request } from '@umijs/max';
 
 /** 应用管理 DTO（与后端 OpenIddictApplicationDto 对齐；永远不含 ClientSecret/JWKS 等凭据材料） */

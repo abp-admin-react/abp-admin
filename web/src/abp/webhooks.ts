@@ -1,3 +1,8 @@
+/**
+ * Webhook 订阅管理 API（AbpAdmin.Webhooks.* 权限）。
+ *
+ * - Host/具备权限的管理员使用；密钥类字段只展示掩码，轮换走专用接口（若有）。
+ */
 import { request } from '@umijs/max';
 
 /** Webhook 订阅（与后端 WebhookSubscriptionDto 镜像；密钥永不回传） */
