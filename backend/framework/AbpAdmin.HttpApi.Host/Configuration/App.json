@@ -1,53 +1,112 @@
 {
-  // Host 基础设施基线（单一事实来源）：端口/SelfUrl/OpenIddict RootUrl/Authority/连接串占位/Redis。
-  // 由 Program.cs 扫描 Configuration/*.json 加载；appsettings*.json 只做环境叠加。
-  // 真实凭据只放 appsettings.secrets.json 或环境变量，不入本文件。
+  // =============================================================================
+  // Host 基础设施基线（单一事实来源 / SSOT）
+  // -----------------------------------------------------------------------------
+  // 加载顺序（Program.cs）：
+  //   1) 默认 appsettings.json（业务/运维叠加，不含 SelfUrl/Cors/Authority）
+  //   2) Configuration/*.json（本文件 + Cors.json）← 本层是端口与认证真源
+  //   3) appsettings.{Environment}.json（Dev/Prod 同名键覆盖）
+  //   4) appsettings.secrets.json（可选，真实凭据）
+  //   5) 环境变量（如 App__SelfUrl，双下划线分层）
+  //
+  // launchSettings.json 的 applicationUrl / sslPort 只影响「本机怎么起进程」，
+  // 不是 SelfUrl / Authority / Cors / OpenIddict RootUrl 的真源；改端口必须改本文件
+  // 与 Cors.json，并同步 Dev 叠加与 OpenIddict 客户端 Redirect。改错表现为：
+  // 浏览器 CORS 失败、登录回调 redirect_uri mismatch、Swagger Authorize 连错主机。
+  //
+  // 敏感项（连接串密码、CertificatePassPhrase、StringEncryption、ClientSecret）
+  // 只走 secrets / 环境变量，占位 CHANGE_ME / 空串不得进生产。
+  // =============================================================================
+
   "App": {
+    // 本 Host 对外自宣 URL（含 scheme+host+port）。OAuth issuer 元数据、健康检查绝对地址依赖它。
+    // 合法：https://host:port 或 http://（仅本机）。默认 https://localhost:44300。
+    // 覆盖：App__SelfUrl。与 launchSettings 不一致时以本键为准（进程仍可能听 launch 端口）。
     "SelfUrl": "https://localhost:44300",
+
+    // SPA 租户子域模板。{0}=租户名。默认 http://{0}.localhost:8000。
+    // 覆盖：App__SpaUrl。改端口须同时改 CorsOrigins / RedirectAllowedUrls。
     "SpaUrl": "http://{0}.localhost:8000",
+
+    // 是否在日志中输出 PII（用户名/邮箱等）。生产必须 false。覆盖：App__EnablePiiLogging。
     "EnablePiiLogging": false,
+
+    // 安全工件（密钥指纹等）是否写入日志。生产 false。
     "EnableSecurityArtifactLogging": false,
+
+    // 健康检查路径。默认 /health-status。探活脚本应对齐此路径。
     "HealthCheckUrl": "/health-status",
+
+    // 多实例区分后缀（缓存键/锁前缀）。单实例留空。覆盖：App__InstanceDiscriminator。
     "InstanceDiscriminator": ""
   },
+
   "OpenIddict": {
     "Applications": {
+      // 管理端 SPA 客户端。RootUrl=前端原点（非 Host 44300）。
+      // 改前端端口：改 RootUrl，并同步 Cors.json、Dev ExtraRedirectUris、库内 OpenIddict 应用 RedirectUris。
       "AbpAdmin_App": {
         "ClientId": "AbpAdmin_App",
         "RootUrl": "http://localhost:8004"
       },
+      // Swagger UI 客户端。RootUrl 通常等于 App:SelfUrl。
       "AbpAdmin_Swagger": {
         "ClientId": "AbpAdmin_Swagger",
         "RootUrl": "https://localhost:44300"
       }
     }
   },
+
   "ConnectionStrings": {
+    // 默认库。密码占位 CHANGE_ME；真值只放 secrets 或 ConnectionStrings__Default。
+    // 改错：迁移/登录全挂。格式：Host=;Port=;Database=;Username=;Password=
     "Default": "Host=localhost;Port=5432;Database=abpadmin;Username=postgres;Password=CHANGE_ME"
   },
+
   "DistributedCache": {
+    // 缓存键全局前缀。多环境共用 Redis 时必填区分。默认空。覆盖：DistributedCache__KeyPrefix。
     "KeyPrefix": ""
   },
+
   "Redis": {
+    // 是否启用 Redis（分布式锁 + DataProtection 密钥）。false=进程内。
+    // 生产多实例见 appsettings.Production.json。覆盖：Redis__IsEnabled。
     "IsEnabled": false,
+    // 连接串。真生产用 Redis__Configuration。不可达且 IsEnabled=true 时锁/密钥异常。
     "Configuration": "127.0.0.1:6379"
   },
+
   "SignalR": {
+    // 是否注册 SignalR Hub。false 则实时通道不可用。
     "Enabled": true,
+    // Redis backplane。多实例必须 true 且 Redis 可达；单实例可 false。
     "UseRedisBackplane": false
   },
+
   "Quartz": {
+    // true=任务持久化到 DB（qrtz_*）。多实例防重复触发。默认 false（内存）。
     "UsePersistentStore": false,
     "SchedulerName": "AbpAdminScheduler"
   },
+
   "AuthServer": {
+    // OIDC Authority，须与 App:SelfUrl 一致（本机一体化 Host）。改端口两边一起改。
+    // 覆盖：AuthServer__Authority。不一致 → 令牌校验失败 / metadata 404。
     "Authority": "https://localhost:44300",
+    // 是否要求 metadata 走 HTTPS。本机 http 调试可 false；生产 true。
     "RequireHttpsMetadata": true,
+    // Swagger 用的 ClientId，须与 OpenIddict.Applications.AbpAdmin_Swagger.ClientId 一致。
     "SwaggerClientId": "AbpAdmin_Swagger",
+    // openiddict.pfx 证书口令。空=开发临时证书；生产必须 secrets/AuthServer__CertificatePassPhrase。
     "CertificatePassPhrase": ""
   },
+
   "StringEncryption": {
+    // ABP 字符串加解密口令。空仅开发；生产 secrets/StringEncryption__DefaultPassPhrase。
+    // 改错：已加密设置/字段解不开。
     "DefaultPassPhrase": ""
   }
-}
 
+  // 时间约定（非本文件键）：AbpAdminHttpApiHostModule 内写死 AbpClockOptions.Kind=DateTimeKind.Utc。
+  // API 时间带 Z；对账过滤按 PostedTime、[start,end) UTC。勿再配本地 Kind。
+}

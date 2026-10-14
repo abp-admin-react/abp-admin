@@ -1,8 +1,20 @@
 {
-  // CORS / 登录回跳白名单（与 App:SelfUrl 同属 Host 入口配置，单独文件方便改端口时一眼找到）。
-  // 开发期额外前端端口（如 8002）只写在 appsettings.Development.json，不要加进本文件。
+  // =============================================================================
+  // CORS / 登录回跳白名单（与 App.json 同属 Host 入口基线）
+  // -----------------------------------------------------------------------------
+  // 真源：本文件（基线）+ appsettings.Development.json（开发额外端口如 8002）。
+  // launchSettings 不是真源。改前端端口：本文件 → Dev 叠加 → OpenIddict ExtraRedirectUris
+  // →（若已种子）库内 RedirectUris。只改一边会出现 CORS 预检失败或 redirect_uri 拒绝。
+  // 环境变量覆盖：App__CorsOrigins、App__RedirectAllowedUrls（逗号分隔，无空格或统一风格）。
+  // =============================================================================
+
   "App": {
+    // 允许跨域调用 Host API 的前端原点。支持 http://*.localhost:8000 通配租户子域。
+    // 默认含 8000/8004/8006；8002 只在 Development。配错：浏览器拦截，Network 见 CORS error。
     "CorsOrigins": "http://localhost:8000,https://localhost:8000,http://*.localhost:8000,http://localhost:8004,http://localhost:8006",
+
+    // 登录后允许回跳的 URL 前缀列表（OpenIddict/Identity 校验）。
+    // 须覆盖实际 SPA 原点；缺一项 → 登录成功后无法回到前端。
     "RedirectAllowedUrls": "http://localhost:8000,http://demo.localhost:8000,http://localhost:8004,http://localhost:8006"
   }
 }

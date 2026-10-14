@@ -1,5 +1,22 @@
 {
+  // =============================================================================
+  // Ledger 模块业务配置（仅本模块节；端口/CORS 不在此文件）
+  // -----------------------------------------------------------------------------
+  // 加载：AbpAdminLedgerModule 先绑模块内 Configuration/Ledger.json，再绑 Host 同名节覆盖。
+  // 环境变量：Ledger__Enabled、Ledger__BizTypes__demo.credit=false 等。
+  // =============================================================================
+
   "Ledger": {
+    // 总开关。与设置 Finance.Ledger.Enabled 同时为 true 才放行业务 Post。
+    // manual-adjust（人工调账）不受此开关限制（A3 调账页仍可用）。
+    // false：业务过账抛 Finance:LedgerDisabled（HTTP 403）。默认 true。
     "Enabled": true
+
+    // 可选灰度（未写在基线，需要时在 Host appsettings 或环境变量追加）：
+    // "BizTypes": {
+    //   "demo.credit": true,   // 未列出的 BizType 视为开；显式 false 则该类型 Post 拒绝
+    //   "payment": false
+    // }
+    // 改错：对应业务过账全部失败，调账不受影响。
   }
 }
