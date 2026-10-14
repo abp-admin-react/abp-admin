@@ -122,7 +122,7 @@ public class Program
     /// <summary>
     /// Load Host Configuration/*.json (App.json, Cors.json, ...) as infrastructure baseline.
     /// </summary>
-    private static void AddHostConfigurationDirectory(
+    internal static void AddHostConfigurationDirectory(
         ConfigurationManager configuration,
         IHostEnvironment environment)
     {

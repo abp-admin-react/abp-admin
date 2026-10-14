@@ -85,6 +85,11 @@ internal static class HostUnderTest
         // would let one developer's e2e leftovers silently flip every "as shipped" test onto
         // the Redis-enabled branch (observed 2026-09-29 after secrets gained Redis:IsEnabled=true).
 
+        // Replay Program.cs: Configuration/*.json is the host baseline (AuthServer:Authority etc.),
+        // then the environment file is re-added so it still overrides that baseline.
+        Program.AddHostConfigurationDirectory(builder.Configuration, builder.Environment);
+        builder.Configuration.AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: false);
+
         if (useAutofac)
         {
             builder.Host.UseAutofac();
