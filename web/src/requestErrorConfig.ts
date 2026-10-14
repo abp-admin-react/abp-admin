@@ -82,7 +82,16 @@ export const errorConfig: RequestConfig = {
         abpError?.message ||
         error.message;
       if (error.response?.status === 403) {
-        message.error(text || '没有权限');
+        // 403 单提示：有 ABP 业务文案（validationErrors/details/message）就只弹它一次；
+        // 没有文案时统一给中文兜底，绝不透出 axios 英文原文（Request failed with status code 403）。
+        // 固定 key 让同一时刻多个 403（并发请求/重复点击）合并成一条，不叠弹。
+        // 页面若自己处理 403 提示，应在请求上传 skipErrorHandler，全局层不再弹。
+        const forbiddenText =
+          abpError?.validationErrors?.map((item) => item.message).join('; ') ||
+          abpError?.details ||
+          abpError?.message ||
+          '没有权限执行此操作';
+        message.error({ content: forbiddenText, key: 'http-403' });
         return;
       }
       // T2.5: 操作限流 429 处理

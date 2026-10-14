@@ -109,7 +109,10 @@ describe('requestErrorConfig', () => {
 
       errorHandler(error, {});
 
-      expect(message.error).toHaveBeenCalledWith('没有权限执行该操作');
+      expect(message.error).toHaveBeenCalledWith({
+        content: '没有权限执行该操作',
+        key: 'http-403',
+      });
     });
 
     it('should join validation errors on 403', () => {
@@ -129,7 +132,24 @@ describe('requestErrorConfig', () => {
 
       errorHandler(error, {});
 
-      expect(message.error).toHaveBeenCalledWith('名称必填; 邮箱格式错误');
+      expect(message.error).toHaveBeenCalledWith({
+        content: '名称必填; 邮箱格式错误',
+        key: 'http-403',
+      });
+    });
+
+    it('should show Chinese fallback (never axios English) on 403 without ABP message', () => {
+      const error: any = new Error('Request failed with status code 403');
+      error.response = { status: 403, data: '' };
+
+      errorHandler(error, {});
+
+      expect(message.error).toHaveBeenCalledTimes(1);
+      expect(message.error).toHaveBeenCalledWith({
+        content: '没有权限执行此操作',
+        key: 'http-403',
+      });
+      expect(notification.error).not.toHaveBeenCalled();
     });
 
     it('should show retry hint with seconds on 429', () => {
