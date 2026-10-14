@@ -1,6 +1,9 @@
 using System.Net;
 using AbpAdmin.TokenGateway.Core;
+using AbpAdmin.TokenGateway.Data;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -11,32 +14,33 @@ public record CreateOrderInput(string? PlanId, string? Method, string? PayMethod
 [Route("api/wallet")]
 public class WalletController(
     KeyStore keys, Wallet wallet, PlanCatalog plans, OrderBook orders, UsageLog usage,
-    IOptions<TokenGatewayOptions> options, ILogger<WalletController> log) : GatewayControllerBase
+    IOptions<TokenGatewayOptions> options, IWebHostEnvironment env, ILogger<WalletController> log) : GatewayControllerBase
 {
-    private Guid Me() => keys.Resolve(Bearer(), allowSession: true);
+    private Task<Guid> Me() => keys.ResolveAsync(Bearer(), allowSession: true);
 
     [HttpGet("balance")]
-    public Task<IActionResult> Balance() => Run(() =>
+    public Task<IActionResult> Balance() => Run(async () =>
     {
-        var v = wallet.View(Me());
-        return Task.FromResult<IActionResult>(Ok(new
+        var v = await wallet.ViewAsync(await Me());
+        return Ok(new
         {
             percent = v.Percent, low = v.Low, balance = v.Balance, frozen = v.Frozen, available = v.Available,
             periodUsed = v.PeriodUsed, updatedAt = v.UpdatedAt,
-        }));
+        });
     }, log);
 
     [HttpGet("plans")]
-    public Task<IActionResult> Plans() => Run(() =>
+    public Task<IActionResult> Plans() => Run(async () =>
     {
-        Me();
-        return Task.FromResult<IActionResult>(Ok(new { items = plans.All().Select(p => new { id = p.Id, name = p.Name, priceCny = p.PriceCny, tokens = p.Tokens }) }));
+        await Me();
+        var items = await plans.AllAsync();
+        return Ok(new { items = items.Select(p => new { id = p.Id, name = p.Name, priceCny = p.PriceCny, tokens = p.Tokens }) });
     }, log);
 
     [HttpPost("orders")]
-    public Task<IActionResult> Create([FromBody] CreateOrderInput input) => Run(() =>
+    public Task<IActionResult> Create([FromBody] CreateOrderInput input) => Run(async () =>
     {
-        var me = Me();
+        var me = await Me();
         if (options.Value.Payment.Mode == PaymentMode.Live)
             throw new GatewayException(GatewayErrorCodes.UpstreamUnavailable, 503, "支付暂未开通");
         var method = (input.Method ?? input.PayMethod)?.ToLowerInvariant() switch
@@ -45,25 +49,26 @@ public class WalletController(
             "alipay" => PayMethod.Alipay,
             _ => throw GatewayException.BadRequest("method 只支持 wechat / alipay"),
         };
-        var o = orders.Create(me, input.PlanId, method);
-        return Task.FromResult<IActionResult>(Ok(View(o)));
+        return Ok(View(await orders.CreateAsync(me, input.PlanId, method)));
     }, log);
 
     [HttpGet("orders/{id}")]
-    public Task<IActionResult> Get(string id) => Run(() => Task.FromResult<IActionResult>(Ok(View(orders.Get(Me(), id)))), log);
+    public Task<IActionResult> Get(string id) => Run(async () => Ok(View(await orders.GetAsync(await Me(), id))), log);
 
     [HttpPost("orders/{id}/refresh-qr")]
-    public Task<IActionResult> RefreshQr(string id) => Run(() => Task.FromResult<IActionResult>(Ok(View(orders.RefreshQr(Me(), id)))), log);
+    public Task<IActionResult> RefreshQr(string id) => Run(async () => Ok(View(await orders.RefreshQrAsync(await Me(), id))), log);
 
-    /// <summary>仅测试环境：Payment.Mode=Stub 且 EnableSimulatePay=true 时可用，否则 404。</summary>
+    /// <summary>仅 Development 环境且支付为桩时可用；其他环境一律 404，与配置无关。</summary>
     [HttpPost("orders/{id}/simulate-paid")]
-    public Task<IActionResult> SimulatePaid(string id) => Run(() =>
+    public Task<IActionResult> SimulatePaid(string id) => Run(async () =>
     {
-        var p = options.Value.Payment;
-        if (p.Mode != PaymentMode.Stub || !p.EnableSimulatePay) throw GatewayException.NotFound();
-        orders.Get(Me(), id);
-        return Task.FromResult<IActionResult>(Ok(View(orders.MarkPaid(id))));
+        if (!SimulatePayAllowed(env, options.Value)) throw GatewayException.NotFound();
+        await orders.GetAsync(await Me(), id);
+        return Ok(View(await orders.MarkPaidAsync(id)));
     }, log);
+
+    internal static bool SimulatePayAllowed(IHostEnvironment env, TokenGatewayOptions o) =>
+        env.IsDevelopment() && o.Payment.Mode == PaymentMode.Stub;
 
     /// <summary>桩二维码图（img 标签直接拉，无鉴权，不含敏感信息）。</summary>
     [HttpGet("orders/{id}/qr.svg")]
@@ -82,7 +87,7 @@ public class WalletController(
         return Content(svg, "image/svg+xml");
     }
 
-    // 真实商户回调钩子：商户就绪后在这里验签 → orders.MarkPaid(outTradeNo)。
+    // 真实商户回调钩子：商户就绪后在这里验签 → orders.MarkPaidAsync(outTradeNo)。
     [HttpPost("notify/wechat")]
     public IActionResult NotifyWechat() => StatusCode(501);
 
@@ -90,30 +95,31 @@ public class WalletController(
     public IActionResult NotifyAlipay() => StatusCode(501);
 
     [HttpGet("usage")]
-    public Task<IActionResult> Usage([FromQuery] int take = 50) => Run(() =>
+    public Task<IActionResult> Usage([FromQuery] int take = 50) => Run(async () =>
     {
-        var me = Me();
-        var v = wallet.View(me);
-        var items = usage.Recent(me, Math.Clamp(take, 1, 200)).Select(e => new
+        var me = await Me();
+        var v = await wallet.ViewAsync(me);
+        var items = (await usage.RecentAsync(me, Math.Clamp(take, 1, 200))).Select(e => new
         {
             time = e.Time, alias = e.Alias, bot = e.Bot, promptTokens = e.PromptTokens,
             completionTokens = e.CompletionTokens, cost = e.Cost, success = e.Success,
         });
-        return Task.FromResult<IActionResult>(Ok(new
+        return Ok(new
         {
             summary = new { periodUsed = v.PeriodUsed, balance = v.Balance, frozen = v.Frozen, available = v.Available },
             items,
-        }));
+        });
     }, log);
 
-    private object View(Order o)
+    private object View(TgOrder o)
     {
         var method = o.Method == PayMethod.Wechat ? "wechat" : "alipay";
         var qr = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/api/wallet/orders/{o.OrderId}/qr.svg?m={method}&a={o.AmountCny}&v={o.QrVersion}";
         return new
         {
             orderId = o.OrderId, planId = o.PlanId, amountCny = o.AmountCny, tokens = o.Tokens, method,
-            qrUrl = qr, expiresAt = o.ExpiresAt, status = o.Status.ToString().ToLowerInvariant(), paidAt = o.PaidAt,
+            qrUrl = qr, expiresAt = new DateTimeOffset(o.ExpiresAt, TimeSpan.Zero), status = o.Status.ToString().ToLowerInvariant(),
+            paidAt = o.PaidAt is { } p ? new DateTimeOffset(p, TimeSpan.Zero) : (DateTimeOffset?)null,
         };
     }
 }

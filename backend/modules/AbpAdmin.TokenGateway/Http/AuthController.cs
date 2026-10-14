@@ -1,6 +1,7 @@
 using AbpAdmin.TokenGateway.Core;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Volo.Abp.Identity;
 
 namespace AbpAdmin.TokenGateway.Http;
@@ -8,7 +9,7 @@ namespace AbpAdmin.TokenGateway.Http;
 public record LoginInput(string? Username, string? UserNameOrEmail, string? Password);
 
 [Route("api/auth")]
-public class AuthController(IdentityUserManager users, KeyStore keys, Wallet wallet, Microsoft.Extensions.Options.IOptions<TokenGatewayOptions> options, ILogger<AuthController> log) : GatewayControllerBase
+public class AuthController(IdentityUserManager users, KeyStore keys, Wallet wallet, IOptions<TokenGatewayOptions> options, ILogger<AuthController> log) : GatewayControllerBase
 {
     /// <summary>abp_admin 账号密码登录 → 会话令牌 + 用户 Key（同一用户复用同一把 hb-）。</summary>
     [HttpPost("login")]
@@ -28,13 +29,13 @@ public class AuthController(IdentityUserManager users, KeyStore keys, Wallet wal
         await users.ResetAccessFailedCountAsync(user);
 
         var trial = options.Value.TrialTokens;
-        if (trial > 0) wallet.Credit(user.Id, trial, "trial");
-        var (session, exp) = keys.IssueSession(user.Id);
+        if (trial > 0) await wallet.CreditAsync(user.Id, trial, "trial:" + user.Id.ToString("N"));
+        var (session, exp) = await keys.IssueSessionAsync(user.Id);
         return Ok(new
         {
             session,
             sessionExpiresAt = exp,
-            apiKey = keys.IssueOrReuseKey(user.Id),
+            apiKey = await keys.IssueOrReuseKeyAsync(user.Id),
             user = new { id = user.Id, userName = user.UserName, name = user.Name },
         });
     }, log);

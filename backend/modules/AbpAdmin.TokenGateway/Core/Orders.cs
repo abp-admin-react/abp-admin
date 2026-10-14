@@ -1,98 +1,83 @@
-using System.Collections.Concurrent;
+using AbpAdmin.TokenGateway.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace AbpAdmin.TokenGateway.Core;
 
-public enum PayMethod { Wechat, Alipay }
+public enum PayMethod { Wechat = 1, Alipay = 2 }
 
-public enum OrderStatus { Pending, Paid, Expired, Failed }
-
-public sealed class Order
-{
-    public required string OrderId { get; init; }
-    public required Guid UserId { get; init; }
-    public required string PlanId { get; init; }
-    public required decimal AmountCny { get; init; }
-    public required long Tokens { get; init; }
-    public required PayMethod Method { get; init; }
-    public required DateTimeOffset CreatedAt { get; init; }
-    public DateTimeOffset ExpiresAt { get; set; }
-    public int QrVersion { get; set; } = 1;
-    public OrderStatus Status { get; set; } = OrderStatus.Pending;
-    public DateTimeOffset? PaidAt { get; set; }
-}
+public enum OrderStatus { Pending = 0, Paid = 1, Expired = 2, Failed = 3 }
 
 /// <summary>
-/// 充值单状态机：Pending →(支付回调/模拟)→ Paid（入账一次）；Pending →(过期)→ Expired →(刷新二维码)→ Pending；
-/// Pending →(渠道失败)→ Failed。Paid/Failed 为终态。真实商户回调走 MarkPaid 钩子。
+/// 充值单状态机：Pending →(回调/模拟)→ Paid（入账一次）；Pending →(过期)→ Expired →(刷新二维码)→ Pending；
+/// Pending/Expired →(渠道失败)→ Failed。Paid/Failed 终态。状态翻转全用条件 UPDATE。
+/// 订单金额/代币数在建单时从价表快照，后续改价不影响已建单。
 /// </summary>
-public class OrderBook(TimeProvider clock, PlanCatalog plans, Wallet wallet, IOptions<TokenGatewayOptions> options)
+public class OrderBook(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider clock, PlanCatalog plans, Wallet wallet, IOptions<TokenGatewayOptions> options)
 {
-    private readonly ConcurrentDictionary<string, Order> _orders = new();
-
+    private DateTime Now() => clock.GetUtcNow().UtcDateTime;
     private TimeSpan Ttl => TimeSpan.FromSeconds(options.Value.Payment.OrderTtlSeconds);
 
-    public Order Create(Guid user, string? planId, PayMethod method)
+    public async Task<TgOrder> CreateAsync(Guid user, string? planId, PayMethod method)
     {
-        var plan = plans.Find(planId);
-        var now = clock.GetUtcNow();
-        var order = new Order
+        var plan = await plans.FindActiveAsync(planId);
+        var now = Now();
+        var order = new TgOrder
         {
-            OrderId = "hbo" + now.ToOffset(TimeSpan.FromHours(8)).ToString("yyyyMMddHHmmss") + Guid.NewGuid().ToString("N")[..8],
+            OrderId = "hbo" + clock.GetUtcNow().ToOffset(TimeSpan.FromHours(8)).ToString("yyyyMMddHHmmss") + Guid.NewGuid().ToString("N")[..8],
             UserId = user, PlanId = plan.Id, AmountCny = plan.PriceCny, Tokens = plan.Tokens, Method = method,
-            CreatedAt = now, ExpiresAt = now + Ttl,
+            Status = OrderStatus.Pending, CreatedAt = now, ExpiresAt = now + Ttl,
         };
-        _orders[order.OrderId] = order;
+        await using var db = await dbf.CreateDbContextAsync();
+        db.Orders.Add(order);
+        await db.SaveChangesAsync();
         return order;
     }
 
-    public Order Get(Guid user, string id)
+    public async Task<TgOrder> GetAsync(Guid user, string id)
     {
-        if (!_orders.TryGetValue(id, out var o) || o.UserId != user) throw GatewayException.NotFound();
-        lock (o)
-        {
-            if (o.Status == OrderStatus.Pending && clock.GetUtcNow() >= o.ExpiresAt) o.Status = OrderStatus.Expired;
-            return o;
-        }
+        await using var db = await dbf.CreateDbContextAsync();
+        var now = Now();
+        await db.Orders.Where(o => o.OrderId == id && o.Status == OrderStatus.Pending && o.ExpiresAt <= now)
+            .ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, OrderStatus.Expired));
+        var order = await db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.OrderId == id);
+        if (order is null || order.UserId != user) throw GatewayException.NotFound();
+        return order;
     }
 
-    public Order RefreshQr(Guid user, string id)
+    public async Task<TgOrder> RefreshQrAsync(Guid user, string id)
     {
-        var o = Get(user, id);
-        lock (o)
-        {
-            if (o.Status is OrderStatus.Paid or OrderStatus.Failed)
-                throw GatewayException.BadRequest("订单已结束");
-            o.Status = OrderStatus.Pending;
-            o.ExpiresAt = clock.GetUtcNow() + Ttl;
-            o.QrVersion++;
-            return o;
-        }
+        await GetAsync(user, id);
+        var exp = Now() + Ttl;
+        await using var db = await dbf.CreateDbContextAsync();
+        var n = await db.Orders.Where(o => o.OrderId == id && (o.Status == OrderStatus.Pending || o.Status == OrderStatus.Expired))
+            .ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, OrderStatus.Pending).SetProperty(o => o.ExpiresAt, exp).SetProperty(o => o.QrVersion, o => o.QrVersion + 1));
+        if (n == 0) throw GatewayException.BadRequest("订单已结束");
+        return await GetAsync(user, id);
     }
 
-    /// <summary>支付成功（真实回调或测试模拟）。幂等；已过期但渠道确认到账也入账。</summary>
-    public Order MarkPaid(string id)
+    /// <summary>支付成功（真实回调或开发环境模拟）。幂等；已过期但渠道确认到账也入账。翻状态与入账同一事务。</summary>
+    public async Task<TgOrder> MarkPaidAsync(string id)
     {
-        if (!_orders.TryGetValue(id, out var o)) throw GatewayException.NotFound();
-        lock (o)
-        {
-            if (o.Status == OrderStatus.Paid) return o;
-            if (o.Status == OrderStatus.Failed) throw GatewayException.BadRequest("订单已失败");
-            wallet.Credit(o.UserId, o.Tokens, o.OrderId);
-            o.Status = OrderStatus.Paid;
-            o.PaidAt = clock.GetUtcNow();
-            return o;
-        }
+        var now = Now();
+        await using var db = await dbf.CreateDbContextAsync();
+        await using var tx = await db.Database.BeginTransactionAsync();
+        var o = await db.Orders.AsNoTracking().FirstOrDefaultAsync(x => x.OrderId == id) ?? throw GatewayException.NotFound();
+        if (o.Status == OrderStatus.Failed) throw GatewayException.BadRequest("订单已失败");
+        var n = await db.Orders.Where(x => x.OrderId == id && (x.Status == OrderStatus.Pending || x.Status == OrderStatus.Expired))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, OrderStatus.Paid).SetProperty(x => x.PaidAt, now));
+        if (n == 1) await wallet.CreditInTxAsync(db, o.UserId, o.Tokens, o.OrderId);
+        await tx.CommitAsync();
+        return await db.Orders.AsNoTracking().FirstAsync(x => x.OrderId == id);
     }
 
-    public Order MarkFailed(string id)
+    public async Task<TgOrder> MarkFailedAsync(string id)
     {
-        if (!_orders.TryGetValue(id, out var o)) throw GatewayException.NotFound();
-        lock (o)
-        {
-            if (o.Status == OrderStatus.Paid) throw GatewayException.BadRequest("订单已支付");
-            o.Status = OrderStatus.Failed;
-            return o;
-        }
+        await using var db = await dbf.CreateDbContextAsync();
+        var n = await db.Orders.Where(x => x.OrderId == id && (x.Status == OrderStatus.Pending || x.Status == OrderStatus.Expired))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, OrderStatus.Failed));
+        var o = await db.Orders.AsNoTracking().FirstOrDefaultAsync(x => x.OrderId == id) ?? throw GatewayException.NotFound();
+        if (n == 0 && o.Status != OrderStatus.Failed) throw GatewayException.BadRequest("订单已支付");
+        return o;
     }
 }

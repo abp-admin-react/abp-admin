@@ -14,11 +14,11 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
     IOptions<TokenGatewayOptions> options, ILogger<ChatController> log) : GatewayControllerBase
 {
     [HttpGet("models")]
-    public Task<IActionResult> Models() => Run(() =>
+    public Task<IActionResult> Models() => Run(async () =>
     {
-        keys.Resolve(Bearer(), allowSession: false);
+        await keys.ResolveAsync(Bearer(), allowSession: false);
         var data = options.Value.EffectiveAliases.Select(a => new { id = a.Alias, @object = "model", owned_by = "harnessbot" });
-        return Task.FromResult<IActionResult>(Ok(new { @object = "list", data }));
+        return Ok(new { @object = "list", data });
     }, log);
 
     [HttpPost("chat/completions")]
@@ -28,10 +28,10 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
         var started = false;
         try
         {
-            var user = keys.Resolve(Bearer(), allowSession: false);
+            var user = await keys.ResolveAsync(Bearer(), allowSession: false);
             var request = await JsonNode.ParseAsync(Request.Body, cancellationToken: HttpContext.RequestAborted) as JsonObject
                           ?? throw GatewayException.BadRequest("body 必须是 JSON 对象");
-            ticket = billing.Begin(user, request, Request.Headers["X-HB-Bot"].FirstOrDefault());
+            ticket = await billing.BeginAsync(user, request, Request.Headers["X-HB-Bot"].FirstOrDefault());
 
             using var resp = await upstream.SendAsync(ticket.UpstreamBody, HttpContext.RequestAborted);
             if (!resp.IsSuccessStatusCode)
@@ -47,8 +47,8 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
                 var json = JsonNode.Parse(await resp.Content.ReadAsStringAsync(HttpContext.RequestAborted)) as JsonObject
                            ?? throw GatewayException.UpstreamUnavailable();
                 var (p, c) = ReadUsage(json);
-                Scrub(json, ticket.Alias.Alias);
-                billing.Settle(ticket, p, c);
+                Scrub(json, ticket.Alias.Alias, ticket.ResponseId);
+                await billing.SettleAsync(ticket, p, c);
                 ticket = null;
                 Response.ContentType = "application/json";
                 await Response.WriteAsync(json.ToJsonString(), HttpContext.RequestAborted);
@@ -79,7 +79,7 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
                 if (chunk["choices"] is JsonArray choices)
                     foreach (var ch in choices)
                         seenChars += ch?["delta"]?["content"]?.ToString().Length ?? 0;
-                Scrub(chunk, ticket.Alias.Alias);
+                Scrub(chunk, ticket.Alias.Alias, ticket.ResponseId);
                 await Response.WriteAsync($"data: {chunk.ToJsonString()}\n\n", HttpContext.RequestAborted);
                 await Response.Body.FlushAsync(HttpContext.RequestAborted);
             }
@@ -88,12 +88,12 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
                 prompt = ChatBilling.EstimatePromptTokens(ticket.UpstreamBody);
                 completion = (seenChars + 1) / 2;
             }
-            billing.Settle(ticket, prompt, completion);
+            await billing.SettleAsync(ticket, prompt, completion);
             ticket = null;
         }
         catch (Exception e)
         {
-            if (ticket is not null) billing.Fail(ticket);
+            if (ticket is not null) await billing.FailAsync(ticket);
             if (HttpContext.RequestAborted.IsCancellationRequested) return;
             var ge = e as GatewayException ?? GatewayException.Internal();
             if (e is not GatewayException) log.LogError(e, "gateway chat failed");
@@ -109,11 +109,11 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
     private static (long Prompt, long Completion) ReadUsage(JsonObject o) =>
         (o["usage"]?["prompt_tokens"]?.GetValue<long>() ?? 0, o["usage"]?["completion_tokens"]?.GetValue<long>() ?? 0);
 
-    /// <summary>剥离上游痕迹：model 回别名，去掉指纹/渠道类字段。</summary>
-    internal static void Scrub(JsonObject o, string alias)
+    /// <summary>剥离上游痕迹：model 回别名，id 换成本次请求固定的 hb- id（流式各帧一致），去掉指纹/渠道类字段。</summary>
+    internal static void Scrub(JsonObject o, string alias, string responseId)
     {
         o["model"] = alias;
         foreach (var k in new[] { "system_fingerprint", "provider", "channel", "x_groq", "service_tier" }) o.Remove(k);
-        if (o["id"] is not null) o["id"] = "hb-" + Guid.NewGuid().ToString("N")[..24];
+        if (o["id"] is not null) o["id"] = responseId;
     }
 }

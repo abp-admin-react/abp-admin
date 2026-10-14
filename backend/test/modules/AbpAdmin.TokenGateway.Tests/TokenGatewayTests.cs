@@ -1,196 +1,279 @@
 using System.Text.Json.Nodes;
 using AbpAdmin.TokenGateway.Core;
+using AbpAdmin.TokenGateway.Data;
 using AbpAdmin.TokenGateway.Http;
-using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.FileProviders;
 using Shouldly;
 using Xunit;
 
 namespace AbpAdmin.TokenGateway;
 
-public class FakeClock(DateTimeOffset now) : TimeProvider
+[Collection(PgCollection.Name)]
+public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
 {
-    public DateTimeOffset Now { get; set; } = now;
-    public override DateTimeOffset GetUtcNow() => Now;
-}
-
-public class TokenGatewayTests
-{
-    private readonly FakeClock _clock = new(new DateTimeOffset(2026, 10, 14, 10, 0, 0, TimeSpan.Zero));
-    private readonly IOptions<TokenGatewayOptions> _opt = Options.Create(new TokenGatewayOptions());
-    private readonly Guid _u = Guid.NewGuid();
-
-    private Wallet NewWallet() => new(_clock);
-
-    private (OrderBook Orders, Wallet Wallet) NewOrders()
-    {
-        var w = NewWallet();
-        return (new OrderBook(_clock, new PlanCatalog(_opt), w, _opt), w);
-    }
-
     [Fact]
-    public void Plans_are_four_tiers()
+    public async Task Plans_seed_is_four_tiers_at_100k_per_yuan()
     {
-        var plans = new PlanCatalog(_opt).All();
+        var plans = await NewPlans().AllAsync();
         plans.Select(p => p.PriceCny).ShouldBe(new[] { 30m, 98m, 198m, 498m });
         plans.Select(p => p.Name).ShouldBe(new[] { "体验包", "标准包", "进阶包", "专业包" });
-        plans.ShouldAllBe(p => p.Tokens > 0);
+        plans.ShouldAllBe(p => p.Tokens == (long)(p.PriceCny * 100_000));
     }
 
     [Fact]
-    public void Percent_is_zero_and_low_when_never_credited()
+    public async Task Plan_tokens_editable_and_new_orders_use_new_value_old_orders_keep_snapshot()
     {
-        var v = NewWallet().View(_u);
+        var catalog = NewPlans();
+        var (orders, w) = NewOrders();
+        var before = await orders.CreateAsync(U, "p198", PayMethod.Wechat);
+        try
+        {
+            (await catalog.UpdateAsync("p198", new PlanPatch(null, null, 25_000_000, null, null))).Tokens.ShouldBe(25_000_000);
+            (await orders.CreateAsync(U, "p198", PayMethod.Wechat)).Tokens.ShouldBe(25_000_000);
+            await orders.MarkPaidAsync(before.OrderId);
+            (await w.ViewAsync(U)).TotalCredited.ShouldBe(19_800_000);
+            await Should.ThrowAsync<GatewayException>(() => catalog.UpdateAsync("p198", new PlanPatch(null, null, 0, null, null)));
+        }
+        finally
+        {
+            await catalog.UpdateAsync("p198", new PlanPatch(null, null, 19_800_000, null, null));
+        }
+    }
+
+    [Fact]
+    public async Task Percent_is_zero_and_low_when_never_credited()
+    {
+        var v = await NewWallet().ViewAsync(U);
         v.Percent.ShouldBe(0);
         v.Low.ShouldBeTrue();
     }
 
     [Fact]
-    public void Percent_floors_available_over_total_credited()
+    public async Task Percent_floors_available_over_total_credited()
     {
         var w = NewWallet();
-        w.Credit(_u, 1000, "o1");
-        w.Credit(_u, 2000, "o2");
-        var r = w.Reserve(_u, 500);
-        w.Settle(_u, r, 299); // balance 2701
-        w.Reserve(_u, 100);   // frozen 100 → available 2601
-        var v = w.View(_u);
-        v.Percent.ShouldBe(86); // floor(2601/3000*100)=86.7→86
+        await w.CreditAsync(U, 1000, "t-" + Guid.NewGuid());
+        await w.CreditAsync(U, 2000, "t-" + Guid.NewGuid());
+        var r = await w.ReserveAsync(U, 500, "hb-chat");
+        (await w.SettleAsync(U, r, 299)).ShouldBe(299);
+        await w.ReserveAsync(U, 100, "hb-chat");
+        var v = await w.ViewAsync(U);
+        v.Percent.ShouldBe(86);  // floor(2601/3000*100)
         v.Low.ShouldBeFalse();
         v.Frozen.ShouldBe(100);
+        v.Available.ShouldBe(3000 - 299 - 100);
         v.PeriodUsed.ShouldBe(299);
+        (await w.ReconcileAsync(U)).Ok.ShouldBeTrue();
     }
 
     [Fact]
-    public void Release_does_not_change_denominator_and_low_under_10()
+    public async Task Release_keeps_denominator_and_low_under_10()
     {
         var w = NewWallet();
-        w.Credit(_u, 1000, "o1");
-        w.Settle(_u, w.Reserve(_u, 950), 950);
-        w.Release(_u, w.Reserve(_u, 10));
-        var v = w.View(_u);
+        await w.CreditAsync(U, 1000, "t-" + Guid.NewGuid());
+        await w.SettleAsync(U, await w.ReserveAsync(U, 950, "a"), 950);
+        await w.ReleaseAsync(U, await w.ReserveAsync(U, 10, "a"));
+        var v = await w.ViewAsync(U);
         v.Percent.ShouldBe(5);
         v.Low.ShouldBeTrue();
         v.TotalCredited.ShouldBe(1000);
+        (await w.ReconcileAsync(U)).Ok.ShouldBeTrue();
     }
 
     [Fact]
-    public void Credit_is_idempotent_by_ref()
+    public async Task Credit_is_idempotent_by_ref()
     {
         var w = NewWallet();
-        w.Credit(_u, 100, "o1").ShouldBeTrue();
-        w.Credit(_u, 100, "o1").ShouldBeFalse();
-        w.View(_u).Balance.ShouldBe(100);
+        var @ref = "o-" + Guid.NewGuid();
+        (await w.CreditAsync(U, 100, @ref)).ShouldBeTrue();
+        (await w.CreditAsync(U, 100, @ref)).ShouldBeFalse();
+        var results = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => w.CreditAsync(U, 100, "c-" + U)));
+        results.Count(x => x).ShouldBe(1);
+        (await w.ViewAsync(U)).Balance.ShouldBe(200);
+        (await w.ReconcileAsync(U)).Ok.ShouldBeTrue();
     }
 
     [Fact]
-    public void Reserve_rejects_insufficient_balance()
+    public async Task Reserve_rejects_insufficient_balance()
     {
         var w = NewWallet();
-        Should.Throw<GatewayException>(() => w.Reserve(_u, 1)).Code.ShouldBe("INSUFFICIENT_BALANCE");
-        w.Credit(_u, 100, "o1");
-        w.Reserve(_u, 80);
-        Should.Throw<GatewayException>(() => w.Reserve(_u, 21)).Status.ShouldBe(402);
+        (await Should.ThrowAsync<GatewayException>(() => w.ReserveAsync(U, 1, "a"))).Code.ShouldBe("INSUFFICIENT_BALANCE");
+        await w.CreditAsync(U, 100, "t-" + Guid.NewGuid());
+        await w.ReserveAsync(U, 80, "a");
+        (await Should.ThrowAsync<GatewayException>(() => w.ReserveAsync(U, 21, "a"))).Status.ShouldBe(402);
     }
 
     [Fact]
-    public async Task Chat_with_no_balance_never_reaches_upstream()
+    public async Task Concurrent_reserves_never_overdraw()
     {
         var w = NewWallet();
-        var billing = new ChatBilling(w, new UsageLog(), _opt);
+        await w.CreditAsync(U, 100, "t-" + Guid.NewGuid());
+        var tasks = Enumerable.Range(0, 30).Select(async _ =>
+        {
+            try { await w.ReserveAsync(U, 10, "a"); return true; }
+            catch (GatewayException) { return false; }
+        });
+        (await Task.WhenAll(tasks)).Count(x => x).ShouldBe(10);
+        var v = await w.ViewAsync(U);
+        v.Available.ShouldBe(0);
+        v.Frozen.ShouldBe(100);
+        (await w.ReconcileAsync(U)).Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Settle_twice_charges_once_and_writes_ledger()
+    {
+        var w = NewWallet();
+        await w.CreditAsync(U, 1000, "t-" + Guid.NewGuid());
+        var r = await w.ReserveAsync(U, 300, "a");
+        var both = await Task.WhenAll(w.SettleAsync(U, r, 120), w.SettleAsync(U, r, 120));
+        both.Sum().ShouldBe(120);
+        await w.ReleaseAsync(U, r);
+        (await w.ViewAsync(U)).Balance.ShouldBe(880);
+
+        await using var db = await Db.CreateDbContextAsync();
+        var kinds = await db.Ledger.Where(e => e.UserId == U).OrderBy(e => e.Kind).Select(e => new { e.Kind, e.Amount }).ToListAsync();
+        kinds.Select(k => (k.Kind, k.Amount)).ShouldBe(new[]
+        {
+            (LedgerKind.Credit, 1000L), (LedgerKind.Reserve, 300L), (LedgerKind.Settle, 120L), (LedgerKind.Release, 180L),
+        });
+        (await w.ReconcileAsync(U)).Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Chat_with_no_balance_never_reaches_upstream_and_settles_after()
+    {
+        var w = NewWallet();
+        var billing = new ChatBilling(w, NewUsage(), Opt);
         var req = JsonNode.Parse("""{"messages":[{"role":"user","content":"hi"}]}""")!.AsObject();
-        Should.Throw<GatewayException>(() => billing.Begin(_u, req, null)).Code.ShouldBe("INSUFFICIENT_BALANCE");
+        (await Should.ThrowAsync<GatewayException>(() => billing.BeginAsync(U, req, null))).Code.ShouldBe("INSUFFICIENT_BALANCE");
 
-        w.Credit(_u, 100_000, "o1");
-        var t = billing.Begin(_u, req, "bot1");
-        t.UpstreamBody["model"]!.GetValue<string>().ShouldBe("CHANGE_ME");
-        var resp = await new MockUpstream().SendAsync(t.UpstreamBody, default);
-        resp.IsSuccessStatusCode.ShouldBeTrue();
-        billing.Settle(t, 12, 8).ShouldBe(20);
-        var v = w.View(_u);
+        await w.CreditAsync(U, 100_000, "t-" + Guid.NewGuid());
+        var t = await billing.BeginAsync(U, req, "bot1");
+        t.ResponseId.ShouldStartWith("hb-");
+        (await billing.SettleAsync(t, 12, 8)).ShouldBe(20);
+        var v = await w.ViewAsync(U);
         v.Frozen.ShouldBe(0);
         v.Balance.ShouldBe(100_000 - 20);
+        var usage = await NewUsage().RecentAsync(U, 10);
+        usage.Single().Bot.ShouldBe("bot1");
     }
 
     [Fact]
-    public void Failed_call_fully_unfreezes()
+    public async Task Failed_call_fully_unfreezes()
     {
         var w = NewWallet();
-        w.Credit(_u, 100_000, "o1");
-        var billing = new ChatBilling(w, new UsageLog(), _opt);
-        var t = billing.Begin(_u, JsonNode.Parse("""{"messages":[]}""")!.AsObject(), null);
-        w.View(_u).Frozen.ShouldBeGreaterThan(0);
-        billing.Fail(t);
-        w.View(_u).Balance.ShouldBe(100_000);
-        w.View(_u).Frozen.ShouldBe(0);
+        await w.CreditAsync(U, 100_000, "t-" + Guid.NewGuid());
+        var billing = new ChatBilling(w, NewUsage(), Opt);
+        var t = await billing.BeginAsync(U, JsonNode.Parse("""{"messages":[]}""")!.AsObject(), null);
+        (await w.ViewAsync(U)).Frozen.ShouldBeGreaterThan(0);
+        await billing.FailAsync(t);
+        (await w.ViewAsync(U)).Balance.ShouldBe(100_000);
+        (await w.ViewAsync(U)).Frozen.ShouldBe(0);
     }
 
     [Fact]
-    public void Invalid_or_missing_key_is_rejected()
+    public async Task Invalid_or_missing_key_is_rejected_and_key_is_reused()
     {
-        var keys = new KeyStore(_clock, _opt);
-        Should.Throw<GatewayException>(() => keys.Resolve(null, true)).Code.ShouldBe("INVALID_KEY");
-        Should.Throw<GatewayException>(() => keys.Resolve("hb-nope", true)).Status.ShouldBe(401);
-        var key = keys.IssueOrReuseKey(_u);
+        var keys = NewKeys();
+        (await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(null, true))).Code.ShouldBe("INVALID_KEY");
+        (await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync("hb-nope", true))).Status.ShouldBe(401);
+        var key = await keys.IssueOrReuseKeyAsync(U);
         key.ShouldStartWith("hb-");
-        keys.IssueOrReuseKey(_u).ShouldBe(key);
-        keys.Resolve(key, false).ShouldBe(_u);
-        var (session, _) = keys.IssueSession(_u);
-        Should.Throw<GatewayException>(() => keys.Resolve(session, allowSession: false));
-        keys.Resolve(session, true).ShouldBe(_u);
-        _clock.Now = _clock.Now.AddHours(_opt.Value.SessionHours + 1);
-        Should.Throw<GatewayException>(() => keys.Resolve(session, true));
-        keys.RevokeKey(_u);
-        Should.Throw<GatewayException>(() => keys.Resolve(key, false));
+        (await NewKeys().IssueOrReuseKeyAsync(U)).ShouldBe(key);
+        (await keys.ResolveAsync(key, false)).ShouldBe(U);
+        var (session, _) = await keys.IssueSessionAsync(U);
+        await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(session, allowSession: false));
+        (await keys.ResolveAsync(session, true)).ShouldBe(U);
+        Clock.Now = Clock.Now.AddHours(Opt.Value.SessionHours + 1);
+        await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(session, true));
+        await keys.RevokeKeyAsync(U);
+        await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(key, false));
     }
 
     [Fact]
-    public void Order_pending_to_paid_credits_once()
+    public async Task Order_pending_to_paid_credits_once_even_concurrently()
     {
         var (orders, w) = NewOrders();
-        var o = orders.Create(_u, "p98", PayMethod.Wechat);
+        var o = await orders.CreateAsync(U, "p98", PayMethod.Wechat);
         o.Status.ShouldBe(OrderStatus.Pending);
         o.AmountCny.ShouldBe(98m);
-        orders.MarkPaid(o.OrderId);
-        orders.MarkPaid(o.OrderId);
-        orders.Get(_u, o.OrderId).Status.ShouldBe(OrderStatus.Paid);
-        w.View(_u).Balance.ShouldBe(9_800_000);
-        w.View(_u).Percent.ShouldBe(100);
-        Should.Throw<GatewayException>(() => orders.RefreshQr(_u, o.OrderId));
+        await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => orders.MarkPaidAsync(o.OrderId)));
+        (await orders.GetAsync(U, o.OrderId)).Status.ShouldBe(OrderStatus.Paid);
+        (await w.ViewAsync(U)).Balance.ShouldBe(9_800_000);
+        (await w.ViewAsync(U)).Percent.ShouldBe(100);
+        await Should.ThrowAsync<GatewayException>(() => orders.RefreshQrAsync(U, o.OrderId));
+        (await w.ReconcileAsync(U)).Ok.ShouldBeTrue();
     }
 
     [Fact]
-    public void Order_expires_then_refresh_returns_pending()
+    public async Task Order_expires_then_refresh_returns_pending()
     {
         var (orders, _) = NewOrders();
-        var o = orders.Create(_u, "p30", PayMethod.Alipay);
-        _clock.Now = _clock.Now.AddSeconds(301);
-        orders.Get(_u, o.OrderId).Status.ShouldBe(OrderStatus.Expired);
-        var r = orders.RefreshQr(_u, o.OrderId);
+        var o = await orders.CreateAsync(U, "p30", PayMethod.Alipay);
+        Clock.Now = Clock.Now.AddSeconds(301);
+        (await orders.GetAsync(U, o.OrderId)).Status.ShouldBe(OrderStatus.Expired);
+        var r = await orders.RefreshQrAsync(U, o.OrderId);
         r.Status.ShouldBe(OrderStatus.Pending);
         r.QrVersion.ShouldBe(2);
-        r.ExpiresAt.ShouldBeGreaterThan(_clock.Now);
+        r.ExpiresAt.ShouldBeGreaterThan(Clock.Now.UtcDateTime);
     }
 
     [Fact]
-    public void Order_failed_is_terminal_and_owner_scoped()
+    public async Task Order_failed_is_terminal_and_owner_scoped()
     {
         var (orders, w) = NewOrders();
-        var o = orders.Create(_u, "p30", PayMethod.Wechat);
-        Should.Throw<GatewayException>(() => orders.Get(Guid.NewGuid(), o.OrderId)).Code.ShouldBe("NOT_FOUND");
-        orders.MarkFailed(o.OrderId);
-        Should.Throw<GatewayException>(() => orders.MarkPaid(o.OrderId));
-        w.View(_u).Balance.ShouldBe(0);
-        Should.Throw<GatewayException>(() => orders.Create(_u, "nope", PayMethod.Wechat)).Code.ShouldBe("BAD_REQUEST");
+        var o = await orders.CreateAsync(U, "p30", PayMethod.Wechat);
+        (await Should.ThrowAsync<GatewayException>(() => orders.GetAsync(Guid.NewGuid(), o.OrderId))).Code.ShouldBe("NOT_FOUND");
+        await orders.MarkFailedAsync(o.OrderId);
+        await Should.ThrowAsync<GatewayException>(() => orders.MarkPaidAsync(o.OrderId));
+        (await w.ViewAsync(U)).Balance.ShouldBe(0);
+        (await Should.ThrowAsync<GatewayException>(() => orders.CreateAsync(U, "nope", PayMethod.Wechat))).Code.ShouldBe("BAD_REQUEST");
     }
 
     [Fact]
-    public void Scrub_hides_upstream_traces()
+    public async Task Data_survives_new_store_instances()
     {
-        var o = JsonNode.Parse("""{"id":"chatcmpl-x","model":"vendor/real","system_fingerprint":"fp","provider":"p"}""")!.AsObject();
-        ChatController.Scrub(o, "hb-chat");
-        o["model"]!.GetValue<string>().ShouldBe("hb-chat");
-        o.ContainsKey("system_fingerprint").ShouldBeFalse();
-        o.ContainsKey("provider").ShouldBeFalse();
-        o["id"]!.GetValue<string>().ShouldStartWith("hb-");
+        await NewWallet().CreditAsync(U, 777, "t-" + Guid.NewGuid());
+        var key = await NewKeys().IssueOrReuseKeyAsync(U);
+        // 模拟进程重启：全新实例，只靠库
+        (await NewWallet().ViewAsync(U)).Balance.ShouldBe(777);
+        (await NewKeys().ResolveAsync(key, false)).ShouldBe(U);
+    }
+
+    [Theory]
+    [InlineData("Development", PaymentMode.Stub, true)]
+    [InlineData("Production", PaymentMode.Stub, false)]
+    [InlineData("Staging", PaymentMode.Stub, false)]
+    [InlineData("Development", PaymentMode.Live, false)]
+    public void Simulate_pay_only_in_development(string envName, PaymentMode mode, bool allowed)
+    {
+        var o = new TokenGatewayOptions();
+        o.Payment.Mode = mode;
+        WalletController.SimulatePayAllowed(new Env(envName), o).ShouldBe(allowed);
+    }
+
+    [Fact]
+    public void Scrub_uses_one_id_and_hides_upstream_traces()
+    {
+        var a = JsonNode.Parse("""{"id":"chatcmpl-x","model":"vendor/real","system_fingerprint":"fp","provider":"p"}""")!.AsObject();
+        var b = JsonNode.Parse("""{"id":"chatcmpl-y","model":"vendor/real"}""")!.AsObject();
+        ChatController.Scrub(a, "hb-chat", "hb-fixed");
+        ChatController.Scrub(b, "hb-chat", "hb-fixed");
+        a["id"]!.GetValue<string>().ShouldBe("hb-fixed");
+        b["id"]!.GetValue<string>().ShouldBe("hb-fixed");
+        a["model"]!.GetValue<string>().ShouldBe("hb-chat");
+        a.ContainsKey("system_fingerprint").ShouldBeFalse();
+        a.ContainsKey("provider").ShouldBeFalse();
+    }
+
+    private sealed class Env(string name) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = name;
+        public string ApplicationName { get; set; } = "t";
+        public string ContentRootPath { get; set; } = "";
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }
