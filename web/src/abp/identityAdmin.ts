@@ -1,3 +1,11 @@
+/**
+ * 身份管理扩展：组织单元、岗位、成员关系等（非标准 CRUD 的 Identity 旁路）。
+ *
+ * ## 边界
+ * - 路径前缀 `/api/app/organization-unit`、`/api/app/post` 等，与 Contracts 对齐。
+ * - 分页参数在此转成 SkipCount/MaxResultCount；页面传 current/pageSize 语义。
+ * - 用户/角色主 CRUD 在 identity.ts；本文件不重复那一套。
+ */
 import { request } from '@umijs/max';
 import type { PagedResult } from './identity';
 

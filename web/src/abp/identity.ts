@@ -1,3 +1,13 @@
+/**
+ * 身份用户 / 角色 API 封装（ABP Identity + 本仓库 IdentityUserAdmin 扩展）。
+ *
+ * ## 边界
+ * - 页面只认本文件导出；路径与查询参数（PascalCase：Filter/Sorting/SkipCount/MaxResultCount）只在此适配。
+ * - 相对路径 `/api/identity/*` 与 `/api/app/identity-user-admin/*`，主机由 proxy.ts / nginx 转发。
+ * - `getCurrentAccountStatus`：读「当前登录用户是否必须改密」；后端在方法内鉴权，
+ *   匿名不可用；返回体只含 shouldChangePassword / reason，不含敏感资料。
+ *   app.tsx getInitialState 用它决定是否强制跳转 `/account/force-change-password`。
+ */
 import { request } from '@umijs/max';
 
 export type IdentityUserDto = {
@@ -347,12 +357,18 @@ export async function requireChangePasswordOnNextLogin(id: string) {
   );
 }
 
-/** 获取当前账户状态 */
+/**
+ * 当前账户状态（强制改密闸门）。
+ * - shouldChangePassword=true 时前端必须拦到改密页，不可进业务壳。
+ * - reason 仅作展示/排障，勿当权限码。
+ * - 与后端约定：接口自身校验登录态；无 Token → 401（全局跳登录），不是 404。
+ */
 export type AccountStatusDto = {
   shouldChangePassword: boolean;
   reason?: string;
 };
 
+/** GET current-account-status：只问「要不要改密」，不拉资料。 */
 export async function getCurrentAccountStatus() {
   return request<AccountStatusDto>(
     '/api/app/identity-user-admin/current-account-status',
