@@ -227,6 +227,18 @@ public class FinTrialBalanceDto
     public List<FinTrialBalanceLineDto> Lines { get; set; } = new();
 }
 
+/// <summary>
+/// A2b 过账规则列表入参。
+/// </summary>
+public class FinPostingRuleListInput
+{
+    /// <summary>
+    /// 默认 false：排除 Status=Deprecated（2），避免 A2b 列表出现已废弃模板（如 demo.commission）。
+    /// 显式 true 时含全部状态。
+    /// </summary>
+    public bool IncludeDeprecated { get; set; }
+}
+
 public class FinPostingRuleDto : EntityDto<Guid>
 {
     public string BizType { get; set; } = default!;

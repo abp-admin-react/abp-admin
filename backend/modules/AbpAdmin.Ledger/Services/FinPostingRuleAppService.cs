@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Data;
+using AbpAdmin.Ledger.Integration.Contracts;
 using AbpAdmin.Ledger.Permissions;
 using AbpAdmin.Ledger.Services.Dtos;
 using Microsoft.AspNetCore.Authorization;
@@ -12,7 +13,11 @@ using Volo.Abp.MultiTenancy;
 
 namespace AbpAdmin.Ledger.Services;
 
-/// <summary>A2b 过账规则只读：GET /api/app/fin-posting-rule</summary>
+/// <summary>
+/// A2b 过账规则只读：GET /api/app/fin-posting-rule。
+/// 默认排除 Deprecated（status=2），避免已废弃模板（如 demo.commission）出现在管理端列表；
+/// 显式 IncludeDeprecated=true 时返回全部状态。
+/// </summary>
 [Authorize(FinancePermissions.Rule.View)]
 public class FinPostingRuleAppService : FinanceAppServiceBase
 {
@@ -25,15 +30,22 @@ public class FinPostingRuleAppService : FinanceAppServiceBase
         _dataFilter = dataFilter;
     }
 
-    public virtual async Task<ListResultDto<FinPostingRuleDto>> GetListAsync()
+    public virtual async Task<ListResultDto<FinPostingRuleDto>> GetListAsync(FinPostingRuleListInput? input = null)
     {
+        input ??= new FinPostingRuleListInput();
         var db = await _db.GetDbContextAsync();
         var tenantId = CurrentTenant.Id;
         using (_dataFilter.Disable<IMultiTenant>())
         {
-            var rules = await db.PostingRules.AsNoTracking()
-                .Where(r => r.TenantId == tenantId || r.TenantId == null)
-                .OrderBy(r => r.BizType).ThenBy(r => r.Phase).ThenBy(r => r.Version)
+            var q = db.PostingRules.AsNoTracking()
+                .Where(r => r.TenantId == tenantId || r.TenantId == null);
+            // 默认隐藏 Deprecated；历史凭证仍记着当时的 RuleVersion，列表不必展示废弃模板。
+            if (!input.IncludeDeprecated)
+            {
+                q = q.Where(r => r.Status != FinPostingRuleStatus.Deprecated);
+            }
+
+            var rules = await q.OrderBy(r => r.BizType).ThenBy(r => r.Phase).ThenBy(r => r.Version)
                 .ToListAsync();
             return new ListResultDto<FinPostingRuleDto>(rules.Select(r => new FinPostingRuleDto
             {

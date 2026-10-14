@@ -11,7 +11,7 @@ using Xunit;
 
 namespace AbpAdmin.Ledger;
 
-/// <summary>科目管理：GET 列表/过滤/权限；CRUD、系统科目只读、有分录不可删只能停用。</summary>
+/// <summary>科目管理：GET 列表默认隐藏停用；过滤/权限；CRUD、系统科目只读、有分录不可删只能停用。</summary>
 public class FinAccountTests : LedgerScenarioTestBase
 {
     private FinAccountAppService Accounts => GetRequiredService<FinAccountAppService>();
@@ -41,6 +41,30 @@ public class FinAccountTests : LedgerScenarioTestBase
             var page = await Accounts.GetListAsync(new FinAccountListInput { MaxResultCount = 1 });
             page.Items.Count.ShouldBe(1);
             page.TotalCount.ShouldBe(all.TotalCount);
+        }
+    }
+
+
+    [Fact]
+    public async Task List_Defaults_To_Active_Only_Unless_Explicit()
+    {
+        using (As(TestUsers.AccountantA))
+        {
+            var a = await Accounts.CreateAsync(New("T9401"));
+            await Accounts.DisableAsync(a.Id);
+
+            var defaults = await Accounts.GetListAsync(new FinAccountListInput { MaxResultCount = 200 });
+            defaults.Items.ShouldNotContain(x => x.Id == a.Id);
+            defaults.Items.ShouldAllBe(x => x.IsActive);
+
+            var inactive = await Accounts.GetListAsync(new FinAccountListInput { IsActive = false, MaxResultCount = 200 });
+            inactive.Items.ShouldContain(x => x.Id == a.Id);
+
+            var activeOnly = await Accounts.GetListAsync(new FinAccountListInput { IsActive = true, MaxResultCount = 200 });
+            activeOnly.Items.ShouldNotContain(x => x.Id == a.Id);
+            activeOnly.Items.ShouldAllBe(x => x.IsActive);
+
+            await Accounts.DeleteAsync(a.Id); // 无分录，可删
         }
     }
 
@@ -83,6 +107,7 @@ public class FinAccountTests : LedgerScenarioTestBase
             u.Code.ShouldBe("T9002");
             u.Name.ShouldBe("改名");
             (await Accounts.DisableAsync(a.Id)).IsActive.ShouldBeFalse();
+            (await Accounts.GetListAsync(new FinAccountListInput { MaxResultCount = 200 })).Items.ShouldNotContain(x => x.Id == a.Id);
             (await Accounts.GetListAsync(new FinAccountListInput { IsActive = false })).Items.ShouldContain(x => x.Id == a.Id);
             (await Accounts.EnableAsync(a.Id)).IsActive.ShouldBeTrue();
             await Accounts.DeleteAsync(a.Id);

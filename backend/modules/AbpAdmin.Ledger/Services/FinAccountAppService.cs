@@ -27,7 +27,10 @@ public class FinAccountAppService : FinanceAppServiceBase
 
     public FinAccountAppService(IDbContextProvider<LedgerDbContext> db) => _db = db;
 
-    /// <summary>分页列表。需 Ledger.View 或 Account.Manage；无权 → 403（无业务码）。</summary>
+    /// <summary>
+    /// 分页列表。需 Ledger.View 或 Account.Manage；无权 → 403（无业务码）。
+    /// 默认只返回启用科目（IsActive 未传时等价 IsActive=true）；科目树/下拉依赖此默认，避免停用科目泄漏到前端。
+    /// </summary>
     public virtual async Task<PagedResultDto<FinAccountDto>> GetListAsync(FinAccountListInput input)
     {
         await RequireAnyAsync(null, FinancePermissions.Ledger.View, FinancePermissions.Account.Manage);
@@ -36,7 +39,9 @@ public class FinAccountAppService : FinanceAppServiceBase
         if (!string.IsNullOrWhiteSpace(input.Code)) { var c = input.Code.Trim(); q = q.Where(a => a.Code.Contains(c)); }
         if (!string.IsNullOrWhiteSpace(input.Name)) { var n = input.Name.Trim(); q = q.Where(a => a.Name.Contains(n)); }
         if (input.Type.HasValue) { q = q.Where(a => a.Type == input.Type.Value); }
+        // 默认隐藏停用：null → IsActive=true；显式 true/false 按调用方过滤。
         if (input.IsActive.HasValue) { q = q.Where(a => a.IsActive == input.IsActive.Value); }
+        else { q = q.Where(a => a.IsActive); }
 
         var total = await q.CountAsync();
         var skip = Math.Max(0, input.SkipCount);
