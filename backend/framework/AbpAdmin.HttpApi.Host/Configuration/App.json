@@ -1,0 +1,53 @@
+{
+  // Host 基础设施基线（单一事实来源）：端口/SelfUrl/OpenIddict RootUrl/Authority/连接串占位/Redis。
+  // 由 Program.cs 扫描 Configuration/*.json 加载；appsettings*.json 只做环境叠加。
+  // 真实凭据只放 appsettings.secrets.json 或环境变量，不入本文件。
+  "App": {
+    "SelfUrl": "https://localhost:44300",
+    "SpaUrl": "http://{0}.localhost:8000",
+    "EnablePiiLogging": false,
+    "EnableSecurityArtifactLogging": false,
+    "HealthCheckUrl": "/health-status",
+    "InstanceDiscriminator": ""
+  },
+  "OpenIddict": {
+    "Applications": {
+      "AbpAdmin_App": {
+        "ClientId": "AbpAdmin_App",
+        "RootUrl": "http://localhost:8004"
+      },
+      "AbpAdmin_Swagger": {
+        "ClientId": "AbpAdmin_Swagger",
+        "RootUrl": "https://localhost:44300"
+      }
+    }
+  },
+  "ConnectionStrings": {
+    "Default": "Host=localhost;Port=5432;Database=abpadmin;Username=postgres;Password=CHANGE_ME"
+  },
+  "DistributedCache": {
+    "KeyPrefix": ""
+  },
+  "Redis": {
+    "IsEnabled": false,
+    "Configuration": "127.0.0.1:6379"
+  },
+  "SignalR": {
+    "Enabled": true,
+    "UseRedisBackplane": false
+  },
+  "Quartz": {
+    "UsePersistentStore": false,
+    "SchedulerName": "AbpAdminScheduler"
+  },
+  "AuthServer": {
+    "Authority": "https://localhost:44300",
+    "RequireHttpsMetadata": true,
+    "SwaggerClientId": "AbpAdmin_Swagger",
+    "CertificatePassPhrase": ""
+  },
+  "StringEncryption": {
+    "DefaultPassPhrase": ""
+  }
+}
+

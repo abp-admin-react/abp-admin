@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -44,34 +45,40 @@ class Program
         Host.CreateDefaultBuilder(args)
             .ConfigureAppConfiguration((hosting, cfg) =>
             {
-                /* 单一配置源（不要搞两套）：
-                 * 数据库相关配置（ConnectionStrings:Default / AuthServer / StringEncryption
-                 * 等共享项）只维护在 HttpApi.Host/appsettings.json（+ appsettings.secrets.json），
-                 * 本项目 appsettings.json 仅保留迁移器专属配置（Quartz / Identity）；
-                 * OpenIddict 客户端清单同样统一在 Host 基座：种子读组合后的 OpenIddict:Applications 节。
+                /* Single shared Host config (do not duplicate):
+                 * ConnectionStrings / AuthServer / StringEncryption / OpenIddict live in
+                 * HttpApi.Host/Configuration/*.json + thin appsettings.json (+ secrets).
+                 * This project's appsettings.json keeps migrator-only keys (Quartz / Identity).
                  *
-                 * 生效顺序（后者覆盖前者）：
-                 *  1. HttpApi.Host/appsettings.json        —— 共享基座（切换数据库只改这里）
-                 *  2. HttpApi.Host/appsettings.secrets.json —— 共享凭证
-                 *  3. HttpApi.Host/appsettings.Development.json —— 仅 Development 环境加载：
-                 *     开发专属 OIDC 通道（AbpAdmin_TestCli、demo/多端口回调）与
-                 *     Identity:AllowDefaultAdminPassword 只在这里生效——生产环境不种入、
-                 *     默认口令直接 fail-fast。刻意不加载 appsettings.Production.json：
-                 *     那份文件的 Redis:IsEnabled=true 等多实例姿态属于宿主——一次性迁移器
-                 *     没有 Redis__Configuration 时会拿着基座默认串（127.0.0.1:6379）去连，
-                 *     建库串行化的分布式锁首用即失败，迁移器被无关姿态破坏。
-                 *  4. 本项目 appsettings.json               —— 迁移器专属覆盖
-                 *  5. 环境变量                               —— 最高（生产/CI 覆盖，含 secrets）
+                 * Load order (later wins):
+                 *  1. HttpApi.Host/Configuration/*.json   — baseline (SelfUrl/Cors/Redis/Authority)
+                 *  2. HttpApi.Host/appsettings.json        — shared overlays (ops/business)
+                 *  3. HttpApi.Host/appsettings.secrets.json — shared secrets
+                 *  4. HttpApi.Host/appsettings.Development.json — Development only
+                 *     (AbpAdmin_TestCli, extra redirect URIs, AllowDefaultAdminPassword).
+                 *     Intentionally skip appsettings.Production.json (Redis multi-instance posture
+                 *     would break migrator without Redis__Configuration).
+                 *  5. this project's appsettings.json      — migrator-only overlays
+                 *  6. environment variables                — highest (prod/CI)
                  *
-                 * 容器/CI 场景通常没有 HttpApi.Host 源码目录，数据库配置必须走环境变量注入。
-                 * ⚠ 运行姿势：必须在本工程目录内 dotnet run（ContentRoot=CWD，下方的
-                 *   hostDir 按 ../AbpAdmin.HttpApi.Host 相对解析——从 backend/ 根目录运行时
-                 *   该路径不存在，两个 optional JSON 被静默跳过，启动落在 PG 占位串预检上）。
+                 * Containers/CI usually lack HttpApi.Host sources; inject DB via env vars.
+                 * Run from this project directory (ContentRoot=CWD; hostDir = ../AbpAdmin.HttpApi.Host).
                  */
                 var hostDir = Path.GetFullPath(
                     Path.Combine(hosting.HostingEnvironment.ContentRootPath, "..", "AbpAdmin.HttpApi.Host"));
 
                 cfg.Sources.Clear();
+                // Host Configuration/*.json first (SelfUrl/Cors/OpenIddict/AuthServer/Redis/connection baseline)
+                var hostConfigDir = Path.Combine(hostDir, "Configuration");
+                if (Directory.Exists(hostConfigDir))
+                {
+                    foreach (var file in Directory.EnumerateFiles(hostConfigDir, "*.json")
+                                 .Where(f => !Path.GetFileName(f).Contains(".example", StringComparison.OrdinalIgnoreCase))
+                                 .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
+                    {
+                        cfg.AddJsonFile(file, optional: true, reloadOnChange: false);
+                    }
+                }
                 cfg.AddJsonFile(Path.Combine(hostDir, "appsettings.json"), optional: true, reloadOnChange: false);
                 cfg.AddJsonFile(Path.Combine(hostDir, "appsettings.secrets.json"), optional: true, reloadOnChange: false);
                 if (hosting.HostingEnvironment.IsDevelopment())

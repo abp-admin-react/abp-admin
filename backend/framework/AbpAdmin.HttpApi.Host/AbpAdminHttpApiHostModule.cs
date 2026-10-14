@@ -18,6 +18,7 @@ using OpenIddict.Validation.AspNetCore;
 using OpenIddict.Server.AspNetCore;
 using AbpAdmin.EntityFrameworkCore;
 using AbpAdmin.Biz.Template;
+using AbpAdmin.Ledger;
 using AbpAdmin.Webhooks;
 using AbpAdmin.Files;
 using AbpAdmin.MultiTenancy;
@@ -34,6 +35,7 @@ using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Autofac;
 using Volo.Abp.Localization;
 using Volo.Abp.Modularity;
+using Volo.Abp.Timing;
 using Volo.Abp.UI.Navigation.Urls;
 using Volo.Abp.VirtualFileSystem;
 using Volo.Abp.AspNetCore.Mvc.UI.Bundling;
@@ -109,6 +111,7 @@ namespace AbpAdmin;
     typeof(AbpAdmin.Webhooks.AbpAdminWebhooksModule), // Webhook 模块（业务模块挂接点同款：一行）
     typeof(AbpAdmin.Collection.AbpAdminCollectionModule), // 收款模块（订单只依赖其契约工程）
     typeof(AbpAdmin.Ordering.AbpAdminOrderingModule),     // 订单模块（依赖 Collection.Contracts）
+    typeof(AbpAdminLedgerModule),                        // 瘦 Ledger（财务总账 F1：调账/科目/对账）
     typeof(AbpCachingStackExchangeRedisModule),
     typeof(AbpAccountWebOpenIddictModule),
     typeof(AbpSwashbuckleModule),
@@ -263,6 +266,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
     {
         var configuration = context.Services.GetConfiguration();
         var hostingEnvironment = context.Services.GetHostingEnvironment();
+
+        // 全系统 UTC：API 时间字段带 Z；与 PostedTime=UtcNow / 对账区间半开一致
+        Configure<AbpClockOptions>(options =>
+        {
+            options.Kind = DateTimeKind.Utc;
+        });
 
         // 链上 worker（M5 计划第 59 行）：扫链/归集 BackgroundService 只在宿主注册（DbMigrator 不调）；
         // 开关默认关（不配置即不跑）；开启时守卫强制 Redis 支撑的分布式锁（扩展内抛 AbpInitializationException）
@@ -809,7 +818,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
         {
             // 安全审计 L-8：Cookie 属性显式加固（此前完全依赖框架默认值；实测登录 POST 的
             // Set-Cookie 已带全三项）。HttpOnly=True / SameSite=Lax 明确声明；Secure 跟随
-            // RequireHttpsMetadata 姿态——默认 true（HTTPS 部署，含 dev 的 https:44395）一律
+            // RequireHttpsMetadata 姿态——默认 true（HTTPS 部署，含 dev 的 https:44300）一律
             // 仅安全通道下发，显式 HTTP 内网部署（RequireHttpsMetadata=false，如本地 compose 栈）
             // 退回 SameAsRequest。SameSite 选 Lax 而非 Strict：Lax 保持"同站导航带 Cookie、
             // 跨站子资源不带"的标准姿态，对授权码流程（顶层跳转）与防 CSRF 都成立；Strict
@@ -883,7 +892,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
         context.Services.AddAbpDynamicOptions<AspNet.Security.OAuth.Weixin.WeixinAuthenticationOptions, DynamicExternalLoginOptionsManager<AspNet.Security.OAuth.Weixin.WeixinAuthenticationOptions>>();
         context.Services.AddAbpDynamicOptions<Microsoft.AspNetCore.Authentication.Google.GoogleOptions, DynamicExternalLoginOptionsManager<Microsoft.AspNetCore.Authentication.Google.GoogleOptions>>();
 
-        var authority = context.Services.GetConfiguration()["AuthServer:Authority"] ?? "https://localhost:44395";
+        var authority = context.Services.GetConfiguration()["AuthServer:Authority"] ?? "https://localhost:44300";
         if (Uri.TryCreate(authority, UriKind.Absolute, out var authorityUri))
         {
             Configure<IdentityPasskeyOptions>(options =>
@@ -1465,3 +1474,5 @@ public class AbpAdminHttpApiHostModule : AbpModule
         await scheduler.ScheduleAllAsync();
     }
 }
+
+

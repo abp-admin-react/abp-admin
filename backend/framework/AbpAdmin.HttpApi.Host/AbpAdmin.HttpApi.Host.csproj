@@ -71,6 +71,7 @@
     <ProjectReference Include="..\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
     <ProjectReference Include="..\..\modules\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
     <ProjectReference Include="..\..\modules\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
+    <ProjectReference Include="..\..\modules\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -84,4 +85,13 @@
     <None Remove="Logs\**" />
   </ItemGroup>
 
+
+  <ItemGroup>
+    <!-- Host Configuration/*.json baseline; copy to output for run/publish -->
+    <Content Update="Configuration\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>
+
+

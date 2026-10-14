@@ -39,6 +39,7 @@ using EasyAbp.PaymentService.WeChatPay;
 using Volo.Abp.Imaging;
 using Volo.Abp.MailKit;
 using Volo.Abp.TextTemplating;
+using Volo.Abp.Timing;
 
 
 namespace AbpAdmin;
@@ -91,6 +92,12 @@ public class AbpAdminDomainModule : AbpModule
     {
         var services = context.Services;
         var configuration = services.GetConfiguration();
+
+        // 全系统 UTC（与 Host AbpClockOptions 一致；测试/DbMigrator 也走 Domain，API 时间字段带 Z）
+        Configure<AbpClockOptions>(options =>
+        {
+            options.Kind = DateTimeKind.Utc;
+        });
 
         services.ConfigureMultiTenancyAndCaching(configuration);   // 多租户/版本缓存/租户连接串清单
         services.ConfigureFileManagement(configuration);           // 文件容器与上传限额

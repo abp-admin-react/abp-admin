@@ -1,5 +1,6 @@
 using AbpAdmin.Biz.Template;
 using AbpAdmin.Collection;
+using AbpAdmin.Ledger;
 using AbpAdmin.EntityFrameworkCore;
 using AbpAdmin.Ordering;
 using AbpAdmin.Webhooks;
@@ -16,7 +17,8 @@ namespace AbpAdmin.DbMigrator;
     typeof(AbpAdminBizTemplateModule),
     typeof(AbpAdminWebhooksModule),
     typeof(AbpAdminCollectionModule),
-    typeof(AbpAdminOrderingModule)
+    typeof(AbpAdminOrderingModule),
+    typeof(AbpAdminLedgerModule)
 )]
 public class AbpAdminDbMigratorModule : AbpModule
 {

@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using System.IO;
 using System.Threading.Tasks;
 using AbpAdmin.Elasticsearch;
 using Elastic.Clients.Elasticsearch;
@@ -27,12 +29,14 @@ public class Program
         {
             Log.Information("Starting AbpAdmin.HttpApi.Host.");
             var builder = WebApplication.CreateBuilder(args);
-            // secrets 追加在环境变量之后会压过 env（ABP AddAppSettingsSecretsJson 的顺序问题）。
-            // 这里再补一次 env 源置于链尾：生产/CI 环境变量（如 ConnectionStrings__Default）优先级最高，
-            // 与本仓库"生产配置走环境变量注入"的约定一致。本项目的 appsettings.json 也是
-            // DbMigrator 的共享配置源（数据库相关配置只维护在这里，DbMigrator 自动跟随）。
-            // （builder.Configuration 与 Host.ConfigureAppConfiguration 操作同一 ConfigurationManager，
-            // 此处直接追加到链尾，均在 ABP 模块初始化读配置之前生效。）
+            // Configuration/*.json = Host baseline (SelfUrl/Cors/OpenIddict/AuthServer/Redis/connection).
+            // Loaded after default appsettings (those keys moved out). Re-add env file + secrets + env vars
+            // so Development (8002)/Production/secrets still override the baseline.
+            AddHostConfigurationDirectory(builder.Configuration, builder.Environment);
+            builder.Configuration.AddJsonFile(
+                $"appsettings.{builder.Environment.EnvironmentName}.json",
+                optional: true,
+                reloadOnChange: true);
             builder.Configuration.AddJsonFile("appsettings.secrets.json", optional: true, reloadOnChange: false);
             builder.Configuration.AddEnvironmentVariables();
 
@@ -114,4 +118,27 @@ public class Program
             Log.CloseAndFlush();
         }
     }
+
+    /// <summary>
+    /// Load Host Configuration/*.json (App.json, Cors.json, ...) as infrastructure baseline.
+    /// </summary>
+    private static void AddHostConfigurationDirectory(
+        ConfigurationManager configuration,
+        IHostEnvironment environment)
+    {
+        var dir = Path.Combine(environment.ContentRootPath, "Configuration");
+        if (!Directory.Exists(dir))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(dir, "*.json")
+                     .Where(f => !Path.GetFileName(f).Contains(".example", StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
+        {
+            var relative = Path.GetRelativePath(environment.ContentRootPath, file);
+            configuration.AddJsonFile(relative, optional: false, reloadOnChange: true);
+        }
+    }
+
 }

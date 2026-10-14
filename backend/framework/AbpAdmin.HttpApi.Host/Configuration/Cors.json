@@ -1,0 +1,8 @@
+{
+  // CORS / 登录回跳白名单（与 App:SelfUrl 同属 Host 入口配置，单独文件方便改端口时一眼找到）。
+  // 开发期额外前端端口（如 8002）只写在 appsettings.Development.json，不要加进本文件。
+  "App": {
+    "CorsOrigins": "http://localhost:8000,https://localhost:8000,http://*.localhost:8000,http://localhost:8004,http://localhost:8006",
+    "RedirectAllowedUrls": "http://localhost:8000,http://demo.localhost:8000,http://localhost:8004,http://localhost:8006"
+  }
+}

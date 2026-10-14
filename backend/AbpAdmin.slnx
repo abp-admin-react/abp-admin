@@ -26,6 +26,8 @@
         <Project Path="modules/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj" />
         <Project Path="modules/AbpAdmin.Collection/AbpAdmin.Collection.csproj" />
         <Project Path="modules/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj" />
+        <Project Path="modules/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj" />
+        <Project Path="modules/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj" />
     </Folder>
     <!-- 框架级测试（对应 /framework/ 分区；业务模块的测试在 /test/modules/） -->
     <Folder Name="/test/">
@@ -45,5 +47,6 @@
         <!-- 收款/订单双模块的测试（Testcontainers PG，程序集串行） -->
         <Project Path="test/modules/AbpAdmin.Collection.Tests/AbpAdmin.Collection.Tests.csproj" />
         <Project Path="test/modules/AbpAdmin.Ordering.Tests/AbpAdmin.Ordering.Tests.csproj" />
+        <Project Path="test/modules/AbpAdmin.Ledger.Tests/AbpAdmin.Ledger.Tests.csproj" />
     </Folder>
 </Solution>
