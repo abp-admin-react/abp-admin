@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
 using System.Text;
 using System.Text.Json.Nodes;
 using AbpAdmin.TokenGateway.Core;
@@ -11,7 +13,7 @@ namespace AbpAdmin.TokenGateway.Http;
 /// <summary>OpenAI 兼容入口。客户端 BaseURL = {host}/v1，Bearer = hb-xxx。</summary>
 [Route("v1")]
 public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstream,
-    IOptions<TokenGatewayOptions> options, ILogger<ChatController> log) : GatewayControllerBase
+    IOptions<TokenGatewayOptions> options, IWebHostEnvironment env, ILogger<ChatController> log) : GatewayControllerBase
 {
     [HttpGet("models")]
     public Task<IActionResult> Models() => Run(async () =>
@@ -31,7 +33,10 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             var user = await keys.ResolveAsync(Bearer(), allowSession: false);
             var request = await JsonNode.ParseAsync(Request.Body, cancellationToken: HttpContext.RequestAborted) as JsonObject
                           ?? throw GatewayException.BadRequest("body 必须是 JSON 对象");
+            var fault = DevFault(env, Request.Headers[DevFaultHeader].FirstOrDefault());
+            if (fault == GatewayErrorCodes.RateLimited) throw GatewayException.RateLimited();
             ticket = await billing.BeginAsync(user, request, Request.Headers["X-HB-Bot"].FirstOrDefault());
+            if (fault == GatewayErrorCodes.UpstreamUnavailable) throw GatewayException.UpstreamUnavailable();
 
             using var resp = await upstream.SendAsync(ticket.UpstreamBody, HttpContext.RequestAborted);
             if (!resp.IsSuccessStatusCode)
@@ -104,6 +109,23 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             }
             await Error(ge).ExecuteResultAsync(ControllerContext);
         }
+    }
+
+    public const string DevFaultHeader = "X-HB-Dev-Fault";
+
+    /// <summary>
+    /// 联调用故障注入：仅 Development 生效，其他环境恒为 null（头被忽略）。
+    /// RATE_LIMITED 在预占前抛（同真实限流）；UPSTREAM_UNAVAILABLE 在预占后抛，走全额解冻（同真实上游失败）。
+    /// </summary>
+    internal static string? DevFault(IHostEnvironment env, string? header)
+    {
+        if (!env.IsDevelopment() || string.IsNullOrWhiteSpace(header)) return null;
+        return header.Trim().ToUpperInvariant() switch
+        {
+            GatewayErrorCodes.UpstreamUnavailable => GatewayErrorCodes.UpstreamUnavailable,
+            GatewayErrorCodes.RateLimited => GatewayErrorCodes.RateLimited,
+            _ => null,
+        };
     }
 
     private static (long Prompt, long Completion) ReadUsage(JsonObject o) =>

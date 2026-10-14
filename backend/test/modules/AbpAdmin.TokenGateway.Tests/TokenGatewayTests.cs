@@ -269,6 +269,31 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
         a.ContainsKey("provider").ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData("Development", "UPSTREAM_UNAVAILABLE", "UPSTREAM_UNAVAILABLE")]
+    [InlineData("Development", "rate_limited", "RATE_LIMITED")]
+    [InlineData("Development", "INTERNAL", null)]
+    [InlineData("Development", null, null)]
+    [InlineData("Production", "UPSTREAM_UNAVAILABLE", null)]
+    [InlineData("Production", "RATE_LIMITED", null)]
+    [InlineData("Staging", "RATE_LIMITED", null)]
+    public void Dev_fault_only_in_development(string envName, string? header, string? expected) =>
+        ChatController.DevFault(new Env(envName), header).ShouldBe(expected);
+
+    [Fact]
+    public void Fault_error_bodies_carry_only_code_and_chinese_message()
+    {
+        foreach (var e in new[] { GatewayException.UpstreamUnavailable(), GatewayException.RateLimited() })
+        {
+            var r = (Microsoft.AspNetCore.Mvc.ObjectResult)GatewayControllerBase.Error(e);
+            var json = System.Text.Json.JsonSerializer.Serialize(r.Value);
+            json.ShouldNotContain("model");
+            json.ShouldNotContain("provider");
+            json.ShouldNotContain("channel");
+            e.Message.ShouldNotContain("upstream", Case.Insensitive);
+        }
+    }
+
     private sealed class Env(string name) : IHostEnvironment
     {
         public string EnvironmentName { get; set; } = name;
