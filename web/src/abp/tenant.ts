@@ -1,6 +1,12 @@
 /**
- * localStorage `abp.tenant`：当前租户 `{id,name}` JSON；无/解析失败=Host。
- * 子域名模式（<租户>.localhost）优先于该键。手动清掉即回 Host；写错 id → 后端租户不存在。
+ * 当前租户上下文（浏览器侧）。
+ *
+ * - 存储键：`STORAGE_KEYS.tenant`（即 `abpadmin:tenant`），见 storageKeys.ts；
+ *   旧文档里的字面量 `abp.tenant` 已废弃，勿再写回代码或注释。
+ * - 值：`{id,name}` JSON；无键/解析失败 = Host（不带 `__tenant` 头）。
+ * - 子域名模式（`<租户>.localhost`）优先于该键（见 subdomain.ts / getTenantNameFromHost）。
+ * - 手动清掉 localStorage 该键即回 Host；写错 id → 后端报租户不存在。
+ * - `getAbpHeaders()` 仅在存在 tenantId 时附加 `__tenant`，供 request 拦截器合并。
  */
 import { STORAGE_KEYS } from './storageKeys';
 
