@@ -297,7 +297,7 @@ const Login: React.FC = () => {
         >
           <Typography.Paragraph type="secondary">
             使用 ABP OpenIddict 授权码 + PKCE 登录。默认账号 admin / 1q2w3E*。
-            也可用子域名访问，例如 http://demo.localhost:8000
+            ???????.?????????????????
           </Typography.Paragraph>
           <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
             {!subdomainMode && (
