@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/appsettings.json",
+
+  // OIDC 客户端与 AuthServer（非敏感部分）。证书口令在 Security.json。
+  // 改前端端口：RootUrl + Cors.json + appsettings.Development.json ExtraRedirectUris + 库内 RedirectUris 一起改。
+
+  "OpenIddict": {
+    "Applications": {
+      "AbpAdmin_App": {
+        "ClientId": "AbpAdmin_App", // 管理端 SPA 的客户端 ID：固定 AbpAdmin_App；默认 AbpAdmin_App；改了须同步前端与库内种子
+        "RootUrl": "http://localhost:8004" // 管理端前端原点（不是 Host SelfUrl）：http(s)://host:port；默认 http://localhost:8004；覆盖 OpenIddict__Applications__AbpAdmin_App__RootUrl
+      },
+      "AbpAdmin_Swagger": {
+        "ClientId": "AbpAdmin_Swagger", // Swagger UI 客户端 ID：固定 AbpAdmin_Swagger；须与 AuthServer:SwaggerClientId 一致
+        "RootUrl": "https://localhost:44300" // Swagger 原点，通常 = App:SelfUrl；默认 https://localhost:44300
+      }
+    }
+  },
+
+  "AuthServer": {
+    "Authority": "https://localhost:44300", // OIDC Authority，须与 App:SelfUrl 一致；默认 https://localhost:44300；覆盖 AuthServer__Authority；不一致 → 令牌校验失败 / metadata 404
+    "RequireHttpsMetadata": true, // metadata 是否强制 HTTPS：true|false；默认 true；仅本机纯 http 体验栈可 false；覆盖 AuthServer__RequireHttpsMetadata
+    "SwaggerClientId": "AbpAdmin_Swagger" // Swagger 用的 ClientId；默认 AbpAdmin_Swagger；须与 OpenIddict:Applications:AbpAdmin_Swagger:ClientId 一致
+  }
+}

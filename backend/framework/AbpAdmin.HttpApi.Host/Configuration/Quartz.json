@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/appsettings.json",
+
+  // 后台任务调度（Quartz）。
+
+  "Quartz": {
+    "UsePersistentStore": false, // 任务是否持久化到库（qrtz_* 表，用 ConnectionStrings:Default，须 Timezone=UTC）：true|false；默认 false=内存；多实例必须 true；覆盖 Quartz__UsePersistentStore
+    "SchedulerName": "AbpAdminScheduler" // 调度器名：任意字符串；默认 AbpAdminScheduler；多应用共用一个库时须区分；覆盖 Quartz__SchedulerName
+  }
+}

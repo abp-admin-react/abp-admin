@@ -322,3 +322,7 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Host Configuration secret-bearing files (templates: *.json.example)
+backend/framework/AbpAdmin.HttpApi.Host/Configuration/Database.json
+backend/framework/AbpAdmin.HttpApi.Host/Configuration/Security.json

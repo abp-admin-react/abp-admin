@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/appsettings.json",
+
+  // =============================================================================
+  // 口令类配置（模板）。本机：复制为同目录 Security.json 再填值。
+  // Security.json 已在 .gitignore / .dockerignore，不入库、不进镜像。
+  // 容器 / 生产：用环境变量注入（docker-compose.yml 已接线），不放文件。
+  // 本机开发可把两项都改成空串 ""：证书用开发临时证书，加密用框架默认口令。
+  // =============================================================================
+
+  "AuthServer": {
+    "CertificatePassPhrase": "CHANGE_ME" // openiddict.pfx 证书口令；空串=开发临时证书；生产必填；覆盖 AuthServer__CertificatePassPhrase；错 → 证书加载失败、无法签发令牌
+  },
+
+  "StringEncryption": {
+    "DefaultPassPhrase": "CHANGE_ME" // ABP 字符串加解密口令（设置项 isEncrypted 落库用）；空串=框架默认，仅开发；Host 与 DbMigrator 必须同值；覆盖 StringEncryption__DefaultPassPhrase；改了 → 已加密字段解不开
+  }
+}

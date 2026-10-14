@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/appsettings.json",
+
+  // =============================================================================
+  // 缓存 / Redis / SignalR 基线。
+  // 密码：无密码时留空，勿填占位假密码；有密码只走 appsettings.secrets.json 或环境变量
+  //       Redis__Configuration（整串覆盖），本文件永远不写密码。
+  // =============================================================================
+
+  "DistributedCache": {
+    // 分布式缓存全局键前缀（ABP DistributedCache:KeyPrefix），所有缓存键 = 前缀 + 键名。
+    // 取值：任意短字符串，建议以 ':' 结尾；默认 abpadmin:。共享 Redis 隔离用；独占实例可改空。
+    // 改错：多个项目/环境同前缀共用一个 Redis → 互相读到对方缓存、权限/设置串号。
+    // 覆盖：DistributedCache__KeyPrefix
+    "KeyPrefix": "abpadmin:"
+  },
+
+  "Redis": {
+    // 是否启用 Redis（分布式缓存 + 分布式锁 + DataProtection 密钥环）。
+    // 取值：true | false；默认 false = 进程内缓存，仅适合单实例开发。生产多实例必须 true。
+    // 改错：多实例却 false → 各实例缓存不一致、令牌互验失败；true 但 Redis 连不上 → 启动/登录失败。
+    // 覆盖：Redis__IsEnabled
+    "IsEnabled": false,
+
+    // StackExchange.Redis 连接串，逗号分隔：
+    //   host:port        Redis 地址；默认 127.0.0.1:6379；改错 → 连接超时、缓存/锁全部失败。
+    //   defaultDatabase  库号 0–15（服务器 databases 上限内）；本项目固定用 0：独占库最简单，
+    //                    多项目共用同一 Redis 时靠 KeyPrefix 隔离；若要换库须所有实例一起改，
+    //                    改错 → 各实例读不同库，缓存/DataProtection 密钥对不上，登录态失效。
+    //   abortConnect     true | false；默认基线 false = 启动时 Redis 未就绪也不让进程崩溃，后台重连；
+    //                    设 true 且 Redis 晚起 → Host 启动直接失败。
+    // 覆盖：Redis__Configuration（整串）。
+    "Configuration": "127.0.0.1:6379,defaultDatabase=0,abortConnect=false"
+  },
+
+  "SignalR": {
+    // 是否注册 SignalR Hub。取值：true | false；默认 true；false → 实时通知通道不可用。覆盖：SignalR__Enabled
+    "Enabled": true,
+    // 是否用 Redis backplane 在多实例间广播。取值：true | false；默认 false；多实例必须 true 且 Redis:IsEnabled=true，
+    // 否则只有连在同一实例上的客户端能收到推送。覆盖：SignalR__UseRedisBackplane
+    "UseRedisBackplane": false
+  }
+}

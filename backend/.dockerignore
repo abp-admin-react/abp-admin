@@ -26,3 +26,7 @@ docs/
 *.db
 *.txt
 .claude/
+
+# Host Configuration secret-bearing files: never in build context / image (env vars inject them)
+**/Configuration/Database.json
+**/Configuration/Security.json

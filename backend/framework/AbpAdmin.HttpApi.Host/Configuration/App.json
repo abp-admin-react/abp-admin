@@ -1,174 +1,27 @@
 {
+  "$schema": "https://json.schemastore.org/appsettings.json",
+
   // =============================================================================
-  // Host 基础设施基线（单一事实来源 / SSOT）
-  // -----------------------------------------------------------------------------
-  // 加载顺序（Program.cs）：
-  //   1) appsettings.json（业务/运维叠加，不含 SelfUrl/Cors/Authority/连接串真源）
-  //   2) Configuration/*.json（本文件 + Cors.json）← 端口、认证、库/Redis 基线真源
-  //   3) appsettings.{Environment}.json
-  //   4) appsettings.secrets.json（真实凭据，不进 git 基线）
-  //   5) 环境变量（双下划线分层，如 App__SelfUrl、ConnectionStrings__Default）
-  //
-  // launchSettings.json 只决定本机进程监听，不是 SelfUrl/Authority/Cors/OpenIddict RootUrl 真源。
-  // 敏感项基线只用 CHANGE_ME / 空串；真值只 secrets 或环境变量。禁止把真实密码写进仓库。
+  // Host 基础设施基线：一个关注点一个文件（本目录 *.json 按文件名字母序加载，*.example 不加载）
+  //   App.json         对外地址 / 日志开关 / 健康检查
+  //   Cache.json       分布式缓存前缀 / Redis / SignalR
+  //   Cors.json        CORS 与登录回跳白名单
+  //   Database.json    数据库连接串（含密码，不入库；模板见 Database.json.example）
+  //   OpenIddict.json  OIDC 客户端与 AuthServer（非敏感部分）
+  //   Quartz.json      后台任务调度
+  //   Security.json    证书口令 / 字符串加密口令（不入库；模板见 Security.json.example）
+  // 总加载顺序（Program.cs）：appsettings.json → Configuration/*.json → appsettings.{Env}.json
+  //   → appsettings.secrets.json → 环境变量（双下划线分层，如 App__SelfUrl）。后者覆盖前者。
+  // launchSettings.json 只决定本机监听端口，不是 SelfUrl/Authority/Cors 的真源。
+  // 时间：代码写死 AbpClockOptions.Kind=Utc（非 JSON 键），API 时间带 Z。
   // =============================================================================
 
   "App": {
-    // 本 Host 对外自宣 URL（scheme+host+port）。OAuth issuer、健康检查绝对地址依赖它。
-    // 默认：https://localhost:44300。覆盖：App__SelfUrl。
-    // 改错：与实际监听不一致时 CORS/回调/Swagger 连错主机。launchSettings 不是本键真源。
-    "SelfUrl": "https://localhost:44300",
-
-    // SPA 租户子域模板，{0}=租户名。默认 http://{0}.localhost:8000。覆盖：App__SpaUrl。
-    // 改端口须同步 CorsOrigins / RedirectAllowedUrls。
-    "SpaUrl": "http://{0}.localhost:8000",
-
-    // 日志是否输出 PII。生产必须 false。覆盖：App__EnablePiiLogging。
-    "EnablePiiLogging": false,
-
-    // 安全工件是否写日志。生产 false。覆盖：App__EnableSecurityArtifactLogging。
-    "EnableSecurityArtifactLogging": false,
-
-    // 健康检查路径。默认 /health-status。覆盖：App__HealthCheckUrl。
-    "HealthCheckUrl": "/health-status",
-
-    // 多实例缓存/锁前缀后缀。单实例留空。覆盖：App__InstanceDiscriminator。
-    "InstanceDiscriminator": ""
-  },
-
-  "OpenIddict": {
-    "Applications": {
-      // 管理端 SPA。RootUrl=前端原点（非 Host SelfUrl）。
-      // 改前端端口：RootUrl + Cors.json + Dev ExtraRedirectUris + 库内 RedirectUris。
-      // ClientSecret（若启用机密客户端）：只 secrets / OpenIddict__Applications__AbpAdmin_App__ClientSecret。
-      "AbpAdmin_App": {
-        "ClientId": "AbpAdmin_App",
-        "RootUrl": "http://localhost:8004"
-      },
-      // Swagger UI。RootUrl 通常=App:SelfUrl。
-      "AbpAdmin_Swagger": {
-        "ClientId": "AbpAdmin_Swagger",
-        "RootUrl": "https://localhost:44300"
-      }
-    }
-  },
-
-  "ConnectionStrings": {
-    // ===========================================================================
-    // PostgreSQL（Npgsql）Default —— 基线占位，真串只 secrets / ConnectionStrings__Default
-    // ---------------------------------------------------------------------------
-    // 覆盖整串：环境变量 ConnectionStrings__Default，或 appsettings.secrets.json
-    //   "ConnectionStrings": { "Default": "Host=...;Password=...;Timezone=UTC;..." }
-    // 禁止把真实 Password 写进本文件 / 提交说明 / 群聊。
-    //
-    // 键说明（均写在同一分号分隔串内；键名大小写不敏感）：
-    //   Host
-    //     干什么：数据库主机名或 IP。默认示例 localhost。
-    //     改错：连错库 / 启动迁移失败。
-    //   Port
-    //     干什么：端口。默认 5432。
-    //     改错：连接拒绝。
-    //   Database
-    //     干什么：库名。示例 abpadmin。
-    //     改错：连到空库或别的项目库。
-    //   Username
-    //     干什么：登录用户。示例 postgres。
-    //     改错：鉴权失败。
-    //   Password
-    //     干什么：密码。基线必须 CHANGE_ME；真值只 secrets / 环境变量整串。
-    //     改错：鉴权失败；勿在日志打印本串。
-    //   Timezone=UTC
-    //     干什么：会话时区，与 Host 代码 AbpClockOptions.Kind=Utc、API 时间带 Z、对账 [start,end) 对齐。
-    //     默认/必配：UTC（基线已写）。漏配或写成本地时区 → PostedTime/过滤错位。
-    //   Maximum Pool Size
-    //     干什么：连接池上限。基线示例 100。默认（Npgsql 未写时）通常 100。
-    //     改太大：占满库 max_connections；太小：请求排队 Timeout。
-    //   Minimum Pool Size
-    //     干什么：池内常驻下限。基线示例 0。默认 0。
-    //     改太大：空闲也占连接。
-    //   Timeout
-    //     干什么：命令超时（秒）。基线示例 30。默认约 30。
-    //     改太小：慢查询误杀；太大：故障时拖死请求。
-    //   Keepalive
-    //     干什么：TCP keepalive（秒）。基线示例 30。0=关闭。
-    //     中间件空闲断连时可避免半开连接；改错表现为偶发连接中断。
-    //   Connection Idle Lifetime
-    //     干什么：池内空闲连接最长存活（秒）。基线示例 300。
-    //     过短：频繁建连；过长：持有已失效服务端连接。
-    //   Connection Pruning Interval
-    //     干什么：修剪空闲连接的扫描间隔（秒）。基线示例 10。
-    //     过密：徒增开销；过疏：空闲连接回收慢。
-    //
-    // 改错总体后果：迁移/登录/业务全挂，或时区与对账错乱。
-    // ===========================================================================
-    "Default": "Host=localhost;Port=5432;Database=abpadmin;Username=postgres;Password=CHANGE_ME;Timezone=UTC;Maximum Pool Size=100;Minimum Pool Size=0;Timeout=30;Keepalive=30;Connection Idle Lifetime=300;Connection Pruning Interval=10"
-  },
-
-  "DistributedCache": {
-    // 缓存键全局前缀。多环境共用 Redis 时必填（如 abpadmin:prod:）。默认空。
-    // 覆盖：DistributedCache__KeyPrefix。与 Redis 密码无关。
-    "KeyPrefix": ""
-  },
-
-  "Redis": {
-    // ---------------------------------------------------------------------------
-    // IsEnabled：是否启用 Redis（分布式锁 + DataProtection 密钥存 Redis）。
-    //   默认基线 false（进程内锁/本地密钥，适合单实例开发）。
-    //   生产多实例必须 true，且 Configuration 可达（见 appsettings.Production.json）。
-    //   覆盖：Redis__IsEnabled。
-    //   true 但不可达 → 锁/密钥异常、多实例令牌互验失败。
-    // ---------------------------------------------------------------------------
-    "IsEnabled": false,
-
-    // ---------------------------------------------------------------------------
-    // Configuration：StackExchange.Redis 连接串（本项目无独立 Password 配置键）。
-    //   密码写法：写在本串内 password=...（可选 user= 用于 ACL）。
-    //   无密码示例：127.0.0.1:6379
-    //   有密码示例（勿把真密码写入仓库）：127.0.0.1:6379,password=CHANGE_ME,abortConnect=false
-    //   常用可选项：abortConnect、connectTimeout、syncTimeout、ssl、sslHost、defaultDatabase、name
-    //   真值：secrets 的 Redis:Configuration，或环境变量 Redis__Configuration（整串覆盖）。
-    //   基线禁止真实 password；IsEnabled=false 时可保留本机无密码示例。
-    //   改错：缓存/锁/SignalR backplane/DataProtection 失败。
-    // ---------------------------------------------------------------------------
-    "Configuration": "127.0.0.1:6379"
-  },
-
-  "SignalR": {
-    // 是否注册 Hub。默认 true。覆盖：SignalR__Enabled。false → 实时通道不可用。
-    "Enabled": true,
-    // Redis backplane。多实例必须 true，且 Redis:IsEnabled=true 且 Configuration（含 password=）可达。
-    // 单实例可 false。覆盖：SignalR__UseRedisBackplane。
-    "UseRedisBackplane": false
-  },
-
-  "Quartz": {
-    // true=任务持久化到 DB（qrtz_*，使用 ConnectionStrings:Default，须含 Timezone=UTC）。
-    // 默认 false（内存）。多实例应 true。覆盖：Quartz__UsePersistentStore。
-    "UsePersistentStore": false,
-    // 调度器名。多应用共用库时需区分。覆盖：Quartz__SchedulerName。
-    "SchedulerName": "AbpAdminScheduler"
-  },
-
-  "AuthServer": {
-    // OIDC Authority，须与 App:SelfUrl 一致。覆盖：AuthServer__Authority。
-    // 不一致 → 令牌校验失败 / metadata 404。launchSettings 不是本键真源。
-    "Authority": "https://localhost:44300",
-    // metadata 是否要求 HTTPS。生产 true；本机 http 可 false。覆盖：AuthServer__RequireHttpsMetadata。
-    "RequireHttpsMetadata": true,
-    // Swagger ClientId，须与 OpenIddict.Applications.AbpAdmin_Swagger.ClientId 一致。
-    // 覆盖：AuthServer__SwaggerClientId。
-    "SwaggerClientId": "AbpAdmin_Swagger",
-    // openiddict.pfx 证书口令。基线空=开发临时证书。
-    // 真值：secrets 或 AuthServer__CertificatePassPhrase。禁止真实口令进基线。
-    // 改错：生产无法加载证书 / 令牌签发失败。
-    "CertificatePassPhrase": ""
-  },
-
-  "StringEncryption": {
-    // ABP 字符串加解密口令。基线空仅开发。
-    // 真值：secrets 或 StringEncryption__DefaultPassPhrase。改错：已加密字段解不开。
-    "DefaultPassPhrase": ""
+    "SelfUrl": "https://localhost:44300", // 本 Host 对外自宣 URL（scheme+host+port），OAuth issuer、健康检查绝对地址依赖它；默认 https://localhost:44300；覆盖 App__SelfUrl；与实际监听不一致 → 回调/Swagger 连错主机
+    "SpaUrl": "http://{0}.localhost:8000", // SPA 租户子域模板，{0}=租户名；默认 http://{0}.localhost:8000；改端口须同步 Cors.json；覆盖 App__SpaUrl
+    "EnablePiiLogging": false, // 日志是否输出 PII：true|false；默认 false；生产必须 false；覆盖 App__EnablePiiLogging
+    "EnableSecurityArtifactLogging": false, // 是否把令牌等安全工件写日志：true|false；默认 false；生产必须 false
+    "HealthCheckUrl": "/health-status", // 健康检查路径（以 / 开头）；默认 /health-status；compose 健康探针依赖它
+    "InstanceDiscriminator": "" // 多实例时缓存/锁键后缀：任意短字符串；默认空=单实例；覆盖 App__InstanceDiscriminator
   }
-
-  // 时间：代码写死 AbpClockOptions.Kind=Utc（非 JSON 键）。连接串须 Timezone=UTC 对齐。
 }
