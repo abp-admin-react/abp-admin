@@ -1,5 +1,6 @@
 import { User, UserManager, WebStorageStateStore } from 'oidc-client-ts';
 import { abpEnv } from './env';
+import { STORAGE_KEYS } from './storageKeys';
 import { getTenantId } from './tenant';
 
 let manager: UserManager | undefined;
@@ -44,7 +45,16 @@ export function getUserManager(): UserManager {
       // loadUserInfo：false=不额外调 /connect/userinfo，用户信息来自 application-configuration。
       loadUserInfo: false,
       // userStore：令牌存 localStorage，键名 `oidc.user:<authority>:<client_id>`（跨标签共享，关浏览器不丢）。
-      userStore: new WebStorageStateStore({ store: window.localStorage }),
+      // 前缀 abpadmin:oidc.（见 storageKeys.ts）：同源多项目不串 token；改前缀=全员重新登录。
+      userStore: new WebStorageStateStore({
+        store: window.localStorage,
+        prefix: STORAGE_KEYS.oidcPrefix,
+      }),
+      // stateStore：授权码流程的 state/PKCE verifier，存 sessionStorage（仅本标签页、回调后清除），同前缀。
+      stateStore: new WebStorageStateStore({
+        store: window.sessionStorage,
+        prefix: STORAGE_KEYS.oidcPrefix,
+      }),
     });
   }
   return manager;

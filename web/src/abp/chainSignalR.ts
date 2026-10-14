@@ -1,4 +1,5 @@
 import * as SignalR from '@microsoft/signalr';
+import { getAccessToken } from './oidc';
 
 /**
  * 收付款模块 SignalR 客户端（四个管理页面共用）。
@@ -91,16 +92,9 @@ const scheduleRetry = () => {
   }, delay);
 };
 
-// 已知问题：令牌键名写死 8000 源（oidc.user:http://localhost:8000:AbpAdmin_App），
-// 在 8002/8004/8006 或生产源下取不到 token → 该 Hub 匿名连接失败。正确做法是走 oidc.ts getAccessToken()；本批只记录不改行为。
-const getToken = (): string => {
-  try {
-    const raw = localStorage.getItem('oidc.user:http://localhost:8000:AbpAdmin_App');
-    return raw ? JSON.parse(raw).access_token ?? '' : '';
-  } catch {
-    return '';
-  }
-};
+// 令牌统一走 oidc.ts getAccessToken()（键带 abpadmin: 前缀、随 authority 变化），
+// 不再手拼 localStorage 键（旧代码写死 localhost:8000，换端口/生产即匿名连接失败）。
+const getToken = async (): Promise<string> => (await getAccessToken()) ?? '';
 
 const ensureConn = () => {
   if (connection) return connection;

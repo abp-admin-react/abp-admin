@@ -117,3 +117,13 @@ equest）
 | Idle THROTTLE_MS | IdleSessionWatcher | 1000ms，活动写入节流；超时分钟数来自后端设置 AbpAdmin.Account.IdleSessionTimeoutMinutes（0=关） |
 | chainSignalR 取 token | src/abp/chainSignalR.ts | **已知问题**：键名写死 localhost:8000；正确应 getAccessToken()——本批只文档化，不改行为 |
 
+
+## 浏览器存储键 / 请求超时 / 时区（真源见代码）
+
+| 项 | 值 | 真源 | 改错后果 |
+| --- | --- | --- | --- |
+| 存储前缀 | `abpadmin:`（令牌 `abpadmin:oidc.user:<authority>:<client_id>`） | `src/abp/storageKeys.ts` | 空串=同源多项目串 token/租户；改值=全员重新登录 |
+| 请求 timeout | `300000` ms | `src/app.tsx` `request` | 0=永不超时转圈；过小误杀导出/批量过账 |
+| 时区 | API 收发 UTC；仅展示层转浏览器时区 | `src/app.tsx` 注释 | 请求层改时区会导致入账日期偏一天 |
+
+旧键（`abp.tenant`、`finance.useMock`、无前缀 `oidc.user:*`）升级后失效，需重新登录；本地开关请改用 `abpadmin:` 前缀重设。

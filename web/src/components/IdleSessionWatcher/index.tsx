@@ -12,7 +12,10 @@ const ACTIVITY_EVENTS = [
 ] as const;
 
 /** 跨标签页共享最近活动时间。`storage` 事件只在「其它标签」触发。 */
-const LAST_ACTIVITY_KEY = 'abp-admin-idle-last-activity';
+import { STORAGE_KEYS } from '@/abp/storageKeys';
+
+/** 最后活动时间键，见 storageKeys.ts。 */
+const LAST_ACTIVITY_KEY = STORAGE_KEYS.idleLastActivity;
 
 /** 写 localStorage / 重装定时器的最小间隔，避免 mousemove 打满主线程。 */
 const THROTTLE_MS = 1000;

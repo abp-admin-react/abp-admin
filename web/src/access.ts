@@ -1,4 +1,5 @@
 import type { AppCurrentUser } from './app';
+import { STORAGE_KEYS } from '@/abp/storageKeys';
 
 /**
  * Umi access 插件：把 ABP `grantedPolicies` 映射成路由/按钮用的布尔开关。
@@ -19,7 +20,7 @@ export default function access(
   const policies = initialState?.grantedPolicies ?? {};
   const financeShell =
     typeof localStorage !== 'undefined' &&
-    localStorage.getItem('finance.shellAccess') === '1';
+    localStorage.getItem(STORAGE_KEYS.financeShellAccess) === '1';
   const isHost = !initialState?.currentTenant?.isAvailable;
   return {
     canAdmin: !!policies['AbpIdentity.Users'],

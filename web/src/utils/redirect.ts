@@ -7,7 +7,10 @@
  * 归一成协议相对地址。这里用「规范化后比对 origin」：任何走私形态最终都被解析成跨源而被
  * 拒绝，返回值只含 pathname+search+hash、天然无法携带 authority。
  */
-export const REDIRECT_STORAGE_KEY = 'abp.redirect';
+import { STORAGE_KEYS } from '@/abp/storageKeys';
+
+/** 回跳路径键（sessionStorage），见 storageKeys.ts。 */
+export const REDIRECT_STORAGE_KEY = STORAGE_KEYS.redirect;
 
 /** 规范化 + 同源校验：通过则返回剥离了一切走私形态的 pathname+search+hash，否则 null。 */
 function toSameOriginPath(raw: string): string | null {

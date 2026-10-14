@@ -326,12 +326,20 @@ export const layout: RunTimeLayoutConfig = ({
 };
 
 /**
- * 全局请求：baseURL 固定空串 = 走当前页同源相对路径（dev 由 proxy.ts 转、生产由 nginx 转），
- * 不要在这里写后端主机。未设 timeout（Umi/axios 默认 0=不超时）；慢接口靠 nginx /api proxy_read_timeout 300s 兜底。
- * 鉴权头、错误码弹窗见 requestErrorConfig.ts。
+ * 全局请求配置（Umi request = axios）。
+ * - baseURL：固定空串 = 当前页同源相对路径（dev 由 proxy.ts 转、生产由 nginx 转）。
+ *   可配：'' 或完整 origin；改成后端主机会绕过代理 → CORS 失败 + OIDC Authority 与 API 源不一致。
+ *   禁止在此写死 host/port。
+ * - timeout：显式 300000ms(5 分钟)，与 nginx /api proxy_read_timeout 300s 对齐。
+ *   不写 = axios 默认 0（永不超时，网络挂起时按钮永远转圈）；
+ *   调小（如 10s）会误杀财务导出/批量过账等慢接口，调大无意义（nginx 先断）。
+ * - 时区：后端 API 收发一律 UTC（ISO 8601 带 Z / Npgsql Timezone=UTC）；
+ *   前端仅在展示层用 dayjs 转浏览器本地时区，提交前转回 UTC，不在请求层做时区改写。
+ * - 鉴权头、错误弹窗：见 requestErrorConfig.ts。
  */
 export const request: RequestConfig = {
   baseURL: '',
+  timeout: 300_000,
   ...errorConfig,
 };
 

@@ -9,8 +9,8 @@
  * ## 浏览器本地开关（非仓库配置；勿提交到 git）
  * | localStorage 键 | 取值 | 作用 | 改错/误开后果 |
  * | --- | --- | --- | --- |
- * | `finance.useMock` | `1` 开，其它关 | 内存假数据看壳，不打真 API | 联调时数据「假成功」；验收前必须关掉 |
- * | `finance.shellAccess` | `1` 开 | 前端菜单/按钮放行（access.ts）；**接口仍按后端权限 403** | 只能看壳，不能当授权；ApproveOwn / Scope.Agent 不受此键影响 |
+ * | `abpadmin:finance.useMock` | `1` 开，其它关 | 内存假数据看壳，不打真 API | 联调时数据「假成功」；验收前必须关掉 |
+ * | `abpadmin:finance.shellAccess` | `1` 开 | 前端菜单/按钮放行（access.ts）；**接口仍按后端权限 403** | 只能看壳，不能当授权；ApproveOwn / Scope.Agent 不受此键影响 |
  *
  * ## 不变量（与后端契约对齐）
  * - 错误码在 `error.code`，附加数据在 `error.data`（Code / ParentId / Id / Field…）。
@@ -19,6 +19,7 @@
  * - 自批禁止：真码 `Finance:Adjust:SelfApproveNotAllowed`（403）；Legacy 仅兼容旧 mock。
  */
 import { request } from '@umijs/max';
+import { STORAGE_KEYS } from './storageKeys';
 
 export type PagedResultDto<T> = { totalCount: number; items: T[] };
 
@@ -373,7 +374,7 @@ export function accountInvalidFields(error: unknown): string[] {
 function useMock(): boolean {
   // 默认走真接口；仅 localStorage finance.useMock=1 时用假数据
   if (typeof localStorage !== 'undefined') {
-    return localStorage.getItem('finance.useMock') === '1';
+    return localStorage.getItem(STORAGE_KEYS.financeUseMock) === '1';
   }
   return false;
 }
