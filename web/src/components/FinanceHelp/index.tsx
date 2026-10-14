@@ -3,7 +3,7 @@ import { Popover, Space } from 'antd';
 import type { ReactNode } from 'react';
 
 // 文案来源：产品《abp_admin 管理端问号说明文案 v1》，必须原样照搬；改文案先改那份文档再同步这里。
-// 口径是框架通用账，禁止出现业务词（租赁、返佣、佣金等）。
+// 口径是框架通用账，禁止出现具体业务模块的科目/模板/业务词。
 export type FinanceHelpPage = 'A1' | 'A2' | 'A2b' | 'A3' | 'A4' | 'A5' | 'A6' | 'A7';
 
 const HELP: Record<FinanceHelpPage, ReactNode> = {

@@ -429,41 +429,39 @@ function uid(prefix: string) {
 }
 
 const mockAccounts: FinAccountDto[] = [
-  { id: 'a1', code: '1001', name: '银行存款', type: 'Asset', normalSide: 'Debit', isSystem: true, enabled: true, hasEntries: true },
+  { id: 'a1', code: '1002', name: '渠道资金（现金/银行）', type: 'Asset', normalSide: 'Debit', isSystem: true, enabled: true, hasEntries: true },
   { id: 'a2', code: '1122', name: '应收账款', type: 'Asset', normalSide: 'Debit', isSystem: true, enabled: true, hasEntries: false },
-  { id: 'a3', code: '2203', name: '预收账款', type: 'Liability', normalSide: 'Credit', isSystem: true, enabled: true, hasEntries: true },
-  { id: 'a4', code: '6001', name: '主营业务收入', type: 'Income', normalSide: 'Credit', isSystem: true, enabled: true, hasEntries: true },
-  { id: 'a5', code: '6603', name: '手续费', type: 'Expense', normalSide: 'Debit', isSystem: false, enabled: true, hasEntries: false },
-  { id: 'a6', code: '6901', name: '调账过渡', type: 'Equity', normalSide: 'Debit', isSystem: true, enabled: true, hasEntries: false },
+  { id: 'a3', code: '2205', name: '预收账款', type: 'Liability', normalSide: 'Credit', isSystem: true, enabled: true, hasEntries: true },
+  { id: 'a4', code: '6002', name: '主营业务收入', type: 'Income', normalSide: 'Credit', isSystem: true, enabled: true, hasEntries: true },
+  { id: 'a5', code: '6602', name: '管理费用', type: 'Expense', normalSide: 'Debit', isSystem: false, enabled: true, hasEntries: false },
+  { id: 'a6', code: '3101', name: '人工调整', type: 'Equity', normalSide: 'Credit', isSystem: true, enabled: true, hasEntries: false },
 ];
 
 const mockRules: FinPostingRuleDto[] = [
-  { id: 'r1', bizType: 'demo.rent', phase: 'collect', version: 1, status: 'Active', debitAccountCode: '1001', creditAccountCode: '2203', summary: '云机租金收款→预收' },
-  { id: 'r2', bizType: 'demo.rent', phase: 'recognize', version: 1, status: 'Active', debitAccountCode: '2203', creditAccountCode: '6001', summary: '预收确认收入' },
-  { id: 'r3', bizType: 'demo.topup', phase: 'collect', version: 1, status: 'Active', debitAccountCode: '1001', creditAccountCode: '2203', summary: 'AI 充值→预收' },
-  { id: 'r4', bizType: 'demo.topup', phase: 'recognize', version: 1, status: 'Active', debitAccountCode: '2203', creditAccountCode: '6001', summary: '用量确认收入' },
-  { id: 'r5', bizType: 'demo.commission', phase: 'settle', version: 1, status: 'Active', debitAccountCode: '6603', creditAccountCode: '1122', summary: '代理佣金' },
+  { id: 'r1', bizType: 'demo.credit', phase: 'pay', version: 1, status: 'Active', debitAccountCode: '1002', creditAccountCode: '2205', summary: '收款：借渠道资金 / 贷预收账款' },
+  { id: 'r2', bizType: 'demo.credit', phase: 'recognize', version: 1, status: 'Active', debitAccountCode: '2205', creditAccountCode: '6002', summary: '确认收入：借预收账款 / 贷主营业务收入' },
+  { id: 'r3', bizType: 'manual-adjust', phase: 'post', version: 2, status: 'Active', debitAccountCode: '*', creditAccountCode: '*', summary: '人工调账过账' },
 ];
 
 let mockVouchers: FinVoucherDto[] = [
   {
-    id: 'v1', voucherNo: 'V-202610-0001', bizType: 'demo.rent', bizRefId: 'ord-1001', phase: 'collect',
+    id: 'v1', voucherNo: 'V-202610-0001', bizType: 'demo.credit', bizRefId: 'ord-1001', phase: 'pay',
     periodLabel: '2026-10', status: 'Posted', debitTotal: 100, creditTotal: 100,
-    creatorName: 'system', creationTime: '2026-10-10T08:00:00+08:00', summary: '租金收款',
+    creatorName: 'system', creationTime: '2026-10-10T08:00:00+08:00', summary: '收款',
     isDemo: true, agentId: 'ag-1',
     entries: [
-      { seq: 1, accountCode: '1001', accountName: '银行存款', debit: 100, credit: 0 },
-      { seq: 2, accountCode: '2203', accountName: '预收账款', debit: 0, credit: 100 },
+      { seq: 1, accountCode: '1002', accountName: '渠道资金（现金/银行）', debit: 100, credit: 0 },
+      { seq: 2, accountCode: '2205', accountName: '预收账款', debit: 0, credit: 100 },
     ],
   },
   {
-    id: 'v2', voucherNo: 'V-202610-0002', bizType: 'demo.rent', bizRefId: 'ord-1001', phase: 'recognize',
+    id: 'v2', voucherNo: 'V-202610-0002', bizType: 'demo.credit', bizRefId: 'ord-1001', phase: 'recognize',
     periodLabel: '2026-10', status: 'Posted', debitTotal: 30, creditTotal: 30,
-    creatorName: 'system', creationTime: '2026-10-12T09:00:00+08:00', summary: '租金确认收入',
+    creatorName: 'system', creationTime: '2026-10-12T09:00:00+08:00', summary: '确认收入',
     isDemo: true, agentId: 'ag-1',
     entries: [
-      { seq: 1, accountCode: '2203', accountName: '预收账款', debit: 30, credit: 0 },
-      { seq: 2, accountCode: '6001', accountName: '主营业务收入', debit: 0, credit: 30 },
+      { seq: 1, accountCode: '2205', accountName: '预收账款', debit: 30, credit: 0 },
+      { seq: 2, accountCode: '6002', accountName: '主营业务收入', debit: 0, credit: 30 },
     ],
   },
 ];
@@ -474,8 +472,8 @@ let mockAdjusts: FinManualAdjustDto[] = [
     summary: '手续费补记', applicantId: 'user-accountant', applicantName: '会计甲',
     creationTime: '2026-10-13T10:00:00+08:00',
     lines: [
-      { accountCode: '6603', debit: 50, credit: 0, summary: '手续费' },
-      { accountCode: '1001', debit: 0, credit: 50, summary: '银行存款' },
+      { accountCode: '6602', debit: 50, credit: 0, summary: '手续费' },
+      { accountCode: '1002', debit: 0, credit: 50, summary: '银行存款' },
     ],
   },
   {
@@ -483,8 +481,8 @@ let mockAdjusts: FinManualAdjustDto[] = [
     summary: '预收纠偏', applicantId: 'user-accountant', applicantName: '会计甲',
     creationTime: '2026-10-13T11:00:00+08:00',
     lines: [
-      { accountCode: '2203', debit: 20, credit: 0 },
-      { accountCode: '6001', debit: 0, credit: 20 },
+      { accountCode: '2205', debit: 20, credit: 0 },
+      { accountCode: '6002', debit: 0, credit: 20 },
     ],
   },
   {
@@ -492,8 +490,8 @@ let mockAdjusts: FinManualAdjustDto[] = [
     summary: '老板自测单（用于验自批拦截）', applicantId: 'user-boss', applicantName: '老板',
     creationTime: '2026-10-13T12:00:00+08:00',
     lines: [
-      { accountCode: '6901', debit: 10, credit: 0 },
-      { accountCode: '1001', debit: 0, credit: 10 },
+      { accountCode: '3101', debit: 10, credit: 0 },
+      { accountCode: '1002', debit: 0, credit: 10 },
     ],
   },  {
     id: 'adj-4', adjustNo: 'ADJ-004', status: 'Rejected', amount: 15, currency: 'CNY',
@@ -502,8 +500,8 @@ let mockAdjusts: FinManualAdjustDto[] = [
     rejectReason: '缺少渠道对账单附件，补齐后重新提交',
     creationTime: '2026-10-13T13:00:00+08:00',
     lines: [
-      { accountCode: '1001', debit: 15, credit: 0 },
-      { accountCode: '6603', debit: 0, credit: 15 },
+      { accountCode: '1002', debit: 15, credit: 0 },
+      { accountCode: '6602', debit: 0, credit: 15 },
     ],
   },
   {
@@ -513,8 +511,8 @@ let mockAdjusts: FinManualAdjustDto[] = [
     rejectReason: '金额与流水不符',
     creationTime: '2026-10-13T14:00:00+08:00',
     lines: [
-      { accountCode: '6603', debit: 8, credit: 0 },
-      { accountCode: '1001', debit: 0, credit: 8 },
+      { accountCode: '6602', debit: 8, credit: 0 },
+      { accountCode: '1002', debit: 0, credit: 8 },
     ],
   },
 ];
@@ -536,7 +534,7 @@ let mockReconciles: FinReconcileRunDto[] = [
 ];
 
 const mockBizDocs: FinBizDocDto[] = [
-  { id: 'bd-1', bizType: 'demo.rent', bizRefId: 'ord-1001', phase: 'collect', amount: 100, currency: 'CNY', status: 'Settled', agentId: 'ag-1', isDemo: true, creationTime: '2026-10-10T08:00:00+08:00', voucherId: 'v1' },
+  { id: 'bd-1', bizType: 'demo.credit', bizRefId: 'ord-1001', phase: 'pay', amount: 100, currency: 'CNY', status: 'Settled', agentId: 'ag-1', isDemo: true, creationTime: '2026-10-10T08:00:00+08:00', voucherId: 'v1' },
   { id: 'bd-2', bizType: 'order.pay', bizRefId: 'ord-2002', phase: 'paid', amount: 88, currency: 'CNY', status: 'Paid', agentId: 'ag-2', isDemo: false, creationTime: '2026-10-11T14:00:00+08:00', voucherId: null },
 ];
 
