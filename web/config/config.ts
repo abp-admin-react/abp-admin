@@ -1,5 +1,11 @@
 // https://umijs.org/config/
-
+//
+// 本文件是 Umi Max 工程配置真源（defineConfig）。
+// 与后端端口/OIDC 相关的「可变运维项」不在这里写死：
+// - 代理上游 → config/proxy.ts + 环境变量 ABP_TARGET
+// - OIDC 客户端 → src/abp/env.ts
+// - 财务本地开关 → 浏览器 localStorage（见 src/abp/finance.ts 文件头）
+//
 import { join } from 'node:path';
 import { defineConfig } from '@umijs/max';
 import defaultSettings from './defaultSettings';
@@ -7,9 +13,22 @@ import proxy from './proxy';
 
 import routes from './routes';
 
+/**
+ * Umi 环境档，决定取 `proxy.ts` 里哪一套代理。
+ * - 干什么：`proxy: proxy[UMI_ENV]`；也影响部分插件行为。
+ * - 可配：`dev` | `test` | `pre`（须与 proxy.ts 导出键一致）。
+ * - 默认：`dev`（完整 OIDC+API 代理，本地登录联调用这个）。
+ * - 覆盖：`UMI_ENV=test pnpm start:test` 等（见 package.json scripts）。
+ * - 改错会怎样：取到 undefined 代理 → 接口全失败；用 test/pre 做登录会缺 /connect。
+ * - 与 ABP_TARGET 无关：UMI_ENV 选「哪套 path」，ABP_TARGET 选「上游 Host」。
+ */
 const { UMI_ENV = 'dev' } = process.env;
 
-// Compute commit hash: env vars take precedence, fall back to git at build time
+/**
+ * 构建写入的提交号（define 进包，供关于页/排障）。
+ * 优先级：COMMIT_HASH → CF_PAGES_COMMIT_SHA（Cloudflare Pages）→ 构建机 `git rev-parse HEAD` → 空串。
+ * 空串不致命，只是版本信息缺失。
+ */
 const commitHash =
   process.env.COMMIT_HASH ||
   process.env.CF_PAGES_COMMIT_SHA ||
@@ -77,10 +96,9 @@ export default defineConfig({
   ignoreMomentLocale: true,
   /**
    * @name 代理配置
-   * @description 可以让你的本地服务器代理到你的服务器上，这样你就可以访问服务器的数据了
-   * @see 要注意以下 代理只能在本地开发时使用，build 之后就无法使用了。
-   * @doc 代理介绍 https://umijs.org/docs/guides/proxy
-   * @doc 代理配置 https://umijs.org/docs/api/config#proxy
+   * @description 本地 dev server 把 API/OIDC/SignalR 转到后端；build 后无效，生产靠 nginx.conf。
+   * 选档：`proxy[UMI_ENV]`；上游地址与路径清单见 `./proxy.ts`（ABP_TARGET / 44300 真源说明也在那里）。
+   * @doc https://umijs.org/docs/guides/proxy
    */
   proxy: proxy[UMI_ENV as keyof typeof proxy],
   /**
@@ -215,6 +233,13 @@ export default defineConfig({
   },
   requestRecord: {},
   exportStatic: {},
+  /**
+   * 编译期注入的全局常量（浏览器里可读，不是运行时 process.env）。
+   * - process.env.CI：CI 标记，有则部分逻辑可收敛日志/埋点。
+   * - process.env.COMMIT_HASH：见上方 commitHash 优先级。
+   * - __APP_VERSION__ / __UMI_VERSION__ / __UTOO_VERSION__：来自对应 package.json，勿手改。
+   * 敏感值禁止放进 define（会打进静态包）。ABP_TARGET 只给 Node 代理用，不要 define 进前端。
+   */
   define: {
     'process.env.CI': process.env.CI,
     'process.env.COMMIT_HASH': commitHash,
