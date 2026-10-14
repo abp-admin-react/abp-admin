@@ -1,3 +1,10 @@
+/**
+ * 功能管理（Feature Management）读写。
+ *
+ * - providerName/providerKey：Host 功能与租户功能分 provider；Host 列表勿传空字符串 providerKey
+ *   （OSS FeatureAppService 会当成租户侧），应省略该查询参数——见 getFeatures 实现。
+ * - 与 permissions 类似：本文件管「功能开关值」，access.ts 管「权限策略」。
+ */
 import { request } from '@umijs/max';
 
 export type FeatureDto = {

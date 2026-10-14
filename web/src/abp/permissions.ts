@@ -1,3 +1,10 @@
+/**
+ * 权限授予读写（ABP Permission Management）。
+ *
+ * - providerName + providerKey：如 R=角色、U=用户；与权限弹窗 PermissionModal 一致。
+ * - update 提交的是「变更集」{name,isGranted}[]，不是全量树。
+ * - 菜单/按钮是否可见另见 access.ts 的 grantedPolicies，不走本文件。
+ */
 import { request } from '@umijs/max';
 
 export type PermissionGrantInfo = {

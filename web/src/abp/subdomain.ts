@@ -1,3 +1,10 @@
+/**
+ * 子域名 → 租户同步。
+ *
+ * - 从 hostname 解析租户名（getTenantNameFromHost），再 findTenantByName。
+ * - 返回：host（无子域）/ tenant（写入 localStorage）/ missing（登录前应去 /tenant-not-found）。
+ * - 只在登录页等入口调用；不要在每个路由重复打 findTenant。
+ */
 import { findTenantByName } from './config';
 import {
   getTenantNameFromHost,

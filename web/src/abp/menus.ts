@@ -1,3 +1,10 @@
+/**
+ * 动态菜单 API（管理端维护 + 当前用户「我的菜单」）。
+ *
+ * - MENU_TYPE：1 目录 / 2 菜单页；与后端枚举一致，页面勿魔法数字。
+ * - getMyMenu：侧栏数据源；path 渲染前仍须 isSafeMenuPath（utils/redirect.ts）过滤。
+ * - 管理 CRUD 与「我的菜单」分端点；改菜单树后需刷新 initialState 才会进侧栏。
+ */
 import { request } from '@umijs/max';
 
 /** 菜单类型：1 目录（分组），2 菜单（页面）。 */

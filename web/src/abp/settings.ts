@@ -1,3 +1,10 @@
+/**
+ * 设置管理 API（邮件 SMTP 等）。
+ *
+ * - 更新邮件设置必须用 POST（ABP EmailingAppService.UpdateAsync）；PUT 会 405——见 updateEmailSettings。
+ * - smtpPassword 仅在用户填写时提交；空/不传表示不改原密码（以后端契约为准）。
+ * - 与 settingUi.ts（动态设置 UI）分工：本文件是强类型邮件/测试信接口。
+ */
 import { request } from '@umijs/max';
 
 export type EmailSettingsDto = {

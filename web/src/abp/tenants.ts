@@ -1,3 +1,9 @@
+/**
+ * 宿主侧租户管理 API（AbpTenantManagement）。
+ *
+ * - 仅 Host 可用；租户管理员看不到本菜单（access.canManageTenants 含 isHost）。
+ * - 与「当前会话租户」tenant.ts 无关：那边是切换上下文，这里是 CRUD 租户实体。
+ */
 import { request } from '@umijs/max';
 import type { CreateTenantInput, TenantDto, TenantListResult } from './types';
 

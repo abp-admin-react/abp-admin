@@ -1,3 +1,9 @@
+/**
+ * 操作日志查询 API（业务操作审计，区别于 ABP AuditLogs）。
+ *
+ * - 列表分页与 identity 同口径（SkipCount/MaxResultCount）。
+ * - success=false 时 errorMessage 供详情展示；列表勿默认弹全局错（按页面 skip 策略）。
+ */
 import { request } from '@umijs/max';
 import type { PagedResult } from './identity';
 
