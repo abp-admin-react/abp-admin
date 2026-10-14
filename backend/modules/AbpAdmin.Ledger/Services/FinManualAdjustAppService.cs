@@ -49,6 +49,10 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         return await MapAsync(await LoadAsync(id));
     }
 
+    /// <summary>
+    /// 列表：任一 Voucher.View / Adjust.* 权限可看。Status 多值；StartTime/EndTime 为 CreationTime 左闭右开（UTC）；
+    /// Filter 只匹配 reason。按 CreationTime 倒序分页。
+    /// </summary>
     public virtual async Task<PagedResultDto<FinManualAdjustDto>> GetListAsync(FinManualAdjustListInput input)
     {
         await RequireViewAsync();
@@ -105,6 +109,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         return await MapAsync(adjust);
     }
 
+    /// <summary>改草稿：需 Finance.Adjust.Create 且为申请人（他人 → AdjustNotApplicant）；状态校验在实体 Update 内。</summary>
     public virtual async Task<FinManualAdjustDto> UpdateAsync(Guid id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] CreateUpdateFinManualAdjustDto? input = null)
     {
         var adjust = await LoadForApplicantAsync(id);
@@ -113,6 +118,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         return await MapAsync(adjust);
     }
 
+    /// <summary>删单：需 Finance.Adjust.Create 且为申请人；仅实体允许的状态可删（EnsureDeletable）。</summary>
     public virtual async Task DeleteAsync(Guid id)
     {
         var adjust = await LoadForApplicantAsync(id);
@@ -165,6 +171,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
     public virtual async Task<FinManualAdjustDto> ApproveAsync(Guid id)
     {
         var (adjust, auditor) = await LoadForAuditAsync(id, FinanceErrorCodes.AdjustApproveDenied, FinancePermissions.Adjust.Approve);
+        // 按 Id 取借贷两侧科目（字典含两项），凭证事件要的是科目编码
         var debit = (await _rules.GetAccountsByIdAsync(new[] { adjust.DebitAccountId, adjust.CreditAccountId }));
         var evt = new FinanceBizEvent(
             FinanceBizTypes.ManualAdjust,
@@ -183,6 +190,10 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         return await MapAsync(adjust);
     }
 
+    /// <summary>
+    /// Pending → Rejected：需 Finance.Adjust.Reject。驳回原因必填（先于权限校验，空 → AdjustRejectReasonRequired）；
+    /// 驳回自己的单同样受 ApproveOwn 约束（见 LoadForAuditAsync）。
+    /// </summary>
     public virtual async Task<FinManualAdjustDto> RejectAsync(Guid id, RejectFinManualAdjustInput input)
     {
         if (string.IsNullOrWhiteSpace(input.RejectReason))
@@ -204,7 +215,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         var adjust = await LoadAsync(id);
         adjust.Require(FinManualAdjustStatus.Posted);
         var reversal = await _engine.ReverseVoucherAsync(adjust.VoucherId!.Value);
-        adjust.MarkReversed(reversal);
+        adjust.MarkReversed(reversal); // 只改状态并记红冲凭证号，原 VoucherId 保留，下方日志同时打两者
         await SaveAsync();
         _logger.LogInformation("Adjust reversed. AdjustId={AdjustId} ReversalVoucherId={ReversalVoucherId} OriginalVoucherId={VoucherId}", id, reversal, adjust.VoucherId);
         return await MapAsync(adjust);
