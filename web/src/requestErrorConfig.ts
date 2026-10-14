@@ -1,3 +1,17 @@
+/**
+ * Umi request 全局错误与鉴权头。
+ *
+ * ## 与代码/日志对齐的约定
+ * - 401 → 静默跳转 /user/login（不弹错）。
+ * - 403 → 只弹一条 message（key=http-403）；有 ABP 文案用文案，否则中文兜底；
+ *   绝不透出 axios 英文 "Request failed with status code 403"。
+ * - 404 → 全局静默；开发环境 console.warn `[request] 404 silenced...` 便于抓错路径；
+ *   页面必须用 isNotFound 自行降级（见 AGENTS.md）。
+ * - 429 → 限流文案，含 RetryAfterSeconds 时格式化等待时间。
+ * - 离线 → message「网络不可用」（i18n）；与 OfflineBanner 一致语义。
+ * - 请求头：Bearer（oidc.getAccessToken）+ __tenant（getAbpHeaders）+
+ *   RequestVerificationToken（XSRF-TOKEN cookie）+ Accept-Language（toAbpCulture）。
+ */
 import type { RequestOptions } from '@@/plugin-request/request';
 import type { RequestConfig } from '@umijs/max';
 import { getIntl, getLocale, history } from '@umijs/max';
