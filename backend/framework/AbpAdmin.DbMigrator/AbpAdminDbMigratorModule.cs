@@ -18,7 +18,8 @@ namespace AbpAdmin.DbMigrator;
     typeof(AbpAdminWebhooksModule),
     typeof(AbpAdminCollectionModule),
     typeof(AbpAdminOrderingModule),
-    typeof(AbpAdminLedgerModule)
+    typeof(AbpAdminLedgerModule),
+    typeof(AbpAdmin.TokenGateway.AbpAdminTokenGatewayModule) // HarnessBot 路线 C 外层
 )]
 public class AbpAdminDbMigratorModule : AbpModule
 {
