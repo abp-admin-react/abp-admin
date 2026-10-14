@@ -1,3 +1,13 @@
+/**
+ * 当前用户账户 API：资料、改密、双因素、Magic Link/OTP、模拟登录。
+ *
+ * ## 边界
+ * - `/api/account/*`：ABP 账户模块（my-profile / change-password）。
+ * - `/api/app/account-pro/*`：本仓库扩展（2FA、联系方式确认、免密登录）。
+ * - 模拟登录 `impersonate*` / `backToMyAccount`：换来的令牌须经 oidc.ts
+ *   `applyImpersonatedTokens` / `applyTokensForNewSession` 写入会话，页面不要手存 token。
+ * - 错误文案走全局 requestErrorConfig；需页面自处理时传 skipErrorHandler。
+ */
 import { request } from '@umijs/max';
 import type { ImpersonationResultDto } from './oidc';
 

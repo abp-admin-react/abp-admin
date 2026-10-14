@@ -1,3 +1,9 @@
+/**
+ * 账户安全：外部登录绑定、会话相关安全操作。
+ *
+ * - 与 account.ts（资料/2FA/模拟登录）互补；本文件偏「登录提供商 / 安全绑定」。
+ * - 解绑等破坏性操作以后端错误码为准，前端只做确认框 + 全局错误提示。
+ */
 import { request } from '@umijs/max';
 import type { ImpersonationResultDto } from './oidc';
 
