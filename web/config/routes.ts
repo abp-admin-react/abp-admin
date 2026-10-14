@@ -326,7 +326,8 @@ export default [
       {
         path: '/finance/accounts',
         name: 'finance-accounts',
-        access: 'canViewFinanceLedger',
+        // A2: read = Ledger.View | Account.Manage
+        access: 'canViewFinanceAccounts',
         component: './finance/accounts',
       },
       {

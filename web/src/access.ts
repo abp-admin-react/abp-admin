@@ -189,6 +189,11 @@ export default function access(
     canViewFinanceLedger: !!policies['Finance.Ledger.View'] || financeShell,
     canExportFinanceLedger: !!policies['Finance.Ledger.Export'] || financeShell,
     canManageFinanceAccounts: !!policies['Finance.Account.Manage'] || financeShell,
+    // A2 科目页可见：读权限 = Ledger.View | Account.Manage（与登录落地 / 产品清单一致）
+    canViewFinanceAccounts:
+      !!policies['Finance.Ledger.View'] ||
+      !!policies['Finance.Account.Manage'] ||
+      financeShell,
     canViewFinanceRules: !!policies['Finance.Rule.View'] || financeShell,
     canViewFinanceVouchers: !!policies['Finance.Voucher.View'] || financeShell,
     canReverseFinanceVouchers: !!policies['Finance.Voucher.Reverse'] || financeShell,
@@ -208,6 +213,7 @@ export default function access(
     // 故父级用「任一子页权限 ∪ shellAccess」并集；细权仍在子路由 / 按钮上。
     canViewFinance:
       !!policies['Finance.Ledger.View'] ||
+      !!policies['Finance.Account.Manage'] ||
       !!policies['Finance.Rule.View'] ||
       !!policies['Finance.Voucher.View'] ||
       !!policies['Finance.Period.View'] ||

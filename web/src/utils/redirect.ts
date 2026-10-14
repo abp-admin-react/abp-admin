@@ -6,7 +6,11 @@
  * URL 规范在解析前会剥掉输入中的 tab/LF/CR、把特殊 scheme 里的反斜杠当正斜杠，两者都被
  * 归一成协议相对地址。这里用「规范化后比对 origin」：任何走私形态最终都被解析成跨源而被
  * 拒绝，返回值只含 pathname+search+hash、天然无法携带 authority。
+ *
+ * 默认落地（无 intended redirect 时）：按财务菜单顺序挑第一个有权限的页（产品定：有
+ * Finance.Ledger.View → A1 资金总览；否则 A2→A2b→…→A7；都没有则 /welcome）。
  */
+import { getApplicationConfiguration } from '@/abp/config';
 import { STORAGE_KEYS } from '@/abp/storageKeys';
 
 /** 回跳路径键（sessionStorage），见 storageKeys.ts。 */
@@ -38,9 +42,107 @@ export function storeIntendedRedirect(raw: string | null | undefined) {
   }
 }
 
-/** 登录后默认落地路径：唯一事实源（路由 config/routes.ts 的语义别名），
- * 回调页 fallback 与登录页 magic-link 直跳共用——此前两处各自硬编码，改路由时会漂移。 */
+/** 无任何财务页权限时的兜底落地（welcome）；有权限时由 resolvePostLoginLandingPath 覆盖。 */
 export const DEFAULT_LANDING_PATH = '/welcome';
+
+/**
+ * 财务菜单落地候选：顺序与 config/routes.ts /finance 子路由一致（A1→A2→A2b→A3→A4→A5→A6→A7）。
+ * 权限码与 access.ts / 产品清单对齐；A2 读权限 = Ledger.View 或 Account.Manage。
+ */
+export const FINANCE_LANDING_CANDIDATES: ReadonlyArray<{
+  path: string;
+  /** 是否具备进入该页的权限（含 financeShell 前端放开菜单态）。 */
+  canEnter: (policies: Record<string, boolean>, financeShell: boolean) => boolean;
+}> = [
+  {
+    // A1 资金总览
+    path: '/finance/overview',
+    canEnter: (p, shell) => !!p['Finance.Ledger.View'] || shell,
+  },
+  {
+    // A2 科目：产品定读权限 Ledger.View | Account.Manage（路由 access 见 canViewFinanceAccounts）
+    path: '/finance/accounts',
+    canEnter: (p, shell) =>
+      !!p['Finance.Ledger.View'] || !!p['Finance.Account.Manage'] || shell,
+  },
+  {
+    // A2b 过账规则
+    path: '/finance/rules',
+    canEnter: (p, shell) => !!p['Finance.Rule.View'] || shell,
+  },
+  {
+    // A3 凭证
+    path: '/finance/vouchers',
+    canEnter: (p, shell) => !!p['Finance.Voucher.View'] || shell,
+  },
+  {
+    // A4 期间
+    path: '/finance/period',
+    canEnter: (p, shell) => !!p['Finance.Period.View'] || shell,
+  },
+  {
+    // A5 对账
+    path: '/finance/reconcile',
+    canEnter: (p, shell) => !!p['Finance.Ledger.View'] || shell,
+  },
+  {
+    // A6 业务单据（代理常见落地）
+    path: '/finance/biz-docs',
+    canEnter: (p, shell) => !!p['Finance.BizDoc.View'] || shell,
+  },
+  {
+    // A7 余额
+    path: '/finance/balances',
+    canEnter: (p, shell) => !!p['Finance.Balance.View'] || shell,
+  },
+];
+
+/**
+ * 按已授财务权限解析登录后默认落地路径。
+ * - 有 Finance.Ledger.View（或 shell）→ 第一个候选即 A1；
+ * - 否则沿菜单顺序找第一页；
+ * - 都没有 → DEFAULT_LANDING_PATH（/welcome）。
+ */
+export function resolvePostLoginLandingPath(
+  policies: Record<string, boolean> | null | undefined,
+  options?: { financeShell?: boolean },
+): string {
+  const p = policies ?? {};
+  const shell = options?.financeShell === true;
+  for (const item of FINANCE_LANDING_CANDIDATES) {
+    if (item.canEnter(p, shell)) {
+      return item.path;
+    }
+  }
+  return DEFAULT_LANDING_PATH;
+}
+
+/** 读 localStorage 的 financeShell 开关（与 access.ts 同一键）。 */
+function readFinanceShellAccess(): boolean {
+  try {
+    return (
+      typeof localStorage !== 'undefined' &&
+      localStorage.getItem(STORAGE_KEYS.financeShellAccess) === '1'
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 登录成功后拉 application-configuration，按 grantedPolicies 解析默认落地。
+ * 接口失败时落回 /welcome，不阻塞进系统。
+ */
+export async function resolvePostLoginLandingPathFromServer(): Promise<string> {
+  try {
+    const config = await getApplicationConfiguration();
+    return resolvePostLoginLandingPath(config.auth?.grantedPolicies, {
+      financeShell: readFinanceShellAccess(),
+    });
+  } catch {
+    return DEFAULT_LANDING_PATH;
+  }
+}
 
 /** 消费暂存的回跳目标（回调/双因素页：读后即清；非法值与脏值落回 fallback）。 */
 export function consumeIntendedRedirect(fallback = DEFAULT_LANDING_PATH): string {
