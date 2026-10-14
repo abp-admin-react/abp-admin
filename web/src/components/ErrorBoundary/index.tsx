@@ -1,3 +1,9 @@
+/**
+ * 路由级错误边界：区分「代码异常」与「ChunkLoadError（发版后旧 chunk 404）」。
+ *
+ * - Chunk 类错误提示用户刷新；普通错误展示可复制信息 + 回首页。
+ * - 文案走 i18n；不要在这里吞掉错误却不打日志——开发态依赖 React 默认 overlay。
+ */
 import { getIntl } from '@umijs/max';
 import { Button, Card, Result } from 'antd';
 import React from 'react';

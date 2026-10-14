@@ -1,3 +1,10 @@
+/**
+ * Cookie 同意条。
+ *
+ * - 同意状态 cookie 名必须与后端 CookieConsentController.ConsentCookieName
+ *   （`.AbpAdmin.CookieConsent`）一致，否则服务端永远看不到同意结果。
+ * - 配置来自后端接口；关闭 isEnabled 时本组件不渲染。
+ */
 import { request } from '@umijs/max';
 import { Button, Space, Typography } from 'antd';
 import React, { useEffect, useState } from 'react';

@@ -1,3 +1,12 @@
+/**
+ * 顶栏通知铃铛（未读数 + 抽屉列表）。
+ *
+ * - 实时：依赖 RealTimeConnection 注册的 notificationRealTimeHandlers；
+ *   SignalR 不可用时 onRealTimeAvailabilityChange → 回落轮询未读数。
+ * - 列表：antd 6 Listy（虚拟化 items/rowKey/itemRender）；不是旧版 List.Item.Meta。
+ * - 标记已读/全部已读走 React Query mutation，成功后失效 myNotificationsQueryKey。
+ * - 不在此建连；建连属主是 RealTimeConnection。
+ */
 import { BellOutlined, CheckOutlined } from '@ant-design/icons';
 import {
   useInfiniteQuery,
