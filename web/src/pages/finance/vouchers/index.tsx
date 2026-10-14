@@ -1,4 +1,4 @@
-import FinanceHelpTitle from '@/components/FinanceHelp';
+import { financeHelpHeader } from '@/components/FinanceHelp';
 import {
   type ActionType,
   ModalForm,
@@ -309,7 +309,7 @@ if (canReverse && r.status === 'Posted') {
 
   return (
     <PageContainer
-      title={<FinanceHelpTitle page="A3" title="A3 凭证与手工调账" />}
+      {...financeHelpHeader('A3', '凭证与调账')}
       extra={
         load.ok ? (
           <Access accessible={canCreate}>

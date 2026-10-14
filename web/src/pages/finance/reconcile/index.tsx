@@ -1,4 +1,4 @@
-import FinanceHelpTitle from '@/components/FinanceHelp';
+import { financeHelpHeader } from '@/components/FinanceHelp';
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { App, Button, DatePicker, Space, Switch, Tag } from 'antd';
 import dayjs from 'dayjs';
@@ -34,7 +34,7 @@ const ReconcilePage: React.FC = () => {
 
   return (
     <PageContainer
-      title={<FinanceHelpTitle page="A5" title="A5 对账" />}
+      {...financeHelpHeader('A5', '对账')}
       extra={
         !load.ok ? null : (
         <Space>

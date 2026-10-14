@@ -92,11 +92,24 @@ ol {
 }
 
 /* ===== 页头密度优化 =====
- * 面包屑末层即页面标题（放大为原 heading-title 样式），
- * 独立的标题行（.ant-page-header-heading）整行隐藏，省一行高度。
- * 各页面的标题行右侧按钮（extra）已挪进各自表格工具栏 / 卡片 extra。 */
-.ant-pro-page-container-warp-page-header .ant-page-header-heading {
+ * 面包屑末层即页面标题（放大为原 heading-title 样式）。
+ * 只藏 title/subtitle 文字，保留 heading-extra（如 A3 新建调账），避免功能按钮被藏。
+ * 无 extra 时整行 heading 仍隐藏，避免空白占位。 */
+.ant-pro-page-container-warp-page-header .ant-page-header-heading-title,
+.ant-pro-page-container-warp-page-header .ant-page-header-heading-sub-title {
   display: none;
+}
+.ant-pro-page-container-warp-page-header
+  .ant-page-header-heading:not(:has(.ant-page-header-heading-extra)) {
+  display: none;
+}
+/* 问号挂在面包屑末项，不要被末项标题字号放大 */
+.ant-pro-page-container-warp-page-header
+  .ant-breadcrumb-item:last-child
+  .finance-help-icon {
+  font-size: 16px;
+  font-weight: normal;
+  color: #8c8c8c;
 }
 
 .ant-pro-page-container-warp-page-header

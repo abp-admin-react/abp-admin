@@ -84,15 +84,42 @@ const HELP: Record<FinanceHelpPage, ReactNode> = {
   ),
 };
 
-/** 页面标题 + 右侧「?」，点击弹出本页说明浮层。 */
-const FinanceHelpTitle = ({ page, title }: { page: FinanceHelpPage; title: ReactNode }) => (
-  <Space size={6}>
-    {title}
-    {/* 用 click 而非 hover：文案较长，hover 移出即消失不便阅读 */}
-    <Popover trigger="click" placement="bottomLeft" content={<div style={{ maxWidth: 420, lineHeight: 1.7 }}>{HELP[page]}</div>}>
-      <QuestionCircleOutlined aria-label="页面说明" style={{ color: '#8c8c8c', cursor: 'pointer', fontSize: 16 }} />
-    </Popover>
-  </Space>
+/** 点击弹出本页说明；挂在面包屑末项旁（页头 title 行被密度优化隐藏）。 */
+export const FinanceHelpIcon = ({ page }: { page: FinanceHelpPage }) => (
+  <Popover
+    trigger="click"
+    placement="bottomLeft"
+    content={<div style={{ maxWidth: 420, lineHeight: 1.7 }}>{HELP[page]}</div>}
+  >
+    <QuestionCircleOutlined
+      aria-label="页面说明"
+      className="finance-help-icon"
+      style={{ color: '#8c8c8c', cursor: 'pointer', fontSize: 16, verticalAlign: 'middle' }}
+    />
+  </Popover>
 );
 
-export default FinanceHelpTitle;
+/**
+ * PageContainer 页头：显式面包屑（末项 + ?），不依赖菜单权限推导。
+ * 原因：无 Finance 菜单权限时自动面包屑为空，再叠加隐藏 title 行会整页无标题。
+ */
+export function financeHelpHeader(page: FinanceHelpPage, label: string) {
+  return {
+    title: false as const,
+    breadcrumb: {
+      items: [
+        { title: '财务管理' },
+        {
+          title: (
+            <Space size={6}>
+              <span>{label}</span>
+              <FinanceHelpIcon page={page} />
+            </Space>
+          ),
+        },
+      ],
+    },
+  };
+}
+
+export default FinanceHelpIcon;

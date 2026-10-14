@@ -1,4 +1,4 @@
-import FinanceHelpTitle from '@/components/FinanceHelp';
+import { financeHelpHeader } from '@/components/FinanceHelp';
 import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
 import { Alert, Button, Space, Spin } from 'antd';
 import React, { useEffect, useState } from 'react';
@@ -28,7 +28,7 @@ const OverviewPage: React.FC = () => {
     }).format(n ?? 0);
 
   return (
-    <PageContainer title={<FinanceHelpTitle page="A1" title="A1 资金总览" />}>
+    <PageContainer {...financeHelpHeader('A1', '资金总览')}>
       <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
       <Spin spinning={loading}>
         {!loading && !data ? (

@@ -1,4 +1,4 @@
-import FinanceHelpTitle from '@/components/FinanceHelp';
+import { financeHelpHeader } from '@/components/FinanceHelp';
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { Alert, Tag } from 'antd';
 import React, { useRef } from 'react';
@@ -10,7 +10,7 @@ const RulesPage: React.FC = () => {
   const actionRef = useRef<ActionType>(undefined);
   const load = useFinanceLoad();
   return (
-    <PageContainer title={<FinanceHelpTitle page="A2b" title="A2b 过账规则" />}>
+    <PageContainer {...financeHelpHeader('A2b', '过账规则')}>
       <Alert
         type="info"
         showIcon

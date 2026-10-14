@@ -1,4 +1,4 @@
-import FinanceHelpTitle from '@/components/FinanceHelp';
+import { financeHelpHeader } from '@/components/FinanceHelp';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import { Alert, Descriptions, Spin, Tag } from 'antd';
 import React, { useEffect, useState } from 'react';
@@ -20,7 +20,7 @@ const PeriodPage: React.FC = () => {
   }, [load.nonce]);
 
   return (
-    <PageContainer title={<FinanceHelpTitle page="A4" title="A4 过账与期间" />}>
+    <PageContainer {...financeHelpHeader('A4', '会计期间')}>
       <Alert
         type="info"
         showIcon
