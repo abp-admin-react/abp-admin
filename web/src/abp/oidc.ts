@@ -1,3 +1,15 @@
+/**
+ * OIDC 客户端会话（oidc-client-ts）。
+ *
+ * ## 边界
+ * - client_id / scope / authority 真源在 env.ts；此处只组装 UserManager。
+ * - **不包含 client_secret**：SPA 公钥客户端，密钥不进浏览器、不进本仓库。
+ * - 令牌存 localStorage（前缀 STORAGE_KEYS.oidcPrefix）；读写一律经本文件，
+ *   禁止业务代码手拼 `oidc.user:...` 键。
+ * - 登录/换号/注销均携带 `__tenant`（若有），与租户子域名会话对齐。
+ * - 模拟登录与 Magic Link 落地：applyImpersonatedTokens（需已有会话） /
+ *   applyTokensForNewSession（无会话亦可）。
+ */
 import { User, UserManager, WebStorageStateStore } from 'oidc-client-ts';
 import { abpEnv } from './env';
 import { STORAGE_KEYS } from './storageKeys';
