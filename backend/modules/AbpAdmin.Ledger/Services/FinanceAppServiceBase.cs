@@ -12,7 +12,11 @@ using Volo.Abp.Authorization;
 
 namespace AbpAdmin.Ledger.Services;
 
-/// <summary>财务应用服务基类：带错误码的权限检查 + 列表参数归一。</summary>
+/// <summary>
+/// 财务应用服务基类：带业务错误码的权限检查 + 列表参数归一。
+/// RequireAnyAsync：未登录 → 401；已登录无权且传了 errorCode → 该码映射 403（如 AdjustCreateDenied）；
+/// 属主校验由子类用 Scope.Agent / ApplicantId 做，未命中时抛 403 业务码或 404（勿泄露跨属主存在性时用 404）。
+/// </summary>
 public abstract class FinanceAppServiceBase : ApplicationService
 {
     public const int DefaultPageSize = 20;

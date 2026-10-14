@@ -267,7 +267,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
         var configuration = context.Services.GetConfiguration();
         var hostingEnvironment = context.Services.GetHostingEnvironment();
 
-        // 全系统 UTC：API 时间字段带 Z；与 PostedTime=UtcNow / 对账区间半开一致
+        // 时间真源（非 JSON）：全站 Clock.Kind=Utc。API 时间字段带 Z；PostedTime=UtcNow；
+        // 对账 RangeStart/End 须带 Z。launchSettings / appsettings 都没有 Clock 节——勿改回 Local。
         Configure<AbpClockOptions>(options =>
         {
             options.Kind = DateTimeKind.Utc;

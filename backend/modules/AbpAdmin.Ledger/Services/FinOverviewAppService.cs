@@ -11,7 +11,12 @@ using Volo.Abp.EntityFrameworkCore;
 
 namespace AbpAdmin.Ledger.Services;
 
-/// <summary>A1 资金总览：GET /api/app/fin-overview</summary>
+/// <summary>
+/// A1 资金总览：GET /api/app/fin-overview。需 Finance.Ledger.View。
+/// Today* 按凭证 CreationTime（Clock=Utc）的当日 [today, tomorrow)；
+/// RecognizedIncomeTotal = 全部收入类科目投影合计（框架种子只有 6002，业务模块种的收入科目自动计入）；
+/// Available/Frozen/Unearned 按科目编码汇总投影（业务模块未种对应科目时为 0）。
+/// </summary>
 [Authorize(FinancePermissions.Ledger.View)]
 public class FinOverviewAppService : FinanceAppServiceBase
 {

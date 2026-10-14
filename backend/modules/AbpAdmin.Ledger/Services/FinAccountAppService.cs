@@ -27,6 +27,7 @@ public class FinAccountAppService : FinanceAppServiceBase
 
     public FinAccountAppService(IDbContextProvider<LedgerDbContext> db) => _db = db;
 
+    /// <summary>分页列表。需 Ledger.View 或 Account.Manage；无权 → 403（无业务码）。</summary>
     public virtual async Task<PagedResultDto<FinAccountDto>> GetListAsync(FinAccountListInput input)
     {
         await RequireAnyAsync(null, FinancePermissions.Ledger.View, FinancePermissions.Account.Manage);
@@ -50,6 +51,7 @@ public class FinAccountAppService : FinanceAppServiceBase
         return new PagedResultDto<FinAccountDto>(total, rows.Select(r => Map(r.A, r.Has)).ToList());
     }
 
+    /// <summary>单科。不存在 → AccountNotFound + data.Id。权限同 GetList。</summary>
     public virtual async Task<FinAccountDto> GetAsync(Guid id)
     {
         await RequireAnyAsync(null, FinancePermissions.Ledger.View, FinancePermissions.Account.Manage);
@@ -58,6 +60,10 @@ public class FinAccountAppService : FinanceAppServiceBase
     }
 
     [Authorize(FinancePermissions.Account.Manage)]
+    /// <summary>
+    /// 新建。需 Account.Manage。校验：code/name 必填 → InvalidEvent Field=code|name；
+    /// 重码 → AccountCodeDuplicate；上级不存在或自指 → AccountNotFound + data.ParentId。
+    /// </summary>
     public virtual async Task<FinAccountDto> CreateAsync(CreateUpdateFinAccountDto input)
     {
         var code = Validate(input);
@@ -72,6 +78,10 @@ public class FinAccountAppService : FinanceAppServiceBase
     }
 
     [Authorize(FinancePermissions.Account.Manage)]
+    /// <summary>
+    /// 更新。系统科目 → AccountSystemReadOnly；有分录时改 code/type/direction → AccountHasEntries；
+    /// 仍可改 name/parent/停用。错误码与 Create 对齐。
+    /// </summary>
     public virtual async Task<FinAccountDto> UpdateAsync(Guid id, CreateUpdateFinAccountDto input)
     {
         var code = Validate(input);
@@ -96,6 +106,10 @@ public class FinAccountAppService : FinanceAppServiceBase
     }
 
     [Authorize(FinancePermissions.Account.Manage)]
+    /// <summary>
+    /// 物理删除。有分录或仍被调账单借贷引用 → AccountHasEntries；有子科目 → AccountHasChildren；
+    /// 系统科目 → AccountSystemReadOnly。已过账历史勿指望靠删科目抹掉。
+    /// </summary>
     public virtual async Task DeleteAsync(Guid id)
     {
         var db = await _db.GetDbContextAsync();

@@ -10,6 +10,11 @@ namespace AbpAdmin.Ledger.Posting;
 
 /// <summary>ILedgerIntegrationService 实现：进程内门面，加入调用方 UoW（无外层时自开事务）。</summary>
 [RemoteService(IsEnabled = false)]
+/// <summary>
+/// 进程内 ILedgerIntegrationService 实现：业务模块过账入口。
+/// 委托 <see cref="LedgerPostingEngine"/>；幂等键 (BizType,BizRefId,Phase,BatchKey)；
+/// 时间与余额均按 UTC / 投影表。真实业务勿走 FinDemoEvent（仅 demo.*）。
+/// </summary>
 public class LedgerIntegrationService : ApplicationService, ILedgerIntegrationService
 {
     private readonly LedgerPostingEngine _engine;

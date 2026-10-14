@@ -67,6 +67,7 @@ public class FinManualAdjust : FullAuditedAggregateRoot<Guid>, IMultiTenant
         Apply(lines, reason);
     }
 
+    /// <summary>Draft → Pending。now 须 UTC（Clock.Kind=Utc）。非法状态 → AdjustInvalidStatus。</summary>
     public void Submit(DateTime now)
     {
         Require(FinManualAdjustStatus.Draft);
@@ -74,6 +75,7 @@ public class FinManualAdjust : FullAuditedAggregateRoot<Guid>, IMultiTenant
         SubmittedAt = now;
     }
 
+    /// <summary>Pending → Rejected。RejectReason 可空由 AppService 再强制非空策略。</summary>
     public void Reject(Guid auditorId, string? reason, DateTime now)
     {
         Require(FinManualAdjustStatus.Pending);
@@ -94,6 +96,7 @@ public class FinManualAdjust : FullAuditedAggregateRoot<Guid>, IMultiTenant
         // RejectReason 故意保留，重提后仍可见
     }
 
+    /// <summary>Pending → Posted。VoucherId 指向同事务过账的 manual-adjust 凭证。</summary>
     public void MarkPosted(Guid auditorId, Guid voucherId, DateTime now)
     {
         Require(FinManualAdjustStatus.Pending);
@@ -103,6 +106,7 @@ public class FinManualAdjust : FullAuditedAggregateRoot<Guid>, IMultiTenant
         Status = FinManualAdjustStatus.Posted;
     }
 
+    /// <summary>Posted → Reversed。ReversalVoucherId 为红冲凭证；不删原分录。</summary>
     public void MarkReversed(Guid reversalVoucherId)
     {
         Require(FinManualAdjustStatus.Posted);
