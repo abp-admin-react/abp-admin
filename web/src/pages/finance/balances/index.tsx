@@ -1,3 +1,4 @@
+import FinanceHelpTitle from '@/components/FinanceHelp';
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { Button, Select, Space, Tag } from 'antd';
 import { formatForDisplay, rangeToUtcBounds } from '@/utils/time';
@@ -19,7 +20,7 @@ const BalancesPage: React.FC = () => {
 
   return (
     <PageContainer
-      title="A7 用户余额投影"
+      title={<FinanceHelpTitle page="A7" title="A7 用户余额投影" />}
       extra={
         !load.ok ? null : (
         !isAgentScoped ? (

@@ -1,3 +1,4 @@
+import FinanceHelpTitle from '@/components/FinanceHelp';
 import {
   type ActionType,
   ModalForm,
@@ -61,7 +62,7 @@ const AccountsPage: React.FC = () => {
 
   return (
     <PageContainer
-      title="A2 科目表"
+      title={<FinanceHelpTitle page="A2" title="A2 科目表" />}
     >
       <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
         <AutoHeightProTable<FinAccountDto>

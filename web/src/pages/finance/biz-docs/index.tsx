@@ -1,3 +1,4 @@
+import FinanceHelpTitle from '@/components/FinanceHelp';
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { Select, Space, Tag } from 'antd';
 import { formatForDisplay, rangeToUtcBounds } from '@/utils/time';
@@ -18,7 +19,7 @@ const BizDocsPage: React.FC = () => {
 
   return (
     <PageContainer
-      title="A6 订单/收款/支付（只读）"
+      title={<FinanceHelpTitle page="A6" title="A6 订单/收款/支付（只读）" />}
       extra={
         !load.ok ? null : (
         <Space>
