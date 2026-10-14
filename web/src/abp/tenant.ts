@@ -1,3 +1,7 @@
+/**
+ * localStorage `abp.tenant`：当前租户 `{id,name}` JSON；无/解析失败=Host。
+ * 子域名模式（<租户>.localhost）优先于该键。手动清掉即回 Host；写错 id → 后端租户不存在。
+ */
 const KEY = 'abp.tenant';
 
 export type StoredTenant = {

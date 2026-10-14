@@ -91,6 +91,8 @@ const scheduleRetry = () => {
   }, delay);
 };
 
+// 已知问题：令牌键名写死 8000 源（oidc.user:http://localhost:8000:AbpAdmin_App），
+// 在 8002/8004/8006 或生产源下取不到 token → 该 Hub 匿名连接失败。正确做法是走 oidc.ts getAccessToken()；本批只记录不改行为。
 const getToken = (): string => {
   try {
     const raw = localStorage.getItem('oidc.user:http://localhost:8000:AbpAdmin_App');

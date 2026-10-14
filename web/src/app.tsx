@@ -325,6 +325,11 @@ export const layout: RunTimeLayoutConfig = ({
   };
 };
 
+/**
+ * 全局请求：baseURL 固定空串 = 走当前页同源相对路径（dev 由 proxy.ts 转、生产由 nginx 转），
+ * 不要在这里写后端主机。未设 timeout（Umi/axios 默认 0=不超时）；慢接口靠 nginx /api proxy_read_timeout 300s 兜底。
+ * 鉴权头、错误码弹窗见 requestErrorConfig.ts。
+ */
 export const request: RequestConfig = {
   baseURL: '',
   ...errorConfig,

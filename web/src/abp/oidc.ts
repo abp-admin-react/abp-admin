@@ -27,13 +27,23 @@ export function getUserManager(): UserManager {
         userinfo_endpoint: `${abpEnv.authority}/connect/userinfo`,
         jwks_uri: `${abpEnv.authority}/.well-known/jwks`,
       },
+      // ---- 以下各项说明见 config/ENV.md「OIDC」节 ----
+      // client_id：= 后端 OpenIddict 种子 ClientId；错 → invalid_client。
       client_id: abpEnv.clientId,
+      // redirect_uri：固定 <前端源>/user/callback；该完整 URL 必须在后端客户端 RedirectUris 白名单
+      //（dev 8000/8002/8004/8006 各一条），否则授权页报 invalid redirect_uri。改路径须同步路由与种子。
       redirect_uri: `${origin}/user/callback`,
+      // post_logout_redirect_uri：注销后回到 <前端源>/user/login；须在 PostLogoutRedirectUris 白名单，否则停在后端注销页。
       post_logout_redirect_uri: `${origin}/user/login`,
+      // response_type：只允许 'code'（授权码 + PKCE，oidc-client-ts 自动加 PKCE）；改 implicit 后端不支持。
       response_type: 'code',
       scope: abpEnv.scope,
+      // automaticSilentRenew：false=不自动静默续期；过期后由 signalr.ts 按需 signinSilent()（用 refresh_token，
+      // 依赖 scope 含 offline_access）。改 true 会多一路定时续期，需评估与按需续期的竞态。
       automaticSilentRenew: false,
+      // loadUserInfo：false=不额外调 /connect/userinfo，用户信息来自 application-configuration。
       loadUserInfo: false,
+      // userStore：令牌存 localStorage，键名 `oidc.user:<authority>:<client_id>`（跨标签共享，关浏览器不丢）。
       userStore: new WebStorageStateStore({ store: window.localStorage }),
     });
   }

@@ -7,14 +7,16 @@ dayjs.extend(timezone);
 
 /**
  * 财务/审计等接口时间约定（与后端 Clock.Kind=Utc 对齐）：
- * - 接口 DateTime **一律按 UTC 瞬间**理解；带 `Z` 或显式偏移的按字面解析；
+ * - 接口 DateTime **一律按 UTC 瞬间**理解；带 Z 或显式偏移的按字面解析；
  *   **无时区后缀的字符串也当作 UTC**（不当本地），避免再差 8 小时。
- * - 展示：转到用户浏览器 IANA 时区，后缀带 `[UTC]±偏移` 便于对账。
- * - 筛选：用户选的「本地日」先转成 UTC 半开区间 `[startUtc, endUtc)` 再传 query。
+ * - 展示：转到 **浏览器/用户本地 IANA 时区**（userTimeZone() → Intl，失败再 dayjs.tz.guess()），
+ *   后缀带 [UTC]±偏移 便于对账。
+ * - 筛选：用户选的「本地日」先转成 UTC 半开区间 [startUtc, endUtc) 再传 query。
+ * - **禁止**写死 Asia/Shanghai / 东八区；即使用户在上海也必须走浏览器时区，不能硬编码。
  * 页面不要自己 dayjs(iso) 当本地；统一走本文件。
  */
 
-/** 浏览器本地 IANA 时区；禁止写死 Asia/Shanghai。 */
+/** 浏览器本地 IANA 时区（Intl → dayjs.tz.guess）；禁止写死 Asia/Shanghai。 */
 export function userTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || dayjs.tz.guess();
 }
