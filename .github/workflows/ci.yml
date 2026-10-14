@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Dockerfile restore COPY closure gate
+        run: pwsh scripts/check-docker-restore.ps1
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -65,3 +67,13 @@ jobs:
         run: pnpm tsc
       - name: Test
         run: pnpm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend images (Host + DbMigrator)
+        run: |
+          pwsh scripts/check-docker-restore.ps1
+          docker build -f backend/framework/AbpAdmin.HttpApi.Host/Dockerfile -t abp-admin-host backend
+          docker build -f backend/framework/AbpAdmin.DbMigrator/Dockerfile -t abp-admin-migrator backend
