@@ -45,7 +45,9 @@ public class ModuleBoundaryContractTests
         // 直接引用 = ProjectReference + PackageReference 两类都要查（只扫工程引用会漏掉
         // 直接引的 EasyAbp 包——评审实测抓到过这种漏网）
         var projectRefs = document.Descendants("ProjectReference")
-            .Select(e => Path.GetFileNameWithoutExtension(e.Attribute("Include")!.Value))
+            // csproj 的 Include 属性用反斜杠相对路径，Linux 上 Path.GetFileName 不切 \ ——
+            // 先归一为 / 再取文件名（CI 首次全量实测：Windows 绿 Linux 红的平台坑）
+            .Select(e => Path.GetFileNameWithoutExtension(e.Attribute("Include")!.Value.Replace('\\', '/')))
             .ToList();
         var packageRefs = document.Descendants("PackageReference")
             .Select(e => e.Attribute("Include")!.Value)
@@ -81,7 +83,7 @@ public class ModuleBoundaryContractTests
         var csproj = FindCsproj(projectName);
         var document = XDocument.Load(csproj);
         return document.Descendants("ProjectReference")
-            .Select(e => Path.GetFileNameWithoutExtension(e.Attribute("Include")!.Value))
+            .Select(e => Path.GetFileNameWithoutExtension(e.Attribute("Include")!.Value.Replace('\\', '/')))
             .ToList();
     }
 
