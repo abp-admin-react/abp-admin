@@ -22,6 +22,8 @@ namespace AbpAdmin.Files;
 /// 请求不再进入端点，且每次拒绝打 Warning 日志（含文件名与拒绝原因，便于审计回溯）。
 /// EnableBuffering 回卷请求体，后续管道照常解析。扩展名不在清单内的文件
 /// （txt/pdf 等普通文档）放行，交由下载侧 Content-Disposition: attachment 兜底。
+/// multipart 解析失败仅当请求未中止时才放行给后续模型绑定；客户端断开导致的
+/// 取消异常原样上抛，交由服务器按「连接已中止」正常收尾。
 /// </summary>
 public class FileUploadContentGuardMiddleware
 {
@@ -71,9 +73,12 @@ public class FileUploadContentGuardMiddleware
             {
                 form = await context.Request.ReadFormAsync(context.RequestAborted);
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException &&
+                                       !context.RequestAborted.IsCancellationRequested)
             {
-                // 非法 multipart 交由后续模型绑定报错
+                // 非法 multipart 交由后续模型绑定报错；客户端断开导致的取消异常
+                // （ConnectionAbortedException 继承自 OperationCanceledException）原样上抛，
+                // 不吞掉后把死请求推进管道（否则深层中间件再读请求体会炸出费解堆栈）
                 await _next(context);
                 return;
             }

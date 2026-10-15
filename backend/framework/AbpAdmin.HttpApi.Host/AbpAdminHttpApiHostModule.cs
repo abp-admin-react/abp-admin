@@ -1249,6 +1249,13 @@ public class AbpAdminHttpApiHostModule : AbpModule
     }
 
     /// <summary>
+    /// 出厂基线 Redis 连接串（Configuration/Cache.json 随库值）——「生产忘改连接串」姿态告警的比对基准。
+    /// 单一真源：Cache.json 改基线时同步改这里与 RedisStartupPostureTests（OCR refactor 修复：
+    /// 拆分基线后告警常量停在旧串，非生产忘覆盖时告警永久静默）。
+    /// </summary>
+    internal const string ShippedTemplateRedisConfiguration = "127.0.0.1:6379,defaultDatabase=0,abortConnect=false";
+
+    /// <summary>
     /// 纯判定：Redis 启用但连接串仍是出厂模板默认。Development 豁免——本机调试 Redis 就在
     /// 默认端口是常态，不该被启动日志刷屏。键位口径与 <see cref="ConfigureRedis"/> /
     /// <see cref="ShouldWarnOnIncoherentRedisPosture"/> 一致：缺省/空 = 启用，仅显式 false 才关
@@ -1266,7 +1273,9 @@ public class AbpAdminHttpApiHostModule : AbpModule
         {
             return false;
         }
-        return configuration["Redis:Configuration"] == "127.0.0.1:6379";
+        // 新基线带参数；旧裸串是拆分前的随库值，同样视为「没覆盖过」
+        return configuration["Redis:Configuration"] is string cfg
+               && (cfg == ShippedTemplateRedisConfiguration || cfg == "127.0.0.1:6379");
     }
 
     // 全自动建表（开关 Database:AutoMigrateOnStartup，默认开）：启动时枚举全部 IAbpAdminDbSchemaMigrator
@@ -1423,6 +1432,9 @@ public class AbpAdminHttpApiHostModule : AbpModule
         await context.AddBackgroundWorkerAsync<IdentitySessionCleanupBackgroundWorker>();
         // 日志保留期清理：缺省/0 天数时空转；周期/分批语义见 LogRetentionBackgroundWorker。
         await context.AddBackgroundWorkerAsync<LogRetentionBackgroundWorker>();
+        // TokenGateway 预占催收：进程中断残留的 Open 预占单超 24h 全额解冻（实现见模块内
+        // ReservationJanitor；只在宿主注册，DbMigrator 是一次性短进程）。
+        await context.AddBackgroundWorkerAsync<AbpAdmin.TokenGateway.Core.ReservationJanitor>();
 
         // T2.3: 启动时同步静态模板到数据库
         using (var scope = context.ServiceProvider.CreateScope())

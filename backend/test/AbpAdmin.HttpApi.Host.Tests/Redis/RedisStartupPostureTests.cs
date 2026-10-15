@@ -50,16 +50,17 @@ public class RedisStartupPostureTests
     }
 
     [Theory]
-    [InlineData("Production", "true", "127.0.0.1:6379", true)]   // 生产 + 出厂默认连接串——多半忘了覆盖
+    [InlineData("Production", "true", "127.0.0.1:6379,defaultDatabase=0,abortConnect=false", true)] // 生产 + 现行出厂基线——多半忘了覆盖
+    [InlineData("Production", "true", "127.0.0.1:6379", true)]   // 拆分前的旧出厂串，同样视为未覆盖
     [InlineData("Production", "true", "redis.internal:6379", false)]
-    [InlineData("Development", "true", "127.0.0.1:6379", false)] // 本机调试 Redis 在默认端口是常态，豁免
+    [InlineData("Development", "true", "127.0.0.1:6379,defaultDatabase=0,abortConnect=false", false)] // 本机调试 Redis 在默认端口是常态，豁免
     [InlineData("Production", "true", null, false)]               // 没配连接串不归本告警管
-    [InlineData("Staging", "true", "127.0.0.1:6379", true)]
+    [InlineData("Staging", "true", "127.0.0.1:6379,defaultDatabase=0,abortConnect=false", true)]
     // 键位口径与 ConfigureRedis 同口径（缺省/空 = 启用）：IsEnabled 没写也要按启用告警。
     // 此前实现把 TryParse 失败当"未启用"静默放过——缺省启用 + 模板串恰是本告警要抓的姿态
-    [InlineData("Production", null, "127.0.0.1:6379", true)]
-    [InlineData("Production", "", "127.0.0.1:6379", true)]
-    [InlineData("Production", "false", "127.0.0.1:6379", false)]  // 显式关：Redis 子系统未启用
+    [InlineData("Production", null, "127.0.0.1:6379,defaultDatabase=0,abortConnect=false", true)]
+    [InlineData("Production", "", "127.0.0.1:6379,defaultDatabase=0,abortConnect=false", true)]
+    [InlineData("Production", "false", "127.0.0.1:6379,defaultDatabase=0,abortConnect=false", false)]  // 显式关：Redis 子系统未启用
     public void Template_Default_Configuration_Warning(
         string environment, string? redisEnabled, string? redisConfiguration, bool expected)
     {
@@ -69,6 +70,25 @@ public class RedisStartupPostureTests
 
         AbpAdminHttpApiHostModule.ShouldWarnOnTemplateRedisConfiguration(Config([.. pairs]), environment)
             .ShouldBe(expected);
+    }
+
+    [Fact]
+    public void Shipped_Template_Constant_Stays_In_Sync_With_Cache_Json()
+    {
+        // 三处手工同步的钉子（OCR R2 修复建议）：宿主常量 ↔ Configuration/Cache.json 随库值。
+        // Cache.json 基线变化而忘同步常量时，生产「忘改连接串」告警会再次永久静默——正是本轮修的失效
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "AbpAdmin.slnx")))
+        {
+            dir = dir.Parent;
+        }
+
+        dir.ShouldNotBeNull("未能定位 backend 根（AbpAdmin.slnx）");
+        var cacheJson = File.ReadAllText(Path.Combine(
+            dir.FullName, "framework", "AbpAdmin.HttpApi.Host", "Configuration", "Cache.json"));
+        cacheJson.ShouldContain(AbpAdminHttpApiHostModule.ShippedTemplateRedisConfiguration,
+            Case.Insensitive,
+            "Cache.json 随库基线与宿主告警常量漂移——同步两处（及本文件 InlineData）后重跑");
     }
 
     /// <summary>
