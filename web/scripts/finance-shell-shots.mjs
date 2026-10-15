@@ -95,16 +95,17 @@ async function main() {
   });
 
   await page.addInitScript(
-    ({ user, policies }) => {
-      localStorage.setItem('finance.shellAccess', '1');
-      localStorage.setItem('finance.useMock', '1');
+    ({ user }) => {
+      // 键名必须与 src 的 STORAGE_KEYS / oidc userStore 前缀严格一致（abpadmin: 前缀，OCR 修复：
+      // 此前写裸键 finance.shellAccess 等，应用一律读不到，脚本只截到登录页）。
+      // 真源见 web/src/abp/storageKeys.ts 与 web/src/abp/oidc.ts——改键名时两处同步。
+      localStorage.setItem('abpadmin:finance.shellAccess', '1');
+      localStorage.setItem('abpadmin:finance.useMock', '1');
       const origin = window.location.origin;
-      const key = `oidc.user:${origin}:AbpAdmin_App`;
+      const key = `abpadmin:oidc.user:${origin}:AbpAdmin_App`;
       localStorage.setItem(key, JSON.stringify(user));
-      // belt-and-suspenders for access.ts
-      window.__FINANCE_SHELL__ = policies;
     },
-    { user: oidcUser, policies: financePolicies },
+    { user: oidcUser },
   );
 
   const results = [];

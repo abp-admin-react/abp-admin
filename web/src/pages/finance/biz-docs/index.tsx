@@ -1,12 +1,12 @@
 import { financeHelpHeader } from '@/components/FinanceHelp';
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { Select, Space, Tag } from 'antd';
-import { formatForDisplay, rangeToUtcBounds } from '@/utils/time';
+import { formatForDisplay } from '@/utils/time';
 import React, { useRef, useState } from 'react';
 import { history, useAccess } from '@umijs/max';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
-import { type FinBizDocDto, getBizDocs } from '@/abp/finance';
+import { type FinBizDocDto, getBizDocs, useMock } from '@/abp/finance';
 
 const BizDocsPage: React.FC = () => {
   const access = useAccess();
@@ -16,6 +16,8 @@ const BizDocsPage: React.FC = () => {
   const [isDemo, setIsDemo] = useState<boolean | null>(null);
   const [agentId, setAgentId] = useState<string | undefined>();
   const isAgentScoped = !!access.canFinanceScopeAgent;
+  // 顶层调用（hook 不能进条件分支）；live 下代理筛选整体隐藏（空 options 的可点下拉是坏 UX）
+  const mockMode = useMock();
 
   return (
     <PageContainer
@@ -23,7 +25,7 @@ const BizDocsPage: React.FC = () => {
       extra={
         !load.ok ? null : (
         <Space>
-          {!isAgentScoped && (
+          {!isAgentScoped && mockMode && (
             <Select
               allowClear
               placeholder="按代理筛选"
@@ -34,6 +36,7 @@ const BizDocsPage: React.FC = () => {
                 actionRef.current?.reload();
               }}
               options={[
+                // mock 演示代理项只在 mock 模式出现（OCR 修复：真实 agentId 是 GUID，live 选中必查空）
                 { value: 'ag-1', label: '代理 ag-1' },
                 { value: 'ag-2', label: '代理 ag-2' },
               ]}

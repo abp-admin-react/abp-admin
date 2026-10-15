@@ -1,7 +1,7 @@
 import { financeHelpHeader } from '@/components/FinanceHelp';
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { Button, Select, Space, Tag } from 'antd';
-import { formatForDisplay, rangeToUtcBounds } from '@/utils/time';
+import { formatForDisplay } from '@/utils/time';
 import React, { useRef, useState } from 'react';
 import { history, useAccess } from '@umijs/max';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
@@ -9,6 +9,7 @@ import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/Fin
 import {
   type FinBalanceProjectionDto,
   getBalanceProjections,
+  useMock,
 } from '@/abp/finance';
 
 const BalancesPage: React.FC = () => {
@@ -17,13 +18,15 @@ const BalancesPage: React.FC = () => {
   const load = useFinanceLoad();
   const [agentId, setAgentId] = useState<string | undefined>();
   const isAgentScoped = !!access.canFinanceScopeAgent;
+  // 顶层调用（hook 不能进条件分支）；live 下代理筛选整体隐藏（空 options 的可点下拉是坏 UX）
+  const mockMode = useMock();
 
   return (
     <PageContainer
       {...financeHelpHeader('A7', '用户余额投影')}
       extra={
         !load.ok ? null : (
-        !isAgentScoped ? (
+        !isAgentScoped && mockMode ? (
           <Space>
             <Select
               allowClear
@@ -35,6 +38,7 @@ const BalancesPage: React.FC = () => {
                 actionRef.current?.reload();
               }}
               options={[
+                // mock 演示代理项只在 mock 模式出现（OCR 修复：真实 agentId 是 GUID，live 选中必查空）
                 { value: 'ag-1', label: '代理 ag-1' },
                 { value: 'ag-2', label: '代理 ag-2' },
               ]}

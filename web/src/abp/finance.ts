@@ -37,6 +37,8 @@ export type FinanceListQuery = {
   /** A6 专用；null=全部。对账默认排除演示 */
   isDemo?: boolean | null;
   bizType?: string;
+  /** A3 凭证「业务单号」精确匹配（后端 BizRefId 等值） */
+  bizRefId?: string;
   phase?: string;
   /** A5 专用：默认 false = 排除演示单据（产品 v1.1） */
   includeDemo?: boolean;
@@ -115,6 +117,9 @@ export type FinManualAdjustDto = {
   auditorName?: string | null;
   rejectReason?: string | null;
   voucherId?: string | null;
+  /** 借方归属——编辑表单回填用（live 归一为名称串，mock 种子可能是数字），缺省 Channel/default 会静默改写原归属 */
+  debitOwnerType?: FinOwnerTypeName | number;
+  debitOwnerId?: string | null;
   creationTime: string;
   lines: { accountCode: string; debit: number; credit: number; summary?: string }[];
 };
@@ -229,7 +234,6 @@ export const FINANCE_ERROR = {
   AccountSystemReadOnly: 'Finance:Account:SystemReadOnly',
   /** 有分录不可删/不可改类型方向；data.Code */
   AccountHasEntries: 'Finance:Account:HasEntries',
-  AccountDisableOnly: 'Finance:Account:DisableOnly',
   /** 科目编号重复；data.Code */
   AccountCodeDuplicate: 'Finance:Account:CodeDuplicate',
   /** 有子科目不可删 */
@@ -371,7 +375,7 @@ export function accountInvalidFields(error: unknown): string[] {
     : [];
   return Array.from(new Set(members.flatMap(toForm)));
 }
-function useMock(): boolean {
+export function useMock(): boolean {
   // 默认走真接口；仅 localStorage finance.useMock=1 时用假数据
   if (typeof localStorage !== 'undefined') {
     return localStorage.getItem(STORAGE_KEYS.financeUseMock) === '1';
@@ -379,10 +383,9 @@ function useMock(): boolean {
   return false;
 }
 
-/** 页面/测试可读：默认 live；仅 localStorage finance.useMock=1 时为 mock */
-export function isFinanceMock(): boolean {
-  return useMock();
-}
+/** 页面/测试可读：默认 live；仅 localStorage finance.useMock=1 时为 mock。
+ *  （OCR refactor：isFinanceMock/getFinanceCurrentUserId 原为无调用方的死导出，已删；
+ *  mock 判定统一走 useMock()，live 用户 id 统一走 resolveFinanceUserId(app.tsx 映射)。） */
 
 /**
  * mock 种子制单人 id（与 mockAdjusts.applicantId 对齐）。
@@ -404,25 +407,6 @@ export function resolveFinanceUserId(fromInitial?: {
   if (id) return id;
   if (useMock()) return MOCK_FINANCE_USER_ID;
   return '';
-}
-
-/**
- * live：GET /api/abp/application-configuration → currentUser.id
- * mock：返回 MOCK_FINANCE_USER_ID
- */
-export async function getFinanceCurrentUserId(): Promise<string> {
-  if (useMock()) return MOCK_FINANCE_USER_ID;
-  const config = await request<{
-    currentUser?: { id?: string | null; isAuthenticated?: boolean };
-  }>('/api/abp/application-configuration', {
-    method: 'GET',
-    params: { includeLocalizationResources: false },
-  });
-  const id = config?.currentUser?.id || '';
-  if (!id) {
-    abpError('Finance:Auth:Unauthenticated', '未登录或无法获取当前用户', 401);
-  }
-  return id;
 }
 
 function uid(prefix: string) {
@@ -589,8 +573,8 @@ function mapFinanceErrorMessage(code?: string, fallback?: string) {
       return '系统科目不能修改或删除';
     case FINANCE_ERROR.AccountHasEntries:
       return '科目已有记账记录，不能删除，可以停用';
-    case FINANCE_ERROR.AccountDisableOnly:
-      return '有分录的科目只能停用';
+    // AccountDisableOnly 死映射已删（OCR R2 修复）：后端 FinanceErrorCodes 从不发出该码，
+    // 有分录的口径统一走 AccountHasEntries——保留「看起来有兜底其实永远不会走」的分支只会误导
     default:
       return fallback || '操作失败';
   }
@@ -677,7 +661,22 @@ const ACCOUNT_REQ = { skipErrorHandler: true } as const;
 export const ADJUST_REQ = { skipErrorHandler: true } as const;
 
 export async function getFinanceOverview(): Promise<FinOverviewDto> {
-  if (!useMock()) return liveGet(API.overview);
+  if (!useMock()) {
+    // live 字段归一（OCR E2E 修复：此前原样透传，live 返回 todayIncome/isBalanced/...，
+    // UI DTO 期望 todayIn/balanced/... → 页面全 0 且永远显示「借贷不平衡」告警）
+    const raw = await liveGet<Record<string, unknown>>(API.overview);
+    const num = (v: unknown) => Number(v || 0);
+    return {
+      todayIn: num(raw.todayIncome),
+      todayOut: num(raw.todayExpense),
+      balanced: raw.isBalanced !== false,
+      unreconciledCount: num(raw.unreconciledCount),
+      availableTotal: num(raw.availableTotal),
+      frozenTotal: num(raw.frozenTotal),
+      prepaymentTotal: num(raw.unearnedTotal),
+      recognizedIncome: num(raw.recognizedIncomeTotal),
+    };
+  }
   return {
     todayIn: 188, todayOut: 20, balanced: true, unreconciledCount: 1,
     availableTotal: 160, frozenTotal: 30, prepaymentTotal: 80, recognizedIncome: 30,
@@ -771,6 +770,7 @@ export async function getVouchers(q: FinanceListQuery = {}): Promise<PagedResult
     list = list.filter((x) => x.voucherNo.toLowerCase().includes(f) || (x.summary || '').toLowerCase().includes(f));
   }
   if (q.bizType) list = list.filter((x) => x.bizType === q.bizType);
+  if (q.bizRefId) list = list.filter((x) => x.bizRefId === q.bizRefId);
   if (q.agentId) list = list.filter((x) => x.agentId === q.agentId);
   if (q.isDemo === true) list = list.filter((x) => x.isDemo);
   if (q.isDemo === false) list = list.filter((x) => !x.isDemo);
@@ -838,6 +838,15 @@ export const FIN_OWNER_TYPE: Record<FinOwnerTypeName, number> = {
   Agent: 2,
   Channel: 3,
 };
+/** 后端数字枚举 → 名称串（fromLiveAdjust 回填用，与 FIN_OWNER_TYPE 一一对应） */
+const FIN_OWNER_NAME_BY_CODE: FinOwnerTypeName[] = ['Platform', 'User', 'Agent', 'Channel'];
+
+/** 后端 OwnerType（数字枚举或名称串）→ 表单 options 的名称串；未知回落 Channel（与历史默认一致）。 */
+export function finOwnerTypeName(v: unknown): FinOwnerTypeName {
+  if (typeof v === 'number' && v >= 0 && v < FIN_OWNER_NAME_BY_CODE.length) return FIN_OWNER_NAME_BY_CODE[v];
+  if (typeof v === 'string' && Object.hasOwn(FIN_OWNER_TYPE, v)) return v as FinOwnerTypeName;
+  return 'Channel';
+}
 
 export type CreateUpdateFinManualAdjustInput = {
   amount: number;
@@ -883,7 +892,7 @@ function toLiveAdjustBody(input: CreateUpdateFinManualAdjustInput) {
   if (input.creditOwnerId) body.creditOwnerId = input.creditOwnerId;
   return body;
 }
-/** Normalize live FinManualAdjustDto → UI shape (lines/summary/adjustNo/status string). */
+/** Live FinManualAdjustDto → UI shape (lines/summary/adjustNo/status string + owner fields). */
 function fromLiveAdjust(raw: Record<string, unknown>): FinManualAdjustDto {
   const debit = String(raw.debitAccountCode || '');
   const credit = String(raw.creditAccountCode || '');
@@ -903,6 +912,8 @@ function fromLiveAdjust(raw: Record<string, unknown>): FinManualAdjustDto {
     auditorName: (raw.auditorName as string) ?? null,
     rejectReason: (raw.rejectReason as string) ?? null,
     voucherId: (raw.voucherId as string) ?? null,
+    debitOwnerType: finOwnerTypeName(raw.debitOwnerType),
+    debitOwnerId: raw.debitOwnerId != null ? String(raw.debitOwnerId) : 'default',
     creationTime: String(raw.creationTime || raw.submittedAt || new Date().toISOString()),
     lines: [
       { accountCode: debit, debit: amount, credit: 0, summary: reason },
@@ -1179,7 +1190,9 @@ export async function runReconcile(input: {
   includeDemo?: boolean;
 }): Promise<FinReconcileRunDto> {
   if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.reconcileRun + '/run', { ...input, includeDemo: !!input.includeDemo });
+    // 页面自处理（catch 里 financeErrorText），skipErrorHandler 防同一次失败弹两条
+    // ——与 ADJUST_REQ/ACCOUNT_REQ 同口径（OCR 修复：此处此前漏了）
+    const raw = await livePost<Record<string, unknown>>(API.reconcileRun + '/run', { ...input, includeDemo: !!input.includeDemo }, ADJUST_REQ);
     return fromLiveReconcile(raw);
   }
   const row: FinReconcileRunDto = {

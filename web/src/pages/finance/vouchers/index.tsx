@@ -19,10 +19,10 @@ import {
   Tag,
 } from 'antd';
 import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
-import { formatForDisplay, rangeToUtcBounds } from '@/utils/time';
+import { formatForDisplay } from '@/utils/time';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProFormInstance } from '@ant-design/pro-components';
-import { Access, useAccess, useModel } from '@umijs/max';
+import { Access, useAccess, useLocation, useModel } from '@umijs/max';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
   ADJUST_STATUS_LABEL,
@@ -33,6 +33,7 @@ import {
   FINANCE_ERROR,
   createAdjust,
   deleteAdjust,
+  finOwnerTypeName,
   financeErrorCode,
   financeErrorText,
   getAdjusts,
@@ -117,6 +118,31 @@ const VouchersPage: React.FC = () => {
     }, 50);
     return () => clearTimeout(t);
   }, [pendingFieldErrors, editingAdjust]);
+
+  // biz-docs 深链接 ?voucherId=xxx：挂载时解析并打开详情（OCR 修复：此前参数被静默丢弃，
+  // 用户点「关联凭证」只会落到列表顶部）。凭证被删/红冲后 404 走 onActionError 给出中文提示
+  const location = useLocation();
+  const deepVoucherId = useMemo(
+    () => new URLSearchParams(location.search).get('voucherId'),
+    [location.search],
+  );
+  useEffect(() => {
+    if (!deepVoucherId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const v = await getVoucher(deepVoucherId);
+        if (!cancelled) setDetail(v);
+      } catch (e) {
+        if (!cancelled) onActionError(e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // onActionError 每渲染重建但只依赖 message/financeErrorText（稳定），不进依赖数组
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepVoucherId]);
 
   const statusTag = (s: AdjustStatus) => {
     const cfg = ADJUST_STATUS_LABEL[s];
@@ -295,7 +321,13 @@ if (canReverse && r.status === 'Posted') {
             <a
               key="voucher"
               onClick={async () => {
-                setDetail(await getVoucher(r.voucherId!));
+                // 404（凭证已删/红冲）全局层刻意静默，这里必须兜 catch 给出反馈（OCR 修复）
+                if (!r.voucherId) return;
+                try {
+                  setDetail(await getVoucher(r.voucherId));
+                } catch (e) {
+                  onActionError(e);
+                }
               }}
             >
               凭证
@@ -349,6 +381,8 @@ if (canReverse && r.status === 'Posted') {
                       maxResultCount,
                       filter: params.voucherNo || params.summary,
                       bizType: params.bizType,
+                      // 「业务单号」搜索列（OCR 修复：此前 params.bizRefId 被静默丢弃，输入后表格原样刷新）
+                      bizRefId: params.bizRefId,
                     }),
                     );
                     if (!result) return { data: [], total: 0, success: false };
@@ -402,7 +436,14 @@ if (canReverse && r.status === 'Posted') {
                         const acts = [
                           <a
                             key="d"
-                            onClick={async () => setDetail(await getVoucher(r.id))}
+                            onClick={async () => {
+                              // 404（凭证已删/红冲）全局层刻意静默，这里必须兜 catch（OCR R2 修复：与「凭证」链接同根因漏修）
+                              try {
+                                setDetail(await getVoucher(r.id));
+                              } catch (e) {
+                                onActionError(e);
+                              }
+                            }}
                           >
                             详情
                           </a>,
@@ -525,8 +566,10 @@ if (canReverse && r.status === 'Posted') {
                 amount: editingAdjust.amount,
                 currency: editingAdjust.currency || 'CNY',
                 debitAccountCode: editingAdjust.lines?.[0]?.accountCode || '1002',
-                debitOwnerType: 'Channel',
-                debitOwnerId: 'default',
+                // 归属字段必须回填记录里的值（OCR 修复：此前硬编码 Channel/default，
+                // 编辑保存会把原始借方归属静默改写）；归一为名称串供 Select 回显
+                debitOwnerType: finOwnerTypeName(editingAdjust.debitOwnerType),
+                debitOwnerId: editingAdjust.debitOwnerId || 'default',
                 reason: editingAdjust.summary,
               }
             : {
@@ -565,7 +608,6 @@ if (canReverse && r.status === 'Posted') {
               setCreateOpen(false);
               setTab('drafts');
             }
-            reloadAdjusts();
             reloadAdjusts();
             return true;
           } catch (e) {
