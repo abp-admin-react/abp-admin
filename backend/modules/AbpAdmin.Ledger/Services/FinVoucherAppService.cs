@@ -66,10 +66,10 @@ public class FinVoucherAppService : FinanceAppServiceBase
         var reversedBy = await db.Vouchers.AsNoTracking().Where(v => v.ReversalOf != null && ids.Contains(v.ReversalOf.Value))
             .ToDictionaryAsync(v => v.ReversalOf!.Value, v => v.Id);
         // 展示列补齐：凭证号已在 Map 按 Id 派生（单一出处，列表/详情/红冲一致）；
-        // 期间标签需联期间表，在此整页取齐
+        // 期间标签需联期间表，在此整页取齐（格式走 PeriodLabel，与详情单查共用）
         var periodIds = items.Where(v => v.PeriodId != null).Select(v => v.PeriodId!.Value).Distinct().ToList();
         var periodLabels = await db.Periods.AsNoTracking().Where(p => periodIds.Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id, p => p.Year.ToString("0000") + "-" + p.Month.ToString("00"));
+            .ToDictionaryAsync(p => p.Id, p => PeriodLabel(p.Year, p.Month));
         return new PagedResultDto<FinVoucherDto>(total, items.Select(v =>
         {
             var dto = Map(v, reversedBy.GetValueOrDefault(v.Id));
@@ -99,10 +99,11 @@ public class FinVoucherAppService : FinanceAppServiceBase
         var v = await GetScopedVoucherAsync(db, id);
         var reversedBy = await db.Vouchers.AsNoTracking().Where(x => x.ReversalOf == id).Select(x => (Guid?)x.Id).FirstOrDefaultAsync();
         var dto = Map(v, reversedBy);
+        // 期间标签与列表同口径（列表整页取齐、详情单查）；期间行可能已被清理，查不到留空
         if (v.PeriodId != null)
         {
             var period = await db.Periods.AsNoTracking().FirstOrDefaultAsync(p => p.Id == v.PeriodId.Value);
-            dto.PeriodLabel = period != null ? period.Year.ToString("0000") + "-" + period.Month.ToString("00") : null;
+            dto.PeriodLabel = period != null ? PeriodLabel(period.Year, period.Month) : null;
         }
         var rows = await (
             from e in db.Entries.AsNoTracking()
@@ -175,9 +176,14 @@ public class FinVoucherAppService : FinanceAppServiceBase
         Summary = v.Summary,
         Currency = v.Currency,
         Amount = v.Amount,
+        // 合计口径：复式记账下单张凭证借贷合计相等且等于凭证金额——列表直接取 Amount 免联分录；
+        // 详情路径由 GetAsync 用分录求和覆盖同一字段（口径一致、粒度到分录）
         TotalDebit = v.Amount,
         TotalCredit = v.Amount,
         CreatorId = v.CreatorId,
         CreationTime = v.CreationTime,
     };
+
+    /// <summary>期间展示标签（yyyy-MM）。列表整页取齐与详情单查共用同一格式。</summary>
+    private static string PeriodLabel(int year, int month) => year.ToString("0000") + "-" + month.ToString("00");
 }
