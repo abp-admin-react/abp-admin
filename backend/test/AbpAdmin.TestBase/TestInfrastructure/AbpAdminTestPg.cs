@@ -53,7 +53,9 @@ public static class AbpAdminTestPg
     /// <summary>
     /// 把容器连接串放进宿主覆盖环境变量（<see cref="RequiresHostDatabaseFactAttribute.OverrideEnvVar"/>），
     /// 供真库门控用例发现与取串。已有显式环境变量时不动它（定向连某台 PG 调试的场景优先）；
-    /// 容器起不来（无 Docker 等）静默返回——门控据此跳过真库用例，模块集成测试会在接线处以明确错误失败。
+    /// 容器起不来（无 Docker 等）返回时环境变量保持未设置——门控据此跳过真库用例，模块集成
+    /// 测试会在接线处以明确错误失败。失败原因写 Console.Error 留痕：CI 上「设计内跳过」与
+    /// 「容器起失败被吞」不可分辨（本地有 secrets 兜底发现不了），不能完全静默。
     /// </summary>
     public static void TrySetHostOverrideEnvVar()
     {

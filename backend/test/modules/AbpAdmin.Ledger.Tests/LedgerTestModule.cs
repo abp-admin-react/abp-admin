@@ -33,7 +33,8 @@ public class LedgerTestModule : AbpModule
         // 测试应用的宿主环境显式钉 Production：不设时 ABP 按缺省解析，演示种子（LedgerDataSeed
         // Contributor 的 Finance:SeedDemoData 门控）可能随 IsDevelopment() 一起被打开，演示凭证
         // 与用例自建分录同科目过账，余额断言全部抬高（CI 首次全量实测：期望 100 实测 1350）。
-        // 种子门控的显式 false（Finance:SeedDemoData=false）是第二道保险。
+        // 本模块没有再注入 Finance:SeedDemoData=false——环境钉死已足够；该键作为不依赖
+        // 环境判定的强制关开关保留在种子门控里（部署形态需要时用）。
         context.Services.Replace(
             ServiceDescriptor.Singleton<Volo.Abp.IAbpHostEnvironment>(new Volo.Abp.AbpHostEnvironment
             {
