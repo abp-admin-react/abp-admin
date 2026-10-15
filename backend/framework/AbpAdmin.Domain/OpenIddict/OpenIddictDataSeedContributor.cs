@@ -88,8 +88,14 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     private static bool SameUriSet(IEnumerable<string> current, IEnumerable<string> target) =>
         new HashSet<Uri>(current.Select(ParseUri)).SetEquals(target.Select(ParseUri));
 
+    /// <summary>宽容解析配置里的 URI：非法/相对返回 null（调用方跳过该条并留日志）。
+    /// IsFile 且原串未显式写 file: 视为非法——Unix 上 Uri.TryCreate("/x", Absolute) 会按
+    /// 绝对路径解析成 file:///x 返回 true（Linux 容器实测），不拦会把相对 RootUrl 种进库。</summary>
     private static Uri ParseUri(string raw) =>
-        Uri.TryCreate((raw ?? "").Trim(), UriKind.Absolute, out var uri) ? uri : null;
+        Uri.TryCreate((raw ?? "").Trim(), UriKind.Absolute, out var uri)
+        && (!uri.IsFile || (raw ?? "").Trim().StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            ? uri
+            : null;
 
     [UnitOfWork]
     public virtual async Task SeedAsync(DataSeedContext context)

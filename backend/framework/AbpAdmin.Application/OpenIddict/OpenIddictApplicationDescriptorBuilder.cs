@@ -312,8 +312,14 @@ public static class OpenIddictApplicationDescriptorBuilder
             return null;
         }
 
-        // 先校验再抛中文业务异常，而不是让 new Uri 抛 UriFormatException 变成 500
-        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri))
+        // 先校验再抛中文业务异常，而不是让 new Uri 抛 UriFormatException 变成 500。
+        // 平台坑（CI Linux 容器实测）：Uri.TryCreate("/callback", Absolute) 在 Unix 上按绝对
+        // 文件路径解析成 file:///callback 返回 true（Windows 返回 false）——相对 URI 会穿过
+        // 本校验、落到 OpenIddict 校验器变框架异常而不是我们的中文错误。IsFile 且原串未显式
+        // 写 file: 前缀的一律视为非法。
+        var trimmed = value.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || (uri.IsFile && !trimmed.StartsWith("file:", StringComparison.OrdinalIgnoreCase)))
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.OpenIddict.InvalidAbsoluteUri)
                 .WithData("field", fieldName)
