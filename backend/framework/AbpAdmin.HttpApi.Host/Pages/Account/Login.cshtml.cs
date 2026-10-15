@@ -108,7 +108,47 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
             }
         }
 
-        return await base.OnPostAsync(action);
+        // prompt=login 一次性生效（OpenIddict 官方建议的回跳摘除）：SPA 在租户上下文发起授权
+        // 时带 prompt=login（防 IdP 残留会话把宿主/其它租户身份静默带进本租户）。基类登录成功后
+        // 原样回跳 authorize、prompt 仍在 → OpenIddict 再强制出登录页 → 无限回环（全量实测：
+        // fin-ops 已 LoginSucceeded 仍被打回登录表单）。prompt 只在首次出表单时生效，认证完成后
+        // 从回跳 URL 摘除，其余 query（state 等）原样保留不做解码重编码。
+        return StripOneTimePromptFromRedirect(await base.OnPostAsync(action));
+    }
+
+    private static IActionResult StripOneTimePromptFromRedirect(IActionResult result)
+    {
+        if (result is not RedirectResult { Url: not null } redirect
+            || !redirect.Url.Contains("/connect/authorize", StringComparison.Ordinal))
+        {
+            return result;
+        }
+
+        var parts = redirect.Url.Split('?', 2);
+        if (parts.Length < 2)
+        {
+            return result;
+        }
+
+        var strippedQuery = System.Text.RegularExpressions.Regex.Replace(
+            parts[1],
+            "(^|&)" + System.Text.RegularExpressions.Regex.Escape("prompt") + "=[^&]*",
+            "$1",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (strippedQuery.StartsWith('&'))
+        {
+            strippedQuery = strippedQuery[1..];
+        }
+
+        if (strippedQuery == parts[1])
+        {
+            return result;
+        }
+
+        return new RedirectResult(
+            strippedQuery.Length > 0 ? parts[0] + "?" + strippedQuery : parts[0],
+            redirect.Permanent,
+            redirect.PreserveMethod);
     }
 
     public virtual async Task<IActionResult> OnPostPasskeyAsync()

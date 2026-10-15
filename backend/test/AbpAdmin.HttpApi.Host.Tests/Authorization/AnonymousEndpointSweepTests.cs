@@ -159,6 +159,12 @@ public class AnonymousEndpointSweepTests
             e => e.Template is "api/abp/application-configuration" or "api/abp/application-localization"),
 
         new(
+            "ABP 租户解析端点（SPA 子域名租户同步与登录页「切换租户」匿名调用 by-name/by-id；"
+            + "由 PreLoginApiEndpointsConvention 豁免——10.6.1 控制器无授权标注，默认拒绝下 "
+            + "宿主对非 AJAX 请求 401→302 到 /Error，前端把解析失败误判成「租户不存在」）",
+            e => e.Template.StartsWith("api/abp/multi-tenancy/tenants/by-", StringComparison.Ordinal)),
+
+        new(
             "Account 登录链路 Razor Pages（登录/找回密码/注册确认/2FA/登出——认证发生之前就必须可达；"
             + "由 PreLoginRazorPagesConvention 按 Precise 页面路径豁免，与该约定的列表逐条对应；"
             + "/Account/Manage 有显式授权，绝不在此列）",
@@ -240,6 +246,7 @@ public class AnonymousEndpointSweepTests
         "Account/Login",
         "api/abp/application-configuration",
         "api/abp/application-localization",
+        "api/abp/multi-tenancy/tenants/by-name/{name}",
     ];
 
     [RequiresHostDatabaseFact]
