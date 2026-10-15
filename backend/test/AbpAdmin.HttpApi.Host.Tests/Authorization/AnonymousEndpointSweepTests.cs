@@ -207,8 +207,14 @@ public class AnonymousEndpointSweepTests
             + "api/wallet/balance|plans|orders|usage = Me()/ResolveAsync, no Key => 401; "
             + "notify/* = payment callback slots (501 stub until live); "
             + "simulate-paid = Development+Stub only else 404, still Me(); "
-            + "qr.svg = stub QR for img tag, no auth, no secrets.",
-            e => e.DisplayName.StartsWith("AbpAdmin.TokenGateway.", StringComparison.Ordinal)),
+            + "qr.svg = stub QR for img tag, no auth, no secrets. "
+            + "按控制器精确收窄（OCR test 修复）：本测试台账自立的规则是「匹配收窄到端点身份，不用"
+            + "长得像的宽匹配」——此前整命名空间前缀放行，任何人在 TokenGateway 里新加/加错的 "
+            + "[AllowAnonymous] 动作都会被静默豁免。AdminPlansController 走宿主权限位"
+            + "（TokenGateway.Plans.Manage），不属于匿名面，不进本白名单。",
+            e => e.DisplayName.StartsWith("AbpAdmin.TokenGateway.Http.AuthController.Login ", StringComparison.Ordinal) // 尾随空格是边界：容 DisplayName 的 "(程序集)" 后缀，又排除 LoginV2 这类前缀同形动作
+                 || e.DisplayName.StartsWith("AbpAdmin.TokenGateway.Http.ChatController.", StringComparison.Ordinal)
+                 || e.DisplayName.StartsWith("AbpAdmin.TokenGateway.Http.WalletController.", StringComparison.Ordinal)),
 
         new(
             "Post-login account status (GetCurrentAccountStatusAsync): [AllowAnonymous] bypasses class-level "

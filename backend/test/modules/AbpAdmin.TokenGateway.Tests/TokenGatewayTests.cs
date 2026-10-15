@@ -143,6 +143,38 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     }
 
     [Fact]
+    public async Task Settle_clamps_to_held_and_zero_settles_to_full_release()
+    {
+        // 钳制分支补测（OCR test 修复）：流式用量超预占是真实形态——结算封顶到预占额；
+        // actual=0 → 全额解冻、只写 Release 流水不写 Settle
+        var w = NewWallet();
+        await w.CreditAsync(U, 1000, "t-" + Guid.NewGuid());
+
+        var r1 = await w.ReserveAsync(U, 300, "clamp-a");
+        (await w.SettleAsync(U, r1, 10_000)).ShouldBe(300);
+        var v1 = await w.ViewAsync(U);
+        v1.Frozen.ShouldBe(0);
+        v1.Balance.ShouldBe(700);
+
+        var r2 = await w.ReserveAsync(U, 50, "clamp-b");
+        (await w.SettleAsync(U, r2, 0)).ShouldBe(0);
+        var v2 = await w.ViewAsync(U);
+        v2.Frozen.ShouldBe(0);
+        v2.Balance.ShouldBe(700);
+
+        await using var db = await Db.CreateDbContextAsync();
+        // ThenBy(Amount) 消同 Kind 平局的不稳定序（FrozenClock 下两笔 Reserve 的 CreatedAt 相同，
+        // 纯 Kind 排序的平局序无契约保证，OCR R2 修复）
+        var kinds = await db.Ledger.Where(e => e.UserId == U).OrderBy(e => e.Kind).ThenBy(e => e.Amount)
+            .Select(e => new { e.Kind, e.Amount }).ToListAsync();
+        kinds.Select(k => (k.Kind, k.Amount)).ShouldBe(new[]
+        {
+            (LedgerKind.Credit, 1000L), (LedgerKind.Reserve, 50L), (LedgerKind.Reserve, 300L),
+            (LedgerKind.Settle, 300L), (LedgerKind.Release, 50L),
+        });
+    }
+
+    [Fact]
     public async Task Chat_with_no_balance_never_reaches_upstream_and_settles_after()
     {
         var w = NewWallet();

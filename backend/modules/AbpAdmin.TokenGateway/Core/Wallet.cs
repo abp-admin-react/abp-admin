@@ -117,7 +117,11 @@ public class Wallet(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider c
         return new BalanceView(percent, percent < 10, balance, w.Frozen, available, w.TotalCredited, used, new DateTimeOffset(w.UpdatedAt, TimeSpan.Zero));
     }
 
-    /// <summary>对账：钱包计数器 vs 流水/预占单重算。</summary>
+    /// <summary>
+    /// 对账：钱包计数器 vs 流水/预占单重算（第一方自洽校验）。当前无 HTTP 面——生产暴露
+    /// 前先定归属：滞留 Open 预占的自动催收由 ReservationJanitor 承担；「Tg 账 vs Fin 总账」
+    /// 的跨账对账口径归路线 C 后续接线阶段（Ledger Integration Contracts 消费方落地时）定义。
+    /// </summary>
     public async Task<ReconcileResult> ReconcileAsync(Guid user)
     {
         await using var db = await dbf.CreateDbContextAsync();

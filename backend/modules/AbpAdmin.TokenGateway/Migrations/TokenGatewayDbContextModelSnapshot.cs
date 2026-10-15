@@ -77,7 +77,9 @@ namespace AbpAdmin.TokenGateway.Migrations
                     b.HasIndex("Kind", "Ref")
                         .IsUnique();
 
-                    b.HasIndex("UserId", "CreatedAt");
+                    b.HasIndex("UserId", "Kind", "CreatedAt");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("UserId", "Kind", "CreatedAt"), new[] { "Amount" });
 
                     b.ToTable("TgLedgerEntries", (string)null);
                 });

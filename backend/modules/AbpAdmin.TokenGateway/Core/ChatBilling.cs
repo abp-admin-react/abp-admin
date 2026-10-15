@@ -9,13 +9,16 @@ public sealed record ChatTicket(Guid User, Guid Reservation, AliasOption Alias, 
 /// <summary>对话计费：选型（别名→内部模型）、reserve、settle、用量记录。</summary>
 public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOptions> options)
 {
-    /// <summary>单用户同时在途对话上限（进程内计数，单实例口径）；超出 → 429 RATE_LIMITED，且不预占。</summary>
+    /// <summary>单用户同时在途对话上限（进程内计数，单实例口径，扩多实例前需换 Redis 计数——KeyPrefix 已隔离）；超出 → 429 RATE_LIMITED，且不预占。</summary>
     public const int MaxInflightPerUser = 4;
     private readonly ConcurrentDictionary<Guid, int> _inflight = new();
 
     /// <summary>
     /// 选别名（未知/缺省 → DefaultAlias）→ 限并发 → 按「输入粗估 + max_tokens」预占（至少 1）→ 生成上游请求体：
     /// model 换成内部模型、去掉 user、流式强制 include_usage。返回的 ResponseId 是本次固定的 hb- id。
+    /// 上游体构造与入参解析全部放在预占之前（不会留下「已预占未释放」的孤儿单）。
+    /// 入参类型从严：max_tokens/stream 键存在但类型非法时直接 400（OCR R2 修复：此前 TryGetValue
+    /// 失败静默回落默认值/按非流式处理，客户端误用无感且注释与行为不符）。
     /// </summary>
     public async Task<ChatTicket> BeginAsync(Guid user, JsonObject request, string? bot)
     {
@@ -32,17 +35,43 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
 
         try
         {
-            var maxTokens = request["max_tokens"]?.GetValue<int>() ?? alias.DefaultMaxTokens;
-            var estimate = Cost(alias, EstimatePromptTokens(request), maxTokens);
-            var reservation = await wallet.ReserveAsync(user, Math.Max(1, estimate), alias.Alias);
-
+            long maxTokens;
+            if (request["max_tokens"] is null)
+            {
+                maxTokens = alias.DefaultMaxTokens;
+            }
+            else if (request["max_tokens"] is System.Text.Json.Nodes.JsonValue mv && mv.TryGetValue<int>(out var mt) && mt >= 1)
+            {
+                maxTokens = mt;
+            }
+            else
+            {
+                throw GatewayException.BadRequest("max_tokens 必须是正整数");
+            }
             var body = (JsonObject)request.DeepClone();
             body["model"] = alias.Model;
             body["max_tokens"] = maxTokens;
             body.Remove("user");
-            if (body["stream"]?.GetValue<bool>() == true)
+            bool? stream = body["stream"] is { } streamNode
+                ? (streamNode is System.Text.Json.Nodes.JsonValue sv && sv.TryGetValue<bool>(out var streamFlag)
+                    ? streamFlag
+                    : throw GatewayException.BadRequest("stream 必须是布尔"))
+                : null;
+            if (stream == true)
                 body["stream_options"] = new JsonObject { ["include_usage"] = true };
-            return new ChatTicket(user, reservation, alias, bot, body, "hb-" + Guid.NewGuid().ToString("N")[..24]);
+
+            var estimate = Cost(alias, EstimatePromptTokens(request), maxTokens);
+            var reservation = await wallet.ReserveAsync(user, Math.Max(1, estimate), alias.Alias);
+            try
+            {
+                return new ChatTicket(user, reservation, alias, bot, body, "hb-" + Guid.NewGuid().ToString("N")[..24]);
+            }
+            catch
+            {
+                // ChatTicket 是纯 record 构造不会抛；防御性兜底：已预占必须解冻，绝不留孤儿单
+                await wallet.ReleaseAsync(user, reservation);
+                throw;
+            }
         }
         catch
         {
@@ -51,12 +80,14 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
         }
     }
 
-    /// <summary>按实际用量结算（Wallet 内最多扣到预占额，差额解冻）并记一条成功用量；返回实扣代币。</summary>
+    /// <summary>按实际用量结算（Wallet 内最多扣到预占额，差额解冻）并记一条成功用量；返回实扣代币。
+    /// 并发额度在成功路径末尾才释放：中途抛异常时由调用方 FailAsync 统一 Done+Release，
+    /// 不会像「先 Done 后结算」那样在 Settle 抛出时被 catch 再 Done 一次（双扣稀释限流）。</summary>
     public async Task<long> SettleAsync(ChatTicket t, long promptTokens, long completionTokens)
     {
-        Done(t.User);
         var charged = await wallet.SettleAsync(t.User, t.Reservation, Cost(t.Alias, promptTokens, completionTokens));
         await usage.AddAsync(t.User, t.Alias.Alias, t.Bot, promptTokens, completionTokens, charged, true);
+        Done(t.User);
         return charged;
     }
 

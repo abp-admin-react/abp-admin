@@ -28,7 +28,9 @@ public static class UpstreamErrors
     public static GatewayException FromException(Exception e) => e switch
     {
         GatewayException g => g,
-        System.Text.Json.JsonException or HttpRequestException or IOException => GatewayException.UpstreamUnavailable(),
+        // OperationCanceledException 走到这里只剩流空闲超时（客户端断开在 catch 前已按
+        // RequestAborted 静默返回）——与传输失败同语义，不是 500
+        OperationCanceledException or System.Text.Json.JsonException or HttpRequestException or IOException => GatewayException.UpstreamUnavailable(),
         _ => GatewayException.Internal(),
     };
 }

@@ -15,6 +15,8 @@ public class TokenGatewayOptions
     /// <summary>新用户首次登录赠送试用代币；产品未定，默认 0（不送）。</summary>
     public long TrialTokens { get; set; }
     public int SessionHours { get; set; } = 24 * 7;
+    /// <summary>预占单滞留 Open 超过该时长视为进程中断残留，由 ReservationJanitor 全额解冻（不是退款）；正常对话生命周期以分钟计。</summary>
+    public int ReservationStaleHours { get; set; } = 24;
 
     internal IReadOnlyList<AliasOption> EffectiveAliases => Aliases.Count > 0 ? Aliases : DefaultAliases;
 

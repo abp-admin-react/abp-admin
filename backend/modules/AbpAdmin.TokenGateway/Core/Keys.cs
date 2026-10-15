@@ -55,8 +55,11 @@ public class KeyStore(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider
     public async Task<(string Token, DateTimeOffset ExpiresAt)> IssueSessionAsync(Guid userId)
     {
         var token = "hbs-" + Random(24);
-        var exp = Now().AddHours(options.Value.SessionHours);
+        var now = Now();
+        var exp = now.AddHours(options.Value.SessionHours);
         await using var db = await dbf.CreateDbContextAsync();
+        // 顺带清掉过期会话：TgSessions 只插不删会无界增长（登录频度低 + IX_TgSessions_ExpiresAt 支撑，代价可忽略）
+        await db.Sessions.Where(x => x.ExpiresAt < now).ExecuteDeleteAsync();
         db.Sessions.Add(new TgSession { TokenHash = Hash(token), UserId = userId, ExpiresAt = exp });
         await db.SaveChangesAsync();
         return (token, new DateTimeOffset(exp, TimeSpan.Zero));

@@ -15,6 +15,13 @@ namespace AbpAdmin.TokenGateway.Http;
 public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstream,
     IOptions<TokenGatewayOptions> options, IWebHostEnvironment env, ILogger<ChatController> log) : GatewayControllerBase
 {
+    /// <summary>
+    /// 对话请求体上限（2MB，正常对话 KB 量级、长上下文也足够）：宿主为文件上传把 Kestrel 全局
+    /// 上限放到 200MB，本端点若继承该上限，持 Key 主体可用巨体 JSON + JsonNode 全量物化
+    /// 钉住数倍内存——这里显式收紧（OCR security 修复）。
+    /// </summary>
+    public const int MaxChatBodyBytes = 2_000_000;
+
     [HttpGet("models")]
     public Task<IActionResult> Models() => Run(async () =>
     {
@@ -30,6 +37,7 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
     /// 流式已开始后出错：不能再改状态码，改为追加一帧 data:{error:{code,message}} 后结束。
     /// </summary>
     [HttpPost("chat/completions")]
+    [Microsoft.AspNetCore.Mvc.RequestSizeLimit(MaxChatBodyBytes)]
     public async Task Completions()
     {
         ChatTicket? ticket = null;
@@ -53,7 +61,8 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
                 throw UpstreamErrors.FromStatus((int)resp.StatusCode);
             }
 
-            var isStream = ticket.UpstreamBody["stream"]?.GetValue<bool>() == true;
+            var isStream = ticket.UpstreamBody["stream"] is System.Text.Json.Nodes.JsonValue streamValue
+                           && streamValue.TryGetValue<bool>(out var streamFlag) && streamFlag;
             if (!isStream)
             {
                 var json = JsonNode.Parse(await resp.Content.ReadAsStringAsync(HttpContext.RequestAborted)) as JsonObject
@@ -73,9 +82,18 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             started = true;
             long prompt = 0, completion = 0, seenChars = 0;
             var gotUsage = false;
+            // 流空闲超时：client.Timeout 只覆盖到响应头，上游 mid-stream 停发时逐行读会无限挂起
+            //（唯一解挂是客户端断开，期间预占一直冻结）。每帧读之前重置空闲计时，帧处理/写出不受影响；
+            // 空闲阈值与上游超时同一口径（最小 30s）。
+            using var idleCts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            var idleTimeout = TimeSpan.FromSeconds(Math.Max(30, options.Value.Upstream.TimeoutSeconds));
             using var reader = new StreamReader(await resp.Content.ReadAsStreamAsync(HttpContext.RequestAborted), Encoding.UTF8);
-            while (await reader.ReadLineAsync(HttpContext.RequestAborted) is { } line)
+            while (true)
             {
+                idleCts.CancelAfter(idleTimeout);
+                var line = await reader.ReadLineAsync(idleCts.Token);
+                if (line is null) break;
+                idleCts.CancelAfter(System.Threading.Timeout.InfiniteTimeSpan);
                 if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
                 var payload = line[5..].Trim();
                 if (payload == "[DONE]")
@@ -108,7 +126,18 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
         catch (Exception e)
         {
             // ticket 非空 = 已预占未结算：先全额解冻，保证每单只关一次（Wallet 内条件 UPDATE 兜底）。
-            if (ticket is not null) await billing.FailAsync(ticket);
+            // 解冻自身失败不顶掉对客错误输出——预占单留 Open 由 ReservationJanitor 兜底解冻（OCR R2 修复）
+            if (ticket is not null)
+            {
+                try
+                {
+                    await billing.FailAsync(ticket);
+                }
+                catch (Exception failEx)
+                {
+                    log.LogError(failEx, "gateway chat fail-unfreeze failed");
+                }
+            }
             // 客户端断开：已解冻，无人接收响应，静默结束。
             if (HttpContext.RequestAborted.IsCancellationRequested) return;
             var ge = UpstreamErrors.FromException(e);
@@ -117,7 +146,13 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             if (e is not GatewayException) log.LogError(e, "gateway chat failed");
             if (started)
             {
-                await Response.WriteAsync($"data: {{\"error\":{{\"code\":\"{ge.Code}\",\"message\":\"{ge.Message}\"}}}}\n\n");
+                // 用 System.Text.Json 序列化而不是手拼：ge.Message 一旦未来动态化（如带上游摘要）
+                // 手拼既会破坏 SSE 分帧也会注入非法 JSON——这里从源头堵死
+                var frame = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["error"] = new System.Text.Json.Nodes.JsonObject { ["code"] = ge.Code, ["message"] = ge.Message },
+                };
+                await Response.WriteAsync("data: " + frame.ToJsonString() + "\n\n", HttpContext.RequestAborted);
                 return;
             }
             await Error(ge).ExecuteResultAsync(ControllerContext);
@@ -144,11 +179,25 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
     private static (long Prompt, long Completion) ReadUsage(JsonObject o) =>
         (o["usage"]?["prompt_tokens"]?.GetValue<long>() ?? 0, o["usage"]?["completion_tokens"]?.GetValue<long>() ?? 0);
 
-    /// <summary>剥离上游痕迹：model 回别名，id 换成本次请求固定的 hb- id（流式各帧一致），去掉指纹/渠道类字段。</summary>
+    /// <summary>
+    /// 剥离上游痕迹：白名单放行 OpenAI 兼容字段——上游/渠道（one-api 及其后端）新增的任何
+    /// 字段（路由、渠道名、自定义 meta 等）一律出不去，模块不变量「上游原文不出本方法」
+    /// 不依赖追补黑名单。取舍：上游若新增合法业务字段（如 message.annotations），客户端
+    /// 也拿不到——有意为之，放行需显式加进 AllowedResponseFields 并过一遍安全评审。
+    /// model 回别名，id 换成本次请求固定的 hb- id（流式各帧一致）。
+    /// </summary>
     internal static void Scrub(JsonObject o, string alias, string responseId)
     {
         o["model"] = alias;
-        foreach (var k in new[] { "system_fingerprint", "provider", "channel", "x_groq", "service_tier" }) o.Remove(k);
+        foreach (var k in o.ToArray())
+        {
+            if (!AllowedResponseFields.Contains(k.Key)) o.Remove(k.Key);
+        }
         if (o["id"] is not null) o["id"] = responseId;
     }
+
+    private static readonly HashSet<string> AllowedResponseFields = new(StringComparer.Ordinal)
+    {
+        "id", "object", "created", "model", "choices", "usage",
+    };
 }
