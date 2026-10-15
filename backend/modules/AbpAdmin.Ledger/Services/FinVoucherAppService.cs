@@ -44,7 +44,10 @@ public class FinVoucherAppService : FinanceAppServiceBase
             q = q.Where(v => statuses.Contains(v.Status));
         }
 
-        if (input.AgentId != null) q = q.Where(v => v.AgentId == input.AgentId);
+        // 代理数据边界（与 A6/A7 同口径）：持 Scope.Agent 只能看自己的凭证，客户端传参不改写边界
+        var agentScope = await ResolveAgentScopeAsync();
+        if (agentScope != null) q = q.Where(v => v.AgentId == agentScope);
+        else if (input.AgentId != null) q = q.Where(v => v.AgentId == input.AgentId);
         if (input.IsDemo != null) q = q.Where(v => v.IsDemo == input.IsDemo);
         if (!string.IsNullOrWhiteSpace(input.BizType)) q = q.Where(v => v.BizType == input.BizType);
         if (!string.IsNullOrWhiteSpace(input.BizRefId)) q = q.Where(v => v.BizRefId == input.BizRefId);
@@ -62,7 +65,17 @@ public class FinVoucherAppService : FinanceAppServiceBase
         var ids = items.Select(v => v.Id).ToList();
         var reversedBy = await db.Vouchers.AsNoTracking().Where(v => v.ReversalOf != null && ids.Contains(v.ReversalOf.Value))
             .ToDictionaryAsync(v => v.ReversalOf!.Value, v => v.Id);
-        return new PagedResultDto<FinVoucherDto>(total, items.Select(v => Map(v, reversedBy.GetValueOrDefault(v.Id))).ToList());
+        // 展示列补齐：凭证号（实体无此列，按 Id 派生）+ 期间标签（PeriodId 联期间表）
+        var periodIds = items.Where(v => v.PeriodId != null).Select(v => v.PeriodId!.Value).Distinct().ToList();
+        var periodLabels = await db.Periods.AsNoTracking().Where(p => periodIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.Year.ToString("0000") + "-" + p.Month.ToString("00"));
+        return new PagedResultDto<FinVoucherDto>(total, items.Select(v =>
+        {
+            var dto = Map(v, reversedBy.GetValueOrDefault(v.Id));
+            dto.VoucherNo = "V-" + v.Id.ToString("N")[..10].ToUpperInvariant();
+            dto.PeriodLabel = v.PeriodId != null ? periodLabels.GetValueOrDefault(v.PeriodId!.Value) : null;
+            return dto;
+        }).ToList());
     }
 
     public virtual async Task<FinVoucherDto> GetAsync(Guid id)
@@ -70,6 +83,12 @@ public class FinVoucherAppService : FinanceAppServiceBase
         var db = await _dbContextProvider.GetDbContextAsync();
         var v = await db.Vouchers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id)
                 ?? throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", id);
+        // 详情与列表同一边界：代理范围外一律 404（不泄露跨属主存在性）
+        var agentScope = await ResolveAgentScopeAsync();
+        if (agentScope != null && v.AgentId != agentScope)
+        {
+            throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", id);
+        }
         var reversedBy = await db.Vouchers.AsNoTracking().Where(x => x.ReversalOf == id).Select(x => (Guid?)x.Id).FirstOrDefaultAsync();
         var dto = Map(v, reversedBy);
         var rows = await (
@@ -104,6 +123,12 @@ public class FinVoucherAppService : FinanceAppServiceBase
         var db = await _dbContextProvider.GetDbContextAsync();
         var v = await db.Vouchers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id)
                 ?? throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", id);
+        // 红冲与详情同一边界：代理范围外的凭证不可红冲（红冲权限是独立授予位，边界不随授放量）
+        var reverseAgentScope = await ResolveAgentScopeAsync();
+        if (reverseAgentScope != null && v.AgentId != reverseAgentScope)
+        {
+            throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", id);
+        }
         Guid reversalId;
         if (v.BizType == FinanceBizTypes.ManualAdjust && Guid.TryParseExact(v.BizRefId, "N", out var adjustId))
         {

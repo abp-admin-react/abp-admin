@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using AbpAdmin.Ledger.Integration.Contracts;
 using AbpAdmin.Ledger.Localization;
+using AbpAdmin.Ledger.Permissions;
 using AbpAdmin.Ledger.Services.Dtos;
 using Volo.Abp;
 using Volo.Abp.Application.Services;
@@ -57,6 +58,25 @@ public abstract class FinanceAppServiceBase : ApplicationService
 
     protected Guid RequireUserId() =>
         CurrentUser.Id ?? throw new AbpAuthorizationException(code: AbpAuthorizationErrorCodes.GivenPolicyHasNotGranted);
+
+    /// <summary>
+    /// 代理数据边界：持 Scope.Agent 的调用方返回强制归属（当前登录用户 Id），否则 null（不限）。
+    /// 持 Scope.All（admin/运营管理面）一律视为不限——ABP 种子把全部权限授给 admin 角色，
+    /// 若只看 Scope.Agent，admin 会被误切成只能看自己的空集（OCR E2E 实测）。
+    /// 列表/详情用它过滤 AgentId——客户端传参与真实边界无关（与 A6/A7 同口径）；
+    /// 未命中时用 404 业务码，不泄露跨属主存在性。
+    /// </summary>
+    protected async Task<Guid?> ResolveAgentScopeAsync()
+    {
+        if (await AuthorizationService.IsGrantedAsync(FinancePermissions.Scope.All))
+        {
+            return null;
+        }
+
+        return await AuthorizationService.IsGrantedAsync(FinancePermissions.Scope.Agent)
+            ? RequireUserId()
+            : null;
+    }
 
     protected static (int Skip, int Take) Paging(FinListInput input) =>
         (Math.Max(0, input.SkipCount),

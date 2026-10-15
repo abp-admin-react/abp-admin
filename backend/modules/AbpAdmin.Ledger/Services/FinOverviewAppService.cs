@@ -30,15 +30,20 @@ public class FinOverviewAppService : FinanceAppServiceBase
         var today = Clock.Now.Date;
         var tomorrow = today.AddDays(1);
 
-        var todayRows = await (
+        // 今日借贷合计在 SQL 端按 phase 分组聚合（原实现把当日全部分录拉进内存再求和，随业务量线性变慢）；
+        // 方向词表引用 FinanceBizTypes（契约住一处，新增 phase 不改这里就自动跟口径）
+        var todayAgg = await (
             from e in db.Entries.AsNoTracking()
             join v in db.Vouchers.AsNoTracking() on e.VoucherId equals v.Id
             where v.CreationTime >= today && v.CreationTime < tomorrow && !v.IsDemo
-            select new { e.Debit, e.Credit, v.Phase }).ToListAsync();
+            group e by v.Phase into g
+            select new { Phase = g.Key, Credit = g.Sum(x => x.Credit), Debit = g.Sum(x => x.Debit) }).ToListAsync();
 
-        var todayIn = todayRows.Where(x => x.Phase is "pay" or "settled" or "recognize").Sum(x => x.Credit);
-        var todayOut = todayRows.Where(x => x.Phase is "refund" or "settle").Sum(x => x.Debit);
+        var todayIn = todayAgg.Where(x => FinanceBizTypes.IncomePhases.Contains(x.Phase)).Sum(x => x.Credit);
+        var todayOut = todayAgg.Where(x => FinanceBizTypes.ExpensePhases.Contains(x.Phase)).Sum(x => x.Debit);
 
+        // 试算平衡必须对全部非 demo 分录求和（IsBalanced 是全历史不变量，任何有界子集都会弱化语义）——
+        // 该查询无时间界是有意为之；数据量成为问题时的正确出路是基于 FinReconcileRun 的对账结果缓存，而不是改口径
         var trial = await (
             from e in db.Entries.AsNoTracking()
             join v in db.Vouchers.AsNoTracking() on e.VoucherId equals v.Id

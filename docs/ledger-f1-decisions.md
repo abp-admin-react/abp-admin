@@ -5,7 +5,7 @@
 | 项 | 决定 |
 |----|------|
 | HTTP 前缀 | ABP 约定 `/api/app/...`，不另开 `/api/finance` |
-| Integration 服务 | `[RemoteService(IsEnabled=false)]`，仅进程内；演示过账走 `POST /api/app/fin-ledger/post-demo-event`（仅 `demo.*`） |
+| Integration 服务 | `[RemoteService(IsEnabled=false)]`，仅进程内；演示过账统一走 FinDemoEventAppService：`POST /api/app/fin-demo-event`（仅 `demo.*`；FinLedgerAppService 上的同构副本已删，防双契约漂移） |
 | 调账五态枚举 | 重排：Draft=0, Pending=1, Rejected=2, Posted=3, Reversed=4（F0 无 Pending、无存量） |
 | 人工调账规则 | Template v2：debit=`*` credit=`*`，取调账单借贷科目；v1 Deprecated |
 | 红冲 BatchKey | `rev:{原凭证Id:N}`；业务 BatchKey 禁止此前缀 |

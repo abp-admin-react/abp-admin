@@ -25,8 +25,13 @@ namespace AbpAdmin.Ledger.Services;
 public class FinReconcileAppService : FinanceAppServiceBase
 {
     private readonly IDbContextProvider<LedgerDbContext> _db;
+    private readonly Volo.Abp.Uow.IUnitOfWorkManager _unitOfWorkManager;
 
-    public FinReconcileAppService(IDbContextProvider<LedgerDbContext> db) => _db = db;
+    public FinReconcileAppService(IDbContextProvider<LedgerDbContext> db, Volo.Abp.Uow.IUnitOfWorkManager unitOfWorkManager)
+    {
+        _db = db;
+        _unitOfWorkManager = unitOfWorkManager;
+    }
 
     public virtual async Task<PagedResultDto<FinReconcileRunDto>> GetListAsync(FinReconcileListInput input)
     {
@@ -49,6 +54,17 @@ public class FinReconcileAppService : FinanceAppServiceBase
     [Authorize(FinancePermissions.Reconcile.Run)]
     public virtual async Task<FinReconcileRunDto> RunAsync(FinReconcileRunInput input)
     {
+        // 三段聚合必须取自同一快照（READ COMMITTED 逐语句快照会让对账期间发生的过账产出假
+        // HasDiff 假阳性，进 A1 的 UnreconciledCount）。requiresNew 开独立 UoW 作用域并指定
+        // REPEATABLE READ——不能直接挂显式 BeginTransaction：环境事务型 UoW 的连接已在事务里
+        // （OCR E2E 实测 InvalidOperationException）。PG 的 RR=快照隔离：纯 SELECT 不阻塞并发过账。
+        using var rrUow = _unitOfWorkManager.Begin(
+            new Volo.Abp.Uow.AbpUnitOfWorkOptions
+            {
+                IsTransactional = true,
+                IsolationLevel = System.Data.IsolationLevel.RepeatableRead,
+            },
+            requiresNew: true);
         var db = await _db.GetDbContextAsync();
         var entryQ = from e in db.Entries.AsNoTracking()
                      join v in db.Vouchers.AsNoTracking() on e.VoucherId equals v.Id
@@ -64,47 +80,51 @@ public class FinReconcileAppService : FinanceAppServiceBase
         if (rangeStart != null) entryQ = entryQ.Where(x => x.v.PostedTime >= rangeStart);
         if (rangeEnd != null) entryQ = entryQ.Where(x => x.v.PostedTime < rangeEnd);
 
-        var totals = await entryQ.GroupBy(_ => 1)
-            .Select(g => new { Debit = g.Sum(x => x.e.Debit), Credit = g.Sum(x => x.e.Credit) })
-            .FirstOrDefaultAsync();
-        var debit = totals?.Debit ?? 0m;
-        var credit = totals?.Credit ?? 0m;
-        var unbalanced = debit != credit;
-
-        // 投影 vs 分录（可选演示过滤：只比参与本次分录的子户）
-        var subIds = await entryQ.Select(x => x.e.SubAccountId).Distinct().ToListAsync();
-        var projDiffs = await (
-            from s in db.SubAccounts.AsNoTracking()
-            where subIds.Contains(s.Id)
-            join a in db.Accounts.AsNoTracking() on s.AccountId equals a.Id
-            join p in db.BalanceProjections.AsNoTracking() on s.Id equals p.SubAccountId into pj
-            from p in pj.DefaultIfEmpty()
-            select new { s.Id, a.NormalSide, Proj = p != null ? p.Balance : 0m }).ToListAsync();
-
-        var entrySums = await db.Entries.AsNoTracking().Where(e => subIds.Contains(e.SubAccountId))
-            .GroupBy(e => e.SubAccountId)
-            .Select(g => new { g.Key, D = g.Sum(e => e.Debit), C = g.Sum(e => e.Credit) })
-            .ToDictionaryAsync(x => x.Key);
-
-        var diffs = projDiffs.Select(x =>
         {
-            entrySums.TryGetValue(x.Id, out var sum);
-            var expected = sum == null ? 0m
-                : (x.NormalSide == Integration.Contracts.FinNormalSide.Debit ? sum.D - sum.C : sum.C - sum.D);
-            return new { SubAccountId = x.Id, Expected = expected, Actual = x.Proj, Diff = x.Proj - expected };
-        }).Where(d => d.Diff != 0m).ToList();
+            var totals = await entryQ.GroupBy(_ => 1)
+                .Select(g => new { Debit = g.Sum(x => x.e.Debit), Credit = g.Sum(x => x.e.Credit) })
+                .FirstOrDefaultAsync();
+            var debit = totals?.Debit ?? 0m;
+            var credit = totals?.Credit ?? 0m;
+            var unbalanced = debit != credit;
 
-        var hasDiff = unbalanced || diffs.Count > 0;
-        var run = new FinReconcileRun(GuidGenerator.Create(), string.IsNullOrWhiteSpace(input.RunType) ? "ledger-internal" : input.RunType, CurrentTenant.Id)
-        {
-            IncludeDemo = input.IncludeDemo,
-            HasDiff = hasDiff,
-            ScopeJson = JsonSerializer.Serialize(new { rangeStart = Iso(rangeStart), rangeEnd = Iso(rangeEnd), includeDemo = input.IncludeDemo }),
-            DiffJson = JsonSerializer.Serialize(new { debit, credit, unbalanced, projectionDiffs = diffs }),
-        };
-        await db.ReconcileRuns.AddAsync(run);
-        await db.SaveChangesAsync();
-        return Map(run);
+            // 投影 vs 分录（可选演示过滤：只比参与本次分录的子户）。entrySums 对触达子户求全部
+            // 历史分录之和——投影本身是累计值，语义要求全历史，无时间界是有意为之
+            var subIds = await entryQ.Select(x => x.e.SubAccountId).Distinct().ToListAsync();
+            var projDiffs = await (
+                from s in db.SubAccounts.AsNoTracking()
+                where subIds.Contains(s.Id)
+                join a in db.Accounts.AsNoTracking() on s.AccountId equals a.Id
+                join p in db.BalanceProjections.AsNoTracking() on s.Id equals p.SubAccountId into pj
+                from p in pj.DefaultIfEmpty()
+                select new { s.Id, a.NormalSide, Proj = p != null ? p.Balance : 0m }).ToListAsync();
+
+            var entrySums = await db.Entries.AsNoTracking().Where(e => subIds.Contains(e.SubAccountId))
+                .GroupBy(e => e.SubAccountId)
+                .Select(g => new { g.Key, D = g.Sum(e => e.Debit), C = g.Sum(e => e.Credit) })
+                .ToDictionaryAsync(x => x.Key);
+
+            var diffs = projDiffs.Select(x =>
+            {
+                entrySums.TryGetValue(x.Id, out var sum);
+                var expected = sum == null ? 0m
+                    : (x.NormalSide == Integration.Contracts.FinNormalSide.Debit ? sum.D - sum.C : sum.C - sum.D);
+                return new { SubAccountId = x.Id, Expected = expected, Actual = x.Proj, Diff = x.Proj - expected };
+            }).Where(d => d.Diff != 0m).ToList();
+
+            var hasDiff = unbalanced || diffs.Count > 0;
+            var run = new FinReconcileRun(GuidGenerator.Create(), string.IsNullOrWhiteSpace(input.RunType) ? "ledger-internal" : input.RunType, CurrentTenant.Id)
+            {
+                IncludeDemo = input.IncludeDemo,
+                HasDiff = hasDiff,
+                ScopeJson = JsonSerializer.Serialize(new { rangeStart = Iso(rangeStart), rangeEnd = Iso(rangeEnd), includeDemo = input.IncludeDemo }),
+                DiffJson = JsonSerializer.Serialize(new { debit, credit, unbalanced, projectionDiffs = diffs }),
+            };
+            await db.ReconcileRuns.AddAsync(run);
+            await db.SaveChangesAsync();
+            await rrUow.CompleteAsync();
+            return Map(run);
+        }
     }
 
     /// <summary>入参须带 Z 或偏移；落库与查询都用 Kind=Unspecified 的 UTC 值（库列为 timestamp without time zone）。</summary>

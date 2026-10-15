@@ -19,6 +19,7 @@
     "Permission:Finance.BizDoc.View": "查看业务单据",
     "Permission:Finance.Balance.View": "查看余额投影",
     "Permission:Finance.Scope.Agent": "代理数据范围",
+    "Permission:Finance.Scope.All": "全量数据（管理面）",
     "Finance": "财务",
     "Setting:Finance.Ledger.Enabled": "启用 Ledger",
     "Setting:Finance.Ledger.Enabled.Description": "总开关；关闭后拒绝业务过账",

@@ -31,6 +31,10 @@ public class PostingRuleProvider : ITransientDependency
     private readonly IDbContextProvider<LedgerDbContext> _dbContextProvider;
     private readonly IDataFilter _dataFilter;
     private readonly ICurrentTenant _currentTenant;
+    // 实例级科目缓存（transient：每次解析一新实例；勿被单例捕获——否则缓存变进程级陈旧）：
+    // 过账引擎在 advisory lock 持有期内按编码解析借贷科目（同一次过账多次命中同科目），
+    // 科目表极小极少变，实例内缓存消掉重复往返。键含租户 Id：防同一实例被跨租户复用时串租户
+    private readonly Dictionary<(Guid? TenantId, string Code), FinAccount> _accountByCode = new();
 
     public PostingRuleProvider(
         IDbContextProvider<LedgerDbContext> dbContextProvider,
@@ -62,8 +66,13 @@ public class PostingRuleProvider : ITransientDependency
 
     public virtual async Task<FinAccount> GetAccountAsync(string code)
     {
-        var db = await _dbContextProvider.GetDbContextAsync();
         var tenantId = _currentTenant.Id;
+        if (_accountByCode.TryGetValue((tenantId, code), out var cached))
+        {
+            return cached;
+        }
+
+        var db = await _dbContextProvider.GetDbContextAsync();
         FinAccount? account;
         using (_dataFilter.Disable<IMultiTenant>())
         {
@@ -78,6 +87,7 @@ public class PostingRuleProvider : ITransientDependency
             throw new BusinessException(FinanceErrorCodes.AccountNotFound).WithData("AccountCode", code);
         }
 
+        _accountByCode[(tenantId, code)] = account;
         return account;
     }
 

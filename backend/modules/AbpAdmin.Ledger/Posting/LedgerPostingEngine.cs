@@ -436,12 +436,15 @@ public class LedgerPostingEngine : DomainService
         {
             reason = "Phase";
         }
-        else if (string.IsNullOrWhiteSpace(evt.Currency) || evt.Currency.Length > LedgerConsts.MaxCurrencyLength)
+        else if (string.IsNullOrWhiteSpace(evt.Currency) || evt.Currency.Length > LedgerConsts.MaxCurrencyLength
+                 || evt.Currency.Any(c => !char.IsAsciiLetterOrDigit(c)))
         {
+            // 币种是子账户维度：只收字母/数字形状（大小写归一由调用方负责，如调账入库前 ToUpper），任意符号串会开新维度污染科目×币余
             reason = "Currency";
         }
-        else if (evt.Amount <= 0 || decimal.Round(evt.Amount, 18) != evt.Amount)
+        else if (evt.Amount <= 0 || evt.Amount > FinanceBizEvent.MaxAmount || decimal.Round(evt.Amount, 18) != evt.Amount)
         {
+            // 上界对应 FinVoucher.Amount numeric(28,18) 的整数位——不挡会拖到 SaveChanges 才炸 500
             reason = "Amount";
         }
         else if ((evt.BatchKey?.Length ?? 0) > LedgerConsts.MaxBatchKeyLength

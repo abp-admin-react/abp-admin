@@ -139,7 +139,22 @@ public class FinAccountAppService : FinanceAppServiceBase
         }
 
         db.Accounts.Remove(a);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            // 删除与并发过账存在窗口：HasEntries 检查之后，过账引擎可能刚为该科目建子户/落分录，
+            // FK/唯一约束在 SaveChanges 才拦——复核科目仍在（异常确由删除引发，避免误吞无关异常）
+            // 后转成业务错误码口径，而不是让 PG 原始异常变 500。
+            if (await db.Accounts.AnyAsync(x => x.Id == id))
+            {
+                throw new BusinessException(FinanceErrorCodes.AccountHasEntries).WithData("Code", a.Code);
+            }
+
+            throw;
+        }
     }
 
     [Authorize(FinancePermissions.Account.Manage)]

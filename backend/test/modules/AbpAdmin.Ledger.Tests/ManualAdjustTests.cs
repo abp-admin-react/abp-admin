@@ -411,6 +411,18 @@ public class ManualAdjustTests : LedgerScenarioTestBase
             reversed.ReversalVoucherId.ShouldNotBeNull();
             (await ChannelBalance()).ShouldBe(0m);
             (await PlatformBalance(FinanceAccountCodes.ManualAdjust)).ShouldBe(0m);
+
+            // Reversed 起点的所有动作（二次红冲/Reopen）都必须拒绝——此前 Illegal_Transitions_Matrix
+            // 只覆盖 Draft/Rejected 起点，Reversed 起点零覆盖（OCR test 修复）。
+            // 注意调用身份：ReverseAsync 无申请人检查（B 有 Reverse 权限即可）；ReopenAsync 先校验
+            // 申请人——必须以申请人 A 调用才能走到状态检查，用 B 会先抛 AdjustReopenDenied
+            (await Should.ThrowAsync<BusinessException>(() => Adjust.ReverseAsync(id))).Code
+                .ShouldBe(FinanceErrorCodes.AdjustInvalidStatus);
+            using (As(TestUsers.AccountantA))
+            {
+                (await Should.ThrowAsync<BusinessException>(() => Adjust.ReopenAsync(id))).Code
+                    .ShouldBe(FinanceErrorCodes.AdjustInvalidStatus);
+            }
         }
     }
 

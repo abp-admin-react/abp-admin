@@ -87,11 +87,12 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         var total = await q.CountAsync();
         var (skip, take) = Paging(input);
         var items = await q.OrderByDescending(x => x.CreationTime).Skip(skip).Take(take).ToListAsync();
-        var dtos = new System.Collections.Generic.List<FinManualAdjustDto>(items.Count);
-        foreach (var item in items)
-        {
-            dtos.Add(await MapAsync(item));
-        }
+
+        // 整页科目一次取齐：原逐行 MapAsync 每行一发科目查询，页大小 100 时即 100 次额外查询，
+        // 而一页涉及的科目去重后通常只有两三个
+        var accounts = await _rules.GetAccountsByIdAsync(
+            items.SelectMany(x => new[] { x.DebitAccountId, x.CreditAccountId }));
+        var dtos = items.Select(x => Map(x, accounts)).ToList();
 
         return new PagedResultDto<FinManualAdjustDto>(total, dtos);
     }
@@ -278,8 +279,17 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
     private async Task<FinManualAdjustLines> BuildLinesAsync(CreateUpdateFinManualAdjustDto? input)
     {
         var invalid = new System.Collections.Generic.List<string>();
-        if (input?.Amount is not { } amount || amount <= 0 || decimal.Round(amount, 18) != amount) invalid.Add("amount");
-        if (string.IsNullOrWhiteSpace(input?.Currency)) invalid.Add("currency");
+        if (input?.Amount is not { } amount || amount <= 0 || amount > FinanceBizEvent.MaxAmount
+            || decimal.Round(amount, 18) != amount) invalid.Add("amount");
+        if (input?.Currency is not { } currency
+            || currency.Trim() is not { Length: > 0 } trimmed
+            || trimmed.Length > LedgerConsts.MaxCurrencyLength
+            || trimmed.Any(c => !char.IsAsciiLetterOrDigit(c)))
+        {
+            // 币种是子账户维度：字母数字形状收紧，任意符号串会开新维度污染科目×币余。
+            // 币种白名单（CNY/USD/USDT…）是产品决策，留待财务口径定稿
+            invalid.Add("currency");
+        }
         if (string.IsNullOrWhiteSpace(input?.DebitAccountCode)) invalid.Add("debitAccountCode");
         if (invalid.Count > 0)
         {
@@ -297,13 +307,22 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
             throw new BusinessException(FinanceErrorCodes.InvalidEvent).WithData("Field", "same sub-account on both sides");
         }
 
-        return new FinManualAdjustLines(input.Amount!.Value, input.Currency!, debit.Id, input.DebitOwnerType, debitOwner,
+        // 校验与存储同一字符串：Trim + 大写归一后再入库（OCR R2 修复：此前校验 Trim、存储原值，
+        // 「CNY 」能建草稿、审批过账才被引擎形状校验打回，错误暴露点后移且存量脏数据语义不明）
+        var normalizedCurrency = input.Currency!.Trim().ToUpperInvariant();
+        return new FinManualAdjustLines(input.Amount!.Value, normalizedCurrency, debit.Id, input.DebitOwnerType, debitOwner,
             credit.Id, input.CreditOwnerType, creditOwner);
     }
 
     private async Task<FinManualAdjustDto> MapAsync(FinManualAdjust x)
     {
         var accounts = await _rules.GetAccountsByIdAsync(new[] { x.DebitAccountId, x.CreditAccountId });
+        return Map(x, accounts);
+    }
+
+    /// <summary>纯映射（无 IO）。列表页传整页预取的科目字典，单条路径走 MapAsync。</summary>
+    private static FinManualAdjustDto Map(FinManualAdjust x, System.Collections.Generic.Dictionary<Guid, FinAccount> accounts)
+    {
         return new FinManualAdjustDto
         {
             Id = x.Id,

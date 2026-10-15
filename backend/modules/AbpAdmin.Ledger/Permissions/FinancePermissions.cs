@@ -68,9 +68,15 @@ public static class FinancePermissions
         public const string View = Default + ".View";
     }
 
-    /// <summary>代理强制按自己 AgentId 过滤 A6/A7。</summary>
+    /// <summary>
+    /// 代理数据边界。Scope.Agent = 代理切片（列表/详情强制按自己的 AgentId 过滤）；
+    /// Scope.All = 显式全量（admin/运营管理面）：ABP 种子把全部权限授给 admin 角色，
+    /// 若只按「是否持有 Scope.Agent」判定，admin 会被误切成只能看自己的空集（OCR E2E 实测）——
+    /// 持有 Scope.All 的一律不做代理切分。
+    /// </summary>
     public static class Scope
     {
         public const string Agent = GroupName + ".Scope.Agent";
+        public const string All = GroupName + ".Scope.All";
     }
 }

@@ -19,6 +19,7 @@
     "Permission:Finance.BizDoc.View": "View business documents",
     "Permission:Finance.Balance.View": "View balance projection",
     "Permission:Finance.Scope.Agent": "Agent data scope",
+    "Permission:Finance.Scope.All": "Full data (management)",
     "Finance": "Finance",
     "Setting:Finance.Ledger.Enabled": "Enable Ledger",
     "Setting:Finance.Ledger.Enabled.Description": "Master switch; when off, business posting is rejected",

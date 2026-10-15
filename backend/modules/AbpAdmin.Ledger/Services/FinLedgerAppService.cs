@@ -7,15 +7,15 @@ using AbpAdmin.Ledger.Permissions;
 using AbpAdmin.Ledger.Posting;
 using AbpAdmin.Ledger.Services.Dtos;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.EntityFrameworkCore;
 
 namespace AbpAdmin.Ledger.Services;
 
-/// <summary>账本查询（余额 / 试算 / 子户余额）+ 演示事件入口。</summary>
+/// <summary>账本查询（余额 / 试算 / 子户余额）。演示过账统一走 FinDemoEventAppService
+/// （POST /api/app/fin-demo-event）——此处曾有一份逐行同构的 post-demo-event 副本，为避免
+/// 双契约漂移已删（OCR design 修复），文档口径见 docs/ledger-f1-decisions.md。</summary>
 public class FinLedgerAppService : FinanceAppServiceBase
 {
     private readonly IDbContextProvider<LedgerDbContext> _dbContextProvider;
@@ -30,27 +30,6 @@ public class FinLedgerAppService : FinanceAppServiceBase
         _dbContextProvider = dbContextProvider;
         _engine = engine;
         _rules = rules;
-    }
-
-    /// <summary>
-    /// 演示事件过账：仅 BizType 以 "demo." 开头。
-    /// 路由固定 POST /api/app/fin-ledger/post-demo-event。
-    /// </summary>
-    [HttpPost("post-demo-event")]
-    public virtual async Task<PostResultDto> CreateDemoEventAsync(PostDemoEventInput input)
-    {
-        await RequireAnyAsync(null, FinancePermissions.Adjust.Create);
-        if (!input.BizType.StartsWith("demo.", StringComparison.Ordinal))
-        {
-            throw new BusinessException(FinanceErrorCodes.InvalidEvent)
-                .WithData("Field", "BizType must start with demo.");
-        }
-
-        var id = await _engine.PostAsync(new FinanceBizEvent(
-            input.BizType, input.BizRefId, input.Phase, input.Currency, input.Amount,
-            input.UserId, input.AgentId, Dimensions: input.Dimensions, Summary: input.Summary,
-            OperatorId: CurrentUser.Id, BatchKey: input.BatchKey));
-        return new PostResultDto { VoucherId = id };
     }
 
     [Authorize(FinancePermissions.Ledger.View)]
@@ -75,8 +54,8 @@ public class FinLedgerAppService : FinanceAppServiceBase
     public virtual async Task<PagedResultDto<FinBalanceDto>> GetSubAccountBalancesAsync(FinSubAccountBalanceListInput input)
     {
         await RequireAnyAsync(null, FinancePermissions.Ledger.View, FinancePermissions.Balance.View);
-        var agentScoped = await AuthorizationService.IsGrantedAsync(FinancePermissions.Scope.Agent);
-        var agentId = agentScoped ? RequireUserId() : input.AgentId;
+        var agentScope = await ResolveAgentScopeAsync();
+        var agentId = agentScope ?? input.AgentId;
 
         var db = await _dbContextProvider.GetDbContextAsync();
         var q = from s in db.SubAccounts.AsNoTracking()
@@ -93,7 +72,7 @@ public class FinLedgerAppService : FinanceAppServiceBase
             q = q.Where(x => x.s.Currency == input.Currency);
         }
 
-        if (agentId != null || agentScoped)
+        if (agentId != null || agentScope != null)
         {
             var owner = agentId?.ToString() ?? "";
             q = q.Where(x => x.s.OwnerType == FinOwnerType.Agent && x.s.OwnerId == owner);

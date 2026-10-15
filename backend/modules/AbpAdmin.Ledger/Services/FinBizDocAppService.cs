@@ -26,8 +26,8 @@ public class FinBizDocAppService : FinanceAppServiceBase
 
     public virtual async Task<PagedResultDto<FinVoucherDto>> GetListAsync(FinBizDocListInput input)
     {
-        var agentScoped = await AuthorizationService.IsGrantedAsync(FinancePermissions.Scope.Agent);
-        var agentId = agentScoped ? RequireUserId() : input.AgentId;
+        // 代理数据边界统一走基类助手（OCR R2 修复：此前与助手逐字等价的手写内联）
+        var agentId = (await ResolveAgentScopeAsync()) ?? input.AgentId;
 
         var db = await _db.GetDbContextAsync();
         var q = db.Vouchers.AsNoTracking().Where(v => v.ReversalOf == null); // 业务视角：正本

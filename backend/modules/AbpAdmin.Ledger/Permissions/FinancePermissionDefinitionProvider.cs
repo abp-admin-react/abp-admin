@@ -36,6 +36,8 @@ public class FinancePermissionDefinitionProvider : PermissionDefinitionProvider
         group.AddPermission(FinancePermissions.BizDoc.View, L("Permission:Finance.BizDoc.View"));
         group.AddPermission(FinancePermissions.Balance.View, L("Permission:Finance.Balance.View"));
         group.AddPermission(FinancePermissions.Scope.Agent, L("Permission:Finance.Scope.Agent"));
+        // Scope.All：显式全量（admin 由种子自动获得；运营管理面手工授予）——持有即不做代理切片
+        group.AddPermission(FinancePermissions.Scope.All, L("Permission:Finance.Scope.All"));
     }
 
     private static LocalizableString L(string name) =>

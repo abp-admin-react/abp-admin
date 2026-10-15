@@ -48,6 +48,10 @@ public class FinVoucherDto : EntityDto<Guid>
     public string BatchKey { get; set; } = default!;
     public int RuleVersion { get; set; }
     public Guid? PeriodId { get; set; }
+    /// <summary>展示用凭证号（实体无此列，按 Id 派生）；仅列表/详情展示。</summary>
+    public string? VoucherNo { get; set; }
+    /// <summary>展示用期间标签（如 2026-10）；按 PeriodId 联出。</summary>
+    public string? PeriodLabel { get; set; }
     public FinVoucherStatus Status { get; set; }
     public Guid? ReversalOf { get; set; }
     public Guid? ReversedBy { get; set; }

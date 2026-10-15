@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Configuration;
+using AbpAdmin.Ledger.Data;
 using AbpAdmin.Ledger.Entities;
 using AbpAdmin.Ledger.Integration.Contracts;
 using AbpAdmin.Ledger.Posting;
@@ -21,6 +22,35 @@ namespace AbpAdmin.Ledger;
 public class PostingEngineTests : LedgerScenarioTestBase
 {
     private readonly Guid _user = Guid.NewGuid();
+
+    [Fact]
+    public async Task Posting_Ignores_Period_Status_F1_Contract_Pinned()
+    {
+        // F1 契约钉住（OCR test 修复）：过账引擎不检查 FinPeriod.Status——A4 期间页只做展示，
+        // 本阶段无关账语义。把当期置 Closed 后过账仍成功；将来引入关账校验时本用例必红，
+        // 逼一次显式决策（改语义 + 改 A4 + 改这里），而不是悄悄改掉。
+        // 直读 DbContext 须自开 UoW（Provider 只能在 UoW 内解析）；期间行找不到（跨月边界跑 CI）
+        // 则跳过置 Closed——引擎会自建当期，核心断言（照常过账）不受影响。置 Closed 不回滚：
+        // 引擎按契约无视 Status，无其他用例断言期间状态
+        using (var uow = GetRequiredService<Volo.Abp.Uow.IUnitOfWorkManager>().Begin(new Volo.Abp.Uow.AbpUnitOfWorkOptions()))
+        {
+            var db = await GetRequiredService<Volo.Abp.EntityFrameworkCore.IDbContextProvider<LedgerDbContext>>().GetDbContextAsync();
+            var now = DateTime.UtcNow;
+            var period = await db.Periods.FirstOrDefaultAsync(p => p.Year == now.Year && p.Month == now.Month);
+            if (period != null)
+            {
+                period.Status = FinPeriodStatus.Closed;
+                await db.SaveChangesAsync();
+            }
+
+            await uow.CompleteAsync();
+        }
+
+        var id = await Ledger.PostAsync(CreditPay("C-PERIOD-PIN", 5m, _user));
+        var voucher = (await VouchersAsync("C-PERIOD-PIN")).Single();
+        voucher.PeriodId.ShouldNotBeNull();
+        voucher.Status.ShouldBe(FinVoucherStatus.Posted);
+    }
 
     [Fact]
     public async Task Event_Template_GL_DemoCredit_Pay_Posts_Debit1002_Credit2205()
