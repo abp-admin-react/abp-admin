@@ -25,7 +25,10 @@ public sealed class RequiresHostDatabaseFactAttribute : FactAttribute
         {
             Skip = "SKIPPED: 宿主连接串无真实覆盖（环境变量 ConnectionStrings__Default 或 " +
                    "framework/AbpAdmin.HttpApi.Host/appsettings.secrets.json 均未提供 ConnectionStrings:Default；" +
-                   "tracked 占位串不算配置）——真库用例，无凭证跳过";
+                   "tracked 占位串不算配置）——真库用例，无凭证跳过" +
+                   (AbpAdminTestPg.LastContainerStartError is { } containerError
+                       ? $"。容器接线失败原因：{containerError}"
+                       : string.Empty);
         }
     }
 
