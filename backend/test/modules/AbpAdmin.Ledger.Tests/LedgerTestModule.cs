@@ -30,6 +30,16 @@ public class LedgerTestModule : AbpModule
 {
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
+        // 测试应用的宿主环境显式钉 Production：不设时 ABP 按缺省解析，演示种子（LedgerDataSeed
+        // Contributor 的 Finance:SeedDemoData 门控）可能随 IsDevelopment() 一起被打开，演示凭证
+        // 与用例自建分录同科目过账，余额断言全部抬高（CI 首次全量实测：期望 100 实测 1350）。
+        // 种子门控的显式 false（Finance:SeedDemoData=false）是第二道保险。
+        context.Services.Replace(
+            ServiceDescriptor.Singleton<Volo.Abp.IAbpHostEnvironment>(new Volo.Abp.AbpHostEnvironment
+            {
+                EnvironmentName = "Production",
+            }));
+
         Configure<FeatureManagementOptions>(options =>
         {
             options.SaveStaticFeaturesToDatabase = false;
