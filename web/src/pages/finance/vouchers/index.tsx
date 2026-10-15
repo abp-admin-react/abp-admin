@@ -110,6 +110,16 @@ const VouchersPage: React.FC = () => {
     }
   };
 
+  /** 取凭证并开详情抽屉。404（凭证已删/红冲）全局层刻意静默，这里必须兜 catch 给出反馈
+   *  （OCR 修复：「凭证」链接与「详情」动作曾因逐字复制各自漏修一处，收拢为单一出口）。 */
+  const openVoucher = async (id: string) => {
+    try {
+      setDetail(await getVoucher(id));
+    } catch (e) {
+      onActionError(e);
+    }
+  };
+
   useEffect(() => {
     if (!pendingFieldErrors.length || !editingAdjust) return;
     const t = setTimeout(() => {
@@ -320,15 +330,7 @@ if (canReverse && r.status === 'Posted') {
           acts.push(
             <a
               key="voucher"
-              onClick={async () => {
-                // 404（凭证已删/红冲）全局层刻意静默，这里必须兜 catch 给出反馈（OCR 修复）
-                if (!r.voucherId) return;
-                try {
-                  setDetail(await getVoucher(r.voucherId));
-                } catch (e) {
-                  onActionError(e);
-                }
-              }}
+              onClick={() => openVoucher(r.voucherId!)}
             >
               凭证
             </a>,
@@ -393,7 +395,9 @@ if (canReverse && r.status === 'Posted') {
                     };
                   }}
                   columns={[
-                    { title: '凭证号', dataIndex: 'voucherNo', width: 150 },
+                    // 凭证号是按 Id 派生的展示串，后端 Filter 口径是 BizRefId/Summary 模糊——
+                    // 放行搜索只会恒空结果，禁用该列的搜索（业务单号列承担检索）
+                    { title: '凭证号', dataIndex: 'voucherNo', width: 150, search: false },
                     { title: '业务类型', dataIndex: 'bizType', width: 120 },
                     { title: '业务单号', dataIndex: 'bizRefId', width: 120 },
                     { title: 'Phase', dataIndex: 'phase', width: 100, search: false },
@@ -436,14 +440,7 @@ if (canReverse && r.status === 'Posted') {
                         const acts = [
                           <a
                             key="d"
-                            onClick={async () => {
-                              // 404（凭证已删/红冲）全局层刻意静默，这里必须兜 catch（OCR R2 修复：与「凭证」链接同根因漏修）
-                              try {
-                                setDetail(await getVoucher(r.id));
-                              } catch (e) {
-                                onActionError(e);
-                              }
-                            }}
+                            onClick={() => openVoucher(r.id)}
                           >
                             详情
                           </a>,

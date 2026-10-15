@@ -80,6 +80,13 @@ export async function getAccessToken(): Promise<string | undefined> {
   return user.access_token;
 }
 
+/**
+ * 发起登录。租户上下文（子域名或切换租户）必须带 prompt=login：防止 IdP 残留会话把
+ * 宿主/其它租户身份静默带进本租户。
+ * ⚠ 配对契约：prompt 只生效一次——宿主登录页（AbpAdminLoginModel）认证成功后会把 prompt
+ * 从回跳 authorize 的 URL 摘除（否则 OpenIddict 再次强制出登录页，无限回环）。删掉这里的
+ * prompt 会重新引入跨租户静默 SSO；删掉宿主摘除则所有租户登录死循环——两端缺一不可。
+ */
 export async function startLogin() {
   const tenantId = getTenantId();
   await getUserManager().signinRedirect({

@@ -762,8 +762,10 @@ export async function getPostingRules(q: FinanceListQuery = {}): Promise<PagedRe
   return pageOf(mockRules, q);
 }
 
-/** 后端 FinVoucherStatus（0=Posted,1=Reversed，数字或同名字符串）→ UI 字符串。 */
-function mapVoucherStatus(v: unknown): VoucherStatus {
+/** 后端 FinVoucherStatus（0=Posted,1=Reversed，数字或同名字符串）→ UI 字符串。
+ *  未知值回落 'Posted'：方向是「可操作态」——红冲入口可见，对不可红冲凭证后端会拒绝兜底；
+ *  后端枚举扩展时同步这里。 */
+export function mapVoucherStatus(v: unknown): VoucherStatus {
   const n = typeof v === 'number' ? v : Number(v);
   if (n === 1 || v === 'Reversed') return 'Reversed';
   return 'Posted';
@@ -771,12 +773,13 @@ function mapVoucherStatus(v: unknown): VoucherStatus {
 
 /** Live FinVoucherDto → UI shape（OCR E2E 修复：与 getFinanceOverview 同根因——原样透传导致
  *  状态恒显「已冲销」（后端枚举是数字 0/1，UI 判 !== 'Posted'）且借贷合计列空（后端字段名
- *  totalDebit/totalCredit，UI 是 debitTotal/creditTotal）。 */
+ *  totalDebit/totalCredit，UI 是 debitTotal/creditTotal）。凭证号派生单一出处=后端 Map，
+ *  这里只透传不再重复实现。 */
 function fromLiveVoucher(raw: Record<string, unknown>): FinVoucherDto {
   const id = String(raw.id || '');
   return {
     id,
-    voucherNo: (raw.voucherNo as string) || 'V-' + id.replace(/-/g, '').slice(0, 10).toUpperCase(),
+    voucherNo: (raw.voucherNo as string) ?? '',
     bizType: String(raw.bizType || ''),
     bizRefId: String(raw.bizRefId || ''),
     phase: String(raw.phase || ''),
@@ -794,7 +797,7 @@ function fromLiveVoucher(raw: Record<string, unknown>): FinVoucherDto {
           seq: Number(en.seq ?? 0),
           accountCode: String(en.accountCode || ''),
           accountName: String(en.accountName || ''),
-          ownerType: en.ownerType != null ? String(en.ownerType) : undefined,
+          ownerType: en.ownerType != null ? finOwnerTypeName(en.ownerType) : undefined,
           ownerId: en.ownerId != null ? String(en.ownerId) : undefined,
           debit: Number(en.debit ?? 0),
           credit: Number(en.credit ?? 0),
@@ -882,8 +885,9 @@ export const FIN_OWNER_TYPE: Record<FinOwnerTypeName, number> = {
   Agent: 2,
   Channel: 3,
 };
-/** 后端数字枚举 → 名称串（fromLiveAdjust 回填用，与 FIN_OWNER_TYPE 一一对应） */
-const FIN_OWNER_NAME_BY_CODE: FinOwnerTypeName[] = ['Platform', 'User', 'Agent', 'Channel'];
+/** 后端数字枚举 → 名称串（fromLiveAdjust 回填用，与 FIN_OWNER_TYPE 一一对应）。
+ *  单一事实源=FIN_OWNER_TYPE 的键序，另抄一份字面量数组会漂移。 */
+const FIN_OWNER_NAME_BY_CODE: FinOwnerTypeName[] = Object.keys(FIN_OWNER_TYPE) as FinOwnerTypeName[];
 
 /** 后端 OwnerType（数字枚举或名称串）→ 表单 options 的名称串；未知回落 Channel（与历史默认一致）。 */
 export function finOwnerTypeName(v: unknown): FinOwnerTypeName {
