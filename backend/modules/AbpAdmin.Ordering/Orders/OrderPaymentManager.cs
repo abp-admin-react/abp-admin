@@ -465,9 +465,6 @@ public class OrderPaymentManager : DomainService
 
     // ── 异常明细（只追加）────────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// 追加异常明细；订单的 PaymentAnomaly 标记写入一次、不覆盖。明细永不更新。
-    /// </summary>
     /// <summary>追加一条明细；<paramref name="markAnomaly"/> 控制是否点亮订单的 PaymentAnomaly
     /// 异常标——到账类异常（金额不符/多笔到账）要点亮；人工退款走
     /// <see cref="AppendManualRefundAsync"/>（markAnomaly=false）：退款是常规运营动作，

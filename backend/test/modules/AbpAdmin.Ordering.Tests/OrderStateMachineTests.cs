@@ -198,6 +198,9 @@ public class OrderStateMachineTests : OrderingStubTestBase
         var revived = await UowAsync(() => ReloadAsync(order.Id));
         revived.Status.ShouldBe(OrderStatus.Paid);
         revived.CollectionId.ShouldBe(current.CollectionId);
+        // 复活不清 ClosedAt 是当前契约（OCR test 修复：此前零断言，有人"顺手"清掉或 DTO
+        // 依赖它判关闭时无回归锁）；PaidAt/ChannelTradeNo 才是复活归因
+        revived.ClosedAt.ShouldNotBeNull();
     }
 
     [Fact]

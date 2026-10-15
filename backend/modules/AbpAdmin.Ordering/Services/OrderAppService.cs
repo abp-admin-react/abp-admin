@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ordering.Data;
+using Microsoft.Extensions.Logging;
 using AbpAdmin.Ordering.Entities;
 using AbpAdmin.Ordering.Orders;
 using AbpAdmin.Ordering.Quotes;
@@ -146,8 +147,17 @@ public class OrderAppService : ApplicationService
             return new List<OrderRefDto>();
         }
 
-        // 去重 + 上限（合法调用方每页 ≤200；不设防则客户端可拉出任意大的 IN 探测）
-        var probeIds = balanceTxnIds.Distinct().Take(200).ToList();
+        // 去重 + 上限（合法调用方每页 ≤200；不设防则客户端可拉出任意大的 IN 探测）。
+        // 截断必须留痕：第 201 条起的流水将查不到关联订单（fail-open 的展示缺口）——
+        // 该上限的正确解除方式是把 200 提进契约/分页约束，而不是静默放宽
+        var distinctIds = balanceTxnIds.Distinct().ToList();
+        var probeIds = distinctIds.Take(200).ToList();
+        if (distinctIds.Count > probeIds.Count)
+        {
+            Logger.LogWarning(
+                "GetOrderRefsByBalanceTxnAsync 截断：入参去重后 {Total} 个 BalanceTxnId 超上限 200，超出部分不反查",
+                distinctIds.Count);
+        }
 
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var refs = await dbContext.Orders.AsNoTracking()

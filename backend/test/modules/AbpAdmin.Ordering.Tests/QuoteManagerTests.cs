@@ -108,6 +108,73 @@ public class QuoteManagerTests : OrderingTestBase
         }
     }
 
+    [Fact]
+    public async Task Concurrent_StartPay_Unique_Violation_Reads_Back_Winner_Idempotently()
+    {
+        // 本窗口修复的并发 start-pay 双击回归测试（OCR test 修复：catch 23505 → 幂等读回此前零覆盖）。
+        // 确定性复现：事务 A 插入 Active 赢者但不提交 → 事务 B 走 QuoteManager，SELECT 读不到未提交行 →
+        // INSERT 在部分唯一索引上阻塞 → A 提交 → B 撞 23505 进 catch → 读回赢者，双双 200。
+        var order = await CreateOrderAsync(10m);
+        var method = OrderingPayChannel.WechatNative;
+
+        var scopeFactory = GetRequiredService<IServiceScopeFactory>();
+        OrdQuote winner;
+        OrdQuote loser;
+        using (var scope1 = scopeFactory.CreateScope())
+        {
+            using var uow1 = scope1.ServiceProvider.GetRequiredService<IUnitOfWorkManager>()
+                .Begin(new Volo.Abp.Uow.AbpUnitOfWorkOptions { IsTransactional = true }, requiresNew: true);
+            var db1 = await scope1.ServiceProvider.GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+            winner = new OrdQuote(Guid.NewGuid())
+            {
+                OrderId = order.Id,
+                PayMethod = method,
+                PayCurrency = AbpAdmin.Collection.Contracts.CollectionCurrency.Cny,
+                PayAmount = 72.44m,
+                UsdCnyRate = 7.2m,
+                Status = QuoteStatus.Active,
+                ExpiresAt = DateTime.UtcNow.AddMinutes(15),
+                CreationTime = DateTime.UtcNow,
+            };
+            await db1.Quotes.AddAsync(winner);
+            await db1.SaveChangesAsync(); // 未提交：模拟并发赢者已插行、未到提交点
+
+            Task<OrdQuote> loserTask;
+            using (var scope2 = scopeFactory.CreateScope())
+            {
+                loserTask = Task.Run(async () =>
+                {
+                    using var uow2 = scope2.ServiceProvider.GetRequiredService<IUnitOfWorkManager>()
+                        .Begin(new Volo.Abp.Uow.AbpUnitOfWorkOptions { IsTransactional = true }, requiresNew: true);
+                    var quote = await scope2.ServiceProvider.GetRequiredService<QuoteManager>()
+                        .GetOrCreateActiveQuoteAsync(order, method);
+                    await uow2.CompleteAsync();
+                    return quote;
+                });
+
+                // 等 loser 走到 INSERT 阻塞点（唯一索引等 winner 的事务出结果），再提交赢者。
+                // 若 loser 未达阻塞点就先提交，SELECT 直接读到已提交赢者走幂等读回——两条路径结果一致，
+                // 但只有前者覆盖 23505 catch 分支（OCR R2 修复：await 移进 scope2，避免提前释放 loser 借用的作用域）
+                await Task.Delay(500);
+                await uow1.CompleteAsync();
+                loser = await loserTask;
+            }
+            loser.Id.ShouldBe(winner.Id); // 读回的是赢者：500 变 200，且不是自己新插的行
+        }
+
+        // Active 行恰一条（赢者）
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
+        {
+            var dbContext = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+            var active = await dbContext.Quotes.AsNoTracking()
+                .Where(q => q.OrderId == order.Id && q.PayMethod == method && q.Status == QuoteStatus.Active)
+                .ToListAsync();
+            await uow.CompleteAsync();
+            active.Count.ShouldBe(1);
+            active[0].Id.ShouldBe(winner.Id);
+        }
+    }
+
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────
 
     private async Task<OrdQuote> QuoteForAsync(OrdOrder order, OrderingPayChannel method)
