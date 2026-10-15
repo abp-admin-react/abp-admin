@@ -48,6 +48,11 @@
     <!-- T3.1：图片压缩/缩放（SkiaSharp provider）+ magic bytes 校验（FileSignatures） -->
     <PackageReference Include="Volo.Abp.Imaging.SkiaSharp" />
     <PackageReference Include="FileSignatures" />
+    <!-- SkiaSharp 的 Linux 原生库（NoDependencies，不依赖系统 fontconfig）。必须在「使用方」
+         工程引用而不能只挂宿主：测试工程经 Domain→测试传递才有 libSkiaSharp.so——只挂宿主时
+         Linux runner 上的图片校验/头像缩放测试 DllNotFoundException（CI 首次全量测试实测）；
+         Windows/macOS 原生资产由 SkiaSharp 主包自带，不受影响。 -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
     <!-- T3.3：Domain 层需要 Quartz 的类型（IScheduler / TriggerKey / CronExpression）。
          只引包不加模块依赖——调度器（AbpBackgroundWorkersQuartzModule）只在 Host 装配。 -->
     <PackageReference Include="Volo.Abp.Quartz" />

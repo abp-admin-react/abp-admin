@@ -42,8 +42,6 @@
          序列化器包 Volo.Abp.Quartz 不带，必须显式引。 -->
     <PackageReference Include="Volo.Abp.BackgroundWorkers.Quartz" />
     <PackageReference Include="Quartz.Serialization.SystemTextJson" />
-    <!-- T3.1：SkiaSharp 的 Linux 原生库只需在最终宿主进程存在（Windows/macOS 原生资产由 SkiaSharp 包自带） -->
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
   </ItemGroup>
 
   <ItemGroup>

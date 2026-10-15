@@ -68,9 +68,12 @@ public static class AbpAdminTestPg
             Environment.SetEnvironmentVariable(
                 RequiresHostDatabaseFactAttribute.OverrideEnvVar, ContainerConnectionString);
         }
-        catch
+        catch (Exception ex)
         {
-            // 容器不可用：留给 RequiresHostDatabaseFact 门控按「无覆盖」跳过
+            // 容器不可用：门控按「无覆盖」跳过真库用例。但不能完全静默——CI 上「设计内跳过」
+            // 与「容器起失败被吞」不可分辨（本地有 secrets 兜底发现不了），至少日志留痕
+            Console.Error.WriteLine(
+                "[AbpAdminTestPg] 宿主覆盖环境变量设置失败（真库用例将被跳过）：" + ex.Message);
         }
     }
 

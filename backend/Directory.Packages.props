@@ -131,8 +131,11 @@
          SkiaSharp 本体保持传递依赖，不写 PackageVersion（TransitivePinning 会把它提升为直接依赖）。 -->
     <PackageVersion Include="Volo.Abp.Imaging.Abstractions" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.Imaging.SkiaSharp" Version="$(AbpVersion)" />
-    <!-- Linux 原生库（自带 fontconfig 依赖的版本），只在最终宿主进程引用 -->
-    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="3.119.0" />
+    <!-- Linux 原生库（NoDependencies 变体：不依赖系统 fontconfig——runner/aspnet 容器默认没有）。
+         引用在 AbpAdmin.Domain（SkiaSharp 的使用方）：生产容器经 Host→Domain 传递、
+         模块测试经 Domain→测试工程传递都拿到 libSkiaSharp.so——只挂在 Host 时测试在
+         Linux runner 上 DllNotFoundException（CI 首次全量测试实测）。 -->
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.1" />
     <!-- T3.1 magic bytes 校验（MIT），包装为 IImageContentValidator -->
     <PackageVersion Include="FileSignatures" Version="7.3.0" />
 
