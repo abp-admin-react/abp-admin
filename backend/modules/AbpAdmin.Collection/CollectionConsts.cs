@@ -26,8 +26,10 @@ public static class CollectionConsts
 
     // ── 链上（M5 计划第 59、289 节）───────────────────────────────────────────────────
 
-    /// <summary>一期唯一的链网络名（种子建行；用户地址/充值按它解析）。</summary>
-    public const string BscNetworkName = "BSC";
+    /// <summary>一期唯一的链网络名（种子建行；用户地址/充值按它解析）。
+    /// 单一出处升级为契约区 CollectionNetworkConsts.BscNetworkName（Ordering 只引契约工程），
+    /// 本别名保留既有引用点不破坏；改名=数据迁移，须同步 DB 种子。</summary>
+    public const string BscNetworkName = Contracts.CollectionNetworkConsts.BscNetworkName;
 
     public const string ScannerLockKey = "Collection:Scanner";
 

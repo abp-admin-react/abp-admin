@@ -196,16 +196,25 @@ public class ChainGatewayFactory
             .OrderBy(k => k.CreationTime).ToListAsync();
         foreach (var k in rpcKeys)
         {
-            var keyUrl = AnkrBscChainGateway.AnkrBscRpcUrlBase + Decrypt(k.KeyCipher, masterKey);
-            // Decrypt 解不开（口令轮换/密文损坏）返回 null：该 key 跳过，不让坏 key 混进池
-            if (keyUrl != null)
+            // 先解密再拼接（OCR R2 修复）：此前 base + Decrypt() 把 null 当空串拼出裸基座 URL，
+            // 坏 key 静默混进池、下方「全部解密失败」分支永不可达
+            var key = Decrypt(k.KeyCipher, masterKey);
+            if (key != null)
             {
-                rpcUrls.Add(keyUrl);
+                rpcUrls.Add(AnkrBscChainGateway.AnkrBscRpcUrlBase + key);
             }
         }
 
         if (rpcUrls.Count == 0)
         {
+            // key 池有条目但全部解密失败时，报错必须指向「解密失败」而不是「池为空」——
+            // 口令轮换/密文损坏是运维动作问题，与「还没录入 key」的排障方向完全不同
+            if (rpcKeys.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"网络 {network.Name} 无可用 RPC：key 池 {rpcKeys.Count} 条全部解密失败（疑似口令轮换/密文损坏），请重新录入 key");
+            }
+
             // 兼容旧配置：key 池为空时回退网络行 RpcCipher（完整 URL，行为与多 key 之前一致）
             if (string.IsNullOrEmpty(network.RpcCipher))
             {
@@ -217,6 +226,11 @@ public class ChainGatewayFactory
             if (legacyUrl != null)
             {
                 rpcUrls.Add(legacyUrl);
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"网络 {network.Name} 无可用 RPC：RpcCipher 解密失败（疑似口令轮换/密文损坏）");
             }
         }
         else
@@ -286,6 +300,6 @@ public class ChainGatewayFactory
     {
         // 调用方 CreateGatewayAsync 已确保池或 RpcCipher 至少一个非空；null 时返回 null（仅日志排查用途）
         if (cipher == null) return null;
-        return _encryptor.Decrypt(cipher.StartsWith('') ? cipher[1..] : cipher, masterKey);
+        return _encryptor.Decrypt(cipher.StartsWith('\u0001') ? cipher[1..] : cipher, masterKey);
     }
 }
