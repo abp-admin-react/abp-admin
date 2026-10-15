@@ -21,11 +21,11 @@ namespace AbpAdmin.Identity;
 
 /// <summary>
 /// 演示身份种子（净库开箱可测）：demo 租户 + 财务角色（fin-accountant/fin-boss）+ 演示账号（密码
-/// 1q2w3E*）。幂等：按租户名/角色名/用户名判重。门控：仅 Development 或 App:SeedDemoData=true
-/// （与 LedgerDataSeedContributor 的 Finance:SeedDemoData 同款口径，IAbpHostEnvironment 是 ABP
-/// 自带抽象，Domain 层零额外依赖）。必须在 Domain 层：DbMigrator 只挂 ApplicationContracts，
-/// 不加载 Application——放 Application 的贡献者迁移时根本不会执行（这正是本文件曾在
-/// AbpAdmin.Application/Seed 而租户种不出来的原因）。
+/// 1q2w3E*）。幂等：按租户名/角色名/用户名判重。门控三态：App:SeedDemoData 显式 true 强制开 /
+/// 显式 false 强制关 / 缺省随 IsDevelopment（与 Ledger 种子的 Finance:SeedDemoData 同款口径；
+/// IAbpHostEnvironment 是 ABP 自带抽象，Domain 层零额外依赖）。必须在 Domain 层：DbMigrator 只挂
+/// ApplicationContracts，不加载 Application——放 Application 的贡献者迁移时根本不会执行（这正是
+/// 本文件曾在 AbpAdmin.Application/Seed 而租户种不出来的原因）。
 /// 运维口径（幂等的边界）：本贡献者只保证 DB 侧幂等。宿主运行期有权限判定缓存
 /// （PermissionChecker 结果进分布式缓存，键形如 c:Volo.Abp.PermissionManagement.PermissionGrant,...）——
 /// 对带流量的宿主重跑本种子修正授权后，需清权限缓存或重启宿主，否则已缓存的 false 判定
@@ -89,8 +89,18 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
             return;
         }
 
+        // 门控三态（与 LedgerDataSeedContributor 的 Finance:SeedDemoData 同款，优先级从高到低）：
+        // App:SeedDemoData 显式 true 强制开（生产演示库）、显式 false 强制关（测试库/特殊部署
+        // 形态可在不依赖环境判定的前提下关死）、缺省随 IsDevelopment()（本地净库 dotnet run
+        // 自动带演示账号）。
+        var configured = _configuration["App:SeedDemoData"];
+        if (string.Equals(configured, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         var enabled = _environment.IsDevelopment()
-            || string.Equals(_configuration["App:SeedDemoData"], "true", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(configured, "true", StringComparison.OrdinalIgnoreCase);
         if (!enabled)
         {
             return;
