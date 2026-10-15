@@ -247,6 +247,7 @@ public class AnonymousEndpointSweepTests
         "api/abp/application-configuration",
         "api/abp/application-localization",
         "api/abp/multi-tenancy/tenants/by-name/{name}",
+        "api/abp/multi-tenancy/tenants/by-id/{id}",
     ];
 
     [RequiresHostDatabaseFact]

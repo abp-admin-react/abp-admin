@@ -113,6 +113,9 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
         // 原样回跳 authorize、prompt 仍在 → OpenIddict 再强制出登录页 → 无限回环（全量实测：
         // fin-ops 已 LoginSucceeded 仍被打回登录表单）。prompt 只在首次出表单时生效，认证完成后
         // 从回跳 URL 摘除，其余 query（state 等）原样保留不做解码重编码。
+        // 成功回跳共三条路径，全部必须过摘除：密码（此处）、Passkey（OnPostPasskeyAsync）、
+        // 2FA（TwoFactorLoginResultAsync 转跳时摘，完成后原样回跳已是干净 URL）——漏一条，
+        // 对应登录方式的用户就在租户上下文复现回环。
         return StripOneTimePromptFromRedirect(await base.OnPostAsync(action));
     }
 
@@ -124,10 +127,28 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
             return result;
         }
 
-        var parts = redirect.Url.Split('?', 2);
+        var stripped = StripPromptFromUrl(redirect.Url);
+        return stripped == redirect.Url
+            ? result
+            : new RedirectResult(stripped, redirect.Permanent, redirect.PreserveMethod);
+    }
+
+    /// <summary>
+    /// 从 URL 的 query 里摘除 prompt 参数（大小写不敏感、全部同名参数）。
+    /// 其余参数（state 等）在原始串上做纯字符串手术、不解码重编码——避免 base64url 值经
+    /// ParseQuery 的 +→空格语义漂移。非 authorize 的 URL 由调用方先判，本函数不区分。
+    /// </summary>
+    internal static string StripPromptFromUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            return url ?? string.Empty;
+        }
+
+        var parts = url.Split('?', 2);
         if (parts.Length < 2)
         {
-            return result;
+            return url;
         }
 
         var strippedQuery = System.Text.RegularExpressions.Regex.Replace(
@@ -140,15 +161,17 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
             strippedQuery = strippedQuery[1..];
         }
 
-        if (strippedQuery == parts[1])
+        // 中段摘除会给两侧各留一个分隔符（a=1&&b=2）；& 在原始 query 串里只作分隔符
+        // （值内 & 必为 %26），归并安全。首/尾悬空 & 一并清理。
+        strippedQuery = strippedQuery.Replace("&&", "&");
+        if (strippedQuery.EndsWith('&'))
         {
-            return result;
+            strippedQuery = strippedQuery[..^1];
         }
 
-        return new RedirectResult(
-            strippedQuery.Length > 0 ? parts[0] + "?" + strippedQuery : parts[0],
-            redirect.Permanent,
-            redirect.PreserveMethod);
+        return strippedQuery == parts[1]
+            ? url
+            : parts[0] + (strippedQuery.Length > 0 ? "?" + strippedQuery : string.Empty);
     }
 
     public virtual async Task<IActionResult> OnPostPasskeyAsync()
@@ -178,14 +201,19 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
             return Page();
         }
 
-        return await RedirectSafelyAsync(ReturnUrl ?? "~/", ReturnUrlHash);
+        // Passkey 成功回跳与密码登录同一治理（见 OnPostAsync 处注释）：漏摘则 Passkey 用户
+        // 在租户上下文复现 authorize 回环。
+        return StripOneTimePromptFromRedirect(await RedirectSafelyAsync(ReturnUrl ?? "~/", ReturnUrlHash));
     }
 
     protected override Task<IActionResult> TwoFactorLoginResultAsync()
     {
+        // 密码因素已在此处成功：转 2FA 前就摘掉 ReturnUrl 的 prompt——2FA 完成后原样回跳
+        // authorize 已是干净 URL；若留到完成后再摘，还得覆写 TwoFactorVerification 页面。
+        var returnUrl = StripPromptFromUrl(ReturnUrl);
         return Task.FromResult<IActionResult>(RedirectToPage("./TwoFactorVerification", new
         {
-            returnUrl = ReturnUrl,
+            returnUrl,
             returnUrlHash = ReturnUrlHash,
             rememberMe = LoginInput.RememberMe
         }));
