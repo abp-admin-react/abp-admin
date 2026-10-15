@@ -28,6 +28,7 @@ COPY modules/AbpAdmin.Collection/AbpAdmin.Collection.csproj modules/AbpAdmin.Col
 COPY modules/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj modules/AbpAdmin.Ordering/
 COPY modules/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj modules/AbpAdmin.Ledger.Integration.Contracts/
 COPY modules/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj modules/AbpAdmin.Ledger/
+COPY modules/AbpAdmin.TokenGateway/AbpAdmin.TokenGateway.csproj modules/AbpAdmin.TokenGateway/
 COPY framework/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj framework/AbpAdmin.DbMigrator/
 COPY framework/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj framework/AbpAdmin.HttpApi.Host/
 RUN dotnet restore framework/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj

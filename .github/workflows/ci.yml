@@ -1,6 +1,9 @@
 # CI 门禁：把仓库的机器契约（后端全量测试——含契约快照/宿主建图/姿态测试，
 # 前端类型检查 + vitest）从"本地纪律"升级为"合并前必红/必绿"。刻意保持最小：
 # 不发布、不打包，只守门。
+#
+# 安全姿态：顶权 contents:read（只读拉代码+跑测试，够用且最小）；第三方/官方 action
+# 一律钉 commit SHA（tag 可变，SHA 不可变），升级时换 SHA 并保留版本注释。
 name: ci
 
 on:
@@ -8,15 +11,24 @@ on:
     branches: [main]
   pull_request:
 
+# 同分支连续 push 只跑最新一次（全量测试 + 双镜像构建较贵，旧跑立即取消）
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Dockerfile restore COPY closure gate
         run: pwsh scripts/check-docker-restore.ps1
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: 10.0.x
       - name: Restore dotnet-ef
@@ -25,7 +37,11 @@ jobs:
         run: dotnet tool restore
       - name: EF model drift check
         # 实体/配置改了但没 dotnet ef migrations add 时必红——五本迁移账各查一遍。
-        # -p 分两区：框架级 backend/framework/，业务模块 backend/modules/；startup 统一走 DbMigrator
+        # -p 分两区：框架级 backend/framework/，业务模块 backend/modules/；startup 统一走 DbMigrator。
+        # 连接串占位由 env 注入：设计时建模不拨号，但工厂解析不到串会直接抛（全新克隆无
+        # Database.json/secrets，OCR R2 修复）
+        env:
+          ConnectionStrings__Default: Host=localhost;Database=ef_model_drift_check
         run: |
           dotnet ef migrations has-pending-model-changes \
             -p backend/framework/AbpAdmin.EntityFrameworkCore -s backend/framework/AbpAdmin.DbMigrator -c AbpAdminDbContext
@@ -46,17 +62,18 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@0c17529a66aca453f9227af23103ed11469b1e47 # v4.0.0
         with:
           version: 10
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -70,10 +87,9 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Build backend images (Host + DbMigrator)
-        run: |
-          pwsh scripts/check-docker-restore.ps1
-          docker build -f backend/framework/AbpAdmin.HttpApi.Host/Dockerfile -t abp-admin-host backend
-          docker build -f backend/framework/AbpAdmin.DbMigrator/Dockerfile -t abp-admin-migrator backend
+        # 与本地 scripts/docker-build-check.ps1 同一实现（先闭包门禁再双镜像构建），不在 CI 里再抄一份
+        run: pwsh scripts/docker-build-check.ps1

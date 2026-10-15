@@ -25,6 +25,7 @@ COPY modules/AbpAdmin.Collection/AbpAdmin.Collection.csproj modules/AbpAdmin.Col
 COPY modules/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj modules/AbpAdmin.Ordering/
 COPY modules/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj modules/AbpAdmin.Ledger.Integration.Contracts/
 COPY modules/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj modules/AbpAdmin.Ledger/
+COPY modules/AbpAdmin.TokenGateway/AbpAdmin.TokenGateway.csproj modules/AbpAdmin.TokenGateway/
 COPY framework/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj framework/AbpAdmin.DbMigrator/
 RUN dotnet restore framework/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj
 
@@ -38,15 +39,14 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 
-# 种子的"单一事实来源"：迁移器 Program.cs 按 ContentRootPath/../AbpAdmin.HttpApi.Host
-# 去读 Host 的 appsettings.json（OpenIddict:Applications 客户端清单等，见其 Program.cs
-# 的分层加载说明）。容器里没有那个兄弟目录，这里把源文件摆到它要找的绝对路径上；
+# 种子的配置真源：迁移器 Program.cs 按 ContentRootPath/../AbpAdmin.HttpApi.Host 分层读取
+# （OpenIddict:Applications 客户端清单单一来源是 Configuration/OpenIddict.json，加载序见其 Program.cs）。容器里没有那个兄弟目录，这里把源文件摆到它要找的绝对路径上；
 # 数据库连接串等敏感项不进镜像，由 compose 的环境变量（最高优先级）注入。
 # appsettings.Development.json 同步带上：本地体验栈的 migrator 以 DOTNET_ENVIRONMENT=
 # Development 运行，靠它种入开发专属客户端/回调（AbpAdmin_TestCli、demo 子域名）；
 # 生产部署的迁移器不设该环境变量，这份文件在镜像里也不会被加载。
 
-# Host Configuration/*.json = SelfUrl/Cors/OpenIddict/AuthServer source (Program.cs reads here first).
+# Host Configuration/*.json = SelfUrl/Cors/OpenIddict/AuthServer 基线（Program.cs 先读 appsettings.json、再读本目录覆盖）。
 # Skip Database/Security secrets (.example only on disk); compose injects connection via env.
 # Without these files AbpAdmin_App:ClientId is empty and the seed block is skipped entirely.
 COPY framework/AbpAdmin.HttpApi.Host/Configuration/App.json /AbpAdmin.HttpApi.Host/Configuration/App.json
