@@ -1,16 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Entities;
 using AbpAdmin.Ledger.Integration.Contracts;
 using AbpAdmin.Ledger.Posting;
+using Microsoft.Extensions.Configuration;
+using Volo.Abp;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Guids;
 using Volo.Abp.MultiTenancy;
-using Volo.Abp;
+using Volo.Abp.Uow;
 
 namespace AbpAdmin.Ledger.Data;
 
@@ -29,9 +32,9 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
     private readonly ICurrentTenant _currentTenant;
     private readonly IEnumerable<ILedgerSeedProvider> _providers;
     private readonly LedgerPostingEngine _engine;
-    private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
-    private readonly Volo.Abp.IAbpHostEnvironment _environment;
-    private readonly Volo.Abp.Uow.IUnitOfWorkManager _unitOfWorkManager;
+    private readonly IConfiguration _configuration;
+    private readonly IAbpHostEnvironment _environment;
+    private readonly IUnitOfWorkManager _unitOfWorkManager;
 
     public LedgerDataSeedContributor(
         IRepository<FinAccount, Guid> accounts,
@@ -41,9 +44,9 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
         ICurrentTenant currentTenant,
         IEnumerable<ILedgerSeedProvider> providers,
         LedgerPostingEngine engine,
-        Microsoft.Extensions.Configuration.IConfiguration configuration,
-        Volo.Abp.IAbpHostEnvironment environment,
-        Volo.Abp.Uow.IUnitOfWorkManager unitOfWorkManager)
+        IConfiguration configuration,
+        IAbpHostEnvironment environment,
+        IUnitOfWorkManager unitOfWorkManager)
     {
         _accounts = accounts;
         _rules = rules;
@@ -61,10 +64,10 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
     {
         // 自包含事务作用域：基线科目/模板/期间与演示过账同事务可见，且满足过账引擎的事务要求
         using var uow = _unitOfWorkManager.Begin(
-            new Volo.Abp.Uow.AbpUnitOfWorkOptions
+            new AbpUnitOfWorkOptions
             {
                 IsTransactional = true,
-                IsolationLevel = System.Data.IsolationLevel.RepeatableRead,
+                IsolationLevel = IsolationLevel.RepeatableRead,
             },
             requiresNew: true);
         using (_currentTenant.Change(context.TenantId))
@@ -129,7 +132,6 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
         {
             return;
         }
-
 
         await _engine.PostAsync(new FinanceBizEvent(
             FinanceBizTypes.DemoCredit, "DEMO-CREDIT-001", FinanceBizTypes.Phases.Pay, "CNY", 1250m,

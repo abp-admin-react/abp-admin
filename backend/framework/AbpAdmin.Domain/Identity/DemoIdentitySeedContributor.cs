@@ -8,7 +8,11 @@ using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Guids;
 using Volo.Abp.MultiTenancy;
 using Volo.Abp.PermissionManagement;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Volo.Abp.Roles;
 using Volo.Abp.TenantManagement;
 using Volo.Abp.Identity;
 
@@ -21,9 +25,16 @@ namespace AbpAdmin.Identity;
 /// 自带抽象，Domain 层零额外依赖）。必须在 Domain 层：DbMigrator 只挂 ApplicationContracts，
 /// 不加载 Application——放 Application 的贡献者迁移时根本不会执行（这正是本文件曾在
 /// AbpAdmin.Application/Seed 而租户种不出来的原因）。
+/// 运维口径（幂等的边界）：本贡献者只保证 DB 侧幂等。宿主运行期有权限判定缓存
+/// （PermissionChecker 结果进分布式缓存，键形如 c:Volo.Abp.PermissionManagement.PermissionGrant,...）——
+/// 对带流量的宿主重跑本种子修正授权后，需清权限缓存或重启宿主，否则已缓存的 false 判定
+/// 不随库失效（docker 全量实测踩过：修行后仍 403，FLUSHALL 恢复）。
 /// </summary>
 public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDependency
 {
+    public ILogger<DemoIdentitySeedContributor> Logger { get; set; } =
+        NullLogger<DemoIdentitySeedContributor>.Instance;
+
     private static readonly string DemoPassword = "1q2w3E*";
 
     private readonly ITenantRepository _tenants;
@@ -84,6 +95,14 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
             return;
         }
 
+        if (!_environment.IsDevelopment())
+        {
+            // 与 AbpAdminDbMigrationService 对默认 admin 口令的告警同姿态：生产/预发显式打开
+            // 演示种子，会落地口令为源码公开常量的可登录账号集，必须留痕。
+            Logger.LogWarning(
+                "App:SeedDemoData=true 在非 Development 环境生效：即将创建演示账号（口令为源码公开常量 1q2w3E*：宿主 fin-viewer 与 demo 租户 admin/fin-ops/fin-boss）——仅限演示/预发，生产误配请关闭并停用这些账号");
+        }
+
         // Host 侧财务角色 + 只读查看账号
         await SeedHostFinanceRolesAsync();
         await EnsureUserAsync(null, "fin-viewer", "fin-viewer@demo.local", "财务查看（只读）",
@@ -106,28 +125,31 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
         {
             // 补租户 admin 角色：框架 IdentityDataSeeder 见 admin 用户已存在会早退、不建角色，
             // 而框架 PermissionDataSeedContributor 已把全部权限授给 ("R","admin")——补上角色并挂
-            // 用户，租户 admin 即全权（IsStatic 与框架种子一致）。
-            var adminRole = await _roles.FindByNormalizedNameAsync("ADMIN");
+            // 用户，租户 admin 即全权（IsStatic 与框架种子一致）。角色名取 AbpRoleConsts 常量、
+            // 归一化查重按其大写归一，不硬编码字面量。
+            var adminRoleName = AbpRoleConsts.AdminRoleName;
+            var adminRole = await _roles.FindByNormalizedNameAsync(adminRoleName.ToUpperInvariant());
             if (adminRole is null)
             {
-                adminRole = new IdentityRole(_guids.Create(), "admin", tenant.Id)
+                adminRole = new IdentityRole(_guids.Create(), adminRoleName, tenant.Id)
                 {
                     IsStatic = true,
                     IsPublic = true,
                 };
-                await _roleManager.CreateAsync(adminRole);
+                (await _roleManager.CreateAsync(adminRole)).CheckErrors();
             }
 
             var admin = await SeedTenantAdminAsync(tenant.Id);
-            if (!await _userManager.IsInRoleAsync(admin, "admin"))
+            if (!await _userManager.IsInRoleAsync(admin, adminRoleName))
             {
-                await _userManager.AddToRoleAsync(admin, "admin");
+                (await _userManager.AddToRoleAsync(admin, adminRoleName)).CheckErrors();
             }
 
-            var accountant = await EnsureUserAsync(
+            // 返回值无消费方，不绑定（与上方 fin-viewer 裸调用风格一致）
+            await EnsureUserAsync(
                 tenant.Id, "fin-ops", "fin-ops@demo.local", "演示：财务操作员",
                 new[] { "Finance.Ledger.View", "Finance.Voucher.View", "Finance.Adjust.Create", "Finance.Adjust.Submit" });
-            var boss = await EnsureUserAsync(
+            await EnsureUserAsync(
                 tenant.Id, "fin-boss", "fin-boss@demo.local", "演示：财务审批人",
                 new[] { "Finance.Ledger.View", "Finance.Voucher.View", "Finance.Adjust.Approve", "Finance.Adjust.Reject" });
         }
@@ -154,7 +176,7 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
         if (existingRole is not { } role)
         {
             role = new IdentityRole(_guids.Create(), roleName, _currentTenant.Id);
-            await _roleManager.CreateAsync(role);
+            (await _roleManager.CreateAsync(role)).CheckErrors();
         }
 
         // "R" 的 ProviderKey 是角色名（RolePermissionValueProvider 按用户角色声明匹配），
@@ -193,7 +215,7 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
             }
 
             var user = new IdentityUser(_guids.Create(), userName, email, tenantId);
-            await _userManager.CreateAsync(user, DemoPassword);
+            (await _userManager.CreateAsync(user, DemoPassword)).CheckErrors();
             await _userManager.AddClaimAsync(user, new System.Security.Claims.Claim("display", display));
             if (permissions is { Length: > 0 })
             {
