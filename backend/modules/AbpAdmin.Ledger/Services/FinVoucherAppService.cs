@@ -65,32 +65,45 @@ public class FinVoucherAppService : FinanceAppServiceBase
         var ids = items.Select(v => v.Id).ToList();
         var reversedBy = await db.Vouchers.AsNoTracking().Where(v => v.ReversalOf != null && ids.Contains(v.ReversalOf.Value))
             .ToDictionaryAsync(v => v.ReversalOf!.Value, v => v.Id);
-        // 展示列补齐：凭证号（实体无此列，按 Id 派生）+ 期间标签（PeriodId 联期间表）
+        // 展示列补齐：凭证号已在 Map 按 Id 派生（单一出处，列表/详情/红冲一致）；
+        // 期间标签需联期间表，在此整页取齐
         var periodIds = items.Where(v => v.PeriodId != null).Select(v => v.PeriodId!.Value).Distinct().ToList();
         var periodLabels = await db.Periods.AsNoTracking().Where(p => periodIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p.Year.ToString("0000") + "-" + p.Month.ToString("00"));
         return new PagedResultDto<FinVoucherDto>(total, items.Select(v =>
         {
             var dto = Map(v, reversedBy.GetValueOrDefault(v.Id));
-            dto.VoucherNo = "V-" + v.Id.ToString("N")[..10].ToUpperInvariant();
             dto.PeriodLabel = v.PeriodId != null ? periodLabels.GetValueOrDefault(v.PeriodId!.Value) : null;
             return dto;
         }).ToList());
     }
 
-    public virtual async Task<FinVoucherDto> GetAsync(Guid id)
+    /// <summary>按 id 取凭证并套代理边界：范围外一律 VoucherNotFound（不泄露跨属主存在性）。
+    /// 详情与红冲共用同一条边界规则，收在此处避免两份逐字复制漂移。</summary>
+    private async Task<FinVoucher> GetScopedVoucherAsync(LedgerDbContext db, Guid id)
     {
-        var db = await _dbContextProvider.GetDbContextAsync();
         var v = await db.Vouchers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id)
                 ?? throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", id);
-        // 详情与列表同一边界：代理范围外一律 404（不泄露跨属主存在性）
         var agentScope = await ResolveAgentScopeAsync();
         if (agentScope != null && v.AgentId != agentScope)
         {
             throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", id);
         }
+
+        return v;
+    }
+
+    public virtual async Task<FinVoucherDto> GetAsync(Guid id)
+    {
+        var db = await _dbContextProvider.GetDbContextAsync();
+        var v = await GetScopedVoucherAsync(db, id);
         var reversedBy = await db.Vouchers.AsNoTracking().Where(x => x.ReversalOf == id).Select(x => (Guid?)x.Id).FirstOrDefaultAsync();
         var dto = Map(v, reversedBy);
+        if (v.PeriodId != null)
+        {
+            var period = await db.Periods.AsNoTracking().FirstOrDefaultAsync(p => p.Id == v.PeriodId.Value);
+            dto.PeriodLabel = period != null ? period.Year.ToString("0000") + "-" + period.Month.ToString("00") : null;
+        }
         var rows = await (
             from e in db.Entries.AsNoTracking()
             join s in db.SubAccounts.AsNoTracking() on e.SubAccountId equals s.Id
@@ -121,14 +134,7 @@ public class FinVoucherAppService : FinanceAppServiceBase
     public virtual async Task<FinVoucherDto> ReverseAsync(Guid id)
     {
         var db = await _dbContextProvider.GetDbContextAsync();
-        var v = await db.Vouchers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id)
-                ?? throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", id);
-        // 红冲与详情同一边界：代理范围外的凭证不可红冲（红冲权限是独立授予位，边界不随授放量）
-        var reverseAgentScope = await ResolveAgentScopeAsync();
-        if (reverseAgentScope != null && v.AgentId != reverseAgentScope)
-        {
-            throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", id);
-        }
+        var v = await GetScopedVoucherAsync(db, id);
         Guid reversalId;
         if (v.BizType == FinanceBizTypes.ManualAdjust && Guid.TryParseExact(v.BizRefId, "N", out var adjustId))
         {
@@ -151,6 +157,9 @@ public class FinVoucherAppService : FinanceAppServiceBase
     private static FinVoucherDto Map(FinVoucher v, Guid? reversedBy) => new()
     {
         Id = v.Id,
+        // 展示用凭证号（实体无此列，按 Id 派生）：派生规则单一出处在此——列表/详情/红冲
+        // 三个端点形状一致，前端不做二次派生（DTO 注释「仅列表/详情展示」由此兑现）
+        VoucherNo = "V-" + v.Id.ToString("N")[..10].ToUpperInvariant(),
         BizType = v.BizType,
         BizRefId = v.BizRefId,
         Phase = v.Phase,
