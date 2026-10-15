@@ -125,9 +125,10 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
         var tenant = await _tenants.FindByNameAsync(_tenantNormalizer.NormalizeName("demo"));
         if (tenant is null)
         {
-            // ABP 10.x 的 TenantManager.CreateAsync 只构造实体并做校验（重名/归一化），
-            // 不落库——持久化是调用方的活（同 TenantAppService）。漏掉 InsertAsync 会种出
-            // 「用户带租户 ID 而 AbpTenants 为空」的孤儿数据，且建租户事件（字典种子）不触发。
+            // ABP 的 TenantManager.CreateAsync 一直是「只构造实体并做校验（重名/归一化）」，
+            // 不落库——持久化是调用方的活（官方种子示例 abp#8800 即 CreateAsync + InsertAsync
+            // 两步；TenantAppService 同构）。漏掉 InsertAsync 会种出「用户带租户 ID 而
+            // AbpTenants 为空」的孤儿数据，且建租户事件（字典种子）不触发。
             tenant = await _tenantManager.CreateAsync("demo");
             await _tenants.InsertAsync(tenant, autoSave: true);
         }

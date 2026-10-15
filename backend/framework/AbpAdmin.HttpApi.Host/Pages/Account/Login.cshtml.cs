@@ -108,11 +108,13 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
             }
         }
 
-        // prompt=login 一次性生效（OpenIddict 官方建议的回跳摘除）：SPA 在租户上下文发起授权
+        // prompt=login 一次性生效（认证完成后从回跳 URL 摘除）：SPA 在租户上下文发起授权
         // 时带 prompt=login（防 IdP 残留会话把宿主/其它租户身份静默带进本租户）。基类登录成功后
         // 原样回跳 authorize、prompt 仍在 → OpenIddict 再强制出登录页 → 无限回环（全量实测：
-        // fin-ops 已 LoginSucceeded 仍被打回登录表单）。prompt 只在首次出表单时生效，认证完成后
-        // 从回跳 URL 摘除，其余 query（state 等）原样保留不做解码重编码。
+        // fin-ops 已 LoginSucceeded 仍被打回登录表单）。OpenIddict 不替宿主管理 prompt——登录
+        // 页逻辑本就归宿主（openiddict-core #29 关闭结论），同族问题（select_account 在 authorize
+        // 请求中残留致循环）在 openiddict-core #2287 有官方确认；宿主必须自己保证 prompt 只影响
+        // 首次交互。摘除时不做解码重编码，state 等其余 query 原样保留。
         // 成功回跳共三条路径，全部必须过摘除：密码（此处）、Passkey（OnPostPasskeyAsync）、
         // 2FA（TwoFactorLoginResultAsync 转跳时摘，完成后原样回跳已是干净 URL）——漏一条，
         // 对应登录方式的用户就在租户上下文复现回环。

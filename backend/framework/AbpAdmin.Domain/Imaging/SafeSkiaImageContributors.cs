@@ -17,12 +17,14 @@ namespace AbpAdmin.Imaging;
 /// <c>SKData.Create(byte[])</c>——字节先拷进原生内存，全程不创建 SKManagedStream。
 /// 由 ImagingConfigurator 以 Replace 注册替换 ABP 原 contributor。
 ///
-/// 为什么必须替换：ABP 原实现用 <c>SKCodec.Create(Stream)</c>/<c>SKBitmap.Decode(Stream)</c>，
-/// 这两个重载内部创建的 SKManagedStream 是 GC 孤儿（无人显式 Dispose），而外层 finally 先把
-/// 托管 MemoryStream Dispose 掉——孤儿 SKManagedStream 被 finalizer 回收时，原生析构会经
-/// 读代理回调托管流，命中已关闭的流 → finalizer 线程 ObjectDisposedException →
-/// 直接打崩整个进程（无人捕获）。Windows 上 GC 时序碰不到，Linux CI 全量测试稳定触发；
-/// 生产容器（Linux）头像上传同样暴露在此风险下。
+/// 为什么必须替换：ABP 原实现用 <c>SKCodec.Create(Stream)</c>/<c>SKBitmap.Decode(Stream)</c>。
+/// SkiaSharp 的 Stream 重载对内部 SKManagedStream 的所有权/生命周期不可控——decode 会接管并
+/// 关闭传入的托管流（mono/SkiaSharp#2263，维护者确认为设计行为，改进项仍在 backlog），ABP 的
+/// finally 又 Dispose 同一批 MemoryStream，残余 wrapper 被 finalizer 回收时经读代理回调已关闭的
+/// 流 → finalizer 线程 ObjectDisposedException → 直接打崩整个进程（无人捕获）。Windows 的
+/// GC 时序碰不到，Linux CI 全量测试稳定触发；生产容器（Linux）头像上传同样暴露在此风险下。
+/// 官方 issue #2263 中社区验证的 workaround 即「SKData.Create(stream) 包一层再解码」——本实现
+/// 采用同一方案并彻底走字节拷贝，全程不创建 SKManagedStream。
 /// </summary>
 public class SafeSkiaSharpImageResizerContributor : IImageResizerContributor, ITransientDependency
 {
