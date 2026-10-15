@@ -4,11 +4,13 @@ using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Entities;
 using AbpAdmin.Ledger.Integration.Contracts;
+using AbpAdmin.Ledger.Posting;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Guids;
 using Volo.Abp.MultiTenancy;
+using Volo.Abp;
 
 namespace AbpAdmin.Ledger.Data;
 
@@ -18,12 +20,18 @@ namespace AbpAdmin.Ledger.Data;
 /// </summary>
 public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDependency
 {
+    /// <summary>演示账的固定演示用户（仅演示数据引用；非真实登录账号）。</summary>
+    public static readonly Guid DemoUserId = Guid.Parse("3a244f32-0000-0000-0000-00000000e2e1");
     private readonly IRepository<FinAccount, Guid> _accounts;
     private readonly IRepository<FinPostingRule, Guid> _rules;
     private readonly IRepository<FinPeriod, Guid> _periods;
     private readonly IGuidGenerator _guids;
     private readonly ICurrentTenant _currentTenant;
     private readonly IEnumerable<ILedgerSeedProvider> _providers;
+    private readonly LedgerPostingEngine _engine;
+    private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
+    private readonly Volo.Abp.IAbpHostEnvironment _environment;
+    private readonly Volo.Abp.Uow.IUnitOfWorkManager _unitOfWorkManager;
 
     public LedgerDataSeedContributor(
         IRepository<FinAccount, Guid> accounts,
@@ -31,7 +39,11 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
         IRepository<FinPeriod, Guid> periods,
         IGuidGenerator guids,
         ICurrentTenant currentTenant,
-        IEnumerable<ILedgerSeedProvider> providers)
+        IEnumerable<ILedgerSeedProvider> providers,
+        LedgerPostingEngine engine,
+        Microsoft.Extensions.Configuration.IConfiguration configuration,
+        Volo.Abp.IAbpHostEnvironment environment,
+        Volo.Abp.Uow.IUnitOfWorkManager unitOfWorkManager)
     {
         _accounts = accounts;
         _rules = rules;
@@ -39,16 +51,30 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
         _guids = guids;
         _currentTenant = currentTenant;
         _providers = providers;
+        _engine = engine;
+        _configuration = configuration;
+        _environment = environment;
+        _unitOfWorkManager = unitOfWorkManager;
     }
 
     public async Task SeedAsync(DataSeedContext context)
     {
+        // 自包含事务作用域：基线科目/模板/期间与演示过账同事务可见，且满足过账引擎的事务要求
+        using var uow = _unitOfWorkManager.Begin(
+            new Volo.Abp.Uow.AbpUnitOfWorkOptions
+            {
+                IsTransactional = true,
+                IsolationLevel = System.Data.IsolationLevel.RepeatableRead,
+            },
+            requiresNew: true);
         using (_currentTenant.Change(context.TenantId))
         {
             var providers = _providers.ToList();
             await SeedAccountsAsync(providers.SelectMany(p => p.Accounts));
             await SeedPostingRulesAsync(providers.SelectMany(p => p.Rules));
             await SeedCurrentPeriodAsync();
+            await SeedDemoVouchersAsync();
+            await uow.CompleteAsync();
         }
     }
 
@@ -61,9 +87,11 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
                 continue;
             }
 
-            await _accounts.InsertAsync(
-                new FinAccount(_guids.Create(), s.Code, s.Name, s.Type, s.Side, isSystem: true),
-                autoSave: true);
+            // ABP 的 EF 管线只自动加租户查询过滤，不在保存时自动盖 TenantId（过账引擎同理显式传）。
+            // 漏盖时租户侧种子落到 NULL 作用域，与 host 行在 NULLS NOT DISTINCT 唯一索引上相撞。
+            var acc = new FinAccount(_guids.Create(), s.Code, s.Name, s.Type, s.Side, isSystem: true)
+                { TenantId = _currentTenant.Id };
+            await _accounts.InsertAsync(acc, autoSave: true);
         }
     }
 
@@ -75,7 +103,8 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
                     x.BizType == r.BizType && x.Phase == r.Phase && x.Version == r.Version))
             {
                 await _rules.InsertAsync(
-                    new FinPostingRule(_guids.Create(), r.BizType, r.Phase, r.TemplateJson, version: r.Version, description: r.Description),
+                    new FinPostingRule(_guids.Create(), r.BizType, r.Phase, r.TemplateJson, version: r.Version, description: r.Description)
+                        { TenantId = _currentTenant.Id },
                     autoSave: true);
             }
 
@@ -91,6 +120,34 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
         }
     }
 
+    private async Task SeedDemoVouchersAsync()
+    {
+        // 演示账（OCR 需求：净库开箱可测）：走引擎幂等过账，重复种子返回原凭证。
+        // 门控：仅 Development 或 Finance:SeedDemoData=true；生产默认不带演示账。
+        if (!_environment.IsDevelopment()
+            && !string.Equals(_configuration["Finance:SeedDemoData"], "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+
+        await _engine.PostAsync(new FinanceBizEvent(
+            FinanceBizTypes.DemoCredit, "DEMO-CREDIT-001", FinanceBizTypes.Phases.Pay, "CNY", 1250m,
+            UserId: DemoUserId,
+            Dimensions: new Dictionary<string, string> { ["channel"] = "wechat" },
+            Summary: "演示：微信收款 1250（进预收）"));
+        await _engine.PostAsync(new FinanceBizEvent(
+            FinanceBizTypes.DemoCredit, "DEMO-CREDIT-001", FinanceBizTypes.Phases.Recognize, "CNY", 800m,
+            UserId: DemoUserId,
+            Dimensions: new Dictionary<string, string> { ["channel"] = "wechat" },
+            Summary: "演示：确认收入 800（预收转收入）"));
+        await _engine.PostAsync(new FinanceBizEvent(
+            FinanceBizTypes.DemoCredit, "DEMO-CREDIT-002", FinanceBizTypes.Phases.Pay, "CNY", 360m,
+            UserId: DemoUserId,
+            Dimensions: new Dictionary<string, string> { ["channel"] = "alipay" },
+            Summary: "演示：支付宝收款 360（进预收）"));
+    }
+
     private async Task SeedCurrentPeriodAsync()
     {
         var now = DateTime.UtcNow; // 与 AbpClockOptions.Kind=Utc 一致
@@ -100,7 +157,7 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
         }
 
         await _periods.InsertAsync(
-            new FinPeriod(_guids.Create(), now.Year, now.Month),
+            new FinPeriod(_guids.Create(), now.Year, now.Month) { TenantId = _currentTenant.Id },
             autoSave: true);
     }
 }

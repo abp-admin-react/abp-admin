@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using OpenIddict.Abstractions;
@@ -32,6 +33,63 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
         // PKCE requirement / 回调白名单补挂（见 EnsurePkceRequirementAsync / EnsureRedirectUrisAsync）。
         _applicationManager = applicationManager;
     }
+
+    /// <summary>
+    /// 覆写官方同签名方法（已核对 rel-10.6 源码：基类对已存在应用无条件 UpdateAsync，每种子轮
+    /// 翻并发戳、产生写放大）。已存在 → 与配置逐域比对（类型/consent/显示名/回调/注销回调/
+    /// 授权类型/scope），全等则整只跳过；有差异或新应用 → 走基类原逻辑。
+    /// 已知取舍：ClientSecret 轮换检测不到（OpenIddict 存哈希，无法与明文比对）——轮换 secret
+    /// 请删应用行后重跑种子。EnsureRedirectUrisAsync 的回调整表覆盖仍保留（双保险，比对域一致）。
+    /// </summary>
+    protected override async Task CreateOrUpdateApplicationAsync(
+        string applicationType,
+        string name,
+        string type,
+        string consentType,
+        string displayName,
+        string secret,
+        List<string> grantTypes,
+        List<string> scopes,
+        List<string> redirectUris = null,
+        List<string> postLogoutRedirectUris = null,
+        string clientUri = null,
+        string logoUri = null)
+    {
+        var application = await _applicationManager.FindByClientIdAsync(name);
+        if (application is null)
+        {
+            await base.CreateOrUpdateApplicationAsync(applicationType, name, type, consentType, displayName,
+                secret, grantTypes, scopes, redirectUris, postLogoutRedirectUris, clientUri, logoUri);
+            return;
+        }
+
+        var same =
+            (await _applicationManager.GetClientTypeAsync(application)) == type
+            && (await _applicationManager.GetConsentTypeAsync(application)) == consentType
+            && (await _applicationManager.GetDisplayNameAsync(application)) == displayName
+            && (await _applicationManager.GetClientUriAsync(application)) == clientUri
+            && (await _applicationManager.GetLogoUriAsync(application)) == logoUri
+            && SameSet((await _applicationManager.GetPermissionsAsync(application)).Where(p => p.StartsWith("gt:", StringComparison.Ordinal)), grantTypes.Select(g => "gt:" + g))
+            && SameSet((await _applicationManager.GetPermissionsAsync(application)).Where(p => p.StartsWith(OpenIddictConstants.Permissions.Prefixes.Scope, StringComparison.Ordinal)), scopes.Select(s2 => OpenIddictConstants.Permissions.Prefixes.Scope + s2))
+            && SameUriSet(await _applicationManager.GetRedirectUrisAsync(application), redirectUris)
+            && SameUriSet(await _applicationManager.GetPostLogoutRedirectUrisAsync(application), postLogoutRedirectUris);
+        if (same)
+        {
+            return;
+        }
+
+        await base.CreateOrUpdateApplicationAsync(applicationType, name, type, consentType, displayName,
+            secret, grantTypes, scopes, redirectUris, postLogoutRedirectUris, clientUri, logoUri);
+    }
+
+    private static bool SameSet(IEnumerable<string> current, IEnumerable<string> target) =>
+        new HashSet<string>(current).SetEquals(target);
+
+    private static bool SameUriSet(IEnumerable<string> current, IEnumerable<string> target) =>
+        new HashSet<Uri>(current.Select(ParseUri)).SetEquals(target.Select(ParseUri));
+
+    private static Uri ParseUri(string raw) =>
+        Uri.TryCreate((raw ?? "").Trim(), UriKind.Absolute, out var uri) ? uri : null;
 
     [UnitOfWork]
     public virtual async Task SeedAsync(DataSeedContext context)
@@ -96,6 +154,10 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     /// 端口/源只来自 OpenIddict:Applications:AbpAdmin_App:RootUrl + Extra*（Host Configuration），
     /// 本方法不硬编码任何端口。CreateOrUpdate 对已有客户端的 URI 集合更新在部分路径上不可靠，
     /// 这里用 Populate + 清空 + 再写入，保证 compose 改 WEB_PUBLIC_URL 后重跑种子立即生效。
+    /// 库内值与配置完全一致时跳过本方法的整只更新——消掉种子路径上的重复二次写（OCR 修复：
+    /// 此前每次种子都无条件重写）。整只级别的零写放大由本类覆写的 CreateOrUpdateApplicationAsync
+    /// 保证（对已存在应用逐域比对，全等直接跳过基类的无条件 UpdateAsync）；本方法只在其
+    /// 判定出回调集合有差异时才会被走到，是差异路径里的二次兜底。
     /// </summary>
     private async Task EnsureRedirectUrisAsync(
         string clientId,
@@ -108,47 +170,59 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
             return;
         }
 
+        // 解析与写入走同一套校验，先比对后写：库内已是配置白名单 → 原样返回
+        var redirectTargets = ParseUris(clientId, redirectUris, "redirectUri");
+        var postLogoutTargets = ParseUris(clientId, postLogoutRedirectUris, "postLogoutRedirectUri");
+
         var descriptor = new OpenIddictApplicationDescriptor();
         await _applicationManager.PopulateAsync(descriptor, application);
 
-        descriptor.RedirectUris.Clear();
-        foreach (var raw in redirectUris)
+        if (SameUris(descriptor.RedirectUris, redirectTargets) && SameUris(descriptor.PostLogoutRedirectUris, postLogoutTargets))
         {
-            if (raw.IsNullOrWhiteSpace())
-            {
-                continue;
-            }
+            return;
+        }
 
-            if (!Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri) || !uri.IsWellFormedOriginalString())
-            {
-                throw new BusinessException(AbpAdminDomainErrorCodes.OpenIddict.SeedRootUrlMissing)
-                    .WithData("client", clientId)
-                    .WithData("redirectUri", raw);
-            }
-
+        descriptor.RedirectUris.Clear();
+        foreach (var uri in redirectTargets)
+        {
             descriptor.RedirectUris.Add(uri);
         }
 
         descriptor.PostLogoutRedirectUris.Clear();
-        foreach (var raw in postLogoutRedirectUris)
+        foreach (var uri in postLogoutTargets)
         {
-            if (raw.IsNullOrWhiteSpace())
-            {
-                continue;
-            }
-
-            if (!Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri) || !uri.IsWellFormedOriginalString())
-            {
-                throw new BusinessException(AbpAdminDomainErrorCodes.OpenIddict.SeedRootUrlMissing)
-                    .WithData("client", clientId)
-                    .WithData("postLogoutRedirectUri", raw);
-            }
-
             descriptor.PostLogoutRedirectUris.Add(uri);
         }
 
         await _applicationManager.UpdateAsync(application, descriptor);
     }
+
+    private static List<Uri> ParseUris(string clientId, IReadOnlyList<string> raws, string field)
+    {
+        var result = new List<Uri>();
+        foreach (var raw in raws)
+        {
+            if (raw.IsNullOrWhiteSpace())
+            {
+                continue;
+            }
+
+            if (!Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri) || !uri.IsWellFormedOriginalString())
+            {
+                throw new BusinessException(AbpAdminDomainErrorCodes.OpenIddict.SeedRootUrlMissing)
+                    .WithData("client", clientId)
+                    .WithData(field, raw);
+            }
+
+            result.Add(uri);
+        }
+
+        return result;
+    }
+
+    /// <summary>回调集合按集合等价比较（顺序无关、忽略重复项）。</summary>
+    private static bool SameUris(IEnumerable<Uri> current, IReadOnlyList<Uri> target) =>
+        new HashSet<Uri>(current).SetEquals(target);
 
     private async Task CreateApplicationsAsync()
     {
