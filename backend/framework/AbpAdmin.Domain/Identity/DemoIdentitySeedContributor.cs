@@ -159,8 +159,10 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
 
         // "R" 的 ProviderKey 是角色名（RolePermissionValueProvider 按用户角色声明匹配），
         // 传 roleId.ToString() 是永远命不中的死数据——框架自己种的也是 ("R","admin")。
+        // tenantId 必须显式传：PermissionDataSeeder 授权行的租户取自参数而非 ICurrentTenant
+        // （框架种子同理显式传），漏传时 demo 租户的授权落 host 作用域，租户内检查永远命不中。
         await _permissionSeeder.SeedAsync(
-            "R", roleName, permissions);
+            "R", roleName, permissions, _currentTenant.Id);
     }
 
     private async Task<IdentityUser> SeedTenantAdminAsync(Guid tenantId)
@@ -170,10 +172,12 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
         // PermissionDataSeedContributor 预先授给 ("R","admin") 的全量权限随之生效）；此处再按
         // 用户钉一层财务权限 + Scope.All，演示账号能力不随角色调整漂移。
         // 注意 ProviderKey 语义："U" 接用户 Id、"R" 接角色名——把用户 Id 塞进 "R" 是
-        // 永远命不中的死数据（权限检查器按 R×角色名 匹配）。
+        // 永远命不中的死数据（权限检查器按 R×角色名 匹配）。tenantId 必须显式传（见
+        // EnsureRoleWithPermissionsAsync 处注释）：漏传 = 授权落 host 作用域，租户内 403。
         await _permissionSeeder.SeedAsync(
             "U", admin.Id.ToString(),
-            new[] { "Finance.Ledger.View", "Finance.Voucher.View", "Finance.Adjust.Create", "Finance.Adjust.Submit", "Finance.Scope.All" });
+            new[] { "Finance.Ledger.View", "Finance.Voucher.View", "Finance.Adjust.Create", "Finance.Adjust.Submit", "Finance.Scope.All" },
+            tenantId);
         return admin;
     }
 
@@ -193,7 +197,10 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
             await _userManager.AddClaimAsync(user, new System.Security.Claims.Claim("display", display));
             if (permissions is { Length: > 0 })
             {
-                await _permissionSeeder.SeedAsync("U", user.Id.ToString(), permissions);
+                // tenantId 显式传（与 _currentTenant.Change 的上下文一致）——见
+                // EnsureRoleWithPermissionsAsync 处注释：授权行租户取自参数而非 ICurrentTenant。
+                await _permissionSeeder.SeedAsync(
+                    "U", user.Id.ToString(), permissions, tenantId);
             }
             return user;
         }
