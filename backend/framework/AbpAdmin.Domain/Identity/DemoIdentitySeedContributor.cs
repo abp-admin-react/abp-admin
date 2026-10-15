@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Volo.Abp;
 using Volo.Abp.Data;
@@ -155,6 +156,12 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
         }
     }
 
+    /// <summary>
+    /// host 侧财务角色的权限面（宿主运营自己用，非 demo 租户）：fin-accountant = 全操作
+    /// （过账/红冲/调账全生命周期/科目管理/对账/期间查看），fin-boss = 只读 + 审批——
+    /// 审批与操作分权（operator 提交、boss 放行），不给 boss 操作位。
+    /// 授权行走 ("R", 角色名)、host 作用域（见 EnsureRoleWithPermissionsAsync）。
+    /// </summary>
     private async Task SeedHostFinanceRolesAsync()
     {
         await EnsureRoleWithPermissionsAsync("fin-accountant", new[]
@@ -172,6 +179,7 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
 
     private async Task EnsureRoleWithPermissionsAsync(string roleName, string[] permissions)
     {
+        // FindByNormalizedNameAsync 按归一化名匹配，Identity 默认归一器是大写——传原始名永远查不到
         var existingRole = await _roles.FindByNormalizedNameAsync(roleName.ToUpperInvariant());
         if (existingRole is not { } role)
         {
@@ -208,6 +216,7 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
     {
         using (var _ = _currentTenant.Change(tenantId))
         {
+            // 同上：用户查重按归一化名（大写）
             var existing = await _users.FindByNormalizedUserNameAsync(userName.ToUpperInvariant());
             if (existing is not null)
             {
@@ -216,7 +225,8 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
 
             var user = new IdentityUser(_guids.Create(), userName, email, tenantId);
             (await _userManager.CreateAsync(user, DemoPassword)).CheckErrors();
-            await _userManager.AddClaimAsync(user, new System.Security.Claims.Claim("display", display));
+            // display claim：演示账号的中文展示名（角色/用户列表与审批单展示申请人时读取）
+            (await _userManager.AddClaimAsync(user, new Claim("display", display))).CheckErrors();
             if (permissions is { Length: > 0 })
             {
                 // tenantId 显式传（与 _currentTenant.Change 的上下文一致）——见
