@@ -26,7 +26,7 @@ public class OrderingDbContextFactory : IDesignTimeDbContextFactory<OrderingDbCo
         var configuration = BuildConfiguration();
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException(
-                "设计时迁移需要 ConnectionStrings:Default（HttpApi.Host/appsettings.json）。");
+                "设计时迁移需要 ConnectionStrings:Default——按 Configuration/Database.json.example 配好数据库连接串（或临时用环境变量 ConnectionStrings__Default）。");
 
         var (historySchema, baseConn) = AbpAdmin.EntityFrameworkCore.MigrationHistorySchemaResolver.Resolve(connectionString);
         var optionsBuilder = new DbContextOptionsBuilder<OrderingDbContext>()
@@ -49,11 +49,15 @@ public class OrderingDbContextFactory : IDesignTimeDbContextFactory<OrderingDbCo
                 Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.json"),
                 optional: false, reloadOnChange: false)
             .AddJsonFile(
+                Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "Configuration", "Database.json"),
+                optional: true, reloadOnChange: false)
+            .AddJsonFile(
                 Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.secrets.json"),
                 optional: true, reloadOnChange: false)
             .AddJsonFile(
                 Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.DbMigrator", "appsettings.json"),
                 optional: true, reloadOnChange: false)
+            .AddEnvironmentVariables()
             .Build();
     }
 

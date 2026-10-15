@@ -11,8 +11,8 @@ namespace AbpAdmin.EntityFrameworkCore;
 /// <summary>
 /// 设计时工厂（dotnet ef）：让 `dotnet ef migrations add/has-pending-model-changes` 无需启动
 /// ABP 宿主即可构建 <see cref="AbpAdminDbContext"/>。配置读取与 DbMigrator 的分层同源——
-/// 从本程序集位置向上锚定仓库根（AbpAdmin.slnx），依次叠加 HttpApi.Host/appsettings.json、
-/// HttpApi.Host/appsettings.secrets.json、DbMigrator/appsettings.json。
+/// 从本程序集位置向上锚定 backend 根（AbpAdmin.slnx），依次叠加 HttpApi.Host/appsettings.json、
+/// Configuration/Database.json、HttpApi.Host/appsettings.secrets.json、DbMigrator/appsettings.json、环境变量。
 /// 生成/校验迁移的标准命令（仓库根执行）：
 /// <code>
 /// dotnet ef migrations add Initial
@@ -33,7 +33,8 @@ public class AbpAdminDbContextFactory : IDesignTimeDbContextFactory<AbpAdminDbCo
         var configuration = BuildConfiguration();
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException(
-                "设计时迁移需要 ConnectionStrings:Default（HttpApi.Host/appsettings.json）。");
+                "设计时迁移需要 ConnectionStrings:Default——按 Configuration/Database.json.example 配好数据库连接串" +
+                "（或临时用环境变量 ConnectionStrings__Default）。");
 
         var optionsBuilder = new DbContextOptionsBuilder<AbpAdminDbContext>()
             .UseNpgsql(connectionString);
@@ -47,16 +48,22 @@ public class AbpAdminDbContextFactory : IDesignTimeDbContextFactory<AbpAdminDbCo
             ?? throw new InvalidOperationException(
                 $"未能定位仓库根（AbpAdmin.slnx）——设计时工厂从 '{AppContext.BaseDirectory}' 向上查找失败。");
 
+        // 分层与宿主运行时同源（OCR design 修复：连接串真源已拆到 Configuration/Database.json，
+        // 此前工厂只读 appsettings.json + secrets，照新模板配置的开发者跑 dotnet ef 直接扑空）
         return new ConfigurationBuilder()
             .AddJsonFile(
                 Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.json"),
                 optional: false, reloadOnChange: false)
+            .AddJsonFile(
+                Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "Configuration", "Database.json"),
+                optional: true, reloadOnChange: false)
             .AddJsonFile(
                 Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.secrets.json"),
                 optional: true, reloadOnChange: false)
             .AddJsonFile(
                 Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.DbMigrator", "appsettings.json"),
                 optional: true, reloadOnChange: false)
+            .AddEnvironmentVariables()
             .Build();
     }
 

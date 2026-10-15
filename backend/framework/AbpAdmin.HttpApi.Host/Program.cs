@@ -39,6 +39,9 @@ public class Program
                 reloadOnChange: true);
             builder.Configuration.AddJsonFile("appsettings.secrets.json", optional: true, reloadOnChange: false);
             builder.Configuration.AddEnvironmentVariables();
+            // Configuration/*.json 追加在 CreateBuilder 默认链（末位是命令行）之后，会盖掉 CLI 参数——
+            // 重加一次恢复「命令行最高」的默认语义（env 同理已在上方重加）
+            builder.Configuration.AddCommandLine(args);
 
             builder.Host
                 .UseAutofac()

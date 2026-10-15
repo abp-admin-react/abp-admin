@@ -23,6 +23,6 @@
   // =============================================================================
 
   "ConnectionStrings": {
-    "Default": "Host=localhost;Port=5432;Database=abpadmin;Username=postgres;Password=CHANGE_ME;Timezone=UTC;Maximum Pool Size=100;Minimum Pool Size=0;Timeout=30;Keepalive=30;Connection Idle Lifetime=300;Connection Pruning Interval=10" // 主库连接串，各键见上；覆盖 ConnectionStrings__Default（整串）
+    "Default": "Host=localhost;Port=5432;Database=abpadmin;Username=postgres;Password=CHANGE_ME;Timezone=UTC;Maximum Pool Size=100;Minimum Pool Size=0;Timeout=30;Keepalive=30;Connection Idle Lifetime=300;Connection Pruning Interval=10" // 主库连接串，各键见上；会被环境变量 ConnectionStrings__Default 覆盖（整串）；设计时工厂（dotnet ef）也读本文件
   }
 }

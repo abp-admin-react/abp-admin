@@ -50,9 +50,10 @@ class Program
                  * HttpApi.Host/Configuration/*.json + thin appsettings.json (+ secrets).
                  * This project's appsettings.json keeps migrator-only keys (Quartz / Identity).
                  *
-                 * Load order (later wins):
-                 *  1. HttpApi.Host/Configuration/*.json   — baseline (SelfUrl/Cors/Redis/Authority)
-                 *  2. HttpApi.Host/appsettings.json        — shared overlays (ops/business)
+                 * Load order (later wins) — mirrors HttpApi.Host/Program.cs:
+                 *  1. HttpApi.Host/appsettings.json        — shared baseline (thin; keys moved to Configuration/)
+                 *  2. HttpApi.Host/Configuration/*.json   — infrastructure baseline (SelfUrl/Cors/Redis/Authority),
+                 *                                            overrides (1) — same relative order as the host
                  *  3. HttpApi.Host/appsettings.secrets.json — shared secrets
                  *  4. HttpApi.Host/appsettings.Development.json — Development only
                  *     (AbpAdmin_TestCli, extra redirect URIs, AllowDefaultAdminPassword).
@@ -68,7 +69,10 @@ class Program
                     Path.Combine(hosting.HostingEnvironment.ContentRootPath, "..", "AbpAdmin.HttpApi.Host"));
 
                 cfg.Sources.Clear();
-                // Host Configuration/*.json first (SelfUrl/Cors/OpenIddict/AuthServer/Redis/connection baseline)
+                // 与宿主 Program.cs 同一相对次序：基线 appsettings 先、Configuration/*.json 后（覆盖基线）。
+                // 此前两区次序相反（Configuration 先、appsettings 后），只因基线刻意不含业务键才没炸——
+                // 这层"键不重复"约束没有测试钉住，一旦回填即 Host 与 Migrator 各取一头（OCR design 修复）。
+                cfg.AddJsonFile(Path.Combine(hostDir, "appsettings.json"), optional: true, reloadOnChange: false);
                 var hostConfigDir = Path.Combine(hostDir, "Configuration");
                 if (Directory.Exists(hostConfigDir))
                 {
@@ -79,7 +83,6 @@ class Program
                         cfg.AddJsonFile(file, optional: true, reloadOnChange: false);
                     }
                 }
-                cfg.AddJsonFile(Path.Combine(hostDir, "appsettings.json"), optional: true, reloadOnChange: false);
                 cfg.AddJsonFile(Path.Combine(hostDir, "appsettings.secrets.json"), optional: true, reloadOnChange: false);
                 if (hosting.HostingEnvironment.IsDevelopment())
                 {
