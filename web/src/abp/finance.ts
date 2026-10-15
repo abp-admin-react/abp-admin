@@ -762,8 +762,52 @@ export async function getPostingRules(q: FinanceListQuery = {}): Promise<PagedRe
   return pageOf(mockRules, q);
 }
 
+/** 后端 FinVoucherStatus（0=Posted,1=Reversed，数字或同名字符串）→ UI 字符串。 */
+function mapVoucherStatus(v: unknown): VoucherStatus {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (n === 1 || v === 'Reversed') return 'Reversed';
+  return 'Posted';
+}
+
+/** Live FinVoucherDto → UI shape（OCR E2E 修复：与 getFinanceOverview 同根因——原样透传导致
+ *  状态恒显「已冲销」（后端枚举是数字 0/1，UI 判 !== 'Posted'）且借贷合计列空（后端字段名
+ *  totalDebit/totalCredit，UI 是 debitTotal/creditTotal）。 */
+function fromLiveVoucher(raw: Record<string, unknown>): FinVoucherDto {
+  const id = String(raw.id || '');
+  return {
+    id,
+    voucherNo: (raw.voucherNo as string) || 'V-' + id.replace(/-/g, '').slice(0, 10).toUpperCase(),
+    bizType: String(raw.bizType || ''),
+    bizRefId: String(raw.bizRefId || ''),
+    phase: String(raw.phase || ''),
+    periodLabel: (raw.periodLabel as string) ?? '',
+    status: mapVoucherStatus(raw.status),
+    debitTotal: Number(raw.totalDebit ?? raw.debitTotal ?? 0),
+    creditTotal: Number(raw.totalCredit ?? raw.creditTotal ?? 0),
+    creationTime: String(raw.creationTime || ''),
+    summary: (raw.summary as string) ?? undefined,
+    isDemo: Boolean(raw.isDemo),
+    agentId: (raw.agentId as string | null) ?? null,
+    reversalOf: (raw.reversalOf as string | null) ?? null,
+    entries: Array.isArray(raw.entries)
+      ? (raw.entries as Record<string, unknown>[]).map((en) => ({
+          seq: Number(en.seq ?? 0),
+          accountCode: String(en.accountCode || ''),
+          accountName: String(en.accountName || ''),
+          ownerType: en.ownerType != null ? String(en.ownerType) : undefined,
+          ownerId: en.ownerId != null ? String(en.ownerId) : undefined,
+          debit: Number(en.debit ?? 0),
+          credit: Number(en.credit ?? 0),
+        }))
+      : undefined,
+  };
+}
+
 export async function getVouchers(q: FinanceListQuery = {}): Promise<PagedResultDto<FinVoucherDto>> {
-  if (!useMock()) return liveGet(API.voucher, q as Record<string, unknown>);
+  if (!useMock()) {
+    const page = await liveGet<{ totalCount: number; items: Record<string, unknown>[] }>(API.voucher, q as Record<string, unknown>);
+    return { totalCount: page.totalCount, items: (page.items || []).map(fromLiveVoucher) };
+  }
   let list = [...mockVouchers];
   if (q.filter) {
     const f = q.filter.toLowerCase();
@@ -778,14 +822,14 @@ export async function getVouchers(q: FinanceListQuery = {}): Promise<PagedResult
 }
 
 export async function getVoucher(id: string): Promise<FinVoucherDto> {
-  if (!useMock()) return liveGet(API.voucher + '/' + id);
+  if (!useMock()) return fromLiveVoucher(await liveGet<Record<string, unknown>>(API.voucher + '/' + id));
   const row = mockVouchers.find((x) => x.id === id);
   if (!row) abpError('Finance:Voucher:NotFound', '凭证不存在', 404);
   return row;
 }
 
 export async function reverseVoucher(id: string): Promise<FinVoucherDto> {
-  if (!useMock()) return livePost(API.voucher + '/' + id + '/reverse');
+  if (!useMock()) return fromLiveVoucher(await livePost<Record<string, unknown>>(API.voucher + '/' + id + '/reverse'));
   const row = mockVouchers.find((x) => x.id === id);
   if (!row) abpError('Finance:Voucher:NotFound', '凭证不存在', 404);
   if (row.status !== 'Posted') abpError('Finance:Voucher:InvalidStatus', '仅已过账凭证可红冲');
