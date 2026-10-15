@@ -4,7 +4,7 @@ import { getTenantNameFromHost } from '@/abp/tenant';
 
 const TenantNotFound: React.FC = () => {
   const name = getTenantNameFromHost();
-  // ????????? Host ????????????????? host:port
+  // 剥离租户子域，回 Host 的 host:port（该行注释曾因编码事故变成问号串，与登录页同批事故）
   const { protocol, hostname, port } = window.location;
   const hostName = name && hostname.startsWith(`${name}.`) ? hostname.slice(name.length + 1) : hostname;
   const hostUrl = `${protocol}//${hostName}${port ? `:${port}` : ''}/`;

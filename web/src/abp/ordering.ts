@@ -154,7 +154,7 @@ export const PAY_METHOD_GROUPS: { groupLabel: string; methods: { value: string; 
     methods: [
       { value: 'WechatNative', label: PAY_CHANNEL_META.WechatNative.label, note: 'M3' },
       { value: 'AlipayPrecreate', label: PAY_CHANNEL_META.AlipayPrecreate.label, note: 'M3' },
-      { value: 'StripeCheckout', label: 'Stripe Checkout (USD)', note: 'M4' },
+      { value: 'StripeCheckout', label: `${PAY_CHANNEL_META.StripeCheckout.label} (USD)`, note: 'M4' },
     ],
   },
 ];

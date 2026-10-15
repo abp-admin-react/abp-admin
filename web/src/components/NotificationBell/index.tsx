@@ -128,7 +128,9 @@ export default function NotificationBell() {
           ) : null
         }
       >
-        {items.length > 0 ? (
+        {/* OCR 修复：此前 `items.length > 0 ?` 为真才渲染 Spin——而 isLoading 只在首载（items 必为空）
+            时为 true，spin 永不生效，首开抽屉闪「暂无通知」。首载也在 Spin 内渲染 Listy。 */}
+        {items.length > 0 || isLoading ? (
           // antd 6 起 List 废弃，Listy 是替代（虚拟化列表 API：items/rowKey/itemRender）。
           // 未读徽标 + 标题/描述两行结构沿用原 List.Item.Meta 的视觉口径（内边距、分隔线、灰色描述）。
           <Spin spinning={!!isLoading}>

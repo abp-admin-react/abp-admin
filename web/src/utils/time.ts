@@ -54,18 +54,8 @@ export function rangeToUtcBounds(
   const e = dayjs.tz(dayjs(endLocalDay).format('YYYY-MM-DD'), tz).add(1, 'day').startOf('day');
   return { startUtc: s.utc().toISOString(), endUtc: e.utc().toISOString() };
 }
-
-/** 用户时区下的「今天」起止（同一天，供日期控件默认值）。 */
-export function todayLocal(): [Dayjs, Dayjs] {
-  const n = dayjs().tz(userTimeZone());
-  return [n.startOf('day'), n.startOf('day')];
-}
-
-/** 用户时区下的本周（周起始随 dayjs locale）。 */
-export function thisWeekLocal(): [Dayjs, Dayjs] {
-  const n = dayjs().tz(userTimeZone());
-  return [n.startOf('week'), n.endOf('week').startOf('day')];
-}
+// todayLocal/thisWeekLocal（OCR refactor 修复删除）：全仓无调用方的死导出——日期控件要
+// 「今天/本周」默认值时再按需加回，避免"看起来有默认值逻辑其实没人走"。
 
 /** ProTable 列渲染：从行对象取 key 再 formatForDisplay。 */
 export const renderApiTime = (_: unknown, r: Record<string, any>, key: string) =>

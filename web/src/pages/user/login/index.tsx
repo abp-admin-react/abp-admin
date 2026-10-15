@@ -312,7 +312,13 @@ const Login: React.FC = () => {
         >
           <Typography.Paragraph type="secondary">
             使用 ABP OpenIddict 授权码 + PKCE 登录。默认账号 admin / 1q2w3E*。
-            ???????.?????????????????
+            {/* 子域名提示动态取当前 host/port（此前硬编码 demo.localhost:8000 已移除；
+                该行曾因编辑编码事故变成乱码问号串，全站用户可见）。已在 demo 子域下则直接展示当前地址 */}
+            也可用子域名访问，例如 demo 租户：
+            {window.location.hostname.startsWith('demo.')
+              ? window.location.hostname
+              : `demo.${window.location.hostname}`}
+            {window.location.port ? `:${window.location.port}` : ''}
           </Typography.Paragraph>
           <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
             {!subdomainMode && (
