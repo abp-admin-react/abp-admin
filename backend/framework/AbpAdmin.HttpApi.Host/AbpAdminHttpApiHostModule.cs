@@ -1419,6 +1419,47 @@ public class AbpAdminHttpApiHostModule : AbpModule
         if (MultiTenancyConsts.IsEnabled)
         {
             app.UseMultiTenancy();
+
+            // 租户失配守卫（安全审计 Finding 7 修正）：ConfigureMultiTenancy 为 SPA 子域登录把
+            // __tenant（Query/Header 解析器）挪到了 CurrentUser 之前，副作用是已认证用户的令牌
+            // 租户声明可被请求携带的 __tenant 覆盖——ABP 官方安全口径是 CurrentUser 解析器必须
+            // 第一（多租户文档 Tenant Resolvers 节），令牌声明优先。本守卫对 Bearer 认证的请求
+            // 恢复该口径：令牌带租户声明的用户，当前解析出的租户必须与声明一致，否则 403——
+            // 封死「租户 A 用户带 __tenant=租户 B」横向读别的租户数据的通道。刻意只拦 Bearer：
+            // 宿主令牌无租户声明、不在判定内，行为与加守卫前一致（实机观察：切到目标租户后
+            // 下游会话校验在目标租户查不到会话，401）；cookie 认证的 /Account、
+            // /connect/authorize（SPA 登录链路）依赖 header-wins 语义，不在此列。
+            // SignalR 的 query token 已由上方 T3.2 中间件搬进 Authorization 头，同样被覆盖。
+            // 不存在的租户名到不了本守卫——ABP 租户中间件对未知租户先行拒绝（实测 404
+            // "Tenant not found!"），本守卫只处理「解析成功但与令牌声明不符」的失配。
+            // 位置必须在 UseMultiTenancy 之后（租户已解析）、UseDynamicClaims 之前——动态
+            // 声明中间件会按当前租户重写 principal，放到它后面比对就失真了。
+            app.Use(async (httpContext, next) =>
+            {
+                var authorization = httpContext.Request.Headers.Authorization.ToString();
+                if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                    && httpContext.User.Identity?.IsAuthenticated == true)
+                {
+                    var currentUser = httpContext.RequestServices.GetRequiredService<Volo.Abp.Users.ICurrentUser>();
+                    var currentTenant = httpContext.RequestServices.GetRequiredService<ICurrentTenant>();
+                    if (currentUser.TenantId is { } claimTenant && currentTenant.Id != claimTenant)
+                    {
+                        httpContext.RequestServices
+                            .GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
+                            .LogWarning("Tenant mismatch blocked. ClaimTenant={ClaimTenant} ResolvedTenant={ResolvedTenant} Path={Path}",
+                                claimTenant, currentTenant.Id, httpContext.Request.Path);
+                        httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        await httpContext.Response.WriteAsJsonAsync(new
+                        {
+                            error = "tenant_mismatch",
+                            error_description = "The authenticated tenant does not match the resolved tenant."
+                        });
+                        return;
+                    }
+                }
+
+                await next();
+            });
         }
 
         app.UseUnitOfWork();
