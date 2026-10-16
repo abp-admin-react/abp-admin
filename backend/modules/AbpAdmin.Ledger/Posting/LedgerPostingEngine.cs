@@ -41,6 +41,9 @@ public sealed record PostingLine(
 /// <item>非负：User/Agent 归属的子账户余额不得为负（科目 AllowNegative 例外）；平台/渠道户可负。</item>
 /// <item>红冲：借贷互换生成新凭证（BatchKey = "rev:" + 原凭证 Id），原凭证标 Reversed，不删分录。</item>
 /// </list>
+/// 引擎是纯机械设施：只做上面的结构/平衡/幂等校验，不做任何业务审批校验（谁可过账、
+/// 是否需要人工审批是调用方的职责——调账走 FinManualAdjustAppService 的审批流，真实业务
+/// 走 ILedgerIntegrationService 前须自行落实审批）。新增 PostAsync 调用方时先补齐业务闸门。
 /// </summary>
 public class LedgerPostingEngine : DomainService
 {

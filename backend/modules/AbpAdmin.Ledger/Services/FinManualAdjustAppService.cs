@@ -209,7 +209,10 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         return await MapAsync(adjust);
     }
 
-    /// <summary>Posted → Reversed：红冲调账凭证（Finance.Adjust.Reverse）。</summary>
+    /// <summary>
+    /// Posted → Reversed：红冲调账凭证（Finance.Adjust.Reverse）。有意不走 LoadForAuditAsync 的
+    /// 自批闸门：冲销与审批是两个独立权限（fin_boss 可冲销自己批过的单），设计见定稿 §5.2。
+    /// </summary>
     public virtual async Task<FinManualAdjustDto> ReverseAsync(Guid id)
     {
         await RequireAnyAsync(FinanceErrorCodes.AdjustReverseDenied, FinancePermissions.Adjust.Reverse);
