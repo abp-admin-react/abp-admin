@@ -353,6 +353,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
         ConfigureAntiforgery(configuration);
         ConfigureUrls(configuration);
         ConfigureMultiTenancy();
+        ConfigureSecurityHeaders();
         ConfigureBundles(hostingEnvironment);
         ConfigureConventionalControllers();
         ConfigureDefaultDenyAuthorization(context);
@@ -986,6 +987,32 @@ public class AbpAdminHttpApiHostModule : AbpModule
             }
 
             options.AddDomainTenantResolver("{0}.localhost");
+        });
+    }
+
+    /// <summary>
+    /// 后端渲染页（/Account 登录/注册等 Razor 页）的 CSP。对齐 ABP 官方渗透测试报告的
+    /// "CSP Header Not Set [Risk: Medium]" 告警与官方修法（Security Headers 文档）：
+    /// UseContentSecurityPolicyHeader 默认 false——官方口径是 CSP 属应用特异决策，模板不预开。
+    /// 此前本应用从未配置，后端渲染页（SPA 之外的登录链路面）一直没有 CSP；SPA 侧 CSP
+    /// 由 web/nginx.conf + security-headers.conf 负责，与本处互不覆盖（反代路径 nginx 不加头，
+    /// 后端 HTML 响应 nginx 不剥头）。
+    /// 值显式钉住官方默认值（middleware 的 DefaultValue 常量），不随包版本漂移：
+    ///   - object-src 'none'：页面无 &lt;object&gt; 嵌入，直接禁掉；
+    ///   - form-action 'self'：登录/注册/外部登录表单全部提交同源，满足；
+    ///   - frame-ancestors 'none'：登录页无被嵌入场景（nginx 侧 X-Frame-Options DENY 同向）。
+    /// 刻意不含 script-src / style-src：官方默认值即如此——LeptonX 主题有内联脚本/样式，
+    /// 收紧这两项需要官方的 ScriptNonce 机制（UseContentSecurityPolicyScriptNonce，
+    /// 仅 MVC/Razor，且只覆盖 script）另做，不在本次范围。
+    /// 中间件只在「请求 Accept 含 HTML 且响应 Content-Type=text/html 且状态 2xx」时追加头，
+    /// JSON API 与 302 重定向一律不带——与 nginx 侧给 SPA 的 CSP 各管各的文档。
+    /// </summary>
+    private void ConfigureSecurityHeaders()
+    {
+        Configure<Volo.Abp.AspNetCore.Security.AbpSecurityHeadersOptions>(options =>
+        {
+            options.UseContentSecurityPolicyHeader = true;
+            options.ContentSecurityPolicyValue = "object-src 'none'; form-action 'self'; frame-ancestors 'none'";
         });
     }
 
