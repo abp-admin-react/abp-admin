@@ -13,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using OpenIddict.Server.AspNetCore;
@@ -377,17 +378,25 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.Contributors.Add(new SignalRApplicationConfigurationContributor());
         });
 
-        // 文件上传体积限制：与 FileManagement:MaxByteSizeForEachUpload 对齐，
-        // 否则 Kestrel / 表单解析会先于模块约束拒绝请求。
-        // 若部署在 Nginx 后，还需同步设置 client_max_body_size。
-        var maxUploadBytes = configuration.GetValue<long>("FileManagement:MaxByteSizeForEachUpload", 200L * 1024 * 1024);
+        // 文件上传体积限制：与 FileManagement 节的容器限额对齐，否则 Kestrel / 表单解析
+        // 会先于模块约束拒绝请求。容器限额按文件净尺寸算，这里数的是整个请求体——
+        // multipart 编码开销（boundary + 每段 header）会让恰好顶到限额的上传先被 413，
+        // 所以请求体上限 = 上传限额 + 编码余量，算法在 GetUploadMaxRequestBodyBytes
+        // （启动日志与此共用同一函数，数字严格一致）。
+        // 绑定习语与 FileManagementConfigurator 同款（节 → Get<T>，缺配置回退类默认值）：
+        // 数值不硬编码，遵循 AbpAdminFileManagementOptions「统一走配置」的约定。
+        // 更外层的 nginx 闸门是同一约束的部署侧：web/nginx.conf /api/ 的
+        // client_max_body_size（现为 210m）须 ≥ 本值，调限额两处一起改。
+        var fileManagementOptions = configuration.GetSection(AbpAdminFileManagementOptions.SectionName)
+            .Get<AbpAdminFileManagementOptions>() ?? new AbpAdminFileManagementOptions();
+        var maxRequestBodyBytes = GetUploadMaxRequestBodyBytes(fileManagementOptions.MaxByteSizeForEachUpload);
         Configure<FormOptions>(options =>
         {
-            options.MultipartBodyLengthLimit = maxUploadBytes;
+            options.MultipartBodyLengthLimit = maxRequestBodyBytes;
         });
         context.Services.Configure<KestrelServerOptions>(options =>
         {
-            options.Limits.MaxRequestBodySize = maxUploadBytes;
+            options.Limits.MaxRequestBodySize = maxRequestBodyBytes;
         });
 
         // T2.1 审计日志：打开实体变更记录。
@@ -1169,6 +1178,17 @@ public class AbpAdminHttpApiHostModule : AbpModule
     }
 
 
+    /// <summary>
+    /// 上传的请求体上限 = FileManagement:MaxByteSizeForEachUpload（容器按文件净尺寸算的
+    /// 限额）+ 1MiB multipart 编码余量（boundary + 每段 header）——Kestrel/FormOptions 数的
+    /// 是整个请求体，余量缺失时恰好顶格的上传会先被 413，容器限额反而在自己的上限值处
+    /// 不可达。ConfigureServices（Kestrel/FormOptions 配置）与启动日志
+    /// （OnApplicationInitializationAsync）共用本函数，两处数字必须严格一致，改余量只改这里。
+    /// 部署侧第三层闸门：web/nginx.conf /api/ 的 client_max_body_size 须 ≥ 本值。
+    /// </summary>
+    internal static long GetUploadMaxRequestBodyBytes(long maxUploadBytes) =>
+        maxUploadBytes + 1024L * 1024;
+
     public override async Task OnPreApplicationInitializationAsync(ApplicationInitializationContext context)
     {
         // PostgreSQL 启动预检：占位串/连不上在迁移与框架初始化器之前给出可行动的致命错误
@@ -1454,6 +1474,23 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 "SignalR HubLifetimeManager<NotificationHub> = {HubLifetimeManagerType} (SignalR:UseRedisBackplane={UseRedisBackplane})",
                 hubLifetimeManagerType.Name,
                 configuration.GetValue<bool>("SignalR:UseRedisBackplane"));
+
+        // 上传体积姿态（可观测纪律，与上面 SignalR HubLifetimeManager 日志同源）：体积
+        // 闸门共三层——nginx client_max_body_size（部署侧，web/nginx.conf）→ Kestrel/
+        // FormOptions（ConfigureServices）→ FileManagement 容器限额。后端只见后两层，
+        // nginx 层曾因「100m vs 200MiB」静默漂移让大文件先被 413 且后端日志毫无痕迹；
+        // 生效值进启动日志，部署侧对账三层才有起点。数值经 IOptions 读绑定后的生效值
+        // （appsettings/环境变量覆盖已生效），请求体上限与 ConfigureServices 共用
+        // GetUploadMaxRequestBodyBytes 计算——两处数字严格一致。
+        var boundFileManagementOptions = context.ServiceProvider
+            .GetRequiredService<IOptions<AbpAdminFileManagementOptions>>().Value;
+        context.ServiceProvider
+            .GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
+            .LogInformation(
+                "上传体积限制：请求体上限 {MaxRequestBodyMiB} MiB = FileManagement:MaxByteSizeForEachUpload({MaxUploadMiB} MiB) + 1 MiB multipart 编码余量；单文件上限 {MaxFileMiB} MiB（FileManagement:MaxByteSizeForEachFile）；入口 nginx 闸门（web/nginx.conf client_max_body_size）须 ≥ 请求体上限",
+                GetUploadMaxRequestBodyBytes(boundFileManagementOptions.MaxByteSizeForEachUpload) / 1024.0 / 1024.0,
+                boundFileManagementOptions.MaxByteSizeForEachUpload / 1024.0 / 1024.0,
+                boundFileManagementOptions.MaxByteSizeForEachFile / 1024.0 / 1024.0);
     }
 
     /// <summary>
