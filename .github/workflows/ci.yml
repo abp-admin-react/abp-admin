@@ -4,6 +4,8 @@
 #
 # 安全姿态：顶权 contents:read（只读拉代码+跑测试，够用且最小）；第三方/官方 action
 # 一律钉 commit SHA（tag 可变，SHA 不可变），升级时换 SHA 并保留版本注释。
+# runner 钉 ubuntu-24.04：ubuntu-latest 2026-10-19 起切 Ubuntu 26（runner-images#14748）——
+# 全绿姿态是在 24.04 上验证的，主动迁移 26 前先在分支上跑一轮（glibc/docker 行为可能漂移）。
 name: ci
 
 on:
@@ -21,7 +23,7 @@ permissions:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -67,7 +69,7 @@ jobs:
         run: dotnet test backend/AbpAdmin.slnx --nologo
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -79,7 +81,7 @@ jobs:
         with:
           version: 10
       - name: Setup Node
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
           cache: pnpm
@@ -92,7 +94,7 @@ jobs:
         run: pnpm test
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
