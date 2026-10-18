@@ -3,7 +3,11 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
 
-    <AbpVersion>10.6.1</AbpVersion>
+    <!-- 10.6.1 → 10.6.2（2026-10-12）：吃掉 GHSA-4x2h-f4f8-xjr6（Volo.Abp.BlobStoring.FileSystem
+         路径穿越，Low；修复提交 = PR #26232 "Validate blob names in file system provider
+         and blogging file service"）。本仓默认 Database provider、容器名多为服务端生成，
+         实际暴露低，但补丁零成本。10.7.0（10-06）暂缓：新次版本需过迁移指南。 -->
+    <AbpVersion>10.6.2</AbpVersion>
     <!-- LeptonXLite 主题走独立版本号，不要改成 AbpVersion -->
     <AbpLeptonXLiteVersion>5.6.1</AbpLeptonXLiteVersion>
     <AbpStudioVersion>3.0.10</AbpStudioVersion>

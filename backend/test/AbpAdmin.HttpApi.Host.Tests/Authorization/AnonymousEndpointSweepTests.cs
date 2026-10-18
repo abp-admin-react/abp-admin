@@ -1,13 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Builder;
-using Npgsql;
-using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -43,8 +40,8 @@ namespace AbpAdmin.Authorization;
 /// 宿主进程内静态共享且从不 Dispose：Quartz 的 LogProvider 把 LoggerFactory 缓存在
 /// 静态字段里，第一个实例 DisposeAsync 之后任何再初始化都会撞
 /// ObjectDisposedException——"每测试方法一个宿主"在这个宿主上不可行。测试进程
-/// 结束即回收，泄漏是刻意的、可接受的。若未来第二个测试类也要初始化完整宿主，
-/// 应把本类的 LazyHost 提升为公共基建，而不是再复制一份。
+/// 结束即回收，泄漏是刻意的、可接受的。LazyHost 已按本注释原先的要求提升为公共基建
+/// <see cref="HostTestBed"/>，本类与 AnonymousSettingTrimTests 共用同一份宿主。
 /// </para>
 /// <para>
 /// 数据库隔离：宿主初始化有真实写库副作用（静态模板同步、后台作业注册）。凭证取真实
@@ -55,69 +52,11 @@ namespace AbpAdmin.Authorization;
 /// </remarks>
 public class AnonymousEndpointSweepTests
 {
-    private static readonly Lazy<Task<WebApplication>> LazyHost = new(() => CreateInitializedHostAsync());
-
-    private static async Task<WebApplication> CreateInitializedHostAsync()
-    {
-        // 宿主是 PostgreSQL-only（EF 模块无条件 UseNpgsql）。凭证取真实覆盖层
-        // （环境变量 ConnectionStrings__Default → appsettings.secrets.json；tracked 基座
-        // 占位串不算配置，见 RequiresHostDatabaseFactAttribute；本程序集加载时通常已由
-        // TestPgAssemblyInitializer 注入容器连接串），schema 隔离到
-        // 专用 abp_admin_hosttest（不存在则创建；宿主启动的 AutoMigrateOnStartup 会在其中
-        // 自举迁移+种子），与 dev schema（abp_admin_efm）互不干扰。
-        var baseConn = ResolveHostDatabaseConnectionString();
-        var connString = await EnsureIsolatedSchemaAsync(baseConn, "abp_admin_hosttest");
-
-        var builder = await HostUnderTest.CreateBuilderAsync(
-            new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:Default"] = connString,
-            },
-            useAutofac: true);
-        var app = builder.Build();
-        await app.InitializeApplicationAsync();
-        return app;
-    }
-
-    private static Task<WebApplication> HostTask => LazyHost.Value;
+    private static Task<WebApplication> HostTask => HostTestBed.HostTask;
 
     /// <summary>
-    /// 宿主连接串的真实覆盖：环境变量 ConnectionStrings__Default 优先，其后 HttpApi.Host 的
-    /// appsettings.secrets.json——统一走 <see cref="AbpAdmin.RequiresHostDatabaseFactAttribute.TryResolveOverride"/>
-    /// （tracked 基座 appsettings.json 的 PG 占位串设计为运行期 fail-fast，不算配置）。
-    /// 事实方法已由 <see cref="AbpAdmin.RequiresHostDatabaseFactAttribute"/> 门控，无覆盖时到不了这里；
-    /// 本抛出仅为直调兜底，防止门控被绕过后拿占位串真拨库。
+    /// 一个匿名端点的判定面：路由模板 + 显示名（控制器动作/页面的全名）。
     /// </summary>
-    private static string ResolveHostDatabaseConnectionString()
-    {
-        var conn = AbpAdmin.RequiresHostDatabaseFactAttribute.TryResolveOverride();
-        if (conn == null)
-        {
-            throw new InvalidOperationException(
-                "匿名端点扫查需要 PostgreSQL 连接串（宿主已 PG-only）。" +
-                "请在 framework/AbpAdmin.HttpApi.Host/appsettings.secrets.json 配置 ConnectionStrings:Default（含凭据）。");
-        }
-
-        return conn;
-    }
-
-    /// <summary>确保专用 schema 存在并返回追加 SearchPath 的连接串（测试写副作用全部落在该 schema）。</summary>
-    private static async Task<string> EnsureIsolatedSchemaAsync(string connectionString, string schemaName)
-    {
-        var bare = connectionString.Contains("SearchPath=", StringComparison.OrdinalIgnoreCase)
-            ? connectionString[..connectionString.IndexOf("SearchPath=", StringComparison.OrdinalIgnoreCase)].TrimEnd(';')
-            : connectionString;
-
-        await using var conn = new NpgsqlConnection(bare);
-        await conn.OpenAsync();
-        await using var cmd = new NpgsqlCommand(
-            $"CREATE SCHEMA IF NOT EXISTS {schemaName}", conn);
-        await cmd.ExecuteNonQueryAsync();
-
-        return bare.EndsWith(";") ? bare + $"SearchPath={schemaName}" : bare + $";SearchPath={schemaName}";
-    }
-
-    /// <summary>一个匿名端点的判定面：路由模板 + 显示名（控制器动作/页面的全名）。</summary>
     private sealed record EndpointInfo(string Template, string DisplayName);
 
     /// <summary>与 PreLoginRazorPagesConvention.AnonymousPageRoutes 同源的页面路径清单。</summary>
