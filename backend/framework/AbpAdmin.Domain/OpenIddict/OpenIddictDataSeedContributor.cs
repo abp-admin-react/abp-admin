@@ -265,7 +265,12 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
             var postLogoutRedirectUris = new List<string>
             {
                 appClientRootUrl,
-                $"{appClientRootUrl}/"
+                $"{appClientRootUrl}/",
+                // SPA（oidc-client-ts）的 post_logout_redirect_uri = {origin}/user/login
+                //（与 redirect_uri 的 /user/callback 对称）。缺了它 end-session 在 Validate
+                // 阶段即被拒（invalid post_logout_redirect_uri→400），服务端会话吊销处理器
+                // 根本不执行，SPA 只是本地清 token——UI 登出路径的会话吊销被静默短路（实测）。
+                $"{appClientRootUrl}/user/login"
             };
             postLogoutRedirectUris.AddRange(configurationSection
                 .GetSection("AbpAdmin_App:ExtraPostLogoutRedirectUris").Get<List<string>>() ?? new List<string>());
