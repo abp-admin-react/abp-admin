@@ -4,7 +4,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Imaging;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -176,20 +175,12 @@ public class ProfileAvatarAppService : AbpAdminAppService, IProfileAvatarAppServ
             var extension = found.Value.Extension;
             var bytes = found.Value.Bytes;
 
-            // 缓存头：头像内容按版本变化，URL 带 v 参数，可安全长缓存（策略常量见 AvatarCacheConsts）。
-            // IHttpContextAccessor 惰性解析：非 Web 宿主（集成测试直接调 AppService）没有注册，跳过即可。
-            // TODO（重构报告问题 18）：缓存头属 Http 关注点，理想位置是 HttpApi 层包装器；
-            //   当前头像走动态 API 无独立控制器，下沉需新增 Host 侧实现（IAvatarCachePolicyApplier），待后续处理。
-            var httpContext = LazyServiceProvider.LazyGetService<IHttpContextAccessor>()?.HttpContext;
-            if (httpContext is not null)
-            {
-                httpContext.Response.Headers.CacheControl = AvatarCacheConsts.CacheControlHeaderValue;
-                var version = user.GetProperty<string?>(AbpAdminConsts.AvatarVersionPropertyName, null);
-                if (!version.IsNullOrWhiteSpace())
-                {
-                    httpContext.Response.Headers.ETag = $"\"{version}\"";
-                }
-            }
+            // 缓存头：头像内容按版本变化，URL 带 v 参数，可安全长缓存（策略常量见
+            // AvatarCacheConsts）。头属 Http 关注点，经 IAvatarCachePolicyApplier 端口由
+            // 宿主侧实现写入（HttpApi.Host/Profile/AvatarCachePolicyApplier）；非 Web 宿主
+            // （集成测试直调 AppService）无实现，解析为 null 即自然跳过。
+            LazyServiceProvider.LazyGetService<IAvatarCachePolicyApplier>()
+                ?.Apply(user.GetProperty<string?>(AbpAdminConsts.AvatarVersionPropertyName, null));
 
             return new RemoteStreamContent(
                 new MemoryStream(bytes),
