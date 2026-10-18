@@ -7,7 +7,11 @@
     <!-- LeptonXLite 主题走独立版本号，不要改成 AbpVersion -->
     <AbpLeptonXLiteVersion>5.6.1</AbpLeptonXLiteVersion>
     <AbpStudioVersion>3.0.10</AbpStudioVersion>
-    <MicrosoftVersion>10.0.9</MicrosoftVersion>
+    <!-- 10.0.9 → 10.0.13：2026-10-18 安全审计（面 H / OS 扫描）实测 aspnet:10.0 已发布的
+         servicing 构建内含 10.0.13，trivy 对 Microsoft.AspNetCore.App.Runtime 10.0.11 给出
+         2 条 CRITICAL + 11 条 HIGH，修复版本均为 10.0.13。包版本与运行时对齐后，
+         DataProtection 10.0.9 引入的 System.Security.Cryptography.Xml 8 条 high 也一并消解。 -->
+    <MicrosoftVersion>10.0.13</MicrosoftVersion>
     <SerilogAspNetCoreVersion>9.0.0</SerilogAspNetCoreVersion>
     <HealthChecksVersion>9.0.0</HealthChecksVersion>
 
@@ -279,5 +283,24 @@
     <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.EntityFrameworkCore" Version="$(EasyAbpPaymentServiceVersion)" />
     <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.HttpApi" Version="$(EasyAbpPaymentServiceVersion)" />
     <PackageVersion Include="EasyAbp.Abp.WeChat.Pay" Version="$(EasyAbpWeChatVersion)" />
+
+    <!-- ===== 传递依赖钉版（本仓已开 CentralPackageTransitivePinningEnabled=true，
+         以下条目直接抬升传递解析结果；来源：2026-10-18 面 H 依赖 CVE 实测） ===== -->
+    <!-- MessagePack 3.1.7 → 3.1.9：GHSA-qhrr-8q5h-9q3h / CVE-2026-92707
+         「嵌套数组可越过 buffer 上限」。由 MagicOnion 7.10.2 引入，
+         而 MagicOnion 是服务端反序列化客户端可控数据的通道，故按可达对待。 -->
+    <PackageVersion Include="MessagePack" Version="3.1.9" />
+    <PackageVersion Include="MessagePack.Annotations" Version="3.1.9" />
+    <!-- AWSSDK.Core 4.0.0.28 → 4.0.3.3：GHSA-9cvc-h2w8-phrp / CVE-2026-22611（low，region 解析防御加固）
+         由 AWSSDK.S3 / AWSSDK.SecurityToken（文件管理 S3 存储链）引入 -->
+    <PackageVersion Include="AWSSDK.Core" Version="4.0.3.3" />
+    <!-- Pkcs 由 MimeKit 4.17.0 以最低版本约束引入（解析到 10.0.0），
+         抬到与运行时同版以免图上继续挂 CVE-2026-84008(high)/CVE-2026-70162(medium) -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.13" />
+    <!-- KubernetesClient 15.0.1（GHSA-w7r3-mgwf-4mqq / CVE-2025-9708, moderate）暂不抬：
+         修复版 17.0.14 是跨大版本，且它由 AspNetCore.HealthChecks.UI 9.0.0 传递引入，
+         正解是升 HealthChecks 主版本（一并解决 host 镜像里 HealthCheckReportCollector
+         打 [::]:44395 稳定刷异常的问题）。留待独立评估，勿在此静默改动。 -->
   </ItemGroup>
 </Project>

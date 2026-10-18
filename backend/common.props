@@ -6,7 +6,16 @@
     <!-- NU1608：Nethereum 4.29 声明 Logging.Abstractions <10.0.0，实际与 10.x 兼容
          （依赖约束未更新）；等 Nethereum 出新版后移除此抑制 -->
     <NoWarn>$(NoWarn);CS1591;NU1608</NoWarn>
-    <NuGetAudit>false</NuGetAudit>
+    <!-- 依赖漏洞审计：2026-10-18 安全审计（面 H）实测，本仓库关闭它等于放弃唯一的自动检出通道。
+         强制开启后，用 dotnet list 加 vulnerable 与 include-transitive 两个开关查询整解决方案，
+         立刻报出 5 个包 / 13 条通告（含 System.Security.Cryptography.Xml 八条 high）。
+         AuditMode=all 覆盖传递依赖，AuditLevel=low 让低危也现身（只观测，不阻断构建；
+         阻断由 scripts/security-scan.sh 在 CI 里按严重度做）。
+         注意：不要把门禁建在 restore 告警上。同一份依赖图 restore 报 0 Warning，
+         而 vulnerable 查询报 13 条，两套路径不一致（审计实测）。 -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
 	<AbpProjectType>app</AbpProjectType>
   </PropertyGroup>
 
