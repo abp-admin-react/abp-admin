@@ -226,14 +226,18 @@ public abstract class IdentityUserAdminAppServiceTests<TStartupModule> : AbpAdmi
             // AbpSingleActiveTokenProvider.GenerateAsync 会经仓储加载用户令牌集合，需要环境 UoW
             // （生产路径无此问题：应用服务与 Razor 页处理器都在 ABP 的 UoW 过滤器内）。
             // 必须整段一个 UoW 而不是只包 Generate：内外两个 UoW 各自加载同一用户会造成
-            // EF 双实例跟踪冲突（实测）；单 UoW 内 stampBefore 是旧值拷贝、断言语义不变。
+            // EF 双实例跟踪冲突（"another instance ... is already being tracked"，实测；
+            // A/B 证据：同测试 10.6.2 通过、10.7.0 失败，见提交 a2684d1d）。
+            // wrap 内断言读的是跟踪实例（内存态），wrap 外另做 fresh read 验证提交后的
+            // 持久化状态——两层各自把关，缺一层都会留下空洞。
+            string? stampBefore = null;
             await WithUnitOfWorkAsync(async () =>
             {
                 // Arrange - 走正规流程确认邮箱（不直接改实体，保持与运行时一致）
                 var user = await _userManager.GetByIdAsync(testUserId);
                 var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
                 (await _userManager.ConfirmEmailAsync(user, token)).Succeeded.ShouldBeTrue();
-                var stampBefore = (await _userManager.GetByIdAsync(testUserId)).SecurityStamp;
+                stampBefore = (await _userManager.GetByIdAsync(testUserId)).SecurityStamp;
 
                 // Act - 管理端启用
                 await _identityUserAdminAppService.SetTwoFactorEnabledAsync(
@@ -242,7 +246,8 @@ public abstract class IdentityUserAdminAppServiceTests<TStartupModule> : AbpAdmi
                 var afterEnable = await _userManager.GetByIdAsync(testUserId);
                 afterEnable.TwoFactorEnabled.ShouldBeTrue();
                 // 启用必须经 UserManager（内部轮换 security stamp 使该用户现存令牌失效），
-                // 绕过 UserManager 直改实体的写法在这里会红
+                // 绕过 UserManager 直改实体的写法在这里会红（此处读的是跟踪实例，
+                // 持久化验证在 wrap 外）
                 afterEnable.SecurityStamp.ShouldNotBe(stampBefore);
 
                 // Act - 管理端禁用
@@ -251,6 +256,12 @@ public abstract class IdentityUserAdminAppServiceTests<TStartupModule> : AbpAdmi
 
                 (await _userManager.GetByIdAsync(testUserId)).TwoFactorEnabled.ShouldBeFalse();
             });
+
+            // wrap 外 fresh read（新的 UoW/DbContext）：验证单 UoW 提交后的持久化状态——
+            // stamp 已轮换且最终处于禁用态，两级断言补齐"内存态 + 持久化态"。
+            var persisted = await _userManager.GetByIdAsync(testUserId);
+            persisted.TwoFactorEnabled.ShouldBeFalse();
+            persisted.SecurityStamp.ShouldNotBe(stampBefore);
         }
         finally
         {
