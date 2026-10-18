@@ -85,8 +85,8 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
         // 操作日志的 CorrelationId 与 ABP AuditLog/SecurityLog 同源（ICorrelationIdProvider），
         // 是手动日志与审计日志的 join 键——审计参数已被 IgnoredTypes 关掉，join 不到就成了孤儿轨迹
         _correlationIdProvider = correlationIdProvider;
-        // IP/UA 与既有 OperationLogActionFilter 写出的日志字段对齐（Chrome 实测发现旧记录有、
-        // 手写记录缺，语义轨迹质量不该因入口不同而缩水）
+        // IP/UA 与既有 OperationLogActionFilter 写出的日志字段对齐——语义轨迹质量
+        // 不该因入口不同而缩水
         _httpContextAccessor = httpContextAccessor;
     }
 

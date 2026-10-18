@@ -84,9 +84,8 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
             // 只重算 Code、不校验后代，移入自身子树会让 Code 以自身旧前缀重算，
             // 层级树渲染、Code 前缀查询、OU 派生角色与数据范围全部失真且难以回滚。
             // OU Code 是祖先链物化路径：目标父的 Code 以本节点 Code 为前缀 ⇒ 目标在本节点子树内。
-            // 已知限制（六透镜第二轮定性为可接受）：守卫读 Code 与 Manager 重算 Code 之间
-            // 存在 TOCTOU 窗口（需两个管理员并发反向移动同一对节点才可触达），未加事务隔离——
-            // 上轮无守卫直调 manager 时同样存在且无任何防护，本轮为净改善。
+            // 已知限制（有意接受）：守卫读 Code 与 Manager 重算 Code 之间存在 TOCTOU 窗口
+            // （需两个管理员并发反向移动同一对节点才可触达），未加事务隔离。
             var targetParent = await _organizationUnitRepository.GetAsync(input.ParentId.Value);
             if (targetParent.Code.StartsWith(ou.Code))
             {
