@@ -37,17 +37,9 @@ namespace AbpAdmin.Authorization;
 /// 必须真的携带匿名元数据。
 /// </para>
 /// <para>
-/// 宿主进程内静态共享且从不 Dispose：Quartz 的 LogProvider 把 LoggerFactory 缓存在
-/// 静态字段里，第一个实例 DisposeAsync 之后任何再初始化都会撞
-/// ObjectDisposedException——"每测试方法一个宿主"在这个宿主上不可行。测试进程
-/// 结束即回收，泄漏是刻意的、可接受的。LazyHost 已按本注释原先的要求提升为公共基建
-/// <see cref="HostTestBed"/>，本类与 AnonymousSettingTrimTests 共用同一份宿主。
-/// </para>
-/// <para>
-/// 数据库隔离：宿主初始化有真实写库副作用（静态模板同步、后台作业注册）。凭证取真实
-/// 覆盖层——本程序集加载时已把 Testcontainers PG 的容器连接串放进环境变量
-/// ConnectionStrings__Default（见 TestPgAssemblyInitializer），宿主在容器默认库的专用
-/// schema abp_admin_hosttest 里自举迁移+种子，副作用全部落在进程容器里，随进程回收。
+/// 宿主由 <see cref="HostTestBed"/> 提供（进程内共享一份、从不 Dispose、初始化写副作用
+/// 隔离在 Testcontainers PG 的专用 schema abp_admin_hosttest）——约束与动机见其类注释；
+/// 本类与 AnonymousSettingTrimTests 共用同一份宿主。
 /// </para>
 /// </remarks>
 public class AnonymousEndpointSweepTests

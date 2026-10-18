@@ -52,6 +52,12 @@ public class AbpAdminHttpApiModule : AbpModule
         Configure<AbpApplicationConfigurationOptions>(options =>
         {
             options.Contributors.Add(new DataDictionaryTagTypesApplicationConfigurationContributor());
+            // 审计 F-E3/#4（2026-10-18）：匿名请求裁剪 setting.values（登录防线画像不下发）。
+            // 无宿主依赖（只读 ICurrentUser），按本仓分层惯例（DataDictionary 同款）注册在
+            // HttpApi 层＝引用本层的任何组合根默认获得该防线；CookieConsent/SignalR 因依赖
+            // 宿主配置仍注册在宿主模块。注册在位由 AnonymousSettingTrimTests 钉死（GitHub
+            // abpframework/abp#19879：贡献者不会被自动发现）。
+            options.Contributors.Add(new AnonymousSettingTrimApplicationConfigurationContributor());
         });
     }
 

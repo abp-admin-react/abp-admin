@@ -8,8 +8,7 @@ namespace AbpAdmin;
 
 /// <summary>
 /// 测试进程内共享的“完整初始化宿主”（自 <see cref="Authorization.AnonymousEndpointSweepTests"/>
-/// 的 LazyHost 提升而来的公共基建——该类注释原本就要求第二个需要完整宿主的测试类
-/// 复用而不是再复制一份）。宿主初始化到端点表构建完成（InitializeApplicationAsync），
+/// 的 LazyHost 提升而来的公共基建）。宿主初始化到端点表构建完成（InitializeApplicationAsync），
 /// 不启动 Kestrel；写副作用落在 Testcontainers PG 的专用 schema（abp_admin_hosttest）里。
 /// 宿主进程内静态共享且从不 Dispose：Quartz 的 LogProvider 把 LoggerFactory 缓存在静态
 /// 字段里，Dispose 后再初始化会撞 ObjectDisposedException（AnonymousEndpointSweepTests

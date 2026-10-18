@@ -7,10 +7,11 @@
          路径穿越，Low；修复提交 = PR #26232 "Validate blob names in file system provider
          and blogging file service"）。本仓默认 Database provider、容器名多为服务端生成，
          实际暴露低，但补丁零成本。10.7.0（10-06）暂缓：新次版本需过迁移指南。
-         注意：GHSA 通告的版本区间只把 10.7.0 列为修复版（未列 10.6.2），属元数据滞后——
-         10.6.2 的 DefaultBlobFilePathCalculator 源码已含三重校验（根路径 / '.' 与 '..' 段 /
-         规范化包含性检查；2026-10-18 与 10.6.1 同文件对照核实，后者是裸 Path.Combine）。
-         Dependabot 若按通告区间对 10.6.2 告警，按已知误报处理。 -->
+         注意：该 GHSA 通告目前只在 abpframework/abp 仓库安全通告页可见——ID 尚未同步进
+         GitHub 全局 Advisory Database（github.com/advisories 与 OSV 均查不到，2026-10-18 实测），
+         同步前 Dependabot 不会按它告警；若同步后按其区间（只列 10.7.0 为修复版）对 10.6.2
+         告警，按已知误报处理——修复确实在包内，可独立复核的证据：PR #26232 + 10.6.1/10.6.2
+         两个 tag 的 DefaultBlobFilePathCalculator.cs 逐行对照。 -->
     <AbpVersion>10.6.2</AbpVersion>
     <!-- LeptonXLite 主题走独立版本号，不要改成 AbpVersion -->
     <AbpLeptonXLiteVersion>5.6.1</AbpLeptonXLiteVersion>

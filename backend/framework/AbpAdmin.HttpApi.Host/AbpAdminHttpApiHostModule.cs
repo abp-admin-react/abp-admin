@@ -377,9 +377,10 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.Contributors.Add(new CookieConsentApplicationConfigurationContributor());
             // T3.2: 下发 SignalR:Enabled，前端读到 false 直接不尝试连接（降级轮询）
             options.Contributors.Add(new SignalRApplicationConfigurationContributor());
-            // 审计 F-E3/#4（2026-10-18）：匿名请求裁剪 setting.values——Lockout/口令策略/
-            // Captcha/IdleTimeout 等登录防线画像不再对未认证方下发；认证路径不触（见贡献者注释）
-            options.Contributors.Add(new AnonymousSettingTrimApplicationConfigurationContributor());
+            // 审计 F-E3/#4 的匿名 setting.values 裁剪贡献者不在此注册：它无宿主依赖，
+            // 按分层惯例（DataDictionary 同款）注册在 AbpAdminHttpApiModule——HttpApi 层
+            // 被引用即生效，防线不做成每个宿主的可选项。此处两个贡献者都依赖宿主绑定的
+            // 配置节，才留在宿主模块。
         });
 
         // 文件上传体积限制：与 FileManagement 节的容器限额对齐，否则 Kestrel / 表单解析

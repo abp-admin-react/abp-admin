@@ -54,7 +54,7 @@ internal static class HostUnderTest
     /// so anything that has to rewrite it must run in this window. Callers that intend to take the
     /// host all the way to <c>InitializeApplicationAsync</c> must isolate the database here — either
     /// point <c>ConnectionStrings:Default</c> at a dedicated database/container of its own (as
-    /// <c>AnonymousEndpointSweepTests</c> does with its dedicated schema, since init needs a
+    /// <c>HostTestBed</c> does with its dedicated schema, since init needs a
     /// migrated schema and an empty database will not boot) or accept writes to a real one.
     /// </param>
     /// <remarks>
