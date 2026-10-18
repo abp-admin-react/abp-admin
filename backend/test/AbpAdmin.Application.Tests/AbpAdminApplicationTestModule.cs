@@ -49,7 +49,7 @@ public class AbpAdminApplicationTestModule : AbpModule
         // ABP 10.7.0 起的直调陷阱：邮件确认/重置密码类的 Generate...TokenAsync（走
         // AbpSingleActiveTokenProvider 家族，经仓储加载令牌集合）需要环境 UoW——
         // 测试里直调 UserManager 必须包 WithUnitOfWorkAsync（见
-        // IdentityUserAdminAppServiceTests 的整段单 UoW 写法与 A/B 证据，提交 a2684d1d）；
+        // IdentityUserAdminAppServiceTests 的整段单 UoW 写法）；
         // DefaultTokenProviders 注册的 DataProtection 型 providers（2FA Email/Phone 等）无此要求。
 
         // T2.3：测试专用模板定义（StoredTemplateContentContributorTests 的被测模板）

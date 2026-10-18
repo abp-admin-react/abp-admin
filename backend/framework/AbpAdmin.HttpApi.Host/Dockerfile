@@ -3,10 +3,8 @@
 #   cd backend && docker build -f framework/AbpAdmin.HttpApi.Host/Dockerfile -t abp-admin-host . ）
 
 # ---- 构建：restore 单独成层（csproj 不变则命中缓存，不重下包） ----
-# 基础镜像按 digest 钉版（2026-10-18 面 H 安全审计）。原因：tag 是浮动的，
-# 上一轮 lab 里 aspnet:10.0 停在 8 月的构建，运行时是 ASP.NET 10.0.11，
-# trivy 实测该版本带 2 条 CRITICAL + 11 条 HIGH，修复版本 10.0.13（= 现钉的这个 digest 的内容）。
-# 刷新方式：docker pull 同 tag 的新构建 → 取新 digest →
+# 基础镜像按 digest 钉版：tag 浮动（aspnet:10.0 曾长期停在带 2 CRITICAL + 11 HIGH 的
+# 10.0.11 构建），digest 不变。刷新方式：docker pull 同 tag 的新构建 → 取新 digest →
 # 改这里并跑 scripts/security-scan.sh 复扫；不要只改 tag（tag 会变，digest 不会）。
 FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
 ARG CERT_PASSPHRASE=dev-only-change-me

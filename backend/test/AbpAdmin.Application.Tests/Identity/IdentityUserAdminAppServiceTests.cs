@@ -226,8 +226,7 @@ public abstract class IdentityUserAdminAppServiceTests<TStartupModule> : AbpAdmi
             // AbpSingleActiveTokenProvider.GenerateAsync 会经仓储加载用户令牌集合，需要环境 UoW
             // （生产路径无此问题：应用服务与 Razor 页处理器都在 ABP 的 UoW 过滤器内）。
             // 必须整段一个 UoW 而不是只包 Generate：内外两个 UoW 各自加载同一用户会造成
-            // EF 双实例跟踪冲突（"another instance ... is already being tracked"，实测；
-            // A/B 证据：同测试 10.6.2 通过、10.7.0 失败，见提交 a2684d1d）。
+            // EF 双实例跟踪冲突（"another instance ... is already being tracked"）。
             // wrap 内断言读的是跟踪实例（内存态），wrap 外另做 fresh read 验证提交后的
             // 持久化状态——两层各自把关，缺一层都会留下空洞。
             string? stampBefore = null;

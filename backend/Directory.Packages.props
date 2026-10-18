@@ -3,26 +3,22 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
 
-    <!-- 10.6.2 → 10.7.0（2026-10-18 决策，直接上 10.7.0）：
-         ① GHSA-4x2h-f4f8-xjr6（Volo.Abp.BlobStoring.FileSystem 路径穿越，Low）修复
-           在 10.6.2（PR #26232）与 10.7.0 均在，通告页把修复区间只写成 10.7.0——
-           升 10.7.0 后连"通告区间未覆盖"的解释成本都省了；
-         ② 10.7.0 的安全集：拒绝无效身份会话 cookie（不再登出）、OpenIddict 7.7.0、
-           client_id 不进交互式认证 cookie、租户连接串不进审计日志、UoW api key 里
-           连接串改哈希、密码授权 2FA 流程修复；
-         ③ 官方无 10.6→10.7 迁移指南（ABP 政策：需要动手才写指南），属常规升级。
-         注意：该 GHSA ID 未同步进 GitHub 全局 Advisory Database（github.com/advisories
-         与 OSV 均查不到，2026-10-18 实测），同步前 Dependabot 不会按它告警；若同步后
-         告警，可独立复核：PR #26232 + 10.6.1/10.7.0 两个 tag 的
-         DefaultBlobFilePathCalculator.cs 对照（10.6.1 是裸 Path.Combine）。 -->
+    <!-- ABP 10.7.0：含 GHSA-4x2h-f4f8-xjr6（Volo.Abp.BlobStoring.FileSystem 路径穿越，
+         Low）修复（PR #26232）与安全集（拒绝无效身份会话 cookie、OpenIddict 7.7.0、
+         client_id 不进交互式认证 cookie、租户连接串不进审计日志、UoW api key 连接串
+         改哈希、密码授权 2FA 修复）。官方无 10.6→10.7 迁移指南。
+         通告处置口径：该 GHSA ID 未同步进 GitHub 全局 Advisory Database（github.com/
+         advisories 与 OSV 均查不到），同步前 Dependabot 不会按它告警；若同步后按其
+         区间（只列 10.7.0 为修复版）告警，按已知误报处理——修复确在包内，可独立复核：
+         PR #26232 + 10.6.1/10.7.0 两个 tag 的 DefaultBlobFilePathCalculator.cs 对照
+         （10.6.1 为裸 Path.Combine）。 -->
     <AbpVersion>10.7.0</AbpVersion>
     <!-- LeptonXLite 主题走独立版本号，不要改成 AbpVersion -->
     <AbpLeptonXLiteVersion>5.6.1</AbpLeptonXLiteVersion>
     <AbpStudioVersion>3.0.10</AbpStudioVersion>
-    <!-- 10.0.9 → 10.0.13：2026-10-18 安全审计（面 H / OS 扫描）实测 aspnet:10.0 已发布的
-         servicing 构建内含 10.0.13，trivy 对 Microsoft.AspNetCore.App.Runtime 10.0.11 给出
-         2 条 CRITICAL + 11 条 HIGH，修复版本均为 10.0.13。包版本与运行时对齐后，
-         DataProtection 10.0.9 引入的 System.Security.Cryptography.Xml 8 条 high 也一并消解。 -->
+    <!-- 与运行时对齐：aspnet 10.0.11 带 2 CRITICAL + 11 HIGH（trivy），修复版本
+         10.0.13（= 微软 2026-10 Patch Tuesday 服务版本）。DataProtection 同版对齐后
+         System.Security.Cryptography.Xml 的 8 条 high 一并消解（无需单钉）。 -->
     <MicrosoftVersion>10.0.13</MicrosoftVersion>
     <SerilogAspNetCoreVersion>9.0.0</SerilogAspNetCoreVersion>
     <HealthChecksVersion>9.0.0</HealthChecksVersion>
@@ -176,7 +172,7 @@
     <!-- EF 设计时工具（dotnet ef）：与 EF Core 10 运行时对齐 -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <!-- Npgsql：10.0.0 → 10.0.3（ABP 10.7.0 的 EF PostgreSQL 提供器传递要求 >= 10.0.3，NU1109 实测） -->
+    <!-- ABP 10.7.0 的 EF PostgreSQL 提供器传递底线 >= 10.0.3 -->
     <PackageVersion Include="Npgsql" Version="10.0.3" />
 
     <!-- Serilog -->
@@ -297,16 +293,16 @@
     <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.HttpApi" Version="$(EasyAbpPaymentServiceVersion)" />
     <PackageVersion Include="EasyAbp.Abp.WeChat.Pay" Version="$(EasyAbpWeChatVersion)" />
 
-    <!-- ===== 传递依赖钉版（本仓已开 CentralPackageTransitivePinningEnabled=true，
-         以下条目直接抬升传递解析结果；来源：2026-10-18 面 H 依赖 CVE 实测） ===== -->
-    <!-- MessagePack 3.1.7 → 3.1.9：GHSA-qhrr-8q5h-9q3h / CVE-2026-92707
+    <!-- ===== 传递依赖钉版（CentralPackageTransitivePinningEnabled=true，
+         以下条目直接抬升传递解析结果） ===== -->
+    <!-- MessagePack 3.1.9：GHSA-qhrr-8q5h-9q3h / CVE-2026-92707
          「嵌套数组可越过 buffer 上限」。由 MagicOnion 7.10.2 引入，
          而 MagicOnion 是服务端反序列化客户端可控数据的通道，故按可达对待。 -->
     <PackageVersion Include="MessagePack" Version="3.1.9" />
     <PackageVersion Include="MessagePack.Annotations" Version="3.1.9" />
-    <!-- AWSSDK.Core：4.0.3.3（GHSA-9cvc-h2w8-phrp / CVE-2026-22611 修复版）→ 4.0.102.3：
-         ABP 10.7.0 的 BlobStoring.Aws 传递要求 AWSSDK.Core >= 4.0.102（NU1109 实测），
-         4.0.102.3 同样覆盖该 CVE。由 AWSSDK.S3 / AWSSDK.SecurityToken（文件管理 S3 存储链）引入 -->
+    <!-- AWSSDK.Core 4.0.102.3：覆盖 GHSA-9cvc-h2w8-phrp / CVE-2026-22611，同时满足
+         ABP 10.7.0 BlobStoring.Aws 的传递底线 >= 4.0.102。由 AWSSDK.S3 /
+         AWSSDK.SecurityToken（文件管理 S3 存储链）引入 -->
     <PackageVersion Include="AWSSDK.Core" Version="4.0.102.3" />
     <!-- Pkcs 由 MimeKit 4.17.0 以最低版本约束引入（解析到 10.0.0），
          抬到与运行时同版以免图上继续挂 CVE-2026-84008(high)/CVE-2026-70162(medium) -->

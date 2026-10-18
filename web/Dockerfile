@@ -19,11 +19,10 @@ COPY . .
 RUN pnpm build
 
 FROM nginx:1.29-alpine
-# Alpine 侧包全部升到当前：2026-10-18 面 H/OS 扫描实测，nginx:1.29-alpine 这个 tag 的上一次
-# 构建停在 4 月，带 44 条 HIGH（libssl3/libcrypto3 3.5.6-r0 含 PKCS7_verify 堆 UAF 与无界内存 DoS，
-# 而这两个库被 /usr/sbin/nginx 实际链接；另有 curl/libcurl 与 libexpat 十余条）。
-# 加这一行后 trivy 复扫该基座 = 0 CRITICAL / 0 HIGH，且 nginx 仍是 1.29.8（不做版本跳跃）。
-# 不换 nginx:alpine（那是 1.31.7 mainline，属行为变更，需另行评估）。
+# 基座只升包不换 nginx 大版本：alpine 基础镜像构建频率低，停旧构建时 trivy 可报
+# 数十条 HIGH（libssl3/libcrypto3 被 /usr/sbin/nginx 实际链接）。apk upgrade 后
+# trivy 复扫 0 CRITICAL / 0 HIGH。不换 nginx:alpine（mainline 大版本，属行为变更，
+# 需另行评估）。
 RUN apk upgrade --no-cache -a
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY nginx-proxy-params.conf /etc/nginx/proxy_params_backend.conf
