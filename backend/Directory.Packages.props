@@ -14,7 +14,9 @@
          （10.6.1 为裸 Path.Combine）。 -->
     <AbpVersion>10.7.0</AbpVersion>
     <!-- LeptonXLite 主题走独立版本号，不要改成 AbpVersion -->
-    <AbpLeptonXLiteVersion>5.6.1</AbpLeptonXLiteVersion>
+    <!-- 与 ABP 10.7.0 同日配套版（5.6.1 是 10.6 配套；旧主题的 bundle 定义缺
+         jquery-migrate，Razor 页渲染即 500，lab 实测） -->
+    <AbpLeptonXLiteVersion>5.7.0</AbpLeptonXLiteVersion>
     <AbpStudioVersion>3.0.10</AbpStudioVersion>
     <!-- 与运行时对齐：aspnet 10.0.11 带 2 CRITICAL + 11 HIGH（trivy），修复版本
          10.0.13（= 微软 2026-10 Patch Tuesday 服务版本）。DataProtection 同版对齐后

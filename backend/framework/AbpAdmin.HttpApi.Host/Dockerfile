@@ -38,6 +38,29 @@ RUN dotnet restore framework/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj
 
 COPY framework/ framework/
 COPY modules/ modules/
+
+# ---- 前端库还原：官方约定 wwwroot/libs 不进库（.gitignore "Use abp install-libs
+# to restore"，ABP 模板同款），容器构建必须自带还原步骤。Razor 页（/Account/Login、
+# /Error）的 ABP Bundling 需要 /libs/abp 等物理文件；SPA 登录走 code flow 会跳转到
+# Razor 登录页——缺 libs 时渲染即 500→302 死循环，等于 docker 部署上主登录流不可用
+# （lab 实测）。node 二进制从官方 node 镜像取（sdk 基座不带 node）；abp CLI 为
+# dotnet 全局工具，install-libs 只做 npm 层搬运、与 ABP 版本解耦。 ----
+COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+ENV PATH="${PATH}:/root/.dotnet/tools"
+RUN dotnet tool install --global Volo.Abp.Studio.Cli
+RUN abp install-libs -wd framework/AbpAdmin.HttpApi.Host
+# 上游 10.7.0 的 MVC 打包缺口：JQueryScriptContributor 引用 /libs/jquery-migrate/
+# jquery-migrate.js，但 @abp/jquery@10.7.0 只把它声明为 npm 依赖，install-libs 的
+# 拷贝通道不覆盖它（10.7.0 源码树无 module.json 机制，实测缺目录→Razor 页 500）。
+# 按 @abp/jquery 同款约束（~4.0.2）显式补装，上游修复后移除。
+RUN cd framework/AbpAdmin.HttpApi.Host \
+    && npm install jquery-migrate@~4.0.2 --no-save --silent \
+    && mkdir -p wwwroot/libs/jquery-migrate \
+    && cp node_modules/jquery-migrate/dist/jquery-migrate.js wwwroot/libs/jquery-migrate/
+
 RUN dotnet publish framework/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj \
     -c Release -o /app/publish --no-restore
 
