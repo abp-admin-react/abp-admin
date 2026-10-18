@@ -52,10 +52,17 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 ENV PATH="${PATH}:/root/.dotnet/tools"
 RUN dotnet tool install --global Volo.Abp.Studio.Cli
 RUN abp install-libs -wd framework/AbpAdmin.HttpApi.Host
-# 上游 10.7.0 的 MVC 打包缺口：JQueryScriptContributor 引用 /libs/jquery-migrate/
-# jquery-migrate.js，但 @abp/jquery@10.7.0 只把它声明为 npm 依赖，install-libs 的
-# 拷贝通道不覆盖它（10.7.0 源码树无 module.json 机制，实测缺目录→Razor 页 500）。
-# 按 @abp/jquery 同款约束（~4.0.2）显式补装，上游修复后移除。
+# 同族坑一：yarn 把 jquery-validation-unobtrusive 等旧 range（>=1.2.6 / <4.0 族）
+# 解析出的 jquery 3.7.1 提升到 node_modules 根，install-libs 从根拷贝——而
+# @abp/jquery@10.7.0 声明的 jquery ~4.0.0 被嵌套。bundle（JQueryScriptContributor）
+# 只引用 /libs/jquery/jquery.js，故先用嵌套正版覆盖（必须在下面 npm install 之前：
+# npm 会按自己的视角重整 node_modules，把 yarn 的嵌套 jquery 4 清掉）。
+RUN cp framework/AbpAdmin.HttpApi.Host/node_modules/@abp/jquery/node_modules/jquery/dist/jquery.js \
+    framework/AbpAdmin.HttpApi.Host/wwwroot/libs/jquery/jquery.js
+# 同族坑二（上游 10.7.0 MVC 打包缺口）：JQueryScriptContributor 引用
+# /libs/jquery-migrate/jquery-migrate.js，但 @abp/jquery@10.7.0 只把它声明为 npm
+# 依赖，install-libs 的拷贝通道不覆盖它（10.7.0 源码树无 module.json 机制，实测
+# 缺目录→Razor 页 500）。按 @abp/jquery 同款约束（~4.0.2）显式补装，上游修复后移除。
 RUN cd framework/AbpAdmin.HttpApi.Host \
     && npm install jquery-migrate@~4.0.2 --no-save --silent \
     && mkdir -p wwwroot/libs/jquery-migrate \
