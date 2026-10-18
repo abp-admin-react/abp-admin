@@ -3,16 +3,19 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
 
-    <!-- 10.6.1 → 10.6.2（2026-10-12）：吃掉 GHSA-4x2h-f4f8-xjr6（Volo.Abp.BlobStoring.FileSystem
-         路径穿越，Low；修复提交 = PR #26232 "Validate blob names in file system provider
-         and blogging file service"）。本仓默认 Database provider、容器名多为服务端生成，
-         实际暴露低，但补丁零成本。10.7.0（10-06）暂缓：新次版本需过迁移指南。
-         注意：该 GHSA 通告目前只在 abpframework/abp 仓库安全通告页可见——ID 尚未同步进
-         GitHub 全局 Advisory Database（github.com/advisories 与 OSV 均查不到，2026-10-18 实测），
-         同步前 Dependabot 不会按它告警；若同步后按其区间（只列 10.7.0 为修复版）对 10.6.2
-         告警，按已知误报处理——修复确实在包内，可独立复核的证据：PR #26232 + 10.6.1/10.6.2
-         两个 tag 的 DefaultBlobFilePathCalculator.cs 逐行对照。 -->
-    <AbpVersion>10.6.2</AbpVersion>
+    <!-- 10.6.2 → 10.7.0（2026-10-18 决策，直接上 10.7.0）：
+         ① GHSA-4x2h-f4f8-xjr6（Volo.Abp.BlobStoring.FileSystem 路径穿越，Low）修复
+           在 10.6.2（PR #26232）与 10.7.0 均在，通告页把修复区间只写成 10.7.0——
+           升 10.7.0 后连"通告区间未覆盖"的解释成本都省了；
+         ② 10.7.0 的安全集：拒绝无效身份会话 cookie（不再登出）、OpenIddict 7.7.0、
+           client_id 不进交互式认证 cookie、租户连接串不进审计日志、UoW api key 里
+           连接串改哈希、密码授权 2FA 流程修复；
+         ③ 官方无 10.6→10.7 迁移指南（ABP 政策：需要动手才写指南），属常规升级。
+         注意：该 GHSA ID 未同步进 GitHub 全局 Advisory Database（github.com/advisories
+         与 OSV 均查不到，2026-10-18 实测），同步前 Dependabot 不会按它告警；若同步后
+         告警，可独立复核：PR #26232 + 10.6.1/10.7.0 两个 tag 的
+         DefaultBlobFilePathCalculator.cs 对照（10.6.1 是裸 Path.Combine）。 -->
+    <AbpVersion>10.7.0</AbpVersion>
     <!-- LeptonXLite 主题走独立版本号，不要改成 AbpVersion -->
     <AbpLeptonXLiteVersion>5.6.1</AbpLeptonXLiteVersion>
     <AbpStudioVersion>3.0.10</AbpStudioVersion>
@@ -173,7 +176,8 @@
     <!-- EF 设计时工具（dotnet ef）：与 EF Core 10 运行时对齐 -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageVersion Include="Npgsql" Version="10.0.0" />
+    <!-- Npgsql：10.0.0 → 10.0.3（ABP 10.7.0 的 EF PostgreSQL 提供器传递要求 >= 10.0.3，NU1109 实测） -->
+    <PackageVersion Include="Npgsql" Version="10.0.3" />
 
     <!-- Serilog -->
     <PackageVersion Include="Serilog.AspNetCore" Version="$(SerilogAspNetCoreVersion)" />
@@ -300,9 +304,10 @@
          而 MagicOnion 是服务端反序列化客户端可控数据的通道，故按可达对待。 -->
     <PackageVersion Include="MessagePack" Version="3.1.9" />
     <PackageVersion Include="MessagePack.Annotations" Version="3.1.9" />
-    <!-- AWSSDK.Core 4.0.0.28 → 4.0.3.3：GHSA-9cvc-h2w8-phrp / CVE-2026-22611（low，region 解析防御加固）
-         由 AWSSDK.S3 / AWSSDK.SecurityToken（文件管理 S3 存储链）引入 -->
-    <PackageVersion Include="AWSSDK.Core" Version="4.0.3.3" />
+    <!-- AWSSDK.Core：4.0.3.3（GHSA-9cvc-h2w8-phrp / CVE-2026-22611 修复版）→ 4.0.102.3：
+         ABP 10.7.0 的 BlobStoring.Aws 传递要求 AWSSDK.Core >= 4.0.102（NU1109 实测），
+         4.0.102.3 同样覆盖该 CVE。由 AWSSDK.S3 / AWSSDK.SecurityToken（文件管理 S3 存储链）引入 -->
+    <PackageVersion Include="AWSSDK.Core" Version="4.0.102.3" />
     <!-- Pkcs 由 MimeKit 4.17.0 以最低版本约束引入（解析到 10.0.0），
          抬到与运行时同版以免图上继续挂 CVE-2026-84008(high)/CVE-2026-70162(medium) -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
