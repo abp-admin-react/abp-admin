@@ -49,7 +49,9 @@ public static class HealthChecksBuilderExtensions
             settings.AddHealthCheckEndpoint("AbpAdmin Health Status", configuration["App:HealthUiCheckUrl"] ?? healthCheckUrl);
         });
 
-        // Set your HealthCheck UI Storage here
+        // UI 历史存储：进程内 InMemory 够本地/单实例用（compose 健康探针只打
+        // /health-status 端点，不消费 /health-api 的历史）；多实例部署或需要跨重启
+        // 保留历史时再换持久化实现
         healthChecksUiBuilder.AddInMemoryStorage();
 
         services.MapHealthChecksUiEndpoints(options =>

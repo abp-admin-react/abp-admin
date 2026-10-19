@@ -8,7 +8,8 @@
 #   docker compose logs -f migrator host   # 迁移种子与后端日志
 #   docker compose down              # 停栈（数据卷保留）；-v 连数据一起删
 # 起来之后：
-#   前端/登录/API/Swagger：http://localhost:8000 （前端源，纯 HTTP，无证书告警）
+#   前端/登录/API：http://localhost:8000 （前端源，纯 HTTP，无证书告警；
+#   Swagger 默认不经前端暴露——/swagger/ 不在反代清单，见下方 host 服务的 Swagger 注释）
 #
 # 可用 backend 同级（仓库根）.env 覆盖的变量（不入库）：
 #   POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
@@ -18,13 +19,14 @@
 #     启动即失败。
 #   WEB_HOST_PORT（前端宿主机端口，默认 8000）
 #   WEB_BIND（前端绑定的宿主机地址，默认 127.0.0.1——栈内置开发默认口令，不默认暴露 LAN）
-#   WEB_BIND（前端绑定的宿主机地址，默认 127.0.0.1——栈内置开发默认口令，不默认暴露 LAN）
 #   WEB_PUBLIC_URL（浏览器看到的完整前端源，默认 http://localhost:8000；
 #     改端口两处必须一起改：WEB_HOST_PORT=8100 + WEB_PUBLIC_URL=http://localhost:8100——
 #     OIDC 授权/令牌/发现端点与客户端回调地址都以它为基准）
 #
-# 连接约定与 CI（.github/workflows/ci.yml 的 postgres 服务）、appsettings.secrets.json
-# 开发样本同参（abpadmin / postgres / postgres）——同一套心智模型，改默认值三处要同步。
+# 连接默认值（postgres/postgres/abpadmin）只在本栈内自洽：db 健康检查与两个连接串
+# 都引用同一组 POSTGRES_* 变量，改 .env 一处全局生效。CI 与本栈不同参：ci.yml 的
+# 数据库由测试进程自起 Testcontainers postgres:16（随机凭据）；appsettings.secrets.json
+# 是 gitignore 的本机真实凭据，也不与此同步。
 
 name: abp-admin
 
