@@ -72,7 +72,7 @@ const abpWsProxy = {
  * - `/api/`：业务与 ABP REST
  * - `/connect/`、`/.well-known/`：OIDC 发现/授权/令牌
  * - `/Account/`：后端登录等 SSR 页
- * - `/Abp/`、`/libs/`、`/Themes/`、`/global-styles.css`、`/global-scripts.js`：ABP 虚文件
+ * - `/Abp/`、`/libs/`、`/Themes/`、`/__bundles/`、`/global-styles.css`、`/global-scripts.js`：ABP 虚文件/打包产物
  * - `/signalr-hubs/`：SignalR（须 ws）
  */
 export default {
@@ -84,6 +84,7 @@ export default {
     '/Abp/': abpProxy,
     '/libs/': abpProxy,
     '/Themes/': abpProxy,
+    '/__bundles/': abpProxy,
     '/global-styles.css': abpProxy,
     '/global-scripts.js': abpProxy,
     '/signalr-hubs/': abpWsProxy,
