@@ -40,6 +40,12 @@ public static class HealthChecksBuilderExtensions
 
         var healthChecksUiBuilder = services.AddHealthChecksUI(settings =>
         {
+            // UI 登记的轮询端点必须是绝对 URI，不能沿用上面兜底出的相对路径：
+            // HealthChecks.UI 会把它拼到 Kestrel 绑定地址上解析成 https://[::]:44395
+            // （通配地址），自轮询每 10s 抛 "GetHealthReport threw an exception ...
+            // 0.0.0.0/::0 are unspecified addresses that cannot be used as a target"。
+            // 部署侧用 App:HealthUiCheckUrl 覆盖（docker-compose host 服务指
+            // http://127.0.0.1:8080/health-status，与 compose 健康探针同端点）
             settings.AddHealthCheckEndpoint("AbpAdmin Health Status", configuration["App:HealthUiCheckUrl"] ?? healthCheckUrl);
         });
 

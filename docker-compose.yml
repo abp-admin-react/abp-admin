@@ -128,6 +128,12 @@ services:
       # 迁移已由 migrator 完成；宿主自迁移开关关掉（多实例生产姿势）。想让 host 单独
       # 自给自足（不跑 migrator）：删掉本键与 depends_on.migrator 段即可，默认值会自己建表
       Database__AutoMigrateOnStartup: "false"
+      # HealthChecks.UI 的轮询端点必须是绝对 URI（消费点 HealthChecksBuilderExtensions
+      # 的 AddHealthCheckEndpoint；默认只兜底出相对路径 /health-status，会被拼成 Kestrel
+      # 通配地址 https://[::]:44395，自轮询每 10s 刷一条 "GetHealthReport threw an
+      # exception ... 0.0.0.0/::0 cannot be used as a target address"）。容器内自探
+      # 固定打 http 回环 8080——compose 对 host 的健康探针探的也是同一端点
+      App__HealthUiCheckUrl: "http://127.0.0.1:8080/health-status"
     depends_on:
       db:
         condition: service_healthy
