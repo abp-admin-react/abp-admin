@@ -30,11 +30,11 @@ import {
 import { applyImpersonatedTokens } from '@/abp/oidc';
 import { sorterToAbpSorting } from '@/abp/sorting';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
+import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 import ClaimModal from '@/components/ClaimModal';
 import PermissionModal from '@/components/PermissionModal';
 import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 import { ResetPasswordForm, UserForm } from './components/UserForms';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 /**
  * 同步导出阈值（与后端 AuditLogExportConsts.SyncThreshold 一致）：
