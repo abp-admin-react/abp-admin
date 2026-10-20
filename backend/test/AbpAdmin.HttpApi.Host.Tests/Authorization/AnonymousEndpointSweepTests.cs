@@ -90,6 +90,16 @@ public class AnonymousEndpointSweepTests
             e => e.Template is "api/abp/application-configuration" or "api/abp/application-localization"),
 
         new(
+            "ABP /Abp/*Script 脚本端点（登录页 LeptonXLite SSR 以 <script> 引用；默认拒绝下 302 到登录页，"
+            + "浏览器按 MIME 拒执行——GUI 全量测试实锤。由 PreLoginApiEndpointsConvention 豁免。"
+            + "数据面与已豁免的 JSON 端点同源：ConfigurationScript=application-configuration 的 $.extend 包装，"
+            + "匿名视角只有匿名用户配置；LocalizationScript 只含公开文案；ServiceProxyScript 的 API 面"
+            + "与仓库随附的 web/swagger.json 同构，无边际泄露）",
+            e => e.Template is "Abp/ApplicationConfigurationScript"
+                     or "Abp/ApplicationLocalizationScript"
+                     or "Abp/ServiceProxyScript"),
+
+        new(
             "ABP 租户解析端点（SPA 子域名租户同步与登录页「切换租户」匿名调用 by-name/by-id；"
             + "由 PreLoginApiEndpointsConvention 豁免——10.6.1 控制器无授权标注，默认拒绝下 "
             + "宿主对非 AJAX 请求 401→302 到 /Error，前端把解析失败误判成「租户不存在」）",
@@ -179,6 +189,10 @@ public class AnonymousEndpointSweepTests
         "api/abp/application-localization",
         "api/abp/multi-tenancy/tenants/by-name/{name}",
         "api/abp/multi-tenancy/tenants/by-id/{id}",
+        // 登录页 <script> 引用的三个脚本端点：302 到登录页 = MIME 拒执行（GUI 实测形态）
+        "Abp/ApplicationConfigurationScript",
+        "Abp/ApplicationLocalizationScript",
+        "Abp/ServiceProxyScript",
     ];
 
     [RequiresHostDatabaseFact]

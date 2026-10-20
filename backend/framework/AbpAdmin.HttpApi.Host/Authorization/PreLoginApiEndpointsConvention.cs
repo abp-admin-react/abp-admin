@@ -26,6 +26,17 @@ public class PreLoginApiEndpointsConvention : IControllerModelConvention
         "Volo.Abp.AspNetCore.Mvc.ApplicationConfigurations.AbpApplicationConfigurationController",
         "Volo.Abp.AspNetCore.Mvc.ApplicationConfigurations.AbpApplicationLocalizationController",
         "Pages.Abp.MultiTenancy.AbpTenantController",
+
+        // —— /Abp/*Script 三个脚本端点（ABP 10.7.0 均无授权标注，程序集字符串核实过全名）——
+        // 登录页（LeptonXLite SSR）以 <script> 引用它们；默认拒绝下 302 到 /Account/Login，
+        // 浏览器按 MIME 拒执行 HTML——GUI 全量测试实锤（2026-10）。三者数据面与已豁免的
+        // JSON 端点同源：ConfigurationScript 就是 application-configuration JSON 的 $.extend 包装
+        // （匿名访客拿到的是匿名用户视角：currentUser=null、默认设置）；LocalizationScript 只含
+        // 公开本地化文案；ServiceProxyScript 暴露的 API 面与仓库随附的 web/swagger.json 同构，
+        // 无边际泄露。漏配的失配形态由 AnonymousEndpointSweepTests 反向断言兜住。
+        "Volo.Abp.AspNetCore.Mvc.ApplicationConfigurations.AbpApplicationConfigurationScriptController",
+        "Volo.Abp.AspNetCore.Mvc.Localization.AbpApplicationLocalizationScriptController",
+        "Volo.Abp.AspNetCore.Mvc.ProxyScripting.AbpServiceProxyScriptController",
     ];
 
     public void Apply(ControllerModel controller)
