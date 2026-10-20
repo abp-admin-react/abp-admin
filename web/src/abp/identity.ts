@@ -248,11 +248,21 @@ export async function getTwoFactorStatuses(
   );
 }
 
+/**
+ * 重置用户密码：走 Volo `IdentityUserAppService.UpdateAsync` 整体 PUT——ABP 10.7.0
+ * 开源版没有专用的管理员重置密码端点，带非空 password 的 Update 就是官方唯一方式。
+ * 以下三条均对照官方源码核实（abpframework/abp@10.7.0 IdentityUserAppService.cs）：
+ * - `Password` 非空才执行 Remove+Add 重置，为空则完全不动密码；
+ * - `RoleNames == null` 时 UpdateUserByInput 跳过 SetRolesAsync——故这里**省略
+ *   roleNames**：省一次串行 GET roles，也消除「并发窗口内他人改的角色被本请求
+ *   回写覆盖」（角色回写无并发戳保护）；改角色属于 UserForm 的显式编辑流；
+ * - `ConcurrencyStamp` 经 SetConcurrencyStampIfNotNull 落到实体，列表行快照过期
+ *   时由 EF 并发令牌以 409 拒绝，不会静默覆盖他处已改的用户字段。
+ */
 export async function resetUserPassword(
   user: IdentityUserDto,
   password: string,
 ) {
-  const userRoles = await getUserRoles(user.id);
   return updateUser(user.id, {
     userName: user.userName,
     email: user.email,
@@ -261,7 +271,6 @@ export async function resetUserPassword(
     phoneNumber: user.phoneNumber,
     isActive: user.isActive,
     lockoutEnabled: user.lockoutEnabled,
-    roleNames: (userRoles.items || []).map((item) => item.name),
     password,
     concurrencyStamp: user.concurrencyStamp,
   });
