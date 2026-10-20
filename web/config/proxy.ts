@@ -73,6 +73,7 @@ const abpWsProxy = {
  * - `/connect/`、`/.well-known/`：OIDC 发现/授权/令牌
  * - `/Account/`：后端登录等 SSR 页
  * - `/Abp/`、`/libs/`、`/Themes/`、`/__bundles/`、`/global-styles.css`、`/global-scripts.js`：ABP 虚文件/打包产物
+ * - `/images/`、`/favicon.svg`：LeptonXLite 登录页的 logo/favicon 虚拟文件（SPA public/ 无同名文件）
  * - `/signalr-hubs/`：SignalR（须 ws）
  */
 export default {
@@ -87,6 +88,8 @@ export default {
     '/__bundles/': abpProxy,
     '/global-styles.css': abpProxy,
     '/global-scripts.js': abpProxy,
+    '/images/': abpProxy,
+    '/favicon.svg': abpProxy,
     '/signalr-hubs/': abpWsProxy,
   },
   test: {
