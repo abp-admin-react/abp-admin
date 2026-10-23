@@ -1,4 +1,4 @@
-import { financeHelpHeader } from '@/components/FinanceHelp';
+import type { ProFormInstance } from '@ant-design/pro-components';
 import {
   type ActionType,
   ModalForm,
@@ -9,6 +9,7 @@ import {
   ProFormText,
   ProFormTextArea,
 } from '@ant-design/pro-components';
+import { Access, useAccess, useLocation, useModel } from '@umijs/max';
 import {
   App,
   Button,
@@ -18,24 +19,20 @@ import {
   Space,
   Tag,
 } from 'antd';
-import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
-import { formatForDisplay } from '@/utils/time';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { ProFormInstance } from '@ant-design/pro-components';
-import { Access, useAccess, useLocation, useModel } from '@umijs/max';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
   ADJUST_STATUS_LABEL,
   type AdjustStatus,
-  type FinManualAdjustDto,
-  type FinVoucherDto,
   approveAdjust,
-  FINANCE_ERROR,
   createAdjust,
   deleteAdjust,
-  finOwnerTypeName,
+  FINANCE_ERROR,
+  type FinManualAdjustDto,
+  type FinVoucherDto,
   financeErrorCode,
+  financeErrorFields,
   financeErrorText,
+  finOwnerTypeName,
   getAdjusts,
   getVoucher,
   getVouchers,
@@ -46,8 +43,15 @@ import {
   reverseVoucher,
   submitAdjust,
   updateAdjust,
-  financeErrorFields,
 } from '@/abp/finance';
+import AutoHeightProTable from '@/components/AutoHeightProTable';
+import { financeHelpHeader } from '@/components/FinanceHelp';
+import {
+  FinanceEmpty,
+  FinanceStateView,
+  useFinanceLoad,
+} from '@/components/FinanceState';
+import { formatForDisplay } from '@/utils/time';
 
 type TabKey = 'vouchers' | 'drafts' | 'pending';
 
@@ -60,8 +64,7 @@ const VouchersPage: React.FC = () => {
     | undefined;
   // live：ABP application-configuration → currentUser.id（app.tsx 映射 userid）；mock 无登录态回落种子 id
   const meId = resolveFinanceUserId(currentUser);
-  const meName =
-    currentUser?.name || currentUser?.userName || '当前用户';
+  const meName = currentUser?.name || currentUser?.userName || '当前用户';
 
   const voucherRef = useRef<ActionType>(undefined);
   const draftRef = useRef<ActionType>(undefined);
@@ -70,13 +73,25 @@ const VouchersPage: React.FC = () => {
   const [pendingFieldErrors, setPendingFieldErrors] = useState<string[]>([]);
 
   /** InvalidInput：按 error.data.fields 高亮表单字段（toast 仍由 onActionError 出） */
-  const ADJUST_FORM_FIELDS = ['amount', 'currency', 'debitAccountCode', 'debitOwnerType', 'debitOwnerId', 'creditAccountCode', 'reason'];
+  const ADJUST_FORM_FIELDS = [
+    'amount',
+    'currency',
+    'debitAccountCode',
+    'debitOwnerType',
+    'debitOwnerId',
+    'creditAccountCode',
+    'reason',
+  ];
   const highlightAdjustFields = (fields: string[]) => {
     const names = fields
-      .map((f) => ADJUST_FORM_FIELDS.find((n) => n.toLowerCase() === f.toLowerCase()))
+      .map((f) =>
+        ADJUST_FORM_FIELDS.find((n) => n.toLowerCase() === f.toLowerCase()),
+      )
       .filter(Boolean) as string[];
     if (!names.length) return;
-    adjustFormRef.current?.setFields(names.map((name) => ({ name, errors: ['请检查此项'] })));
+    adjustFormRef.current?.setFields(
+      names.map((name) => ({ name, errors: ['请检查此项'] })),
+    );
     adjustFormRef.current?.scrollToField?.(names[0]);
   };
   const [tab, setTab] = useState<TabKey>('vouchers');
@@ -183,7 +198,11 @@ const VouchersPage: React.FC = () => {
             dataIndex: 'rejectReason',
             ellipsis: true,
             render: (_: unknown, r: FinManualAdjustDto) =>
-              r.rejectReason ? <span style={{ color: '#d46b08' }}>{r.rejectReason}</span> : '-',
+              r.rejectReason ? (
+                <span style={{ color: '#d46b08' }}>{r.rejectReason}</span>
+              ) : (
+                '-'
+              ),
           },
         ]
       : []),
@@ -275,7 +294,11 @@ const VouchersPage: React.FC = () => {
         }
         // 老板待批：只审批/驳回；本人发起的单不出审批按钮（UI 先拦自批，
         // 后端兜底 403 Finance:Adjust:SelfApproveNotAllowed，除非有 Finance.Adjust.ApproveOwn）
-        if (mode === 'pending' && (canApprove || canReject) && r.status === 'Pending') {
+        if (
+          mode === 'pending' &&
+          (canApprove || canReject) &&
+          r.status === 'Pending'
+        ) {
           if (r.applicantId === meId && !canApproveOwn) {
             acts.push(
               <Tag key="self" color="orange">
@@ -283,31 +306,33 @@ const VouchersPage: React.FC = () => {
               </Tag>,
             );
           } else {
-            if (canApprove) acts.push(
-              <Popconfirm
-                key="ok"
-                title="审批通过将生成凭证并过账，确认？"
-                onConfirm={async () => {
-                  try {
-                    await approveAdjust(r.id, auditor);
-                    message.success('已审批并过账');
-                    reloadAdjusts();
-                  } catch (e) {
-                    onActionError(e);
-                  }
-                }}
-              >
-                <a>审批</a>
-              </Popconfirm>,
-            );
-            if (canReject) acts.push(
-              <a key="reject" onClick={() => setRejecting(r)}>
-                驳回
-              </a>,
-            );
+            if (canApprove)
+              acts.push(
+                <Popconfirm
+                  key="ok"
+                  title="审批通过将生成凭证并过账，确认？"
+                  onConfirm={async () => {
+                    try {
+                      await approveAdjust(r.id, auditor);
+                      message.success('已审批并过账');
+                      reloadAdjusts();
+                    } catch (e) {
+                      onActionError(e);
+                    }
+                  }}
+                >
+                  <a>审批</a>
+                </Popconfirm>,
+              );
+            if (canReject)
+              acts.push(
+                <a key="reject" onClick={() => setRejecting(r)}>
+                  驳回
+                </a>,
+              );
           }
         }
-if (canReverse && r.status === 'Posted') {
+        if (canReverse && r.status === 'Posted') {
           acts.push(
             <Popconfirm
               key="adj-rev"
@@ -326,12 +351,12 @@ if (canReverse && r.status === 'Posted') {
             </Popconfirm>,
           );
         }
-        if (r.voucherId) {
+        // 先落局部常量再进 onClick 闭包：捕获渲染时的行快照（ProTable 行不可变），
+        // 闭包里直接读 r.voucherId 类型收窄失效、只能靠非空断言——这里避免 `!`。
+        const voucherId = r.voucherId;
+        if (voucherId) {
           acts.push(
-            <a
-              key="voucher"
-              onClick={() => openVoucher(r.voucherId!)}
-            >
+            <a key="voucher" onClick={() => openVoucher(voucherId)}>
               凭证
             </a>,
           );
@@ -354,200 +379,235 @@ if (canReverse && r.status === 'Posted') {
         ) : null
       }
     >
-      <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
-      <ProCard
-        key={load.nonce}
-        tabs={{
-          activeKey:
-            (tab === 'drafts' && !canCreate) || (tab === 'pending' && !(canApprove || canReject))
-              ? 'vouchers'
-              : tab,
-          onChange: (k) => setTab(k as TabKey),
-          items: [
-            {
-              key: 'vouchers',
-              label: '凭证列表',
-              children: (
-                <AutoHeightProTable<FinVoucherDto>
-                  rowKey="id"
-                  actionRef={voucherRef}
-                  locale={{ emptyText: <FinanceEmpty text="暂无凭证" /> }}
-                  search={{ labelWidth: 'auto' }}
-                  request={async (params) => {
-                    const maxResultCount = params.pageSize ?? 20;
-                    const skipCount =
-                      ((params.current ?? 1) - 1) * maxResultCount;
-                    const result = await load.guard(() =>
-                      getVouchers({
-                      skipCount,
-                      maxResultCount,
-                      filter: params.voucherNo || params.summary,
-                      bizType: params.bizType,
-                      // 「业务单号」搜索列（OCR 修复：此前 params.bizRefId 被静默丢弃，输入后表格原样刷新）
-                      bizRefId: params.bizRefId,
-                    }),
-                    );
-                    if (!result) return { data: [], total: 0, success: false };
-                    return {
-                      data: result.items,
-                      total: result.totalCount,
-                      success: true,
-                    };
-                  }}
-                  columns={[
-                    // 凭证号是按 Id 派生的展示串，后端 Filter 口径是 BizRefId/Summary 模糊——
-                    // 放行搜索只会恒空结果，禁用该列的搜索（业务单号列承担检索）
-                    { title: '凭证号', dataIndex: 'voucherNo', width: 150, search: false },
-                    { title: '业务类型', dataIndex: 'bizType', width: 120 },
-                    { title: '业务单号', dataIndex: 'bizRefId', width: 120 },
-                    { title: 'Phase', dataIndex: 'phase', width: 100, search: false },
-                    { title: '期间', dataIndex: 'periodLabel', width: 90, search: false },
-                    {
-                      title: '状态',
-                      dataIndex: 'status',
-                      width: 90,
-                      search: false,
-                      render: (_, r) => (
-                        <Tag color={r.status === 'Posted' ? 'success' : 'error'}>
-                          {r.status === 'Posted' ? '已过账' : '已冲销'}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: '借方合计',
-                      dataIndex: 'debitTotal',
-                      width: 100,
-                      search: false,
-                    },
-                    {
-                      title: '贷方合计',
-                      dataIndex: 'creditTotal',
-                      width: 100,
-                      search: false,
-                    },
-                    {
-                      title: '时间',
-                      dataIndex: 'creationTime',
-                      search: false,
-                      render: (_: unknown, r: any) => formatForDisplay(r.creationTime),
-                      width: 170,
-                    },
-                    {
-                      title: '操作',
-                      valueType: 'option',
-                      width: 160,
-                      render: (_, r) => {
-                        const acts = [
-                          <a
-                            key="d"
-                            onClick={() => openVoucher(r.id)}
-                          >
-                            详情
-                          </a>,
-                        ];
-                        if (
-                          access.canReverseFinanceAdjust &&
-                          r.status === 'Posted' &&
-                          r.bizType === 'manual-adjust'
-                        ) {
-                          acts.push(
-                            <Popconfirm
-                              key="rev"
-                              title="红冲将生成反向凭证，确认？"
-                              onConfirm={async () => {
-                                try {
-                                  await reverseVoucher(r.id);
-                                  message.success('已红冲');
-                                  voucherRef.current?.reload();
-                                } catch (e) {
-                                  message.error(financeErrorText(e));
-                                }
-                              }}
-                            >
-                              <a>红冲</a>
-                            </Popconfirm>,
-                          );
-                        }
-                        return acts;
+      <FinanceStateView
+        state={load.state}
+        errorText={load.errorText}
+        onRetry={load.retry}
+      >
+        <ProCard
+          key={load.nonce}
+          tabs={{
+            activeKey:
+              (tab === 'drafts' && !canCreate) ||
+              (tab === 'pending' && !(canApprove || canReject))
+                ? 'vouchers'
+                : tab,
+            onChange: (k) => setTab(k as TabKey),
+            items: [
+              {
+                key: 'vouchers',
+                label: '凭证列表',
+                children: (
+                  <AutoHeightProTable<FinVoucherDto>
+                    rowKey="id"
+                    actionRef={voucherRef}
+                    locale={{ emptyText: <FinanceEmpty text="暂无凭证" /> }}
+                    search={{ labelWidth: 'auto' }}
+                    request={async (params) => {
+                      const maxResultCount = params.pageSize ?? 20;
+                      const skipCount =
+                        ((params.current ?? 1) - 1) * maxResultCount;
+                      const result = await load.guard(() =>
+                        getVouchers({
+                          skipCount,
+                          maxResultCount,
+                          filter: params.voucherNo || params.summary,
+                          bizType: params.bizType,
+                          // 「业务单号」搜索列（OCR 修复：此前 params.bizRefId 被静默丢弃，输入后表格原样刷新）
+                          bizRefId: params.bizRefId,
+                        }),
+                      );
+                      if (!result)
+                        return { data: [], total: 0, success: false };
+                      return {
+                        data: result.items,
+                        total: result.totalCount,
+                        success: true,
+                      };
+                    }}
+                    columns={[
+                      // 凭证号是按 Id 派生的展示串，后端 Filter 口径是 BizRefId/Summary 模糊——
+                      // 放行搜索只会恒空结果，禁用该列的搜索（业务单号列承担检索）
+                      {
+                        title: '凭证号',
+                        dataIndex: 'voucherNo',
+                        width: 150,
+                        search: false,
                       },
-                    },
-                  ]}
-                />
-              ),
-            },
-            {
-              key: 'drafts',
-              label: '调账草稿',
-              children: (
-                <AutoHeightProTable<FinManualAdjustDto>
-                  rowKey="id"
-                  actionRef={draftRef}
-                  search={false}
-                  locale={{ emptyText: <FinanceEmpty text="没有草稿或被驳回的调账" /> }}
-                  params={{ tab: 'drafts' }}
-                  request={async (params) => {
-                    const maxResultCount = params.pageSize ?? 20;
-                    const skipCount =
-                      ((params.current ?? 1) - 1) * maxResultCount;
-                    const result = await load.guard(() =>
-                      getAdjusts({
-                      skipCount,
-                      maxResultCount,
-                      status: 'Draft,Rejected',
-                    }),
-                    );
-                    if (!result) return { data: [], total: 0, success: false };
-                    return {
-                      data: result.items,
-                      total: result.totalCount,
-                      success: true,
-                    };
-                  }}
-                  columns={adjustColumns('drafts') as any}
-                />
-              ),
-            },
-            {
-              key: 'pending',
-              label: '待审批',
-              children: (
-                <AutoHeightProTable<FinManualAdjustDto>
-                  rowKey="id"
-                  actionRef={pendingRef}
-                  search={false}
-                  locale={{ emptyText: <FinanceEmpty text="没有待审批的调账" /> }}
-                  params={{ tab: 'pending' }}
-                  request={async (params) => {
-                    const maxResultCount = params.pageSize ?? 20;
-                    const skipCount =
-                      ((params.current ?? 1) - 1) * maxResultCount;
-                    const result = await load.guard(() =>
-                      getAdjusts({
-                      skipCount,
-                      maxResultCount,
-                      status: 'Pending',
-                    }),
-                    );
-                    if (!result) return { data: [], total: 0, success: false };
-                    return {
-                      data: result.items,
-                      total: result.totalCount,
-                      success: true,
-                    };
-                  }}
-                  columns={adjustColumns('pending') as any}
-                />
-              ),
-            },
-          ].filter((it) =>
-            it.key === 'drafts' ? canCreate : it.key === 'pending' ? (canApprove || canReject) : true,
-          ),
-        }}
-      />
+                      { title: '业务类型', dataIndex: 'bizType', width: 120 },
+                      { title: '业务单号', dataIndex: 'bizRefId', width: 120 },
+                      {
+                        title: 'Phase',
+                        dataIndex: 'phase',
+                        width: 100,
+                        search: false,
+                      },
+                      {
+                        title: '期间',
+                        dataIndex: 'periodLabel',
+                        width: 90,
+                        search: false,
+                      },
+                      {
+                        title: '状态',
+                        dataIndex: 'status',
+                        width: 90,
+                        search: false,
+                        render: (_, r) => (
+                          <Tag
+                            color={r.status === 'Posted' ? 'success' : 'error'}
+                          >
+                            {r.status === 'Posted' ? '已过账' : '已冲销'}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: '借方合计',
+                        dataIndex: 'debitTotal',
+                        width: 100,
+                        search: false,
+                      },
+                      {
+                        title: '贷方合计',
+                        dataIndex: 'creditTotal',
+                        width: 100,
+                        search: false,
+                      },
+                      {
+                        title: '时间',
+                        dataIndex: 'creationTime',
+                        search: false,
+                        render: (_: unknown, r: any) =>
+                          formatForDisplay(r.creationTime),
+                        width: 170,
+                      },
+                      {
+                        title: '操作',
+                        valueType: 'option',
+                        width: 160,
+                        render: (_, r) => {
+                          const acts = [
+                            <a key="d" onClick={() => openVoucher(r.id)}>
+                              详情
+                            </a>,
+                          ];
+                          if (
+                            access.canReverseFinanceAdjust &&
+                            r.status === 'Posted' &&
+                            r.bizType === 'manual-adjust'
+                          ) {
+                            acts.push(
+                              <Popconfirm
+                                key="rev"
+                                title="红冲将生成反向凭证，确认？"
+                                onConfirm={async () => {
+                                  try {
+                                    await reverseVoucher(r.id);
+                                    message.success('已红冲');
+                                    voucherRef.current?.reload();
+                                  } catch (e) {
+                                    message.error(financeErrorText(e));
+                                  }
+                                }}
+                              >
+                                <a>红冲</a>
+                              </Popconfirm>,
+                            );
+                          }
+                          return acts;
+                        },
+                      },
+                    ]}
+                  />
+                ),
+              },
+              {
+                key: 'drafts',
+                label: '调账草稿',
+                children: (
+                  <AutoHeightProTable<FinManualAdjustDto>
+                    rowKey="id"
+                    actionRef={draftRef}
+                    search={false}
+                    locale={{
+                      emptyText: <FinanceEmpty text="没有草稿或被驳回的调账" />,
+                    }}
+                    params={{ tab: 'drafts' }}
+                    request={async (params) => {
+                      const maxResultCount = params.pageSize ?? 20;
+                      const skipCount =
+                        ((params.current ?? 1) - 1) * maxResultCount;
+                      const result = await load.guard(() =>
+                        getAdjusts({
+                          skipCount,
+                          maxResultCount,
+                          status: 'Draft,Rejected',
+                        }),
+                      );
+                      if (!result)
+                        return { data: [], total: 0, success: false };
+                      return {
+                        data: result.items,
+                        total: result.totalCount,
+                        success: true,
+                      };
+                    }}
+                    columns={adjustColumns('drafts') as any}
+                  />
+                ),
+              },
+              {
+                key: 'pending',
+                label: '待审批',
+                children: (
+                  <AutoHeightProTable<FinManualAdjustDto>
+                    rowKey="id"
+                    actionRef={pendingRef}
+                    search={false}
+                    locale={{
+                      emptyText: <FinanceEmpty text="没有待审批的调账" />,
+                    }}
+                    params={{ tab: 'pending' }}
+                    request={async (params) => {
+                      const maxResultCount = params.pageSize ?? 20;
+                      const skipCount =
+                        ((params.current ?? 1) - 1) * maxResultCount;
+                      const result = await load.guard(() =>
+                        getAdjusts({
+                          skipCount,
+                          maxResultCount,
+                          status: 'Pending',
+                        }),
+                      );
+                      if (!result)
+                        return { data: [], total: 0, success: false };
+                      return {
+                        data: result.items,
+                        total: result.totalCount,
+                        success: true,
+                      };
+                    }}
+                    columns={adjustColumns('pending') as any}
+                  />
+                ),
+              },
+            ].filter((it) =>
+              it.key === 'drafts'
+                ? canCreate
+                : it.key === 'pending'
+                  ? canApprove || canReject
+                  : true,
+            ),
+          }}
+        />
       </FinanceStateView>
 
-            <ModalForm
-        title={editingAdjust ? `编辑调账 ${editingAdjust.adjustNo}` : '新建调账（草稿）'}
+      <ModalForm
+        title={
+          editingAdjust
+            ? `编辑调账 ${editingAdjust.adjustNo}`
+            : '新建调账（草稿）'
+        }
         open={createOpen || !!editingAdjust}
         onOpenChange={(open) => {
           if (!open) {
@@ -562,7 +622,8 @@ if (canReverse && r.status === 'Posted') {
             ? {
                 amount: editingAdjust.amount,
                 currency: editingAdjust.currency || 'CNY',
-                debitAccountCode: editingAdjust.lines?.[0]?.accountCode || '1002',
+                debitAccountCode:
+                  editingAdjust.lines?.[0]?.accountCode || '1002',
                 // 归属字段必须回填记录里的值（OCR 修复：此前硬编码 Channel/default，
                 // 编辑保存会把原始借方归属静默改写）；归一为名称串供 Select 回显
                 debitOwnerType: finOwnerTypeName(editingAdjust.debitOwnerType),
@@ -614,9 +675,24 @@ if (canReverse && r.status === 'Posted') {
           }
         }}
       >
-        <ProFormDigit name="amount" label="金额" min={0.01} rules={[{ required: true }]} />
-        <ProFormText name="currency" label="币种" initialValue="CNY" rules={[{ required: true }]} />
-        <ProFormText name="debitAccountCode" label="借方科目编码" rules={[{ required: true }]} placeholder="如 1002" />
+        <ProFormDigit
+          name="amount"
+          label="金额"
+          min={0.01}
+          rules={[{ required: true }]}
+        />
+        <ProFormText
+          name="currency"
+          label="币种"
+          initialValue="CNY"
+          rules={[{ required: true }]}
+        />
+        <ProFormText
+          name="debitAccountCode"
+          label="借方科目编码"
+          rules={[{ required: true }]}
+          placeholder="如 1002"
+        />
         <ProFormSelect
           name="debitOwnerType"
           label="借方 OwnerType"
@@ -628,10 +704,22 @@ if (canReverse && r.status === 'Posted') {
           ]}
           rules={[{ required: true }]}
         />
-        <ProFormText name="debitOwnerId" label="借方 OwnerId" rules={[{ required: true }]} />
-        <ProFormText name="creditAccountCode" label="贷方科目编码（可空，默认 3101）" placeholder="留空=3101" />
-          {/* reason：存草稿可空；submit 时后端校验，空则 400 + data.fields=reason，由 ADJUST_FORM_FIELDS 高亮 */}
-          <ProFormText name="reason" label="原因" placeholder="草稿可不填，提交时必填" />
+        <ProFormText
+          name="debitOwnerId"
+          label="借方 OwnerId"
+          rules={[{ required: true }]}
+        />
+        <ProFormText
+          name="creditAccountCode"
+          label="贷方科目编码（可空，默认 3101）"
+          placeholder="留空=3101"
+        />
+        {/* reason：存草稿可空；submit 时后端校验，空则 400 + data.fields=reason，由 ADJUST_FORM_FIELDS 高亮 */}
+        <ProFormText
+          name="reason"
+          label="原因"
+          placeholder="草稿可不填，提交时必填"
+        />
       </ModalForm>
 
       <ModalForm<{ rejectReason: string }>
@@ -644,14 +732,19 @@ if (canReverse && r.status === 'Posted') {
         onFinish={async (values) => {
           if (!rejecting) return false;
           try {
-            await rejectAdjust(rejecting.id, auditor, values.rejectReason.trim());
+            await rejectAdjust(
+              rejecting.id,
+              auditor,
+              values.rejectReason.trim(),
+            );
             message.success('已驳回');
             setRejecting(undefined);
             reloadAdjusts();
             return true;
           } catch (e) {
             onActionError(e);
-            if (financeErrorCode(e) === FINANCE_ERROR.InvalidStatus) setRejecting(undefined);
+            if (financeErrorCode(e) === FINANCE_ERROR.InvalidStatus)
+              setRejecting(undefined);
             return false;
           }
         }}
@@ -676,22 +769,34 @@ if (canReverse && r.status === 'Posted') {
         {adjustDetail && (
           <>
             <Descriptions column={1} size="small">
-              <Descriptions.Item label="状态">{statusTag(adjustDetail.status)}</Descriptions.Item>
-              <Descriptions.Item label="摘要">{adjustDetail.summary}</Descriptions.Item>
+              <Descriptions.Item label="状态">
+                {statusTag(adjustDetail.status)}
+              </Descriptions.Item>
+              <Descriptions.Item label="摘要">
+                {adjustDetail.summary}
+              </Descriptions.Item>
               <Descriptions.Item label="金额">
                 {adjustDetail.amount.toFixed(2)} {adjustDetail.currency}
               </Descriptions.Item>
-              <Descriptions.Item label="申请人">{adjustDetail.applicantName}</Descriptions.Item>
-              <Descriptions.Item label="审批人">{adjustDetail.auditorName || '-'}</Descriptions.Item>
+              <Descriptions.Item label="申请人">
+                {adjustDetail.applicantName}
+              </Descriptions.Item>
+              <Descriptions.Item label="审批人">
+                {adjustDetail.auditorName || '-'}
+              </Descriptions.Item>
               {/* rejectReason 一直保留：重新编辑、再提交后仍展示 */}
               {adjustDetail.rejectReason ? (
                 <Descriptions.Item label="驳回意见">
-                  <span style={{ color: '#d46b08' }}>{adjustDetail.rejectReason}</span>
+                  <span style={{ color: '#d46b08' }}>
+                    {adjustDetail.rejectReason}
+                  </span>
                 </Descriptions.Item>
               ) : null}
             </Descriptions>
             <AutoHeightProTable
-              rowKey={(l: { accountCode: string }, i?: number) => `${l.accountCode}-${i}`}
+              rowKey={(l: { accountCode: string }, i?: number) =>
+                `${l.accountCode}-${i}`
+              }
               search={false}
               pagination={false}
               toolBarRender={false}
@@ -703,25 +808,30 @@ if (canReverse && r.status === 'Posted') {
                 { title: '摘要', dataIndex: 'summary', ellipsis: true },
               ]}
             />
-            {adjustDetail.status === 'Rejected' && adjustDetail.applicantId === meId && canCreate && (
-              <Space style={{ marginTop: 16 }}>
-                <Button
-                  type="primary"
-                  onClick={async () => {
-                    try {
-                      await reopenAdjust(adjustDetail.id, { id: meId, canCreate });
-                      message.success('已回到草稿');
-                      setAdjustDetail(undefined);
-                      reloadAdjusts();
-                    } catch (e) {
-                      onActionError(e);
-                    }
-                  }}
-                >
-                  重新编辑
-                </Button>
-              </Space>
-            )}
+            {adjustDetail.status === 'Rejected' &&
+              adjustDetail.applicantId === meId &&
+              canCreate && (
+                <Space style={{ marginTop: 16 }}>
+                  <Button
+                    type="primary"
+                    onClick={async () => {
+                      try {
+                        await reopenAdjust(adjustDetail.id, {
+                          id: meId,
+                          canCreate,
+                        });
+                        message.success('已回到草稿');
+                        setAdjustDetail(undefined);
+                        reloadAdjusts();
+                      } catch (e) {
+                        onActionError(e);
+                      }
+                    }}
+                  >
+                    重新编辑
+                  </Button>
+                </Space>
+              )}
           </>
         )}
       </Drawer>
@@ -744,7 +854,9 @@ if (canReverse && r.status === 'Posted') {
               <Descriptions.Item label="期间">
                 {detail.periodLabel}
               </Descriptions.Item>
-              <Descriptions.Item label="状态">{detail.status}</Descriptions.Item>
+              <Descriptions.Item label="状态">
+                {detail.status}
+              </Descriptions.Item>
               <Descriptions.Item label="摘要">
                 {detail.summary || '-'}
               </Descriptions.Item>

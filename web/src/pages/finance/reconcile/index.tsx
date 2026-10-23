@@ -66,9 +66,12 @@ const ReconcilePage: React.FC = () => {
               onClick={async () => {
                 setRunning(true);
                 try {
+                  // 后端 runReconcile 按 UTC 半开区间过滤过账时间（rangeToUtcBounds：
+                  // 结束日取次日 0 点，避免漏掉结束日当天数据），本地日选择需先转 UTC 边界
+                  const b = rangeToUtcBounds(range[0], range[1]);
                   const row = await runReconcile({
-                    ...(() => { const b = rangeToUtcBounds(range[0], range[1]); return { rangeStart: b.startUtc, rangeEnd: b.endUtc }; })(),
-                    
+                    rangeStart: b.startUtc,
+                    rangeEnd: b.endUtc,
                     includeDemo,
                   });
                   message.success(
