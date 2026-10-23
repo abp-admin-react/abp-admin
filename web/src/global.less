@@ -103,20 +103,21 @@ ol {
   .ant-page-header-heading:not(:has(.ant-page-header-heading-extra)) {
   display: none;
 }
-/* 问号挂在面包屑末项，不要被末项标题字号放大 */
+/* 末项 = 页面标题（放大为 heading 字号）。只击中末项直接子 span（.ant-breadcrumb-link）：
+ * 财务页该 span 内嵌 Space 包文字+问号，问号字号/颜色由 FinanceHelpIcon 内联样式独立决定，
+ * 不应被后代 span 选择器连带放大（旧写法曾为此叠一条死补偿规则，已一并移除）。 */
 .ant-pro-page-container-warp-page-header
   .ant-breadcrumb-item:last-child
-  .finance-help-icon {
-  font-size: 16px;
-  font-weight: normal;
-  color: #8c8c8c;
-}
-
-.ant-pro-page-container-warp-page-header
-  .ant-breadcrumb-item:last-child
-  span {
+  > span {
   font-size: var(--ant-font-size-heading, 20px);
   font-weight: 600;
   line-height: 1.3;
   color: var(--ant-color-text-heading, rgba(0, 0, 0, 0.88));
+}
+
+/* 末项放大成标题后与 14px 前项默认 flex 对齐会底边参差（差约 6px）；
+ * 按文字基线对齐（CJK 无下降部，基线≈字形底边），末项文字/分隔符/前项视觉底边一致。
+ * 财务页末项内的问号与文字仍由 Space align="end" 内部底对齐。 */
+.ant-pro-page-container-warp-page-header .ant-breadcrumb ol {
+  align-items: baseline;
 }

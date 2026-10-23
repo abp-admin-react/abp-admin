@@ -111,7 +111,10 @@ export function financeHelpHeader(page: FinanceHelpPage, label: string) {
         { title: '财务管理' },
         {
           title: (
-            <Space size={6}>
+            // align="end" 与 global.less 页头面包屑「末项放大为标题 + ol 基线对齐」配套：
+            // 末项文字 20px、问号 16px，问号按底边对齐文字（CJK 无下降部，底边≈基线）。
+            // 改动对齐方式需与 global.less 的面包屑规则同步评估。
+            <Space size={6} align="end">
               <span>{label}</span>
               <FinanceHelpIcon page={page} />
             </Space>
