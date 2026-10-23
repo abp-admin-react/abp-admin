@@ -28,6 +28,9 @@ export type FinanceListQuery = {
   maxResultCount?: number;
   sorting?: string;
   filter?: string;
+  /** A2 科目列表专用：按编码/名称分别模糊查（后端 FinAccountListInput，不认 filter） */
+  code?: string;
+  name?: string;
   startTime?: string;
   endTime?: string;
   /** Guid?; 会计/老板可传；代理有 Scope.Agent 时服务端覆盖 */
@@ -44,9 +47,19 @@ export type FinanceListQuery = {
   includeDemo?: boolean;
 };
 
-export type AdjustStatus = 'Draft' | 'Pending' | 'Rejected' | 'Posted' | 'Reversed';
+export type AdjustStatus =
+  | 'Draft'
+  | 'Pending'
+  | 'Rejected'
+  | 'Posted'
+  | 'Reversed';
 export type VoucherStatus = 'Posted' | 'Reversed';
-export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Income' | 'Expense';
+export type AccountType =
+  | 'Asset'
+  | 'Liability'
+  | 'Equity'
+  | 'Income'
+  | 'Expense';
 
 export type FinAccountDto = {
   id: string;
@@ -121,7 +134,12 @@ export type FinManualAdjustDto = {
   debitOwnerType?: FinOwnerTypeName | number;
   debitOwnerId?: string | null;
   creationTime: string;
-  lines: { accountCode: string; debit: number; credit: number; summary?: string }[];
+  lines: {
+    accountCode: string;
+    debit: number;
+    credit: number;
+    summary?: string;
+  }[];
 };
 
 export type FinPeriodDto = {
@@ -215,10 +233,8 @@ export const API = {
  * 后端若改码：先改这里再改映射函数；A2 NotFound 两种码都要继续认。
  */
 export const FINANCE_ERROR = {
-  /** 自批禁止（现行真码，通常 HTTP 403） */
+  /** 自批禁止（现行真码，通常 HTTP 403）；旧 SelfApproveForbidden 码后端已废弃不再发 */
   SelfApproveForbidden: 'Finance:Adjust:SelfApproveNotAllowed',
-  /** 旧 mock / 历史码，仅兼容，新后端不应再发 */
-  SelfApproveLegacy: 'Finance:Adjust:SelfApproveForbidden',
   SubmitDenied: 'Finance:Adjust:SubmitDenied',
   RejectDenied: 'Finance:Adjust:RejectDenied',
   ReverseDenied: 'Finance:Adjust:ReverseDenied',
@@ -246,7 +262,10 @@ export const FINANCE_ERROR = {
   InvalidEvent: 'Finance:InvalidEvent',
 } as const;
 
-export const ADJUST_STATUS_LABEL: Record<AdjustStatus, { text: string; color: string }> = {
+export const ADJUST_STATUS_LABEL: Record<
+  AdjustStatus,
+  { text: string; color: string }
+> = {
   Draft: { text: '草稿', color: 'default' },
   Pending: { text: '待批', color: 'processing' },
   Rejected: { text: '已驳回', color: 'warning' },
@@ -263,12 +282,21 @@ export const ADJUST_STATUS_LABEL: Record<AdjustStatus, { text: string; color: st
 export function canEditAccount(a: { isSystem?: boolean }): boolean {
   return !a.isSystem;
 }
-export function canDeleteAccount(a: { isSystem?: boolean; hasEntries?: boolean }): boolean {
+export function canDeleteAccount(a: {
+  isSystem?: boolean;
+  hasEntries?: boolean;
+}): boolean {
   return !a.isSystem && !a.hasEntries;
 }
 
 /** 后端未配 JsonStringEnumConverter，枚举按数字收发（FinAccountType / FinNormalSide 的序号）。 */
-const ACCOUNT_TYPES: AccountType[] = ['Asset', 'Liability', 'Equity', 'Income', 'Expense'];
+const ACCOUNT_TYPES: AccountType[] = [
+  'Asset',
+  'Liability',
+  'Equity',
+  'Income',
+  'Expense',
+];
 const NORMAL_SIDES: FinAccountDto['normalSide'][] = ['Debit', 'Credit'];
 function enumName<T extends string>(v: unknown, names: T[], fallback: T): T {
   if (typeof v === 'number') return names[v] ?? fallback;
@@ -276,12 +304,18 @@ function enumName<T extends string>(v: unknown, names: T[], fallback: T): T {
   return fallback;
 }
 
-function normalizeAccount(raw: FinAccountDto & { direction?: unknown }): FinAccountDto {
+function normalizeAccount(
+  raw: FinAccountDto & { direction?: unknown },
+): FinAccountDto {
   const enabled = raw.enabled ?? raw.isActive ?? true;
   return {
     ...raw,
     type: enumName(raw.type, ACCOUNT_TYPES, 'Asset'),
-    normalSide: enumName(raw.normalSide ?? raw.direction, NORMAL_SIDES, 'Debit'),
+    normalSide: enumName(
+      raw.normalSide ?? raw.direction,
+      NORMAL_SIDES,
+      'Debit',
+    ),
     enabled,
     isActive: raw.isActive ?? enabled,
   };
@@ -306,7 +340,10 @@ function toLiveAccountBody(input: FinAccountInput) {
 }
 
 /** error.data 里的值（ABP 原样带 WithData 的键，大小写都兼容） */
-export function financeErrorData(error: unknown, key: string): string | undefined {
+export function financeErrorData(
+  error: unknown,
+  key: string,
+): string | undefined {
   const e = error as any;
   const d = e?.response?.data?.error?.data ?? e?.info?.data ?? {};
   const v = d[key] ?? d[key.charAt(0).toLowerCase() + key.slice(1)];
@@ -321,7 +358,11 @@ export type AccountOp = 'create' | 'update' | 'delete' | 'toggle';
  * 后端选自己/成环也走这个码（带 ParentId），所以用 selfId 比对区分。
  * InvalidEvent 返回 null，由页面按 data.Field 在输入框下标红。
  */
-export function accountErrorText(error: unknown, op: AccountOp, selfId?: string): string | null {
+export function accountErrorText(
+  error: unknown,
+  op: AccountOp,
+  selfId?: string,
+): string | null {
   const code = financeErrorCode(error);
   const c = financeErrorData(error, 'Code') ?? '';
   switch (code) {
@@ -364,28 +405,32 @@ export function accountInvalidFields(error: unknown): string[] {
     const k = f.trim().toLowerCase();
     if (k === 'type/direction') return ['type', 'normalSide'];
     if (k === 'direction') return ['normalSide'];
-    return ['code', 'name', 'type', 'parentid'].includes(k) ? [k === 'parentid' ? 'parentId' : k] : [];
+    return ['code', 'name', 'type', 'parentid'].includes(k)
+      ? [k === 'parentid' ? 'parentId' : k]
+      : [];
   };
   if (financeErrorCode(error) === FINANCE_ERROR.InvalidEvent) {
     return toForm(financeErrorData(error, 'Field') || '');
   }
   const errObj = (error as any)?.response?.data?.error;
   const members: string[] = Array.isArray(errObj?.validationErrors)
-    ? errObj.validationErrors.flatMap((v: any) => (Array.isArray(v?.members) ? v.members.map(String) : []))
+    ? errObj.validationErrors.flatMap((v: any) =>
+        Array.isArray(v?.members) ? v.members.map(String) : [],
+      )
     : [];
   return Array.from(new Set(members.flatMap(toForm)));
 }
-export function useMock(): boolean {
-  // 默认走真接口；仅 localStorage finance.useMock=1 时用假数据
+/**
+ * mock 开关：默认 live；仅 localStorage `abpadmin:finance.useMock`（STORAGE_KEYS.financeUseMock）
+ * === '1' 时走内存假数据。普通同步谓词（非 hook），可在任意位置调用；渲染期读取、
+ * 非响应式——切开关需刷新页面才生效。mock/live 用户 id 统一走 resolveFinanceUserId。
+ */
+export function isMock(): boolean {
   if (typeof localStorage !== 'undefined') {
     return localStorage.getItem(STORAGE_KEYS.financeUseMock) === '1';
   }
   return false;
 }
-
-/** 页面/测试可读：默认 live；仅 localStorage finance.useMock=1 时为 mock。
- *  （OCR refactor：isFinanceMock/getFinanceCurrentUserId 原为无调用方的死导出，已删；
- *  mock 判定统一走 useMock()，live 用户 id 统一走 resolveFinanceUserId(app.tsx 映射)。） */
 
 /**
  * mock 种子制单人 id（与 mockAdjusts.applicantId 对齐）。
@@ -399,62 +444,195 @@ export const MOCK_FINANCE_USER_ID = 'user-accountant';
  * - mock 且无传入时回落 MOCK_FINANCE_USER_ID
  * - live 且无传入时返回空串（不硬编码 user-boss）
  */
-export function resolveFinanceUserId(fromInitial?: {
-  userid?: string;
-  id?: string;
-} | null): string {
+export function resolveFinanceUserId(
+  fromInitial?: {
+    userid?: string;
+    id?: string;
+  } | null,
+): string {
   const id = fromInitial?.userid || fromInitial?.id;
   if (id) return id;
-  if (useMock()) return MOCK_FINANCE_USER_ID;
+  if (isMock()) return MOCK_FINANCE_USER_ID;
   return '';
 }
 
 function uid(prefix: string) {
-  return prefix + '-' + Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 const mockAccounts: FinAccountDto[] = [
-  { id: 'a1', code: '1002', name: '渠道资金（现金/银行）', type: 'Asset', normalSide: 'Debit', isSystem: true, enabled: true, hasEntries: true },
-  { id: 'a2', code: '1122', name: '应收账款', type: 'Asset', normalSide: 'Debit', isSystem: true, enabled: true, hasEntries: false },
-  { id: 'a3', code: '2205', name: '预收账款', type: 'Liability', normalSide: 'Credit', isSystem: true, enabled: true, hasEntries: true },
-  { id: 'a4', code: '6002', name: '主营业务收入', type: 'Income', normalSide: 'Credit', isSystem: true, enabled: true, hasEntries: true },
-  { id: 'a5', code: '6602', name: '管理费用', type: 'Expense', normalSide: 'Debit', isSystem: false, enabled: true, hasEntries: false },
-  { id: 'a6', code: '3101', name: '人工调整', type: 'Equity', normalSide: 'Credit', isSystem: true, enabled: true, hasEntries: false },
+  {
+    id: 'a1',
+    code: '1002',
+    name: '渠道资金（现金/银行）',
+    type: 'Asset',
+    normalSide: 'Debit',
+    isSystem: true,
+    enabled: true,
+    hasEntries: true,
+  },
+  {
+    id: 'a2',
+    code: '1122',
+    name: '应收账款',
+    type: 'Asset',
+    normalSide: 'Debit',
+    isSystem: true,
+    enabled: true,
+    hasEntries: false,
+  },
+  {
+    id: 'a3',
+    code: '2205',
+    name: '预收账款',
+    type: 'Liability',
+    normalSide: 'Credit',
+    isSystem: true,
+    enabled: true,
+    hasEntries: true,
+  },
+  {
+    id: 'a4',
+    code: '6002',
+    name: '主营业务收入',
+    type: 'Income',
+    normalSide: 'Credit',
+    isSystem: true,
+    enabled: true,
+    hasEntries: true,
+  },
+  {
+    id: 'a5',
+    code: '6602',
+    name: '管理费用',
+    type: 'Expense',
+    normalSide: 'Debit',
+    isSystem: false,
+    enabled: true,
+    hasEntries: false,
+  },
+  {
+    id: 'a6',
+    code: '3101',
+    name: '人工调整',
+    type: 'Equity',
+    normalSide: 'Credit',
+    isSystem: true,
+    enabled: true,
+    hasEntries: false,
+  },
 ];
 
 const mockRules: FinPostingRuleDto[] = [
-  { id: 'r1', bizType: 'demo.credit', phase: 'pay', version: 1, status: 'Active', debitAccountCode: '1002', creditAccountCode: '2205', summary: '收款：借渠道资金 / 贷预收账款' },
-  { id: 'r2', bizType: 'demo.credit', phase: 'recognize', version: 1, status: 'Active', debitAccountCode: '2205', creditAccountCode: '6002', summary: '确认收入：借预收账款 / 贷主营业务收入' },
-  { id: 'r3', bizType: 'manual-adjust', phase: 'post', version: 2, status: 'Active', debitAccountCode: '*', creditAccountCode: '*', summary: '人工调账过账' },
+  {
+    id: 'r1',
+    bizType: 'demo.credit',
+    phase: 'pay',
+    version: 1,
+    status: 'Active',
+    debitAccountCode: '1002',
+    creditAccountCode: '2205',
+    summary: '收款：借渠道资金 / 贷预收账款',
+  },
+  {
+    id: 'r2',
+    bizType: 'demo.credit',
+    phase: 'recognize',
+    version: 1,
+    status: 'Active',
+    debitAccountCode: '2205',
+    creditAccountCode: '6002',
+    summary: '确认收入：借预收账款 / 贷主营业务收入',
+  },
+  {
+    id: 'r3',
+    bizType: 'manual-adjust',
+    phase: 'post',
+    version: 2,
+    status: 'Active',
+    debitAccountCode: '*',
+    creditAccountCode: '*',
+    summary: '人工调账过账',
+  },
 ];
 
 let mockVouchers: FinVoucherDto[] = [
   {
-    id: 'v1', voucherNo: 'V-202610-0001', bizType: 'demo.credit', bizRefId: 'ord-1001', phase: 'pay',
-    periodLabel: '2026-10', status: 'Posted', debitTotal: 100, creditTotal: 100,
-    creatorName: 'system', creationTime: '2026-10-10T08:00:00+08:00', summary: '收款',
-    isDemo: true, agentId: 'ag-1',
+    id: 'v1',
+    voucherNo: 'V-202610-0001',
+    bizType: 'demo.credit',
+    bizRefId: 'ord-1001',
+    phase: 'pay',
+    periodLabel: '2026-10',
+    status: 'Posted',
+    debitTotal: 100,
+    creditTotal: 100,
+    creatorName: 'system',
+    creationTime: '2026-10-10T08:00:00+08:00',
+    summary: '收款',
+    isDemo: true,
+    agentId: 'ag-1',
     entries: [
-      { seq: 1, accountCode: '1002', accountName: '渠道资金（现金/银行）', debit: 100, credit: 0 },
-      { seq: 2, accountCode: '2205', accountName: '预收账款', debit: 0, credit: 100 },
+      {
+        seq: 1,
+        accountCode: '1002',
+        accountName: '渠道资金（现金/银行）',
+        debit: 100,
+        credit: 0,
+      },
+      {
+        seq: 2,
+        accountCode: '2205',
+        accountName: '预收账款',
+        debit: 0,
+        credit: 100,
+      },
     ],
   },
   {
-    id: 'v2', voucherNo: 'V-202610-0002', bizType: 'demo.credit', bizRefId: 'ord-1001', phase: 'recognize',
-    periodLabel: '2026-10', status: 'Posted', debitTotal: 30, creditTotal: 30,
-    creatorName: 'system', creationTime: '2026-10-12T09:00:00+08:00', summary: '确认收入',
-    isDemo: true, agentId: 'ag-1',
+    id: 'v2',
+    voucherNo: 'V-202610-0002',
+    bizType: 'demo.credit',
+    bizRefId: 'ord-1001',
+    phase: 'recognize',
+    periodLabel: '2026-10',
+    status: 'Posted',
+    debitTotal: 30,
+    creditTotal: 30,
+    creatorName: 'system',
+    creationTime: '2026-10-12T09:00:00+08:00',
+    summary: '确认收入',
+    isDemo: true,
+    agentId: 'ag-1',
     entries: [
-      { seq: 1, accountCode: '2205', accountName: '预收账款', debit: 30, credit: 0 },
-      { seq: 2, accountCode: '6002', accountName: '主营业务收入', debit: 0, credit: 30 },
+      {
+        seq: 1,
+        accountCode: '2205',
+        accountName: '预收账款',
+        debit: 30,
+        credit: 0,
+      },
+      {
+        seq: 2,
+        accountCode: '6002',
+        accountName: '主营业务收入',
+        debit: 0,
+        credit: 30,
+      },
     ],
   },
 ];
 
 let mockAdjusts: FinManualAdjustDto[] = [
   {
-    id: 'adj-1', adjustNo: 'ADJ-001', status: 'Draft', amount: 50, currency: 'CNY',
-    summary: '手续费补记', applicantId: 'user-accountant', applicantName: '会计甲',
+    id: 'adj-1',
+    adjustNo: 'ADJ-001',
+    status: 'Draft',
+    amount: 50,
+    currency: 'CNY',
+    summary: '手续费补记',
+    applicantId: 'user-accountant',
+    applicantName: '会计甲',
     creationTime: '2026-10-13T10:00:00+08:00',
     lines: [
       { accountCode: '6602', debit: 50, credit: 0, summary: '手续费' },
@@ -462,8 +640,14 @@ let mockAdjusts: FinManualAdjustDto[] = [
     ],
   },
   {
-    id: 'adj-2', adjustNo: 'ADJ-002', status: 'Pending', amount: 20, currency: 'CNY',
-    summary: '预收纠偏', applicantId: 'user-accountant', applicantName: '会计甲',
+    id: 'adj-2',
+    adjustNo: 'ADJ-002',
+    status: 'Pending',
+    amount: 20,
+    currency: 'CNY',
+    summary: '预收纠偏',
+    applicantId: 'user-accountant',
+    applicantName: '会计甲',
     creationTime: '2026-10-13T11:00:00+08:00',
     lines: [
       { accountCode: '2205', debit: 20, credit: 0 },
@@ -471,17 +655,31 @@ let mockAdjusts: FinManualAdjustDto[] = [
     ],
   },
   {
-    id: 'adj-3', adjustNo: 'ADJ-003', status: 'Pending', amount: 10, currency: 'CNY',
-    summary: '老板自测单（用于验自批拦截）', applicantId: 'user-boss', applicantName: '老板',
+    id: 'adj-3',
+    adjustNo: 'ADJ-003',
+    status: 'Pending',
+    amount: 10,
+    currency: 'CNY',
+    summary: '老板自测单（用于验自批拦截）',
+    applicantId: 'user-boss',
+    applicantName: '老板',
     creationTime: '2026-10-13T12:00:00+08:00',
     lines: [
       { accountCode: '3101', debit: 10, credit: 0 },
       { accountCode: '1002', debit: 0, credit: 10 },
     ],
-  },  {
-    id: 'adj-4', adjustNo: 'ADJ-004', status: 'Rejected', amount: 15, currency: 'CNY',
-    summary: '渠道手续费冲回（被驳回，制单人=当前演示用户）', applicantId: 'user-boss', applicantName: '老板',
-    auditorId: 'user-accountant2', auditorName: '会计乙',
+  },
+  {
+    id: 'adj-4',
+    adjustNo: 'ADJ-004',
+    status: 'Rejected',
+    amount: 15,
+    currency: 'CNY',
+    summary: '渠道手续费冲回（被驳回，制单人=当前演示用户）',
+    applicantId: 'user-boss',
+    applicantName: '老板',
+    auditorId: 'user-accountant2',
+    auditorName: '会计乙',
     rejectReason: '缺少渠道对账单附件，补齐后重新提交',
     creationTime: '2026-10-13T13:00:00+08:00',
     lines: [
@@ -490,9 +688,16 @@ let mockAdjusts: FinManualAdjustDto[] = [
     ],
   },
   {
-    id: 'adj-5', adjustNo: 'ADJ-005', status: 'Rejected', amount: 8, currency: 'CNY',
-    summary: '他人被驳回单（当前用户不可重新编辑）', applicantId: 'user-accountant', applicantName: '会计甲',
-    auditorId: 'user-boss', auditorName: '老板',
+    id: 'adj-5',
+    adjustNo: 'ADJ-005',
+    status: 'Rejected',
+    amount: 8,
+    currency: 'CNY',
+    summary: '他人被驳回单（当前用户不可重新编辑）',
+    applicantId: 'user-accountant',
+    applicantName: '会计甲',
+    auditorId: 'user-boss',
+    auditorName: '老板',
     rejectReason: '金额与流水不符',
     creationTime: '2026-10-13T14:00:00+08:00',
     lines: [
@@ -503,29 +708,95 @@ let mockAdjusts: FinManualAdjustDto[] = [
 ];
 
 const mockPeriod: FinPeriodDto = {
-  id: 'p-202610', year: 2026, month: 10, label: '2026-10', status: 'Open',
+  id: 'p-202610',
+  year: 2026,
+  month: 10,
+  label: '2026-10',
+  status: 'Open',
   lastPostFailure: null,
 };
 
 let mockReconciles: FinReconcileRunDto[] = [
   {
-    id: 'rc-1', type: 'ledger-internal', rangeStart: '2026-10-01', rangeEnd: '2026-10-14',
-    diffCount: 0, status: 'Done', createdAt: '2026-10-14T07:00:00+08:00', excludedDemo: true,
+    id: 'rc-1',
+    type: 'ledger-internal',
+    rangeStart: '2026-10-01',
+    rangeEnd: '2026-10-14',
+    diffCount: 0,
+    status: 'Done',
+    createdAt: '2026-10-14T07:00:00+08:00',
+    excludedDemo: true,
   },
   {
-    id: 'rc-0', type: 'ledger-internal', rangeStart: '2026-10-01', rangeEnd: '2026-10-13',
-    diffCount: 0, status: 'Done', createdAt: '2026-10-13T07:00:00+08:00', excludedDemo: false,
+    id: 'rc-0',
+    type: 'ledger-internal',
+    rangeStart: '2026-10-01',
+    rangeEnd: '2026-10-13',
+    diffCount: 0,
+    status: 'Done',
+    createdAt: '2026-10-13T07:00:00+08:00',
+    excludedDemo: false,
   },
 ];
 
 const mockBizDocs: FinBizDocDto[] = [
-  { id: 'bd-1', bizType: 'demo.credit', bizRefId: 'ord-1001', phase: 'pay', amount: 100, currency: 'CNY', status: 'Settled', agentId: 'ag-1', isDemo: true, creationTime: '2026-10-10T08:00:00+08:00', voucherId: 'v1' },
-  { id: 'bd-2', bizType: 'order.pay', bizRefId: 'ord-2002', phase: 'paid', amount: 88, currency: 'CNY', status: 'Paid', agentId: 'ag-2', isDemo: false, creationTime: '2026-10-11T14:00:00+08:00', voucherId: null },
+  {
+    id: 'bd-1',
+    bizType: 'demo.credit',
+    bizRefId: 'ord-1001',
+    phase: 'pay',
+    amount: 100,
+    currency: 'CNY',
+    status: 'Settled',
+    agentId: 'ag-1',
+    isDemo: true,
+    creationTime: '2026-10-10T08:00:00+08:00',
+    voucherId: 'v1',
+  },
+  {
+    id: 'bd-2',
+    bizType: 'order.pay',
+    bizRefId: 'ord-2002',
+    phase: 'paid',
+    amount: 88,
+    currency: 'CNY',
+    status: 'Paid',
+    agentId: 'ag-2',
+    isDemo: false,
+    creationTime: '2026-10-11T14:00:00+08:00',
+    voucherId: null,
+  },
 ];
 
 const mockBalances: FinBalanceProjectionDto[] = [
-  { id: 'bal-1', ownerType: 'User', ownerId: 'u-1', ownerName: '用户甲', currency: 'CNY', available: 120, frozen: 30, prepayment: 70, ledgerDerived: 150, diff: 0, syncedAt: '2026-10-14T07:30:00+08:00', agentId: 'ag-1' },
-  { id: 'bal-2', ownerType: 'User', ownerId: 'u-2', ownerName: '用户乙', currency: 'CNY', available: 40, frozen: 0, prepayment: 10, ledgerDerived: 55, diff: -5, syncedAt: '2026-10-14T07:30:00+08:00', agentId: 'ag-2' },
+  {
+    id: 'bal-1',
+    ownerType: 'User',
+    ownerId: 'u-1',
+    ownerName: '用户甲',
+    currency: 'CNY',
+    available: 120,
+    frozen: 30,
+    prepayment: 70,
+    ledgerDerived: 150,
+    diff: 0,
+    syncedAt: '2026-10-14T07:30:00+08:00',
+    agentId: 'ag-1',
+  },
+  {
+    id: 'bal-2',
+    ownerType: 'User',
+    ownerId: 'u-2',
+    ownerName: '用户乙',
+    currency: 'CNY',
+    available: 40,
+    frozen: 0,
+    prepayment: 10,
+    ledgerDerived: 55,
+    diff: -5,
+    syncedAt: '2026-10-14T07:30:00+08:00',
+    agentId: 'ag-2',
+  },
 ];
 
 function pageOf<T>(all: T[], q: FinanceListQuery): PagedResultDto<T> {
@@ -544,11 +815,10 @@ function abpError(code: string, message: string, status = 400): never {
 
 /**
  * 错误码 → 中文提示。码以后端 FinanceErrorCodes 为准（error.code）；
- * 自批是 Finance:Adjust:SelfApproveNotAllowed（403），Legacy 码仅兼容旧 mock。
+ * 自批是 Finance:Adjust:SelfApproveNotAllowed（403）。
  */
 function mapFinanceErrorMessage(code?: string, fallback?: string) {
   switch (code) {
-    case FINANCE_ERROR.SelfApproveLegacy:
     case FINANCE_ERROR.SelfApproveForbidden:
       return '不能审批自己发起的调账';
     case FINANCE_ERROR.CreateDenied:
@@ -609,10 +879,6 @@ export function financeErrorFields(error: unknown): string[] {
   return fields.map((s) => s.charAt(0).toLowerCase() + s.slice(1));
 }
 
-export function isFinanceInvalidInput(error: unknown): boolean {
-  return /InvalidInput/i.test(financeErrorCode(error) || '') || financeErrorFields(error).length > 0;
-}
-
 export function financeErrorCode(error: unknown): string | undefined {
   const e = error as {
     info?: { code?: string };
@@ -640,10 +906,18 @@ export function financeErrorText(error: unknown): string {
 async function liveGet<T>(url: string, params?: Record<string, unknown>) {
   return request<T>(url, { method: 'GET', params });
 }
-async function livePost<T>(url: string, data?: unknown, opts?: Record<string, unknown>) {
+async function livePost<T>(
+  url: string,
+  data?: unknown,
+  opts?: Record<string, unknown>,
+) {
   return request<T>(url, { method: 'POST', data, ...opts });
 }
-async function livePut<T>(url: string, data?: unknown, opts?: Record<string, unknown>) {
+async function livePut<T>(
+  url: string,
+  data?: unknown,
+  opts?: Record<string, unknown>,
+) {
   return request<T>(url, { method: 'PUT', data, ...opts });
 }
 async function liveDelete<T>(url: string, opts?: Record<string, unknown>) {
@@ -661,7 +935,7 @@ const ACCOUNT_REQ = { skipErrorHandler: true } as const;
 export const ADJUST_REQ = { skipErrorHandler: true } as const;
 
 export async function getFinanceOverview(): Promise<FinOverviewDto> {
-  if (!useMock()) {
+  if (!isMock()) {
     // live 字段归一（OCR E2E 修复：此前原样透传，live 返回 todayIncome/isBalanced/...，
     // UI DTO 期望 todayIn/balanced/... → 页面全 0 且永远显示「借贷不平衡」告警）
     const raw = await liveGet<Record<string, unknown>>(API.overview);
@@ -678,14 +952,25 @@ export async function getFinanceOverview(): Promise<FinOverviewDto> {
     };
   }
   return {
-    todayIn: 188, todayOut: 20, balanced: true, unreconciledCount: 1,
-    availableTotal: 160, frozenTotal: 30, prepaymentTotal: 80, recognizedIncome: 30,
+    todayIn: 188,
+    todayOut: 20,
+    balanced: true,
+    unreconciledCount: 1,
+    availableTotal: 160,
+    frozenTotal: 30,
+    prepaymentTotal: 80,
+    recognizedIncome: 30,
   };
 }
 
-export async function getAccounts(q: FinanceListQuery = {}): Promise<PagedResultDto<FinAccountDto>> {
-  if (!useMock()) {
-    const page = await liveGet<PagedResultDto<FinAccountDto>>(API.account, q as Record<string, unknown>);
+export async function getAccounts(
+  q: FinanceListQuery = {},
+): Promise<PagedResultDto<FinAccountDto>> {
+  if (!isMock()) {
+    const page = await liveGet<PagedResultDto<FinAccountDto>>(
+      API.account,
+      q as Record<string, unknown>,
+    );
     return { ...page, items: (page.items || []).map(normalizeAccount) };
   }
   let list = [...mockAccounts];
@@ -693,34 +978,65 @@ export async function getAccounts(q: FinanceListQuery = {}): Promise<PagedResult
     const f = q.filter.toLowerCase();
     list = list.filter((x) => x.code.includes(f) || x.name.includes(f));
   }
+  // 与 live FinAccountListInput 同口径：code/name 分别模糊查（A2 搜索走这两个字段）
+  if (q.code) {
+    const c = q.code.toLowerCase();
+    list = list.filter((x) => x.code.toLowerCase().includes(c));
+  }
+  if (q.name) {
+    const n = q.name.toLowerCase();
+    list = list.filter((x) => x.name.toLowerCase().includes(n));
+  }
   return pageOf(list, q);
 }
 
 export async function getAccount(id: string): Promise<FinAccountDto> {
-  if (!useMock()) return normalizeAccount(await liveGet(API.account + '/' + id));
+  if (!isMock()) return normalizeAccount(await liveGet(`${API.account}/${id}`));
   const row = mockAccounts.find((x) => x.id === id);
   if (!row) abpError(FINANCE_ERROR.AccountNotFound, '科目不存在', 404);
   return row;
 }
 
 /** POST /api/app/fin-account（Finance.Account.Manage） */
-export async function createAccount(input: FinAccountInput): Promise<FinAccountDto> {
-  if (!useMock()) {
-    return normalizeAccount(await request(API.account, { method: 'POST', data: toLiveAccountBody(input), ...ACCOUNT_REQ }));
+export async function createAccount(
+  input: FinAccountInput,
+): Promise<FinAccountDto> {
+  if (!isMock()) {
+    return normalizeAccount(
+      await request(API.account, {
+        method: 'POST',
+        data: toLiveAccountBody(input),
+        ...ACCOUNT_REQ,
+      }),
+    );
   }
   const row: FinAccountDto = {
-    id: uid('a'), code: input.code, name: input.name, type: input.type, normalSide: input.normalSide,
-    parentId: input.parentId ?? null, isSystem: false, enabled: true, hasEntries: false,
+    id: uid('a'),
+    code: input.code,
+    name: input.name,
+    type: input.type,
+    normalSide: input.normalSide,
+    parentId: input.parentId ?? null,
+    isSystem: false,
+    enabled: true,
+    hasEntries: false,
   };
   mockAccounts.push(row);
   return row;
 }
 
 /** PUT /api/app/fin-account/{id}：整份 body，同 create */
-export async function updateAccount(id: string, input: FinAccountInput): Promise<FinAccountDto> {
-  if (!useMock()) {
+export async function updateAccount(
+  id: string,
+  input: FinAccountInput,
+): Promise<FinAccountDto> {
+  if (!isMock()) {
     return normalizeAccount(
-      await request(API.account + '/' + id, { method: 'PUT', data: toLiveAccountBody(input), ...ACCOUNT_REQ }),
+      await request(`${API.account}/${id}`, {
+        method: 'PUT',
+        data: toLiveAccountBody(input),
+        ...ACCOUNT_REQ,
+      }),
     );
   }
   const i = mockAccounts.findIndex((x) => x.id === id);
@@ -730,10 +1046,16 @@ export async function updateAccount(id: string, input: FinAccountInput): Promise
 }
 
 /** POST /{id}/disable | /{id}/enable；系统科目后端拒 SystemReadOnly */
-export async function setAccountActive(id: string, active: boolean): Promise<FinAccountDto> {
-  if (!useMock()) {
+export async function setAccountActive(
+  id: string,
+  active: boolean,
+): Promise<FinAccountDto> {
+  if (!isMock()) {
     return normalizeAccount(
-      await request(API.account + '/' + id + (active ? '/enable' : '/disable'), { method: 'POST', ...ACCOUNT_REQ }),
+      await request(`${API.account}/${id}${active ? '/enable' : '/disable'}`, {
+        method: 'POST',
+        ...ACCOUNT_REQ,
+      }),
     );
   }
   const row = mockAccounts.find((x) => x.id === id);
@@ -745,20 +1067,24 @@ export async function setAccountActive(id: string, active: boolean): Promise<Fin
 
 /** DELETE /{id}：有分录或被调账引用 → HasEntries；有子科目 → HasChildren */
 export async function deleteAccount(id: string): Promise<void> {
-  if (!useMock()) {
-    await request(API.account + '/' + id, { method: 'DELETE', ...ACCOUNT_REQ });
+  if (!isMock()) {
+    await request(`${API.account}/${id}`, { method: 'DELETE', ...ACCOUNT_REQ });
     return;
   }
   const row = mockAccounts.find((x) => x.id === id);
   if (!row) abpError(FINANCE_ERROR.AccountNotFound, '科目不存在', 404);
-  if (row.isSystem) abpError(FINANCE_ERROR.AccountSystemReadOnly, '系统科目不可删');
-  if (row.hasEntries) abpError(FINANCE_ERROR.AccountHasEntries, '有分录的科目不可删，只能停用');
+  if (row.isSystem)
+    abpError(FINANCE_ERROR.AccountSystemReadOnly, '系统科目不可删');
+  if (row.hasEntries)
+    abpError(FINANCE_ERROR.AccountHasEntries, '有分录的科目不可删，只能停用');
   const idx = mockAccounts.findIndex((x) => x.id === id);
   mockAccounts.splice(idx, 1);
 }
 
-export async function getPostingRules(q: FinanceListQuery = {}): Promise<PagedResultDto<FinPostingRuleDto>> {
-  if (!useMock()) return liveGet(API.postingRule, q as Record<string, unknown>);
+export async function getPostingRules(
+  q: FinanceListQuery = {},
+): Promise<PagedResultDto<FinPostingRuleDto>> {
+  if (!isMock()) return liveGet(API.postingRule, q as Record<string, unknown>);
   return pageOf(mockRules, q);
 }
 
@@ -797,7 +1123,8 @@ function fromLiveVoucher(raw: Record<string, unknown>): FinVoucherDto {
           seq: Number(en.seq ?? 0),
           accountCode: String(en.accountCode || ''),
           accountName: String(en.accountName || ''),
-          ownerType: en.ownerType != null ? finOwnerTypeName(en.ownerType) : undefined,
+          ownerType:
+            en.ownerType != null ? finOwnerTypeName(en.ownerType) : undefined,
           ownerId: en.ownerId != null ? String(en.ownerId) : undefined,
           debit: Number(en.debit ?? 0),
           credit: Number(en.credit ?? 0),
@@ -806,15 +1133,27 @@ function fromLiveVoucher(raw: Record<string, unknown>): FinVoucherDto {
   };
 }
 
-export async function getVouchers(q: FinanceListQuery = {}): Promise<PagedResultDto<FinVoucherDto>> {
-  if (!useMock()) {
-    const page = await liveGet<{ totalCount: number; items: Record<string, unknown>[] }>(API.voucher, q as Record<string, unknown>);
-    return { totalCount: page.totalCount, items: (page.items || []).map(fromLiveVoucher) };
+export async function getVouchers(
+  q: FinanceListQuery = {},
+): Promise<PagedResultDto<FinVoucherDto>> {
+  if (!isMock()) {
+    const page = await liveGet<{
+      totalCount: number;
+      items: Record<string, unknown>[];
+    }>(API.voucher, q as Record<string, unknown>);
+    return {
+      totalCount: page.totalCount,
+      items: (page.items || []).map(fromLiveVoucher),
+    };
   }
   let list = [...mockVouchers];
   if (q.filter) {
     const f = q.filter.toLowerCase();
-    list = list.filter((x) => x.voucherNo.toLowerCase().includes(f) || (x.summary || '').toLowerCase().includes(f));
+    list = list.filter(
+      (x) =>
+        x.voucherNo.toLowerCase().includes(f) ||
+        (x.summary || '').toLowerCase().includes(f),
+    );
   }
   if (q.bizType) list = list.filter((x) => x.bizType === q.bizType);
   if (q.bizRefId) list = list.filter((x) => x.bizRefId === q.bizRefId);
@@ -825,36 +1164,55 @@ export async function getVouchers(q: FinanceListQuery = {}): Promise<PagedResult
 }
 
 export async function getVoucher(id: string): Promise<FinVoucherDto> {
-  if (!useMock()) return fromLiveVoucher(await liveGet<Record<string, unknown>>(API.voucher + '/' + id));
+  if (!isMock())
+    return fromLiveVoucher(
+      await liveGet<Record<string, unknown>>(`${API.voucher}/${id}`),
+    );
   const row = mockVouchers.find((x) => x.id === id);
   if (!row) abpError('Finance:Voucher:NotFound', '凭证不存在', 404);
   return row;
 }
 
 export async function reverseVoucher(id: string): Promise<FinVoucherDto> {
-  if (!useMock()) return fromLiveVoucher(await livePost<Record<string, unknown>>(API.voucher + '/' + id + '/reverse'));
+  if (!isMock())
+    return fromLiveVoucher(
+      await livePost<Record<string, unknown>>(`${API.voucher}/${id}/reverse`),
+    );
   const row = mockVouchers.find((x) => x.id === id);
   if (!row) abpError('Finance:Voucher:NotFound', '凭证不存在', 404);
-  if (row.status !== 'Posted') abpError('Finance:Voucher:InvalidStatus', '仅已过账凭证可红冲');
+  if (row.status !== 'Posted')
+    abpError('Finance:Voucher:InvalidStatus', '仅已过账凭证可红冲');
   row.status = 'Reversed';
   const rev: FinVoucherDto = {
     ...row,
     id: uid('v'),
-    voucherNo: row.voucherNo + '-R',
+    voucherNo: `${row.voucherNo}-R`,
     status: 'Posted',
     reversalOf: row.id,
     creationTime: new Date().toISOString(),
-    summary: '红冲 ' + row.voucherNo,
-    entries: row.entries?.map((e) => ({ ...e, debit: e.credit, credit: e.debit })),
+    summary: `红冲 ${row.voucherNo}`,
+    entries: row.entries?.map((e) => ({
+      ...e,
+      debit: e.credit,
+      credit: e.debit,
+    })),
   };
   mockVouchers = [rev, ...mockVouchers];
   return rev;
 }
 
-export async function getAdjusts(q: FinanceListQuery = {}): Promise<PagedResultDto<FinManualAdjustDto>> {
-  if (!useMock()) {
-    const page = await liveGet<{ totalCount: number; items: Record<string, unknown>[] }>(API.manualAdjust, q as Record<string, unknown>);
-    return { totalCount: page.totalCount, items: (page.items || []).map(fromLiveAdjust) };
+export async function getAdjusts(
+  q: FinanceListQuery = {},
+): Promise<PagedResultDto<FinManualAdjustDto>> {
+  if (!isMock()) {
+    const page = await liveGet<{
+      totalCount: number;
+      items: Record<string, unknown>[];
+    }>(API.manualAdjust, q as Record<string, unknown>);
+    return {
+      totalCount: page.totalCount,
+      items: (page.items || []).map(fromLiveAdjust),
+    };
   }
   let list = [...mockAdjusts];
   if (q.status) {
@@ -863,17 +1221,28 @@ export async function getAdjusts(q: FinanceListQuery = {}): Promise<PagedResultD
   }
   if (q.filter) {
     const f = q.filter.toLowerCase();
-    list = list.filter((x) => x.adjustNo.toLowerCase().includes(f) || x.summary.toLowerCase().includes(f));
+    list = list.filter(
+      (x) =>
+        x.adjustNo.toLowerCase().includes(f) ||
+        x.summary.toLowerCase().includes(f),
+    );
   }
   return pageOf(list, q);
 }
 
-
-const ADJUST_STATUS_FROM_API: AdjustStatus[] = ['Draft', 'Pending', 'Rejected', 'Posted', 'Reversed'];
+const ADJUST_STATUS_FROM_API: AdjustStatus[] = [
+  'Draft',
+  'Pending',
+  'Rejected',
+  'Posted',
+  'Reversed',
+];
 
 function mapAdjustStatus(v: unknown): AdjustStatus {
-  if (typeof v === 'number' && v >= 0 && v < ADJUST_STATUS_FROM_API.length) return ADJUST_STATUS_FROM_API[v];
-  if (typeof v === 'string' && (ADJUST_STATUS_FROM_API as string[]).includes(v)) return v as AdjustStatus;
+  if (typeof v === 'number' && v >= 0 && v < ADJUST_STATUS_FROM_API.length)
+    return ADJUST_STATUS_FROM_API[v];
+  if (typeof v === 'string' && (ADJUST_STATUS_FROM_API as string[]).includes(v))
+    return v as AdjustStatus;
   return 'Draft';
 }
 
@@ -887,12 +1256,16 @@ export const FIN_OWNER_TYPE: Record<FinOwnerTypeName, number> = {
 };
 /** 后端数字枚举 → 名称串（fromLiveAdjust 回填用，与 FIN_OWNER_TYPE 一一对应）。
  *  单一事实源=FIN_OWNER_TYPE 的键序，另抄一份字面量数组会漂移。 */
-const FIN_OWNER_NAME_BY_CODE: FinOwnerTypeName[] = Object.keys(FIN_OWNER_TYPE) as FinOwnerTypeName[];
+const FIN_OWNER_NAME_BY_CODE: FinOwnerTypeName[] = Object.keys(
+  FIN_OWNER_TYPE,
+) as FinOwnerTypeName[];
 
 /** 后端 OwnerType（数字枚举或名称串）→ 表单 options 的名称串；未知回落 Channel（与历史默认一致）。 */
 export function finOwnerTypeName(v: unknown): FinOwnerTypeName {
-  if (typeof v === 'number' && v >= 0 && v < FIN_OWNER_NAME_BY_CODE.length) return FIN_OWNER_NAME_BY_CODE[v];
-  if (typeof v === 'string' && Object.hasOwn(FIN_OWNER_TYPE, v)) return v as FinOwnerTypeName;
+  if (typeof v === 'number' && v >= 0 && v < FIN_OWNER_NAME_BY_CODE.length)
+    return FIN_OWNER_NAME_BY_CODE[v];
+  if (typeof v === 'string' && Object.hasOwn(FIN_OWNER_TYPE, v))
+    return v as FinOwnerTypeName;
   return 'Channel';
 }
 
@@ -919,9 +1292,13 @@ function toLiveAdjustBody(input: CreateUpdateFinManualAdjustInput) {
     Number(input.amount) ||
     lines.reduce((sum, l) => sum + Number(l.debit || 0), 0) ||
     lines.reduce((sum, l) => sum + Number(l.credit || 0), 0);
-  const coerceOwner = (v: FinOwnerTypeName | number | undefined, fallback: number) => {
+  const coerceOwner = (
+    v: FinOwnerTypeName | number | undefined,
+    fallback: number,
+  ) => {
     if (typeof v === 'number') return v;
-    if (typeof v === 'string' && v in FIN_OWNER_TYPE) return FIN_OWNER_TYPE[v as FinOwnerTypeName];
+    if (typeof v === 'string' && v in FIN_OWNER_TYPE)
+      return FIN_OWNER_TYPE[v as FinOwnerTypeName];
     return fallback;
   };
   const body: Record<string, unknown> = {
@@ -935,7 +1312,10 @@ function toLiveAdjustBody(input: CreateUpdateFinManualAdjustInput) {
   const creditCode = input.creditAccountCode || creditLine?.accountCode;
   if (creditCode) body.creditAccountCode = creditCode;
   if (input.creditOwnerType !== undefined && input.creditOwnerType !== null) {
-    body.creditOwnerType = coerceOwner(input.creditOwnerType as FinOwnerTypeName | number | undefined, FIN_OWNER_TYPE.Platform);
+    body.creditOwnerType = coerceOwner(
+      input.creditOwnerType as FinOwnerTypeName | number | undefined,
+      FIN_OWNER_TYPE.Platform,
+    );
   }
   if (input.creditOwnerId) body.creditOwnerId = input.creditOwnerId;
   return body;
@@ -949,7 +1329,7 @@ function fromLiveAdjust(raw: Record<string, unknown>): FinManualAdjustDto {
   const id = String(raw.id || '');
   return {
     id,
-    adjustNo: String(raw.adjustNo || (id ? 'ADJ-' + id.slice(0, 8) : '')),
+    adjustNo: String(raw.adjustNo || (id ? `ADJ-${id.slice(0, 8)}` : '')),
     status: mapAdjustStatus(raw.status),
     amount,
     currency: String(raw.currency || 'CNY'),
@@ -961,31 +1341,47 @@ function fromLiveAdjust(raw: Record<string, unknown>): FinManualAdjustDto {
     rejectReason: (raw.rejectReason as string) ?? null,
     voucherId: (raw.voucherId as string) ?? null,
     debitOwnerType: finOwnerTypeName(raw.debitOwnerType),
-    debitOwnerId: raw.debitOwnerId != null ? String(raw.debitOwnerId) : 'default',
-    creationTime: String(raw.creationTime || raw.submittedAt || new Date().toISOString()),
+    debitOwnerId:
+      raw.debitOwnerId != null ? String(raw.debitOwnerId) : 'default',
+    creationTime: String(
+      raw.creationTime || raw.submittedAt || new Date().toISOString(),
+    ),
     lines: [
       { accountCode: debit, debit: amount, credit: 0, summary: reason },
-      { accountCode: credit || debit, debit: 0, credit: amount, summary: reason },
+      {
+        accountCode: credit || debit,
+        debit: 0,
+        credit: amount,
+        summary: reason,
+      },
     ],
   };
 }
 
-export async function createAdjust(input: CreateUpdateFinManualAdjustInput & {
-  summary?: string;
-  lines?: FinManualAdjustDto['lines'];
-  applicantId?: string;
-  applicantName?: string;
-}): Promise<FinManualAdjustDto> {
-  if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust, toLiveAdjustBody(input), ADJUST_REQ);
+export async function createAdjust(
+  input: CreateUpdateFinManualAdjustInput & {
+    summary?: string;
+    lines?: FinManualAdjustDto['lines'];
+    applicantId?: string;
+    applicantName?: string;
+  },
+): Promise<FinManualAdjustDto> {
+  if (!isMock()) {
+    const raw = await livePost<Record<string, unknown>>(
+      API.manualAdjust,
+      toLiveAdjustBody(input),
+      ADJUST_REQ,
+    );
     return fromLiveAdjust(raw);
   }
-  const debitCode = input.debitAccountCode || input.lines?.[0]?.accountCode || '1002';
-  const creditCode = input.creditAccountCode || input.lines?.[1]?.accountCode || '3101';
+  const debitCode =
+    input.debitAccountCode || input.lines?.[0]?.accountCode || '1002';
+  const creditCode =
+    input.creditAccountCode || input.lines?.[1]?.accountCode || '3101';
   const reason = input.reason ?? input.summary ?? '';
   const row: FinManualAdjustDto = {
     id: uid('adj'),
-    adjustNo: 'ADJ-' + String(mockAdjusts.length + 1).padStart(3, '0'),
+    adjustNo: `ADJ-${String(mockAdjusts.length + 1).padStart(3, '0')}`,
     status: 'Draft',
     amount: input.amount,
     currency: input.currency || 'CNY',
@@ -994,8 +1390,18 @@ export async function createAdjust(input: CreateUpdateFinManualAdjustInput & {
     applicantName: input.applicantName || 'accountant',
     creationTime: new Date().toISOString(),
     lines: input.lines || [
-      { accountCode: debitCode, debit: input.amount, credit: 0, summary: reason },
-      { accountCode: creditCode, debit: 0, credit: input.amount, summary: reason },
+      {
+        accountCode: debitCode,
+        debit: input.amount,
+        credit: 0,
+        summary: reason,
+      },
+      {
+        accountCode: creditCode,
+        debit: 0,
+        credit: input.amount,
+        summary: reason,
+      },
     ],
   };
   mockAdjusts = [row, ...mockAdjusts];
@@ -1011,17 +1417,24 @@ function findAdjust(id: string) {
 function requireDraft(cur: FinManualAdjustDto) {
   // 产品 v1.1：编辑/删除/提交非 Draft → InvalidStatus
   if (cur.status !== 'Draft') {
-    abpError(FINANCE_ERROR.InvalidStatus, mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus));
+    abpError(
+      FINANCE_ERROR.InvalidStatus,
+      mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus),
+    );
   }
 }
 
 export async function updateAdjust(
   id: string,
-  input: CreateUpdateFinManualAdjustInput | Partial<Pick<FinManualAdjustDto, 'summary' | 'amount' | 'lines' | 'currency'>>,
+  input:
+    | CreateUpdateFinManualAdjustInput
+    | Partial<
+        Pick<FinManualAdjustDto, 'summary' | 'amount' | 'lines' | 'currency'>
+      >,
 ): Promise<FinManualAdjustDto> {
-  if (!useMock()) {
+  if (!isMock()) {
     const raw = await livePut<Record<string, unknown>>(
-      API.manualAdjust + '/' + id,
+      `${API.manualAdjust}/${id}`,
       toLiveAdjustBody(input as CreateUpdateFinManualAdjustInput),
       ADJUST_REQ,
     );
@@ -1035,23 +1448,29 @@ export async function updateAdjust(
 }
 
 export async function deleteAdjust(id: string): Promise<void> {
-  if (!useMock()) return liveDelete(API.manualAdjust + '/' + id, ADJUST_REQ);
+  if (!isMock()) return liveDelete(`${API.manualAdjust}/${id}`, ADJUST_REQ);
   const i = findAdjust(id);
   requireDraft(mockAdjusts[i]);
   mockAdjusts.splice(i, 1);
 }
 
 export async function getAdjust(id: string): Promise<FinManualAdjustDto> {
-  if (!useMock()) {
-    const raw = await liveGet<Record<string, unknown>>(API.manualAdjust + '/' + id);
+  if (!isMock()) {
+    const raw = await liveGet<Record<string, unknown>>(
+      `${API.manualAdjust}/${id}`,
+    );
     return fromLiveAdjust(raw);
   }
   return mockAdjusts[findAdjust(id)];
 }
 
 export async function submitAdjust(id: string): Promise<FinManualAdjustDto> {
-  if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/submit', undefined, ADJUST_REQ);
+  if (!isMock()) {
+    const raw = await livePost<Record<string, unknown>>(
+      `${API.manualAdjust}/${id}/submit`,
+      undefined,
+      ADJUST_REQ,
+    );
     return fromLiveAdjust(raw);
   }
   const i = findAdjust(id);
@@ -1065,14 +1484,21 @@ export async function approveAdjust(
   id: string,
   auditor: { id: string; name: string },
 ): Promise<FinManualAdjustDto> {
-  if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/approve', undefined, ADJUST_REQ);
+  if (!isMock()) {
+    const raw = await livePost<Record<string, unknown>>(
+      `${API.manualAdjust}/${id}/approve`,
+      undefined,
+      ADJUST_REQ,
+    );
     return fromLiveAdjust(raw);
   }
   const i = findAdjust(id);
   const cur = mockAdjusts[i];
   if (cur.status !== 'Pending') {
-    abpError(FINANCE_ERROR.InvalidStatus, mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus));
+    abpError(
+      FINANCE_ERROR.InvalidStatus,
+      mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus),
+    );
   }
   if (cur.applicantId === auditor.id) {
     abpError(
@@ -1083,7 +1509,7 @@ export async function approveAdjust(
   }
   const voucher: FinVoucherDto = {
     id: uid('v'),
-    voucherNo: 'V-ADJ-' + cur.adjustNo,
+    voucherNo: `V-ADJ-${cur.adjustNo}`,
     bizType: 'manual-adjust',
     bizRefId: cur.id,
     phase: 'post',
@@ -1120,17 +1546,27 @@ export async function rejectAdjust(
   auditor: { id: string; name: string },
   rejectReason: string,
 ): Promise<FinManualAdjustDto> {
-  if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reject', { rejectReason }, ADJUST_REQ);
+  if (!isMock()) {
+    const raw = await livePost<Record<string, unknown>>(
+      `${API.manualAdjust}/${id}/reject`,
+      { rejectReason },
+      ADJUST_REQ,
+    );
     return fromLiveAdjust(raw);
   }
-  if (!rejectReason || !rejectReason.trim()) {
-    abpError(FINANCE_ERROR.RejectReasonRequired, mapFinanceErrorMessage(FINANCE_ERROR.RejectReasonRequired));
+  if (!rejectReason?.trim()) {
+    abpError(
+      FINANCE_ERROR.RejectReasonRequired,
+      mapFinanceErrorMessage(FINANCE_ERROR.RejectReasonRequired),
+    );
   }
   const i = findAdjust(id);
   const cur = mockAdjusts[i];
   if (cur.status !== 'Pending') {
-    abpError(FINANCE_ERROR.InvalidStatus, mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus));
+    abpError(
+      FINANCE_ERROR.InvalidStatus,
+      mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus),
+    );
   }
   if (cur.applicantId === auditor.id) {
     abpError(
@@ -1157,20 +1593,35 @@ export async function reopenAdjust(
   id: string,
   me: { id: string; canCreate: boolean },
 ): Promise<FinManualAdjustDto> {
-  if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reopen', undefined, ADJUST_REQ);
+  if (!isMock()) {
+    const raw = await livePost<Record<string, unknown>>(
+      `${API.manualAdjust}/${id}/reopen`,
+      undefined,
+      ADJUST_REQ,
+    );
     return fromLiveAdjust(raw);
   }
   const i = findAdjust(id);
   const cur = mockAdjusts[i];
   if (!me.canCreate) {
-    abpError(FINANCE_ERROR.CreateDenied, mapFinanceErrorMessage(FINANCE_ERROR.CreateDenied), 403);
+    abpError(
+      FINANCE_ERROR.CreateDenied,
+      mapFinanceErrorMessage(FINANCE_ERROR.CreateDenied),
+      403,
+    );
   }
   if (cur.applicantId !== me.id) {
-    abpError(FINANCE_ERROR.ReopenDenied, mapFinanceErrorMessage(FINANCE_ERROR.ReopenDenied), 403);
+    abpError(
+      FINANCE_ERROR.ReopenDenied,
+      mapFinanceErrorMessage(FINANCE_ERROR.ReopenDenied),
+      403,
+    );
   }
   if (cur.status !== 'Rejected') {
-    abpError(FINANCE_ERROR.InvalidStatus, mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus));
+    abpError(
+      FINANCE_ERROR.InvalidStatus,
+      mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus),
+    );
   }
   mockAdjusts[i] = { ...cur, status: 'Draft' };
   return mockAdjusts[i];
@@ -1178,37 +1629,54 @@ export async function reopenAdjust(
 
 /** Posted -> Reversed（F1：POST /api/app/fin-manual-adjust/{id}/reverse） */
 export async function reverseAdjust(id: string): Promise<FinManualAdjustDto> {
-  if (!useMock()) {
-    const raw = await livePost<Record<string, unknown>>(API.manualAdjust + '/' + id + '/reverse', undefined, ADJUST_REQ);
+  if (!isMock()) {
+    const raw = await livePost<Record<string, unknown>>(
+      `${API.manualAdjust}/${id}/reverse`,
+      undefined,
+      ADJUST_REQ,
+    );
     return fromLiveAdjust(raw);
   }
   const i = findAdjust(id);
   const cur = mockAdjusts[i];
   if (cur.status !== 'Posted') {
-    abpError(FINANCE_ERROR.InvalidStatus, mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus));
+    abpError(
+      FINANCE_ERROR.InvalidStatus,
+      mapFinanceErrorMessage(FINANCE_ERROR.InvalidStatus),
+    );
   }
-  mockAdjusts[i] = { ...cur, status: 'Reversed' as FinManualAdjustDto['status'] };
+  mockAdjusts[i] = {
+    ...cur,
+    status: 'Reversed' as FinManualAdjustDto['status'],
+  };
   return mockAdjusts[i];
 }
 
 export async function getCurrentPeriod(): Promise<FinPeriodDto> {
-  if (!useMock()) return liveGet(API.period + '/current');
+  if (!isMock()) return liveGet(`${API.period}/current`);
   return mockPeriod;
 }
 
 function parseJsonObj(v: unknown): Record<string, any> {
   if (v && typeof v === 'object') return v as Record<string, any>;
   if (typeof v !== 'string' || !v) return {};
-  try { return JSON.parse(v) ?? {}; } catch { return {}; }
+  try {
+    return JSON.parse(v) ?? {};
+  } catch {
+    return {};
+  }
 }
 /** Live FinReconcileRunDto (runType/hasDiff/diffJson/scopeJson/creationTime) -> UI shape. */
 function fromLiveReconcile(raw: Record<string, unknown>): FinReconcileRunDto {
   const scope = parseJsonObj(raw.scopeJson);
   const diff = parseJsonObj(raw.diffJson);
-  const projDiffs = Array.isArray(diff.projectionDiffs) ? diff.projectionDiffs.length : 0;
-  const diffCount = typeof raw.diffCount === 'number'
-    ? raw.diffCount
-    : projDiffs + (diff.unbalanced ? 1 : 0) || (raw.hasDiff ? 1 : 0);
+  const projDiffs = Array.isArray(diff.projectionDiffs)
+    ? diff.projectionDiffs.length
+    : 0;
+  const diffCount =
+    typeof raw.diffCount === 'number'
+      ? raw.diffCount
+      : projDiffs + (diff.unbalanced ? 1 : 0) || (raw.hasDiff ? 1 : 0);
   const includeDemo = (raw.includeDemo ?? scope.includeDemo) === true;
   return {
     id: String(raw.id || ''),
@@ -1222,12 +1690,22 @@ function fromLiveReconcile(raw: Record<string, unknown>): FinReconcileRunDto {
   };
 }
 
-export async function getReconcileRuns(q: FinanceListQuery = {}): Promise<PagedResultDto<FinReconcileRunDto>> {
-  if (!useMock()) {
-    const res = await liveGet<PagedResultDto<Record<string, unknown>>>(API.reconcileRun, { ...q, includeDemo: !!q.includeDemo } as Record<string, unknown>);
-    return { totalCount: res?.totalCount ?? 0, items: (res?.items ?? []).map(fromLiveReconcile) };
+export async function getReconcileRuns(
+  q: FinanceListQuery = {},
+): Promise<PagedResultDto<FinReconcileRunDto>> {
+  if (!isMock()) {
+    const res = await liveGet<PagedResultDto<Record<string, unknown>>>(
+      API.reconcileRun,
+      { ...q, includeDemo: !!q.includeDemo } as Record<string, unknown>,
+    );
+    return {
+      totalCount: res?.totalCount ?? 0,
+      items: (res?.items ?? []).map(fromLiveReconcile),
+    };
   }
-  const list = q.includeDemo ? mockReconciles : mockReconciles.filter((x) => x.excludedDemo);
+  const list = q.includeDemo
+    ? mockReconciles
+    : mockReconciles.filter((x) => x.excludedDemo);
   return pageOf(list, q);
 }
 
@@ -1237,10 +1715,14 @@ export async function runReconcile(input: {
   /** 产品 v1.1：默认 false = 排除演示单据 */
   includeDemo?: boolean;
 }): Promise<FinReconcileRunDto> {
-  if (!useMock()) {
+  if (!isMock()) {
     // 页面自处理（catch 里 financeErrorText），skipErrorHandler 防同一次失败弹两条
     // ——与 ADJUST_REQ/ACCOUNT_REQ 同口径（OCR 修复：此处此前漏了）
-    const raw = await livePost<Record<string, unknown>>(API.reconcileRun + '/run', { ...input, includeDemo: !!input.includeDemo }, ADJUST_REQ);
+    const raw = await livePost<Record<string, unknown>>(
+      `${API.reconcileRun}/run`,
+      { ...input, includeDemo: !!input.includeDemo },
+      ADJUST_REQ,
+    );
     return fromLiveReconcile(raw);
   }
   const row: FinReconcileRunDto = {
@@ -1257,15 +1739,19 @@ export async function runReconcile(input: {
   return row;
 }
 
-export async function getBizDocs(q: FinanceListQuery = {}): Promise<PagedResultDto<FinBizDocDto>> {
-  if (!useMock()) return liveGet(API.bizDoc, q as Record<string, unknown>);
+export async function getBizDocs(
+  q: FinanceListQuery = {},
+): Promise<PagedResultDto<FinBizDocDto>> {
+  if (!isMock()) return liveGet(API.bizDoc, q as Record<string, unknown>);
   let list = [...mockBizDocs];
   if (q.agentId) list = list.filter((x) => x.agentId === q.agentId);
   if (q.isDemo === true) list = list.filter((x) => x.isDemo);
   if (q.isDemo === false) list = list.filter((x) => !x.isDemo);
   if (q.filter) {
     const f = q.filter.toLowerCase();
-    list = list.filter((x) => x.bizRefId.toLowerCase().includes(f) || x.bizType.includes(f));
+    list = list.filter(
+      (x) => x.bizRefId.toLowerCase().includes(f) || x.bizType.includes(f),
+    );
   }
   return pageOf(list, q);
 }
@@ -1273,12 +1759,16 @@ export async function getBizDocs(q: FinanceListQuery = {}): Promise<PagedResultD
 export async function getBalanceProjections(
   q: FinanceListQuery = {},
 ): Promise<PagedResultDto<FinBalanceProjectionDto>> {
-  if (!useMock()) return liveGet(API.balanceProjection, q as Record<string, unknown>);
+  if (!isMock())
+    return liveGet(API.balanceProjection, q as Record<string, unknown>);
   let list = [...mockBalances];
   if (q.agentId) list = list.filter((x) => x.agentId === q.agentId);
   if (q.filter) {
     const f = q.filter.toLowerCase();
-    list = list.filter((x) => (x.ownerName || '').toLowerCase().includes(f) || x.ownerId.includes(f));
+    list = list.filter(
+      (x) =>
+        (x.ownerName || '').toLowerCase().includes(f) || x.ownerId.includes(f),
+    );
   }
   return pageOf(list, q);
 }

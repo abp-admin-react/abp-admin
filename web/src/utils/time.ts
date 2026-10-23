@@ -35,10 +35,13 @@ export function parseApiDate(iso?: string | null): Dayjs | null {
 }
 
 /** 接口瞬间 → 用户本地可读串（默认到秒 + UTC 偏移标签）。空/非法显示 `-`。 */
-export function formatForDisplay(iso?: string | null, fmt = 'YYYY-MM-DD HH:mm:ss'): string {
+export function formatForDisplay(
+  iso?: string | null,
+  fmt = 'YYYY-MM-DD HH:mm:ss',
+): string {
   const d = parseApiDate(iso);
   if (!d) return '-';
-  return d.tz(userTimeZone()).format(fmt + ' [UTC]Z');
+  return d.tz(userTimeZone()).format(`${fmt} [UTC]Z`);
 }
 
 /**
@@ -50,15 +53,23 @@ export function rangeToUtcBounds(
   endLocalDay: Dayjs | string,
 ): { startUtc: string; endUtc: string } {
   const tz = userTimeZone();
-  const s = dayjs.tz(dayjs(startLocalDay).format('YYYY-MM-DD'), tz).startOf('day');
-  const e = dayjs.tz(dayjs(endLocalDay).format('YYYY-MM-DD'), tz).add(1, 'day').startOf('day');
+  const s = dayjs
+    .tz(dayjs(startLocalDay).format('YYYY-MM-DD'), tz)
+    .startOf('day');
+  const e = dayjs
+    .tz(dayjs(endLocalDay).format('YYYY-MM-DD'), tz)
+    .add(1, 'day')
+    .startOf('day');
   return { startUtc: s.utc().toISOString(), endUtc: e.utc().toISOString() };
 }
 // todayLocal/thisWeekLocal（OCR refactor 修复删除）：全仓无调用方的死导出——日期控件要
 // 「今天/本周」默认值时再按需加回，避免"看起来有默认值逻辑其实没人走"。
 
 /** ProTable 列渲染：从行对象取 key 再 formatForDisplay。 */
-export const renderApiTime = (_: unknown, r: Record<string, any>, key: string) =>
-  formatForDisplay(r?.[key]);
+export const renderApiTime = (
+  _: unknown,
+  r: Record<string, any>,
+  key: string,
+) => formatForDisplay(r?.[key]);
 
 export default dayjs;

@@ -1,9 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { chromium } from 'playwright';
-import fs from 'fs';
-import path from 'path';
 
 const BASE = process.env.ABP_BASE || 'http://127.0.0.1:8100';
-const OUT = process.env.ABP_SHOT_DIR || 'C:\\Users\\Administrator\\agent-tools\\abp-shots';
+const OUT =
+  process.env.ABP_SHOT_DIR ||
+  'C:\\Users\\Administrator\\agent-tools\\abp-shots';
 fs.mkdirSync(OUT, { recursive: true });
 
 const pages = [
@@ -84,7 +86,10 @@ async function main() {
   // swallow other /api that might 404 during shell shot
   await page.route('**/api/**', async (route) => {
     const url = route.request().url();
-    if (url.includes('application-configuration') || url.includes('application-localization')) {
+    if (
+      url.includes('application-configuration') ||
+      url.includes('application-localization')
+    ) {
       return route.fallback();
     }
     await route.fulfill({
@@ -117,10 +122,19 @@ async function main() {
       await page.waitForTimeout(1500);
       // If still on login, record
       const title = await page.title();
-      const bodyText = await page.locator('body').innerText().catch(() => '');
+      const bodyText = await page
+        .locator('body')
+        .innerText()
+        .catch(() => '');
       const shot = path.join(OUT, `A-${name}.png`);
       await page.screenshot({ path: shot, fullPage: true });
-      results.push({ name, routePath, title, shot, snippet: bodyText.slice(0, 120).replace(/\s+/g, ' ') });
+      results.push({
+        name,
+        routePath,
+        title,
+        shot,
+        snippet: bodyText.slice(0, 120).replace(/\s+/g, ' '),
+      });
       console.log('ok', name, title);
     } catch (e) {
       console.error('fail', name, e.message);
@@ -128,7 +142,11 @@ async function main() {
     }
   }
 
-  fs.writeFileSync(path.join(OUT, 'shots-report.json'), JSON.stringify(results, null, 2), 'utf8');
+  fs.writeFileSync(
+    path.join(OUT, 'shots-report.json'),
+    JSON.stringify(results, null, 2),
+    'utf8',
+  );
   await browser.close();
   console.log('done', OUT);
 }

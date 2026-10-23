@@ -6,7 +6,7 @@ import React, { useRef, useState } from 'react';
 import { history, useAccess } from '@umijs/max';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
-import { type FinBizDocDto, getBizDocs, useMock } from '@/abp/finance';
+import { type FinBizDocDto, getBizDocs, isMock } from '@/abp/finance';
 
 const BizDocsPage: React.FC = () => {
   const access = useAccess();
@@ -16,8 +16,8 @@ const BizDocsPage: React.FC = () => {
   const [isDemo, setIsDemo] = useState<boolean | null>(null);
   const [agentId, setAgentId] = useState<string | undefined>();
   const isAgentScoped = !!access.canFinanceScopeAgent;
-  // 顶层调用（hook 不能进条件分支）；live 下代理筛选整体隐藏（空 options 的可点下拉是坏 UX）
-  const mockMode = useMock();
+  // 普通同步谓词（非 hook），渲染期读 localStorage、非响应式；live 下代理筛选整体隐藏（空 options 的可点下拉是坏 UX）
+  const mockMode = isMock();
 
   return (
     <PageContainer

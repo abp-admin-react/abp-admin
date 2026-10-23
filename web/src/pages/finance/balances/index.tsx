@@ -9,7 +9,7 @@ import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/Fin
 import {
   type FinBalanceProjectionDto,
   getBalanceProjections,
-  useMock,
+  isMock,
 } from '@/abp/finance';
 
 const BalancesPage: React.FC = () => {
@@ -18,8 +18,8 @@ const BalancesPage: React.FC = () => {
   const load = useFinanceLoad();
   const [agentId, setAgentId] = useState<string | undefined>();
   const isAgentScoped = !!access.canFinanceScopeAgent;
-  // 顶层调用（hook 不能进条件分支）；live 下代理筛选整体隐藏（空 options 的可点下拉是坏 UX）
-  const mockMode = useMock();
+  // 普通同步谓词（非 hook），渲染期读 localStorage、非响应式；live 下代理筛选整体隐藏（空 options 的可点下拉是坏 UX）
+  const mockMode = isMock();
 
   return (
     <PageContainer

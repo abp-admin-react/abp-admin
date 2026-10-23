@@ -93,7 +93,7 @@ const AccountsPage: React.FC = () => {
             const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
             // 后端列表按 code/name 分别模糊查（FinAccountListInput），不认 filter
             const result = await load.guard(() =>
-              getAccounts({ skipCount, maxResultCount, code: params.code, name: params.name } as never),
+              getAccounts({ skipCount, maxResultCount, code: params.code, name: params.name }),
             );
             if (!result) return { data: [], total: 0, success: false };
             return { data: result.items, total: result.totalCount, success: true };
