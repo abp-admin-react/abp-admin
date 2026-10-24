@@ -36,6 +36,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
     public DbSet<ColChainApiKey> ChainApiKeys { get; set; } = default!;
 
+    public DbSet<ColWithdrawOrder> WithdrawOrders { get; set; } = default!;
+
     public CollectionDbContext(DbContextOptions<CollectionDbContext> options)
         : base(options)
     {
@@ -80,11 +82,14 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
             b.Property(x => x.Currency);
             b.Property(x => x.Balance).HasPrecision(28, 18);
+            b.Property(x => x.Frozen).HasPrecision(28, 18);
             b.Property(x => x.UpdatedAt);
 
             // 唯一 (UserId, Currency)；非负约束由数据库兜底（「余额足够才减」的 SQL 是第一道）
             b.HasIndex(x => new { x.UserId, x.Currency }).IsUnique();
             b.ToTable(t => t.HasCheckConstraint("CK_ColBalances_NonNegative", "\"Balance\" >= 0"));
+            // 提现冻结桶非负（Freeze/Unfreeze/DeductFrozen 的条件 UPDATE 是第一道）
+            b.ToTable(t => t.HasCheckConstraint("CK_ColBalances_FrozenNonNegative", "\"Frozen\" >= 0"));
         });
 
         builder.Entity<ColBalanceTxn>(b =>
@@ -232,6 +237,29 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.NetworkId, x.Provider, x.KeyHash }).IsUnique();
             // 工厂取启用 key 的查询路径
             b.HasIndex(x => new { x.NetworkId, x.Provider, x.IsEnabled });
+        });
+
+        builder.Entity<ColWithdrawOrder>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "WithdrawOrders");
+            b.ConfigureByConvention();
+
+            b.Property(x => x.NetworkName).IsRequired().HasMaxLength(32);
+            b.Property(x => x.ToAddress).IsRequired().HasMaxLength(42);
+            b.Property(x => x.Amount).HasPrecision(28, 18);
+            b.Property(x => x.Fee).HasPrecision(28, 18);
+            b.Property(x => x.ActualAmount).HasPrecision(28, 18);
+            b.Property(x => x.FeeRate).HasPrecision(18, 8);
+            b.Property(x => x.TxHash).HasMaxLength(66);
+            b.Property(x => x.FailReason).HasMaxLength(CollectionConsts.MaxNoteLength);
+            b.Property(x => x.AuditRemark).HasMaxLength(CollectionConsts.MaxNoteLength);
+
+            // 用户侧「我的提现」分页 + 当日额度聚合（SubmitAsync 锁内计数）
+            b.HasIndex(x => new { x.UserId, x.CreationTime });
+            // 广播 worker 的取件路径（Processing 队列 / Broadcasting 超时扫描）
+            b.HasIndex(x => new { x.Status, x.StatusChangedAt });
+            // 双花门：近期是否已向该地址付过款
+            b.HasIndex(x => new { x.ToAddress, x.CompleteTime });
         });
     }
 }

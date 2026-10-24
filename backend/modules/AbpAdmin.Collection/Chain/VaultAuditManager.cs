@@ -70,9 +70,10 @@ public class VaultAuditManager : DomainService
         }
 
         var currency = MapCurrency(token.Symbol);
+        // 用户侧口径 = 可用 + 冻结（提现 M1 两桶后，冻结中的钱仍属用户、仍在金库里）
         var userTotal = await dbContext.Balances
             .Where(b => b.Currency == currency)
-            .SumAsync(b => b.Balance, ct);
+            .SumAsync(b => b.Balance + b.Frozen, ct);
 
         dbContext.VaultChecks.Add(new ColVaultCheck(_guidGenerator.Create())
         {

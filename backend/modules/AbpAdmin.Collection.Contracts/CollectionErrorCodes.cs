@@ -67,4 +67,63 @@ public static class CollectionErrorCodes
 
     /// <summary>同一服务商下该 KEY 已存在（按 SHA-256 判重）。</summary>
     public const string ApiKeyExists = Namespace + ":ApiKeyExists";
+
+    /// <summary>余额两桶状态与预期不符（解冻/扣冻结时冻结桶不足）：数据完整性异常，需人工核查。</summary>
+    public const string BalanceStateConflict = Namespace + ":BalanceStateConflict";
+
+    /// <summary>同一提现单的同一动作重放，但金额/币种/用户与原流水不同。</summary>
+    public const string WithdrawActionConflict = Namespace + ":WithdrawActionConflict";
+
+    // —— 提现（M2 审核/状态机；M3 补热钱包/双花门）—————————————————————————————
+
+    /// <summary>提现功能未开启（Collection:Withdraw:Enabled=false）。</summary>
+    public const string WithdrawDisabled = Namespace + ":WithdrawDisabled";
+
+    /// <summary>提现总闸拉下（运行时设置，紧急停机用）。</summary>
+    public const string WithdrawHalted = Namespace + ":WithdrawHalted";
+
+    /// <summary>提现单不存在。</summary>
+    public const string WithdrawNotFound = Namespace + ":WithdrawNotFound";
+
+    /// <summary>只能操作本人的提现单。</summary>
+    public const string WithdrawNotOwner = Namespace + ":WithdrawNotOwner";
+
+    /// <summary>收款地址非法（需 0x + 40 位十六进制，且不是全零黑洞地址）。</summary>
+    public const string WithdrawInvalidAddress = Namespace + ":WithdrawInvalidAddress";
+
+    /// <summary>低于单笔最小提现额。</summary>
+    public const string WithdrawBelowMin = Namespace + ":WithdrawBelowMin";
+
+    /// <summary>超过当日提现总额度。</summary>
+    public const string WithdrawDailyAmountExceeded = Namespace + ":WithdrawDailyAmountExceeded";
+
+    /// <summary>超过当日提现笔数限额。</summary>
+    public const string WithdrawDailyCountExceeded = Namespace + ":WithdrawDailyCountExceeded";
+
+    /// <summary>状态迁移不合法（CAS 未命中：单子已被并发迁移，刷新后重试）。</summary>
+    public const string WithdrawInvalidStatus = Namespace + ":WithdrawInvalidStatus";
+
+    /// <summary>拒绝必须填写原因。</summary>
+    public const string WithdrawRemarkRequired = Namespace + ":WithdrawRemarkRequired";
+
+    /// <summary>重试次数已达上限。</summary>
+    public const string WithdrawRetryLimitReached = Namespace + ":WithdrawRetryLimitReached";
+
+    /// <summary>提现热钱包未配置（地址/私钥）。</summary>
+    public const string HotWalletNotConfigured = Namespace + ":HotWalletNotConfigured";
+
+    /// <summary>热钱包链上余额不足以支付本次提现。</summary>
+    public const string HotWalletInsolvent = Namespace + ":HotWalletInsolvent";
+
+    /// <summary>热钱包链上余额低于熔断地板——阻断所有提现审批，需人工处理。</summary>
+    public const string WithdrawBreakerOpen = Namespace + ":WithdrawBreakerOpen";
+
+    /// <summary>热钱包 BNB 不足（付不了 gas）。</summary>
+    public const string HotWalletGasShort = Namespace + ":HotWalletGasShort";
+
+    /// <summary>热钱包存在待确认出站交易（nonce 卡在 mempool），禁止重播。</summary>
+    public const string WithdrawPendingOutbound = Namespace + ":WithdrawPendingOutbound";
+
+    /// <summary>近期已向该地址付过款（双花门），禁止盲目重播。</summary>
+    public const string WithdrawRecentPayoutExists = Namespace + ":WithdrawRecentPayoutExists";
 }

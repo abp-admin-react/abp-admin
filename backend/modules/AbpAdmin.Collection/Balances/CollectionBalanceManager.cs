@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
+using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Settings;
@@ -335,6 +336,286 @@ public class CollectionBalanceManager : DomainService
         });
 
         return txnId;
+    }
+
+    // ── 提现冻结原语（提现 M1：可用/冻结两桶搬运 + 出账 + 退款）────────────────────────
+    //
+    // 纪律与扣款/充值一致：先插流水行（ON CONFLICT 探 IdempotencyKey 唯一索引）再动余额，
+    // 两条语句必须同事务（加入环境事务或自开）；幂等键 = W:{提现单 Id:N}:{动作}
+    //（BalanceIdempotencyKeys 唯一定义处）。重放同键同额返回原流水，同键异额抛冲突。
+
+    /// <summary>
+    /// 提现提交冻结：可用 −amount / 冻结 +amount（一条条件 UPDATE 原子完成）。
+    /// 可用不足抛 InsufficientBalance，失败路径不留孤儿流水行。
+    /// </summary>
+    public virtual async Task<Guid> FreezeAsync(
+        Guid userId, CollectionCurrency currency, decimal amount, Guid withdrawOrderId)
+    {
+        AssertAmbientTransactionIfAny();
+        if (_unitOfWorkManager.Current != null)
+        {
+            return await FreezeCoreAsync(userId, currency, amount, withdrawOrderId);
+        }
+
+        using var uow = _unitOfWorkManager.Begin(isTransactional: true);
+        var txnId = await FreezeCoreAsync(userId, currency, amount, withdrawOrderId);
+        await uow.CompleteAsync();
+        return txnId;
+    }
+
+    private async Task<Guid> FreezeCoreAsync(
+        Guid userId, CollectionCurrency currency, decimal amount, Guid withdrawOrderId)
+    {
+        AssertStableCurrency(currency);
+        if (amount <= 0)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
+        }
+
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var (txnId, inserted) = await InsertWithdrawTxnRowAsync(
+            dbContext, userId, currency, BalanceActions.WithdrawFreeze, -amount, withdrawOrderId);
+        if (!inserted)
+        {
+            return txnId; // 幂等重放：不动两桶
+        }
+
+        // 可用足够才冻结（行锁留到外层提交；与扣款同一超时口径——热点账户排队宁可失败重试）
+        var previousTimeout = dbContext.Database.GetCommandTimeout();
+        await SetDebitCommandTimeoutAsync(dbContext);
+        var balances = await dbContext.Database
+            .SqlQuery<decimal>($"""
+                WITH u AS (UPDATE "ColBalances" SET "Balance" = "Balance" - {amount}, "Frozen" = "Frozen" + {amount}, "UpdatedAt" = {_clock.Now}
+                           WHERE "UserId" = {userId} AND "Currency" = {(int)currency} AND "Balance" >= {amount}
+                           RETURNING "Balance" AS "Value")
+                SELECT "Value" FROM u
+                """)
+            .ToListAsync();
+        dbContext.Database.SetCommandTimeout(previousTimeout);
+
+        if (balances.Count == 0)
+        {
+            var current = await dbContext.Balances.AsNoTracking()
+                .Where(b => b.UserId == userId && b.Currency == currency)
+                .FirstOrDefaultAsync();
+            Logger.LogInformation(
+                "提现冻结被拒：用户 {UserId} {Currency} 可用不足，当前可用 {Balance} 冻结 {Frozen}，本次需要 {Amount}",
+                userId, currency, current?.Balance ?? 0m, current?.Frozen ?? 0m, amount);
+
+            throw new BusinessException(CollectionErrorCodes.InsufficientBalance)
+                .WithData("Currency", currency)
+                .WithData("Balance", CollectionAmounts.Format(current?.Balance ?? 0m))
+                .WithData("Amount", CollectionAmounts.Format(amount));
+        }
+
+        await SetBalanceAfterAsync(dbContext, txnId, balances[0]);
+        return txnId;
+    }
+
+    /// <summary>
+    /// 提现撤单/拒绝解冻：冻结 −amount / 可用 +amount。重放同键幂等。
+    /// 冻结桶不足说明两桶状态与流水不符（完整性异常），抛 BalanceStateConflict。
+    /// </summary>
+    public virtual async Task<Guid> UnfreezeAsync(
+        Guid userId, CollectionCurrency currency, decimal amount, Guid withdrawOrderId)
+    {
+        AssertAmbientTransactionIfAny();
+        if (_unitOfWorkManager.Current != null)
+        {
+            return await UnfreezeCoreAsync(userId, currency, amount, withdrawOrderId);
+        }
+
+        using var uow = _unitOfWorkManager.Begin(isTransactional: true);
+        var txnId = await UnfreezeCoreAsync(userId, currency, amount, withdrawOrderId);
+        await uow.CompleteAsync();
+        return txnId;
+    }
+
+    private async Task<Guid> UnfreezeCoreAsync(
+        Guid userId, CollectionCurrency currency, decimal amount, Guid withdrawOrderId)
+    {
+        AssertStableCurrency(currency);
+        if (amount <= 0)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
+        }
+
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var (txnId, inserted) = await InsertWithdrawTxnRowAsync(
+            dbContext, userId, currency, BalanceActions.WithdrawUnfreeze, amount, withdrawOrderId);
+        if (!inserted)
+        {
+            return txnId; // 幂等重放：不动两桶
+        }
+
+        var balances = await dbContext.Database
+            .SqlQuery<decimal>($"""
+                WITH u AS (UPDATE "ColBalances" SET "Balance" = "Balance" + {amount}, "Frozen" = "Frozen" - {amount}, "UpdatedAt" = {_clock.Now}
+                           WHERE "UserId" = {userId} AND "Currency" = {(int)currency} AND "Frozen" >= {amount}
+                           RETURNING "Balance" AS "Value")
+                SELECT "Value" FROM u
+                """)
+            .ToListAsync();
+
+        if (balances.Count == 0)
+        {
+            throw await BalanceStateConflictAsync(dbContext, userId, currency, "解冻", amount, withdrawOrderId);
+        }
+
+        await SetBalanceAfterAsync(dbContext, txnId, balances[0]);
+        return txnId;
+    }
+
+    /// <summary>
+    /// 提现审核通过出账：冻结 −amount（可用不动——冻结时就已排除在可用外）。
+    /// 钱在此步真正离开用户侧；打款完成不再动余额。
+    /// </summary>
+    public virtual async Task<Guid> DeductFrozenAsync(
+        Guid userId, CollectionCurrency currency, decimal amount, Guid withdrawOrderId)
+    {
+        AssertAmbientTransactionIfAny();
+        if (_unitOfWorkManager.Current != null)
+        {
+            return await DeductFrozenCoreAsync(userId, currency, amount, withdrawOrderId);
+        }
+
+        using var uow = _unitOfWorkManager.Begin(isTransactional: true);
+        var txnId = await DeductFrozenCoreAsync(userId, currency, amount, withdrawOrderId);
+        await uow.CompleteAsync();
+        return txnId;
+    }
+
+    private async Task<Guid> DeductFrozenCoreAsync(
+        Guid userId, CollectionCurrency currency, decimal amount, Guid withdrawOrderId)
+    {
+        AssertStableCurrency(currency);
+        if (amount <= 0)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
+        }
+
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var (txnId, inserted) = await InsertWithdrawTxnRowAsync(
+            dbContext, userId, currency, BalanceActions.WithdrawSettle, -amount, withdrawOrderId);
+        if (!inserted)
+        {
+            return txnId; // 幂等重放：不动两桶
+        }
+
+        var balances = await dbContext.Database
+            .SqlQuery<decimal>($"""
+                WITH u AS (UPDATE "ColBalances" SET "Frozen" = "Frozen" - {amount}, "UpdatedAt" = {_clock.Now}
+                           WHERE "UserId" = {userId} AND "Currency" = {(int)currency} AND "Frozen" >= {amount}
+                           RETURNING "Balance" AS "Value")
+                SELECT "Value" FROM u
+                """)
+            .ToListAsync();
+
+        if (balances.Count == 0)
+        {
+            throw await BalanceStateConflictAsync(dbContext, userId, currency, "扣冻结出账", amount, withdrawOrderId);
+        }
+
+        await SetBalanceAfterAsync(dbContext, txnId, balances[0]);
+        return txnId;
+    }
+
+    /// <summary>
+    /// 提现广播失败退款：加回可用余额（走充值同一 upsert，无余额行也能建行）。
+    /// 只用于审核后失败终态；撤单/拒绝走 <see cref="UnfreezeAsync"/>。
+    /// </summary>
+    public virtual async Task<Guid> RefundAsync(
+        Guid userId, CollectionCurrency currency, decimal amount, Guid withdrawOrderId)
+    {
+        AssertAmbientTransactionIfAny();
+        if (_unitOfWorkManager.Current != null)
+        {
+            return await RefundCoreAsync(userId, currency, amount, withdrawOrderId);
+        }
+
+        using var uow = _unitOfWorkManager.Begin(isTransactional: true);
+        var txnId = await RefundCoreAsync(userId, currency, amount, withdrawOrderId);
+        await uow.CompleteAsync();
+        return txnId;
+    }
+
+    private async Task<Guid> RefundCoreAsync(
+        Guid userId, CollectionCurrency currency, decimal amount, Guid withdrawOrderId)
+    {
+        AssertStableCurrency(currency);
+        if (amount <= 0)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
+        }
+
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var (txnId, inserted) = await InsertWithdrawTxnRowAsync(
+            dbContext, userId, currency, BalanceActions.WithdrawRefund, amount, withdrawOrderId);
+        if (!inserted)
+        {
+            return txnId; // 幂等重放：不加余额
+        }
+
+        var balanceAfter = await AddToBalanceAsync(dbContext, userId, currency, amount, _clock.Now);
+        await SetBalanceAfterAsync(dbContext, txnId, balanceAfter);
+        return txnId;
+    }
+
+    /// <summary>
+    /// 提现动作的流水行插入（幂等探针）：IdempotencyKey = W:{提现单}:{动作}，冲突目标全列唯一索引。
+    /// 返回 (流水 Id, 是否新插入)；重放同键：金额/币种/用户一致返回 (原流水, false)，
+    /// 不一致抛 WithdrawActionConflict（调用方状态机错乱）。
+    /// </summary>
+    private async Task<(Guid TxnId, bool Inserted)> InsertWithdrawTxnRowAsync(
+        CollectionDbContext dbContext, Guid userId, CollectionCurrency currency,
+        string action, decimal signedAmount, Guid withdrawOrderId)
+    {
+        var now = _clock.Now;
+        var idempotencyKey = BalanceIdempotencyKeys.ForWithdrawOrder(withdrawOrderId, action);
+        var txnId = GuidGenerator.Create();
+
+        var inserted = await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "ColBalanceTxns" ("Id", "UserId", "Currency", "Action", "Amount", "BalanceAfter", "IdempotencyKey", "BusinessType", "BusinessId", "RefTxnId", "ReversedAt", "CreationTime")
+            VALUES ({txnId}, {userId}, {(int)currency}, {action}, {signedAmount}, {0m}, {idempotencyKey}, {CollectionBusinessTypes.Withdraw}, {withdrawOrderId}, NULL, NULL, {now})
+            ON CONFLICT ("IdempotencyKey") DO NOTHING
+            """);
+
+        if (inserted == 0)
+        {
+            var existing = await dbContext.BalanceTxns.AsNoTracking()
+                .FirstAsync(t => t.IdempotencyKey == idempotencyKey);
+
+            if (existing.UserId != userId || existing.Currency != currency
+                || existing.Amount != signedAmount || existing.Action != action)
+            {
+                throw new BusinessException(CollectionErrorCodes.WithdrawActionConflict)
+                    .WithData("WithdrawOrderId", withdrawOrderId)
+                    .WithData("Action", action);
+            }
+
+            return (existing.Id, false);
+        }
+
+        return (txnId, true);
+    }
+
+    /// <summary>冻结桶不足的完整性异常：带当前两桶现场便于人工核查。</summary>
+    private async Task<BusinessException> BalanceStateConflictAsync(
+        CollectionDbContext dbContext, Guid userId, CollectionCurrency currency,
+        string operation, decimal amount, Guid withdrawOrderId)
+    {
+        var current = await dbContext.Balances.AsNoTracking()
+            .Where(b => b.UserId == userId && b.Currency == currency)
+            .FirstOrDefaultAsync();
+        Logger.LogError(
+            "余额两桶状态冲突：提现单 {WithdrawOrderId} {Operation} {Amount}，用户 {UserId} {Currency} 当前可用 {Balance} 冻结 {Frozen}",
+            withdrawOrderId, operation, amount, userId, currency, current?.Balance ?? 0m, current?.Frozen ?? 0m);
+
+        return new BusinessException(CollectionErrorCodes.BalanceStateConflict)
+            .WithData("WithdrawOrderId", withdrawOrderId)
+            .WithData("Operation", operation)
+            .WithData("Frozen", CollectionAmounts.Format(current?.Frozen ?? 0m))
+            .WithData("Amount", CollectionAmounts.Format(amount));
     }
 
     // ── 内部 ─────────────────────────────────────────────────────────────────────────────

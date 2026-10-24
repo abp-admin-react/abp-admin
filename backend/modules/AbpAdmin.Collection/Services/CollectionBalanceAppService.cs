@@ -20,8 +20,14 @@ public class MyBalanceDto
 {
     public string Currency { get; set; } = default!;
 
-    /// <summary>十进制字符串（边界一律字符串，计划第 2 节）。</summary>
+    /// <summary>可用余额，十进制字符串（边界一律字符串，计划第 2 节）。</summary>
     public string Balance { get; set; } = default!;
+
+    /// <summary>提现冻结，十进制字符串（提现 M1 两桶口径）。</summary>
+    public string Frozen { get; set; } = default!;
+
+    /// <summary>合计 = 可用 + 冻结，十进制字符串。</summary>
+    public string Total { get; set; } = default!;
 }
 
 /// <summary>我的余额流水（分页、倒序）。</summary>
@@ -79,15 +85,18 @@ public class CollectionBalanceAppService : ApplicationService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var rows = await dbContext.Balances.AsNoTracking()
             .Where(b => b.UserId == userId)
-            .ToDictionaryAsync(b => b.Currency, b => b.Balance);
+            .ToDictionaryAsync(b => b.Currency, b => new { b.Balance, b.Frozen });
 
         var result = new List<MyBalanceDto>();
         foreach (var currency in new[] { Contracts.CollectionCurrency.Usdt, Contracts.CollectionCurrency.Usdc })
         {
+            var row = rows.TryGetValue(currency, out var v) ? v : new { Balance = 0m, Frozen = 0m };
             result.Add(new MyBalanceDto
             {
                 Currency = currency.ToString(),
-                Balance = Contracts.CollectionAmounts.Format(rows.TryGetValue(currency, out var v) ? v : 0m),
+                Balance = Contracts.CollectionAmounts.Format(row.Balance),
+                Frozen = Contracts.CollectionAmounts.Format(row.Frozen),
+                Total = Contracts.CollectionAmounts.Format(row.Balance + row.Frozen),
             });
         }
 

@@ -7,6 +7,8 @@ namespace AbpAdmin.Collection.Chain;
 /// 进款单 Id 的 "D" 格式。写入（归集确认入账 SweepManager）与读取（用户流水回填
 /// 链上凭证 CollectionBalanceAppService）都从这里取口径——格式变更只改这一个文件，
 /// 不会静默退化成"用户看不见凭证"。
+/// 提现四动作（Freeze/Unfreeze/Settle/Refund）的幂等键也在此定义：
+/// W:{提现单 Id:N}:{动作}，一单至多一 Freeze、一 Unfreeze、一 Settle、一 Refund。
 /// </summary>
 public static class BalanceIdempotencyKeys
 {
@@ -14,4 +16,7 @@ public static class BalanceIdempotencyKeys
 
     public static bool TryParseDepositOrder(string? idempotencyKey, out Guid depositOrderId)
         => Guid.TryParseExact(idempotencyKey, "D", out depositOrderId);
+
+    public static string ForWithdrawOrder(Guid withdrawOrderId, string action)
+        => $"W:{withdrawOrderId:N}:{action}";
 }

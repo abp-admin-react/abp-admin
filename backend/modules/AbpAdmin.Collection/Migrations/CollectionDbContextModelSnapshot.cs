@@ -19,7 +19,7 @@ namespace AbpAdmin.Collection.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasAnnotation("_Abp_DatabaseProvider", EfCoreDatabaseProvider.PostgreSql)
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -35,6 +35,10 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.Property<int>("Currency")
                         .HasColumnType("integer");
+
+                    b.Property<decimal>("Frozen")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp without time zone");
@@ -52,6 +56,8 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.ToTable("ColBalances", null, t =>
                         {
+                            t.HasCheckConstraint("CK_ColBalances_FrozenNonNegative", "\"Frozen\" >= 0");
+
                             t.HasCheckConstraint("CK_ColBalances_NonNegative", "\"Balance\" >= 0");
                         });
                 });
@@ -400,6 +406,12 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<DateTime?>("SweepStuckAlertedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("WithdrawVaultAddress")
+                        .HasColumnType("text");
+
+                    b.Property<string>("WithdrawVaultKeyCipher")
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
@@ -579,6 +591,93 @@ namespace AbpAdmin.Collection.Migrations
                     b.HasIndex("TokenId", "CheckedAt");
 
                     b.ToTable("ColVaultChecks", (string)null);
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColWithdrawOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("ActualAmount")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<string>("AuditRemark")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("AuditTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid?>("AuditUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("BroadcastAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("CompleteTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("CreationTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FailReason")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<decimal>("Fee")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<decimal>("FeeRate")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
+
+                    b.Property<string>("NetworkName")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long?>("NonceUsed")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StatusChangedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ToAddress")
+                        .IsRequired()
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
+
+                    b.Property<string>("TxHash")
+                        .HasMaxLength(66)
+                        .HasColumnType("character varying(66)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "StatusChangedAt");
+
+                    b.HasIndex("ToAddress", "CompleteTime");
+
+                    b.HasIndex("UserId", "CreationTime");
+
+                    b.ToTable("ColWithdrawOrders", (string)null);
                 });
 #pragma warning restore 612, 618
         }

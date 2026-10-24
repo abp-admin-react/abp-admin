@@ -36,14 +36,24 @@ public enum CollectionStatus
 public static class CollectionBusinessTypes
 {
     public const string TopUp = "TopUp";
+
+    /// <summary>提现单：余额流水的 BusinessType，BusinessId = 提现单 Id。</summary>
+    public const string Withdraw = "Withdraw";
 }
 
 /// <summary>
 /// 稳定币余额的动作类型（M2 落库，契约先行）。
+/// 提现四动作（M1 冻结原语）：Freeze/Unfreeze 在可用与冻结两桶间搬运，
+/// Settle 把冻结桶真正出账（审核通过），Refund 广播失败退款加回可用。
 /// </summary>
 public static class BalanceActions
 {
     public const string DepositCredit = "DepositCredit";
     public const string BusinessDebit = "BusinessDebit";
     public const string DebitReverse = "DebitReverse";
+
+    public const string WithdrawFreeze = "WithdrawFreeze";
+    public const string WithdrawUnfreeze = "WithdrawUnfreeze";
+    public const string WithdrawSettle = "WithdrawSettle";
+    public const string WithdrawRefund = "WithdrawRefund";
 }
