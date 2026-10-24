@@ -67,7 +67,9 @@ public static class MenuTemplateDefinition
         new("collection-deposits", "collection", MenuTypeEnum.Menu, "充值单", "collection-deposits", "/collection/deposits", "deposit", 48, "AbpAdmin.Collection.Collections"),
         new("collection-sweeps", "collection", MenuTypeEnum.Menu, "归集任务", "collection-sweeps", "/collection/sweeps", "send", 49, "AbpAdmin.Collection.Collections"),
         new("collection-vault", "collection", MenuTypeEnum.Menu, "金库核对", "collection-vault", "/collection/vault", "audit", 50, "AbpAdmin.Collection.Collections"),
-        new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 51, "AbpAdmin.Collection.Network.Admin"),
+        // 提现管理（M3）：资金出账高危动作，独立权限 WithdrawAdmin（与链网运维同级）
+        new("collection-withdrawals", "collection", MenuTypeEnum.Menu, "提现管理", "collection-withdrawals", "/collection/withdrawals", "withdraw", 51, "AbpAdmin.Collection.WithdrawAdmin"),
+        new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 52, "AbpAdmin.Collection.Network.Admin"),
         new("current-session", null, MenuTypeEnum.Menu, "当前会话", "current-session", "/current-session", "user", 50),
     };
 }

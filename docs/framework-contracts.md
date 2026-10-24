@@ -19,6 +19,7 @@
 | `MonitoringAppServiceTests` / `CacheMonitorScanPaginationTests` | 缓存键空间硬边界（c:/t: + 隔离前缀）、SCAN 分页协议（溢出缓冲/合成游标/熔断/后置过滤）、删除守卫 | 共享 Redis 上误删/误读其它应用数据；翻页丢键 |
 | `TenantRegionStoreTests`（Domain.Tests） | 租户地域归属：ExtraProperties 持久化往返、未标注回落 DefaultRegion | 方案二按租户分区搬迁时丢失归属标记（租户落错机房） |
 | `ModuleBoundaryContractTests`（Ordering.Tests） | 收款契约工程传递闭包无 EasyAbp/Nethereum/收款实现/EF 工程；订单工程直接引用只含契约+框架；两个模块 DbContext 的 `ConnectionStringName` 都是 `Default`（Default 才有共享事务，否则扣款+标支付静默分家） | 模块边界被悄悄击穿；共享事务静默消失 |
+| `ModuleBoundaryContractTests`（Ordering.Tests，提现 M2 扩充待办） | Collection → `AbpAdmin.Ledger.Integration.Contracts` 是新增合法引用（提现/充值过账 + ILedgerSeedProvider 播种，契约工程纯净无实现依赖）；提现专属边界锁（Collection 工程闭包不含 AbpAdmin.Ledger 实现）随 P1 对账作业一起补 | 过账接入变成对 Ledger 实现的整包引用 |
 | `SharedTransactionRollbackTests`（Ordering.Tests） | 同一工作单元写两边模块的行，失败一起回滚（收款/订单计划 M1 第一条测试） | 扣款与订单状态分家提交 |
 | `QuoteFeeMathTests` / `RefundGuardSourcePurityTests`（模块测试） | X_min 表驱动（分母≤0 拒绝、分子≤0 无下限、CNY/USD 比较基准）；`AbpAdmin.Application` 源码不出现收款/订单模块名（退款拦截只经 `IPaymentRefundGuard` 扩展点）；金额字段一律十进制字符串（`CollectionAmounts` 助手，业务代码不直接 decimal.Parse） | 费率下限算错货币基准；框架反向依赖业务模块；金额 JSON 数字精度丢失 |
 | `.github/workflows/ci.yml` | 以上全部 + 前端 `tsc`/vitest，push/PR 必跑 | fork 后保留此文件即继承全部保证 |

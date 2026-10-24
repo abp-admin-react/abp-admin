@@ -56,19 +56,19 @@ export default [
             access: 'canManageTenants',
             component: './tenants',
           },
-      {
-        path: '/administration/saas/editions',
-        name: 'editions',
-        access: 'canManageEditions',
-        component: './saas/editions',
-      },
-      {
-        path: '/administration/saas/tenant-packages',
-        name: 'tenant-packages',
-        icon: 'cluster',
-        access: 'canManageTenantPackages',
-        component: './saas/tenant-packages',
-      },
+          {
+            path: '/administration/saas/editions',
+            name: 'editions',
+            access: 'canManageEditions',
+            component: './saas/editions',
+          },
+          {
+            path: '/administration/saas/tenant-packages',
+            name: 'tenant-packages',
+            icon: 'cluster',
+            access: 'canManageTenantPackages',
+            component: './saas/tenant-packages',
+          },
         ],
       },
       {
@@ -146,18 +146,18 @@ export default [
             access: 'canManageOpenIddictApplications',
             component: './openiddict/applications',
           },
-      {
-        path: '/administration/openiddict/scopes',
-        name: 'scopes',
-        access: 'canManageOpenIddictScopes',
-        component: './openiddict/scopes',
-      },
-      {
-        path: '/administration/openiddict/token-management',
-        name: 'token-management',
-        access: 'canManageOpenIddictTokens',
-        component: './openiddict/token-management',
-      },
+          {
+            path: '/administration/openiddict/scopes',
+            name: 'scopes',
+            access: 'canManageOpenIddictScopes',
+            component: './openiddict/scopes',
+          },
+          {
+            path: '/administration/openiddict/token-management',
+            name: 'token-management',
+            access: 'canManageOpenIddictTokens',
+            component: './openiddict/token-management',
+          },
         ],
       },
       {
@@ -401,6 +401,12 @@ export default [
         name: 'collection-vault',
         access: 'canViewCollections',
         component: './collection/vault',
+      },
+      {
+        path: '/collection/withdrawals',
+        name: 'collection-withdrawals',
+        access: 'canAdminWithdrawals',
+        component: './collection/withdrawals',
       },
       {
         path: '/collection/network',

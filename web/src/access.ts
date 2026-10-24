@@ -1,5 +1,5 @@
-import type { AppCurrentUser } from './app';
 import { STORAGE_KEYS } from '@/abp/storageKeys';
+import type { AppCurrentUser } from './app';
 
 /**
  * Umi access 插件：把 ABP `grantedPolicies` 映射成路由/按钮用的布尔开关。
@@ -64,15 +64,21 @@ export default function access(
     // 实体变更回滚：能看变更历史 ≠ 能改写业务数据，独立权限
     canRestoreEntityChange: !!policies['AbpAdmin.AuditLogs.Restore'],
     // 权限定义运行时管理（Host 专属，后端 multiTenancySide=Host）
-    canManagePermissionDefinitions: !!policies['AbpAdmin.PermissionDefinitions'] && isHost,
+    canManagePermissionDefinitions:
+      !!policies['AbpAdmin.PermissionDefinitions'] && isHost,
     // Webhook 管理（模块自持权限组 AbpAdmin.Webhooks.*）
     canManageWebhooks: !!policies['AbpAdmin.Webhooks.Subscriptions'],
-    canCreateWebhookSubscriptions: !!policies['AbpAdmin.Webhooks.Subscriptions.Create'],
-    canUpdateWebhookSubscriptions: !!policies['AbpAdmin.Webhooks.Subscriptions.Update'],
-    canDeleteWebhookSubscriptions: !!policies['AbpAdmin.Webhooks.Subscriptions.Delete'],
+    canCreateWebhookSubscriptions:
+      !!policies['AbpAdmin.Webhooks.Subscriptions.Create'],
+    canUpdateWebhookSubscriptions:
+      !!policies['AbpAdmin.Webhooks.Subscriptions.Update'],
+    canDeleteWebhookSubscriptions:
+      !!policies['AbpAdmin.Webhooks.Subscriptions.Delete'],
     canManageWebhookSendRecords: !!policies['AbpAdmin.Webhooks.SendRecords'],
-    canResendWebhookSendRecords: !!policies['AbpAdmin.Webhooks.SendRecords.Resend'],
-    canDeleteWebhookSendRecords: !!policies['AbpAdmin.Webhooks.SendRecords.Delete'],
+    canResendWebhookSendRecords:
+      !!policies['AbpAdmin.Webhooks.SendRecords.Resend'],
+    canDeleteWebhookSendRecords:
+      !!policies['AbpAdmin.Webhooks.SendRecords.Delete'],
     canCreatePermissionDefinitions:
       !!policies['AbpAdmin.PermissionDefinitions.Create'] && isHost,
     canUpdatePermissionDefinitions:
@@ -143,9 +149,13 @@ export default function access(
     canViewOrders: !!policies['AbpAdmin.Ordering.Orders'],
     canViewCollections: !!policies['AbpAdmin.Collection.Collections'],
     // 收付款父组（订单/收付款子页共用入口）：任一子域可见即显示父组
-    canViewTrade: !!policies['AbpAdmin.Ordering.Orders'] || !!policies['AbpAdmin.Collection.Collections'],
+    canViewTrade:
+      !!policies['AbpAdmin.Ordering.Orders'] ||
+      !!policies['AbpAdmin.Collection.Collections'],
     // 链网配置（高危运维：RPC/助记词/金库/上限），独立权限仅授予运维角色
     canAdminNetwork: !!policies['AbpAdmin.Collection.Network.Admin'],
+    // 提现管理（资金出账高危动作，Host 专用独立权限）
+    canAdminWithdrawals: !!policies['AbpAdmin.Collection.WithdrawAdmin'],
     // T2.6 Identity Pro 缺口：用户导入导出
     canImportUsers: !!policies['AbpAdmin.Identity.Users.Import'],
     canExportUsers: !!policies['AbpAdmin.Identity.Users.Export'],
@@ -188,7 +198,8 @@ export default function access(
     // 调账动作与五态：Create/Submit/Approve/Reject/Reverse + ApproveOwn（自批，默认关）。
     canViewFinanceLedger: !!policies['Finance.Ledger.View'] || financeShell,
     canExportFinanceLedger: !!policies['Finance.Ledger.Export'] || financeShell,
-    canManageFinanceAccounts: !!policies['Finance.Account.Manage'] || financeShell,
+    canManageFinanceAccounts:
+      !!policies['Finance.Account.Manage'] || financeShell,
     // A2 科目页可见：读权限 = Ledger.View | Account.Manage（与登录落地 / 产品清单一致）
     canViewFinanceAccounts:
       !!policies['Finance.Ledger.View'] ||
@@ -196,12 +207,15 @@ export default function access(
       financeShell,
     canViewFinanceRules: !!policies['Finance.Rule.View'] || financeShell,
     canViewFinanceVouchers: !!policies['Finance.Voucher.View'] || financeShell,
-    canReverseFinanceVouchers: !!policies['Finance.Voucher.Reverse'] || financeShell,
+    canReverseFinanceVouchers:
+      !!policies['Finance.Voucher.Reverse'] || financeShell,
     canCreateFinanceAdjust: !!policies['Finance.Adjust.Create'] || financeShell,
-    canApproveFinanceAdjust: !!policies['Finance.Adjust.Approve'] || financeShell,
+    canApproveFinanceAdjust:
+      !!policies['Finance.Adjust.Approve'] || financeShell,
     canSubmitFinanceAdjust: !!policies['Finance.Adjust.Submit'] || financeShell,
     canRejectFinanceAdjust: !!policies['Finance.Adjust.Reject'] || financeShell,
-    canReverseFinanceAdjust: !!policies['Finance.Adjust.Reverse'] || financeShell,
+    canReverseFinanceAdjust:
+      !!policies['Finance.Adjust.Reverse'] || financeShell,
     canApproveOwnFinanceAdjust: !!policies['Finance.Adjust.ApproveOwn'],
     canRunFinanceReconcile: !!policies['Finance.Reconcile.Run'] || financeShell,
     canViewFinancePeriod: !!policies['Finance.Period.View'] || financeShell,

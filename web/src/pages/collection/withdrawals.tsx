@@ -1,0 +1,470 @@
+import { PageContainer } from '@ant-design/pro-components';
+import {
+  App,
+  Button,
+  Card,
+  Descriptions,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd';
+import React, { useCallback, useEffect, useState } from 'react';
+import { financeErrorText } from '@/abp/finance';
+import {
+  approveWithdraw,
+  completeWithdraw,
+  getHotWallet,
+  getWithdrawals,
+  getWithdrawStatus,
+  refundWithdraw,
+  rejectWithdraw,
+  retryWithdraw,
+  WD_STATUS_LABELS,
+  type WithdrawHotWalletStatusDto,
+  type WithdrawOrderDto,
+  type WithdrawStatusDto,
+} from '@/abp/withdrawal';
+
+const { Text } = Typography;
+
+/**
+ * 提现管理页（/collection/withdrawals，提现 M3/M4）：
+ * 状态卡（开关/总闸/限额 + 热钱包余额/熔断）+ 四态 Tab 列表；
+ * 审批/拒绝/重试/人工完结/退款拒绝；写动作错误就地提示（skipErrorHandler 语义）。
+ */
+export default function WithdrawalsPage() {
+  const { message } = App.useApp();
+  const [data, setData] = useState<WithdrawOrderDto[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('Pending');
+  const [status, setStatus] = useState<WithdrawStatusDto>();
+  const [hotWallet, setHotWallet] = useState<WithdrawHotWalletStatusDto>();
+  const [walletLoading, setWalletLoading] = useState(false);
+  const pageSize = 20;
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getWithdrawals({
+        skipCount: (page - 1) * pageSize,
+        maxResultCount: pageSize,
+        status: statusFilter,
+      });
+      setData(result.items);
+      setTotal(result.totalCount);
+    } catch {
+      /* interceptor */
+    } finally {
+      setLoading(false);
+    }
+  }, [page, statusFilter]);
+
+  const reloadCards = useCallback(async () => {
+    try {
+      setStatus(await getWithdrawStatus());
+    } catch {
+      /* interceptor */
+    }
+    setWalletLoading(true);
+    try {
+      setHotWallet(await getHotWallet());
+    } catch {
+      setHotWallet(undefined); // 热钱包未配置或 RPC 不可用：状态卡显示未配置即可
+    } finally {
+      setWalletLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+  useEffect(() => {
+    reloadCards();
+  }, [reloadCards]);
+
+  const [rejectTarget, setRejectTarget] = useState<WithdrawOrderDto>();
+  const [refundTarget, setRefundTarget] = useState<WithdrawOrderDto>();
+  const [completeTarget, setCompleteTarget] = useState<WithdrawOrderDto>();
+  const [remark, setRemark] = useState('');
+  const [txHashInput, setTxHashInput] = useState('');
+  const [acting, setActing] = useState(false);
+
+  const guard = async (fn: () => Promise<void>, ok: string) => {
+    setActing(true);
+    try {
+      await fn();
+      message.success(ok);
+      setRejectTarget(undefined);
+      setRefundTarget(undefined);
+      setCompleteTarget(undefined);
+      setRemark('');
+      setTxHashInput('');
+      await reload();
+      await reloadCards();
+    } catch (e) {
+      message.error(financeErrorText(e));
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const fmtTime = (v?: string) => {
+    if (!v) {
+      return '-';
+    }
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
+  };
+  const shortId = (v: string) => `${v.slice(0, 8)}...`;
+
+  const columns = [
+    {
+      title: '时间',
+      dataIndex: 'creationTime',
+      width: 150,
+      render: (v: string) => fmtTime(v),
+    },
+    {
+      title: '用户',
+      dataIndex: 'id',
+      width: 110,
+      render: (_: unknown, row: WithdrawOrderDto) => (
+        // 列表 DTO 未带 userId 明细列——用单号前缀代替；后续需要用户列时后端补字段
+        <Tooltip title={row.id}>
+          <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>
+            {shortId(row.id)}
+          </Text>
+        </Tooltip>
+      ),
+    },
+    {
+      title: '币种',
+      dataIndex: 'currency',
+      width: 70,
+      render: (v: string) => <Tag color="cyan">{v}</Tag>,
+    },
+    {
+      title: '收款地址',
+      dataIndex: 'toAddress',
+      width: 150,
+      ellipsis: true,
+      render: (v: string) => (
+        <Text
+          copyable={{ text: v }}
+          style={{ fontFamily: 'monospace', fontSize: 11 }}
+        >{`${v.slice(0, 10)}...${v.slice(-6)}`}</Text>
+      ),
+    },
+    { title: '总额', dataIndex: 'amount', width: 110, align: 'right' as const },
+    { title: '手续费', dataIndex: 'fee', width: 90, align: 'right' as const },
+    {
+      title: '净出账',
+      dataIndex: 'actualAmount',
+      width: 110,
+      align: 'right' as const,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 110,
+      render: (v: string) => {
+        const cfg = WD_STATUS_LABELS[v] ?? { color: 'default', text: v };
+        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+      },
+    },
+    {
+      title: '链上哈希',
+      dataIndex: 'txHash',
+      width: 160,
+      ellipsis: true,
+      render: (v?: string) =>
+        v ? (
+          <Text
+            copyable={{ text: v }}
+            style={{ fontFamily: 'monospace', fontSize: 11 }}
+          >{`${v.slice(0, 12)}...${v.slice(-6)}`}</Text>
+        ) : (
+          '-'
+        ),
+    },
+    {
+      title: '审核/失败原因',
+      dataIndex: 'auditRemark',
+      width: 180,
+      ellipsis: true,
+      render: (v: string | undefined, row: WithdrawOrderDto) =>
+        row.failReason ?? v ?? '-',
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 220,
+      fixed: 'right' as const,
+      render: (_: unknown, row: WithdrawOrderDto) => (
+        <Space size={4}>
+          {row.status === 'Pending' && (
+            <>
+              <Popconfirm
+                title={`确认审批通过？净出账 ${row.actualAmount} ${row.currency}`}
+                onConfirm={() =>
+                  guard(() => approveWithdraw(row.id), '已审批通过')
+                }
+              >
+                <Button size="small" type="primary" loading={acting}>
+                  审批
+                </Button>
+              </Popconfirm>
+              <Button
+                size="small"
+                danger
+                onClick={() => {
+                  setRejectTarget(row);
+                  setRemark('');
+                }}
+              >
+                拒绝
+              </Button>
+            </>
+          )}
+          {row.status === 'BroadcastFailed' && (
+            <>
+              <Button
+                size="small"
+                onClick={() => guard(() => retryWithdraw(row.id), '已重试')}
+              >
+                重试
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  setCompleteTarget(row);
+                  setTxHashInput(row.txHash ?? '');
+                }}
+              >
+                人工完结
+              </Button>
+              <Button
+                size="small"
+                danger
+                onClick={() => {
+                  setRefundTarget(row);
+                  setRemark('');
+                }}
+              >
+                退款拒绝
+              </Button>
+            </>
+          )}
+          {(row.status === 'Completed' ||
+            row.status === 'Rejected' ||
+            row.status === 'Cancelled') && <Text type="secondary">—</Text>}
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <PageContainer>
+      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+        <Card title="提现状态" size="small">
+          {status ? (
+            <Space size={32} wrap>
+              <Space size={6}>
+                功能开关：
+                <Switch checked={status.enabled} disabled size="small" />
+              </Space>
+              <Space size={6}>
+                总闸（紧急停机）：
+                <Switch
+                  checked={status.halt}
+                  checkedChildren="已拉闸"
+                  unCheckedChildren="正常"
+                  disabled
+                  size="small"
+                />
+              </Space>
+              <Text>单笔最小 {status.minAmount}</Text>
+              <Text>费率 {status.feeRate}</Text>
+              <Text>
+                当日额度 {status.maxDailyAmount} / {status.maxDailyCount} 笔
+              </Text>
+              <Text>小额自动审 ≤ {status.autoApproveMaxAmount}</Text>
+              <Text>待审 {status.pendingCount}</Text>
+              <Text>待广播 {status.processingCount}</Text>
+              <Text>广播中 {status.broadcastingCount}</Text>
+              <Text type="danger">广播失败 {status.broadcastFailedCount}</Text>
+            </Space>
+          ) : (
+            <Spin size="small" />
+          )}
+          <div style={{ marginTop: 8 }}>
+            {walletLoading ? (
+              <Spin size="small" />
+            ) : hotWallet?.configured ? (
+              <Space size={24} wrap>
+                <Text>
+                  热钱包{' '}
+                  <Text
+                    copyable
+                    style={{ fontFamily: 'monospace', fontSize: 11 }}
+                  >
+                    {hotWallet.address}
+                  </Text>
+                </Text>
+                {Object.entries(hotWallet.tokenBalances).map(([sym, bal]) => (
+                  <Text key={sym}>
+                    {sym} {bal}
+                  </Text>
+                ))}
+                <Text>BNB {hotWallet.bnb}</Text>
+                <Text>熔断地板 {hotWallet.usdtFloor}</Text>
+                {hotWallet.breakerOpen ? (
+                  <Tag color="error">
+                    熔断中（余额低于地板，审批已全部阻断）
+                  </Tag>
+                ) : (
+                  <Tag color="success">偿付正常</Tag>
+                )}
+              </Space>
+            ) : (
+              <Tag color="warning">热钱包未配置（审批与广播不可用）</Tag>
+            )}
+          </div>
+        </Card>
+
+        <Card
+          title="提现单"
+          extra={
+            <Select
+              style={{ width: 140 }}
+              value={statusFilter}
+              onChange={(v) => {
+                setStatusFilter(v);
+                setPage(1);
+              }}
+              options={[
+                { value: '', label: '全部状态' },
+                ...Object.entries(WD_STATUS_LABELS).map(([value, cfg]) => ({
+                  value,
+                  label: cfg.text,
+                })),
+              ]}
+            />
+          }
+        >
+          <Table<WithdrawOrderDto>
+            rowKey="id"
+            loading={loading}
+            dataSource={data}
+            columns={columns}
+            size="small"
+            scroll={{ x: 1500 }}
+            pagination={{
+              current: page,
+              pageSize,
+              total,
+              showSizeChanger: false,
+              onChange: (p) => setPage(p),
+            }}
+          />
+        </Card>
+      </Space>
+
+      <Modal
+        title={`拒绝提现 ${rejectTarget?.id.slice(0, 8)}...`}
+        open={!!rejectTarget}
+        confirmLoading={acting}
+        okText="拒绝"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        onCancel={() => setRejectTarget(undefined)}
+        onOk={() =>
+          remark.trim()
+            ? guard(
+                () => rejectWithdraw(rejectTarget!.id, remark.trim()),
+                '已拒绝并解冻',
+              )
+            : message.warning('拒绝原因必填')
+        }
+      >
+        <Input.TextArea
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+          maxLength={500}
+          showCount
+          placeholder="拒绝原因（必填，用户可见）"
+        />
+      </Modal>
+
+      <Modal
+        title={`退款拒绝 ${refundTarget?.id.slice(0, 8)}...`}
+        open={!!refundTarget}
+        confirmLoading={acting}
+        okText="退款拒绝"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        onCancel={() => setRefundTarget(undefined)}
+        onOk={() =>
+          remark.trim()
+            ? guard(
+                () => refundWithdraw(refundTarget!.id, remark.trim()),
+                '已退款拒绝',
+              )
+            : message.warning('退款原因必填')
+        }
+      >
+        <Input.TextArea
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+          maxLength={500}
+          showCount
+          placeholder="退款原因（必填；前提：已核实链上未付出）"
+        />
+        <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+          净额 + 手续费将退回用户可用余额；请先在浏览器核对链上确实未付出。
+        </Text>
+      </Modal>
+
+      <Modal
+        title={`人工完结 ${completeTarget?.id.slice(0, 8)}...`}
+        open={!!completeTarget}
+        confirmLoading={acting}
+        okText="完结"
+        cancelText="取消"
+        onCancel={() => setCompleteTarget(undefined)}
+        onOk={() =>
+          /^0x[0-9a-fA-F]{64}$/.test(txHashInput.trim())
+            ? guard(
+                () =>
+                  completeWithdraw(
+                    completeTarget!.id,
+                    txHashInput.trim().toLowerCase(),
+                  ),
+                '已完结',
+              )
+            : message.warning('请输入合法的交易哈希（0x + 64 位十六进制）')
+        }
+      >
+        <Input
+          value={txHashInput}
+          onChange={(e) => setTxHashInput(e.target.value)}
+          placeholder="链上交易哈希（0x + 64 位十六进制）"
+          style={{ fontFamily: 'monospace' }}
+        />
+        <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+          服务端会强制核对该哈希的回执且状态必须成功。
+        </Text>
+      </Modal>
+    </PageContainer>
+  );
+}
