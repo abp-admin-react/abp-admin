@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using AbpAdmin.Ledger.Data;
 using AbpAdmin.Ledger.Integration.Contracts;
 using Volo.Abp.DependencyInjection;
 

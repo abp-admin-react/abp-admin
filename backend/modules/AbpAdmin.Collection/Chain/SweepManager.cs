@@ -38,6 +38,7 @@ public class SweepManager : DomainService
 {
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly CollectionBalanceManager _balanceManager;
+    private readonly AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster _ledgerPoster;
     private readonly ChainAlertService _alerts;
     private readonly IStringEncryptionService _encryptor;
     private readonly IClock _clock;
@@ -46,6 +47,7 @@ public class SweepManager : DomainService
     public SweepManager(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         CollectionBalanceManager balanceManager,
+        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster ledgerPoster,
         ChainAlertService alerts,
         IStringEncryptionService encryptor,
         IClock clock,
@@ -53,6 +55,7 @@ public class SweepManager : DomainService
     {
         _dbContextProvider = dbContextProvider;
         _balanceManager = balanceManager;
+        _ledgerPoster = ledgerPoster;
         _alerts = alerts;
         _encryptor = encryptor;
         _clock = clock;
@@ -416,6 +419,10 @@ public class SweepManager : DomainService
                 await _balanceManager.CreditAsync(
                     order.UserId, MapCurrency(token.Symbol), order.Amount!.Value,
                     idempotencyKey: BalanceIdempotencyKeys.ForDepositOrder(order.Id));
+                // 账本入账（deposit/pay 借 1001 链上资产 / 贷 2201 用户可用，同事务；
+                // BizRefId = 进款单 Id，幂等）。余额侧已有 IdempotencyKey 兜底，账本重放安全。
+                await _ledgerPoster.PostDepositCreditAsync(
+                    order.Id, order.UserId, MapCurrency(token.Symbol), order.Amount!.Value);
                 order.Status = DepositOrderStatus.Swept;
             }
 

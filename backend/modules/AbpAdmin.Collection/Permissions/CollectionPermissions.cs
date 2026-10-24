@@ -15,4 +15,10 @@ public static class CollectionPermissions
     {
         public const string Admin = GroupName + ".Network.Admin";
     }
+
+    /// <summary>提现管理（审核/拒绝/退款/开账回填）——资金出账动作，与链网运维同级独立权限。</summary>
+    public static class Withdraw
+    {
+        public const string Admin = GroupName + ".WithdrawAdmin";
+    }
 }

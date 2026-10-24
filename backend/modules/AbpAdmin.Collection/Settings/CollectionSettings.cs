@@ -79,4 +79,72 @@ public static class CollectionSettings
         /// <summary>扣款命令超时（秒）：行锁会留到外层订单事务提交，热点账户宁可失败重试也不无限排队。</summary>
         public const string DebitCommandTimeoutSeconds = Prefix + ".Balance.DebitCommandTimeoutSeconds";
     }
+
+    /// <summary>
+    /// 提现功能开关与 worker 节奏（宿主配置，冒号键；与 Chain.* 同层）。默认 Enabled=false——
+    /// 上线由运维显式打开；DbMigrator 不注册 worker。
+    /// </summary>
+    public static class WithdrawConfig
+    {
+        /// <summary>提现总开关：false 时提交拒绝（WithdrawDisabled）、worker 睡眠不碰锁与链。</summary>
+        public const string Enabled = Prefix + ":Withdraw:Enabled";
+
+        /// <summary>广播 worker 轮间隔（秒）。默认 15。</summary>
+        public const string BroadcastIntervalSeconds = Prefix + ":Withdraw:BroadcastIntervalSeconds";
+
+        /// <summary>每轮墙钟预算（秒）。默认 120。</summary>
+        public const string RoundBudgetSeconds = Prefix + ":Withdraw:RoundBudgetSeconds";
+    }
+
+    /// <summary>
+    /// 提现运行期参数（ISettingProvider 点键，SettingUi 可改）：限额/费率/总闸/热钱包阈值。
+    /// 代码默认值在 <see cref="WithdrawDefaults"/>，设置缺省值与之一致。
+    /// </summary>
+    public static class Withdraw
+    {
+        /// <summary>单笔最小提现额（总额口径，含手续费）。默认 10。</summary>
+        public const string MinAmount = Prefix + ".Withdraw.MinAmount";
+
+        /// <summary>提现费率（0-1 小数，对总额计；手续费 = 总额×费率，8 位截断）。默认 0.004。</summary>
+        public const string FeeRate = Prefix + ".Withdraw.FeeRate";
+
+        /// <summary>当日提现总额度（UTC 日；撤单/拒绝释放额度）。默认 50000；空值 = 不限。</summary>
+        public const string MaxDailyAmount = Prefix + ".Withdraw.MaxDailyAmount";
+
+        /// <summary>当日提现笔数限额。默认 3。</summary>
+        public const string MaxDailyCount = Prefix + ".Withdraw.MaxDailyCount";
+
+        /// <summary>小额自动审阈值：Pending 且总额 ≤ 此值由 worker 自动审批。默认 100。</summary>
+        public const string AutoApproveMaxAmount = Prefix + ".Withdraw.AutoApproveMaxAmount";
+
+        /// <summary>提现总闸（true = 紧急停机：拒绝提交与全部审批）。默认 false。</summary>
+        public const string Halt = Prefix + ".Withdraw.Halt";
+
+        /// <summary>广播超时（分钟）：Broadcasting 超时进卡单恢复。默认 30。</summary>
+        public const string BroadcastTimeoutMinutes = Prefix + ".Withdraw.BroadcastTimeoutMinutes";
+
+        /// <summary>广播重试上限（RetryCount 超过即 BroadcastFailed 终态等人工）。默认 3。</summary>
+        public const string MaxRetries = Prefix + ".Withdraw.MaxRetries";
+
+        /// <summary>热钱包 USDT 熔断地板：链上余额低于它则阻断所有审批并告警。默认 1000。</summary>
+        public const string HotWalletUsdtFloor = Prefix + ".Withdraw.HotWalletUsdtFloor";
+
+        /// <summary>热钱包最低 BNB（付 gas）。默认 0.005。</summary>
+        public const string MinHotWalletBnb = Prefix + ".Withdraw.MinHotWalletBnb";
+    }
+
+}
+
+/// <summary>提现运行期参数的代码默认值（设置读不出/解析失败时兜底）。</summary>
+public static class WithdrawDefaults
+{
+    public const decimal MinAmount = 10m;
+    public const decimal FeeRate = 0.004m;
+    public const decimal MaxDailyAmount = 50000m;
+    public const int MaxDailyCount = 3;
+    public const decimal AutoApproveMaxAmount = 100m;
+    public const int BroadcastTimeoutMinutes = 30;
+    public const int MaxRetries = 3;
+    public const decimal HotWalletUsdtFloor = 1000m;
+    public const decimal MinHotWalletBnb = 0.005m;
 }

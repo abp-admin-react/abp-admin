@@ -1,7 +1,6 @@
 using System.Collections.Generic;
-using AbpAdmin.Ledger.Integration.Contracts;
 
-namespace AbpAdmin.Ledger.Data;
+namespace AbpAdmin.Ledger.Integration.Contracts;
 
 /// <summary>科目种子：按 Code 判重，已存在不覆盖（名称/类型改动只影响新库）。</summary>
 public record LedgerAccountSeed(string Code, string Name, FinAccountType Type, FinNormalSide Side);
@@ -10,7 +9,8 @@ public record LedgerAccountSeed(string Code, string Name, FinAccountType Type, F
 public record LedgerRuleSeed(string BizType, string Phase, string Description, string TemplateJson, int Version = 1);
 
 /// <summary>
-/// Ledger 种子扩展点。框架只注册 <see cref="FrameworkLedgerSeedProvider"/>（通用科目 + 通用模板）；
+/// Ledger 种子扩展点（提现 M2 起由 Contracts 承载：业务模块只引用契约工程即可接入，
+/// 不必引用 Ledger 实现）。框架只注册 FrameworkLedgerSeedProvider（通用科目 + 通用模板）；
 /// 业务模块接入 Ledger 时各自实现本接口并以 ITransientDependency 注册，
 /// 模块未被宿主 DependsOn 就不会注册，新库也就不会出现该模块的科目和模板。
 /// </summary>

@@ -16,6 +16,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\framework\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\AbpAdmin.Collection.Contracts\AbpAdmin.Collection.Contracts.csproj" />
+    <!-- 提现 M2 接入 Fin 账本：过账走 ILedgerIntegrationService（进程内、加入调用方事务），
+         科目/模板经 ILedgerSeedProvider 播种。只引用契约工程，不引用 Ledger 实现。 -->
+    <ProjectReference Include="..\AbpAdmin.Ledger.Integration.Contracts\AbpAdmin.Ledger.Integration.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

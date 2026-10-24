@@ -18,6 +18,9 @@ public class CollectionPermissionDefinitionProvider : PermissionDefinitionProvid
         // 否则租户管理员可自授 Network.Admin 操作 Host 的共享网络行（助记词/金库/RPC）
         group.AddPermission(CollectionPermissions.Network.Admin, L("Permission:Network.Admin"),
             multiTenancySide: MultiTenancySides.Host);
+        // 提现出账仅 Host（余额/提现表无租户列；租户管理员自授会越过 Host 资金边界）
+        group.AddPermission(CollectionPermissions.Withdraw.Admin, L("Permission:WithdrawAdmin"),
+            multiTenancySide: MultiTenancySides.Host);
     }
 
     private static LocalizableString L(string name)

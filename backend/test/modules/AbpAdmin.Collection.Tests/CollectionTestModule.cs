@@ -13,12 +13,15 @@ using Volo.Abp.FeatureManagement;
 namespace AbpAdmin.Collection;
 
 /// <summary>
-/// 收款模块测试模块：程序集专属 Testcontainers PG 库真迁移建表（框架 + Collection 两本账）。
+/// 收款模块测试模块：程序集专属 Testcontainers PG 库真迁移建表（框架 + Collection + Ledger 三本账）。
 /// 不调 AddAlwaysDisableUnitOfWorkTransaction：CreateAsync/CancelAsync 的验收点就是
 /// requiresNew 提交可见性与状态机事务语义。
+/// 提现 M2 起 DependsOn Ledger（提现/充值过账走 ILedgerIntegrationService，测试基类的
+/// IDataSeeder 会把 CollectionLedgerSeedProvider 的科目与模板种进 Fin 表）。
 /// </summary>
 [DependsOn(
     typeof(AbpAdminCollectionModule),
+    typeof(AbpAdmin.Ledger.AbpAdminLedgerModule),
     typeof(AbpAdminTestBaseModule)
 )]
 public class CollectionTestModule : AbpModule
@@ -54,6 +57,17 @@ public class CollectionTestModule : AbpModule
                     .Options);
             dbContext.Database.Migrate();
         });
+        database.MigrateOnce("LedgerDbContext", () =>
+        {
+            using var dbContext = new AbpAdmin.Ledger.Data.LedgerDbContext(
+                new DbContextOptionsBuilder<AbpAdmin.Ledger.Data.LedgerDbContext>()
+                    .UseNpgsql(database.ConnectionString, npgsql =>
+                    {
+                        npgsql.MigrationsHistoryTable(AbpAdmin.Ledger.LedgerConsts.SchemaHistoryTable);
+                    })
+                    .Options);
+            dbContext.Database.Migrate();
+        });
 
         context.Services.Configure<AbpDbConnectionOptions>(options =>
         {
@@ -61,12 +75,14 @@ public class CollectionTestModule : AbpModule
         });
 
         // 链网管理服务从 IConfiguration 读 Collection:MasterKey（解密助记词/RPC/KEY 密文）——
-        // 测试用与 HdKeyService.Protect 相同的 "test-master-key"，叠加在既有配置之上
+        // 测试用与 HdKeyService.Protect 相同的 "test-master-key"，叠加在既有配置之上；
+        // Collection:Withdraw:Enabled 默认开（提现用例需要，宿主 appsettings 默认关互不影响）
         var testConfig = new ConfigurationBuilder()
             .AddConfiguration(context.Services.GetConfiguration())
             .AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
             {
                 ["Collection:MasterKey"] = "test-master-key",
+                ["Collection:Withdraw:Enabled"] = "true",
             })
             .Build();
         context.Services.Replace(

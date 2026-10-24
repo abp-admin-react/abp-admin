@@ -25,4 +25,7 @@ public static class FinanceAccountCodes
     public const string AgentPayable = "2203";
     public const string RentIncome = "6001";
     public const string CommissionExpense = "6601";
+
+    /// <summary>提现手续费收入（Collection 模块提现 M2 播种）。</summary>
+    public const string WithdrawFeeIncome = "6003";
 }
