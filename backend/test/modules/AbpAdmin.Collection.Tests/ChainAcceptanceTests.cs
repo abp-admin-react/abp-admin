@@ -818,8 +818,11 @@ public class FakeChainGateway : IBscChainGateway
         return Task.FromResult(new AddressTransferPage(logs, !complete));
     }
 
+    /// <summary>按 (合约, 地址) 的代币原始余额（提现护栏用；缺省 0）。</summary>
+    public Dictionary<string, string> TokenBalances { get; } = new();
+
     public Task<string> GetTokenBalanceRawAsync(string contractAddress, string address, CancellationToken ct = default)
-        => Task.FromResult("0");
+        => Task.FromResult(TokenBalances.TryGetValue(contractAddress + ":" + address, out var raw) ? raw : "0");
 
     public Task<decimal> GetBnbBalanceAsync(string address, CancellationToken ct = default)
         => Task.FromResult(BnbBalances.TryGetValue(address, out var b) ? b : 1m);

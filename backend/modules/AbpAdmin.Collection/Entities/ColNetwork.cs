@@ -34,6 +34,17 @@ public class ColNetwork : BasicAggregateRoot<Guid>
     /// <summary>RPC 连接串密文（URL 含项目密钥）。null = 未设置。</summary>
     public string? RpcCipher { get; set; }
 
+    // ── 提现热钱包（M3）：独立于归集助记词的打款钱包，绝不与 MnemonicCipher 同源 ——
+
+    /// <summary>提现热钱包地址（0x + 40 位十六进制）。null = 未配置（审批/广播拒绝）。</summary>
+    public string? WithdrawVaultAddress { get; set; }
+
+    /// <summary>
+    /// 提现热钱包私钥密文（版本前缀 + ABP StringEncryption，口令 = Collection:MasterKey）。
+    /// 管理端设置时校验地址与私钥匹配；明文只在签名临界区内短暂解出，不落日志。
+    /// </summary>
+    public string? WithdrawVaultKeyCipher { get; set; }
+
     /// <summary>
     /// 单次 getLogs 响应的条数上限（计划第 5.6 节）：优先节点报错实测，静默截断用服务商文档，
     /// 都没有则拒绝打开扫链（不设缺省）。返回条数达到上限八成视为没读完。

@@ -62,6 +62,26 @@ public static class HdKeyService
         return '\u0001' + encryptor.Encrypt(words, masterKey);
     }
 
+    /// <summary>
+    /// 解密任意敏感明文（提现热钱包私钥等，同一版本前缀协议与口令）。
+    /// 返回 null = masterKey 不对或密文损坏（调用方 fail-closed）。
+    /// </summary>
+    public static string? UnprotectPlain(string cipher, string masterKey, IStringEncryptionService encryptor)
+    {
+        if (string.IsNullOrEmpty(cipher) || cipher.Length < 2 || cipher[0] != '\u0001')
+        {
+            return null;
+        }
+
+        return encryptor.Decrypt(cipher[1..], masterKey);
+    }
+
+    /// <summary>加密任意敏感明文（与 Protect 同一协议；提现热钱包私钥用）。</summary>
+    public static string ProtectPlain(string plaintext, string masterKey, IStringEncryptionService encryptor)
+    {
+        return '\u0001' + encryptor.Encrypt(plaintext, masterKey);
+    }
+
     public static string DeriveAddress(string words, int index)
     {
         return MakeWallet(words).GetAccount(index).Address;

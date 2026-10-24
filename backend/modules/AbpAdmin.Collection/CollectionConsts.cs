@@ -35,6 +35,9 @@ public static class CollectionConsts
 
     public const string SweepLockKey = "Collection:Sweep";
 
+    /// <summary>提现广播 worker 的轮锁（提现 M3）。</summary>
+    public const string WithdrawBroadcastLockKey = "Collection:WithdrawBroadcast";
+
     /// <summary>
     /// 助记词生成/重置与用户地址派生共用的全局锁键：堵住 check-then-write 竞态——
     /// 重置检查后、写库前有用户派生提交 → 覆写密文会让该用户地址永远不可达（评审 H 级）。
@@ -51,4 +54,7 @@ public static class CollectionConsts
     public const string AlertPrefixSweepStuck = "[Alert:SweepStuck] ";
 
     public const string AlertPrefixTokenPaused = "[Alert:TokenPaused] ";
+
+    /// <summary>提现热钱包熔断/异常告警前缀（提现 M3）。</summary>
+    public const string AlertPrefixWithdrawHotWallet = "[Alert:WithdrawHotWallet] ";
 }

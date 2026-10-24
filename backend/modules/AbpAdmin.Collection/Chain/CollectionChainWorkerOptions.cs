@@ -52,9 +52,25 @@ public class CollectionChainWorkerOptions
 
     public Guid[] AlertRecipientUserIds { get; set; } = Array.Empty<Guid>();
 
+    // ── 提现（M3）：独立开关与节奏（Collection:Withdraw 节，与 Chain 平级）────────────────
+
+    /// <summary>提现总开关：false 时提交拒绝、广播 worker 睡眠不碰锁不碰链。</summary>
+    public bool WithdrawEnabled { get; set; }
+
+    public int WithdrawBroadcastIntervalSeconds { get; set; } = 15;
+
+    public int WithdrawRoundBudgetSeconds { get; set; } = 120;
+
+    /// <summary>广播队列每轮取件上限。</summary>
+    public int WithdrawBroadcastBatchSize { get; set; } = 5;
+
+    /// <summary>小额自动审每轮取件上限。</summary>
+    public int WithdrawAutoApproveBatchSize { get; set; } = 20;
+
     public static CollectionChainWorkerOptions FromConfiguration(IConfiguration configuration)
     {
         var s = configuration.GetSection("Collection:Chain");
+        var w = configuration.GetSection("Collection:Withdraw");
         var options = new CollectionChainWorkerOptions
         {
             ScanEnabled = s.GetValue("ScanEnabled", false),
@@ -80,6 +96,11 @@ public class CollectionChainWorkerOptions
                 .Select(x => Guid.TryParse(x, out var g) ? g : Guid.Empty)
                 .Where(g => g != Guid.Empty)
                 .ToArray(),
+            WithdrawEnabled = w.GetValue("Enabled", false),
+            WithdrawBroadcastIntervalSeconds = w.GetValue("BroadcastIntervalSeconds", 15),
+            WithdrawRoundBudgetSeconds = w.GetValue("RoundBudgetSeconds", 120),
+            WithdrawBroadcastBatchSize = w.GetValue("BroadcastBatchSize", 5),
+            WithdrawAutoApproveBatchSize = w.GetValue("AutoApproveBatchSize", 20),
         };
         return options;
     }
@@ -99,7 +120,7 @@ public static class CollectionChainWorkersCollectionExtensions
     {
         var options = CollectionChainWorkerOptions.FromConfiguration(configuration);
 
-        if (options.ScanEnabled || options.SweepEnabled)
+        if (options.ScanEnabled || options.SweepEnabled || options.WithdrawEnabled)
         {
             GuardRedisBackedLock(configuration);
         }
@@ -111,6 +132,8 @@ public static class CollectionChainWorkersCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChainAlertService>>()));
         services.AddHostedService<DepositScanWorker>();
         services.AddHostedService<SweepWorker>();
+        // 提现广播（M3）：同一 Redis 锁纪律；WithdrawEnabled=false 时每轮纯睡眠（base 类开关语义）
+        services.AddHostedService<AbpAdmin.Collection.Withdrawals.WithdrawBroadcastWorker>();
         return services;
     }
 
