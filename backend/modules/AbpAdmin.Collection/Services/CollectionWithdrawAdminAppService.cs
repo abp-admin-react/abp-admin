@@ -11,6 +11,7 @@ using AbpAdmin.Collection.Withdrawals;
 using AbpAdmin.Collection.Ledger;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
@@ -35,6 +36,60 @@ public class SetWithdrawVaultInput
     public string Address { get; set; } = default!;
 
     public string PrivateKey { get; set; } = default!;
+}
+
+/// <summary>热钱包监控流水行（金额超精度时 Amount 为 null，展示回退 RawAmount）。</summary>
+public class HotWalletTxnDto
+{
+    public Guid Id { get; set; }
+    public string Symbol { get; set; } = default!;
+    public string TxHash { get; set; } = default!;
+    public int LogIndex { get; set; }
+    public string From { get; set; } = default!;
+    public string To { get; set; } = default!;
+
+    /// <summary>Out / In。</summary>
+    public string Direction { get; set; } = default!;
+
+    /// <summary>缩放后金额（十进制字符串）；null = 超精度。</summary>
+    public string? Amount { get; set; }
+
+    public string RawAmount { get; set; } = default!;
+    public long BlockNumber { get; set; }
+
+    /// <summary>Matched / ExternalIn / Anomaly / Acked。</summary>
+    public string Status { get; set; } = default!;
+
+    /// <summary>出站匹配到的提现单 Id。</summary>
+    public Guid? MatchedWithdrawId { get; set; }
+
+    public string? AckedBy { get; set; }
+    public DateTime? AckedAt { get; set; }
+    public string? AckNote { get; set; }
+    public DateTime CreationTime { get; set; }
+}
+
+/// <summary>热钱包监控状态卡（游标/异常计数；余额熔断走 GetHotWallet）。</summary>
+public class HotWalletWatchStatusDto
+{
+    /// <summary>未处置异常出账数（红点口径）。</summary>
+    public int AnomalyOpenCount { get; set; }
+
+    public List<HotWalletWatchTokenDto> Tokens { get; set; } = new();
+}
+
+/// <summary>单币监控通道状态。</summary>
+public class HotWalletWatchTokenDto
+{
+    public string Symbol { get; set; } = default!;
+
+    /// <summary>已扫到的安全链头；null = 尚未首跑。</summary>
+    public long? LastScannedBlock { get; set; }
+
+    public DateTime? LastScanAt { get; set; }
+
+    /// <summary>最近一轮失败原因（成功后清空）。</summary>
+    public string? LastError { get; set; }
 }
 
 /// <summary>
@@ -280,6 +335,124 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         AssertHost();
         var (_, gateway) = await CreateWithdrawGatewayAsync();
         return await _guard.GetStatusAsync(gateway);
+    }
+
+    /// <summary>
+    /// 热钱包监控状态卡：各币游标/最近扫描/最近错误 + 未处置异常计数（前端状态卡与红点口径）。
+    /// 不碰链（纯 DB 读）——余额/熔断走 GetHotWalletAsync。
+    /// </summary>
+    public virtual async Task<HotWalletWatchStatusDto> GetHotWalletWatchStatusAsync()
+    {
+        AssertHost();
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+
+        var states = await dbContext.HotWalletWatchStates.AsNoTracking()
+            .OrderBy(s => s.Symbol)
+            .ToListAsync();
+        var anomalyOpen = await dbContext.HotWalletTxns.AsNoTracking()
+            .CountAsync(t => t.Status == HotWalletTxnStatus.Anomaly);
+        await uow.CompleteAsync();
+
+        return new HotWalletWatchStatusDto
+        {
+            AnomalyOpenCount = anomalyOpen,
+            Tokens = states.Select(s => new HotWalletWatchTokenDto
+            {
+                Symbol = s.Symbol,
+                LastScannedBlock = s.LastScannedBlock,
+                LastScanAt = s.LastScanAt,
+                LastError = s.LastError,
+            }).ToList(),
+        };
+    }
+
+    /// <summary>热钱包流水分页（可按状态/方向筛选，最新在前）。</summary>
+    public virtual async Task<PagedResultDto<HotWalletTxnDto>> GetHotWalletTxnsAsync(
+        int skipCount, int maxResultCount, string? status = null, string? direction = null)
+    {
+        AssertHost();
+        if (maxResultCount <= 0 || maxResultCount > 200)
+        {
+            maxResultCount = 20;
+        }
+
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var query = dbContext.HotWalletTxns.AsNoTracking();
+        if (!string.IsNullOrEmpty(status) && Enum.TryParse<HotWalletTxnStatus>(status, true, out var st))
+        {
+            query = query.Where(t => t.Status == st);
+        }
+        if (!string.IsNullOrEmpty(direction) && Enum.TryParse<HotWalletDirection>(direction, true, out var dir))
+        {
+            query = query.Where(t => t.Direction == dir);
+        }
+
+        var total = await query.CountAsync();
+        var items = await query
+            .OrderByDescending(t => t.BlockNumber).ThenByDescending(t => t.LogIndex)
+            .Skip(Math.Max(0, skipCount))
+            .Take(maxResultCount)
+            .ToListAsync();
+        await uow.CompleteAsync();
+
+        return new PagedResultDto<HotWalletTxnDto>(total, items.Select(t => new HotWalletTxnDto
+        {
+            Id = t.Id,
+            Symbol = t.Symbol,
+            TxHash = t.TxHash,
+            LogIndex = t.LogIndex,
+            From = t.From,
+            To = t.To,
+            Direction = t.Direction.ToString(),
+            Amount = t.Amount == null ? null : CollectionAmounts.Format(t.Amount.Value),
+            RawAmount = t.RawAmount,
+            BlockNumber = t.BlockNumber,
+            Status = t.Status.ToString(),
+            MatchedWithdrawId = t.MatchedWithdrawId,
+            AckedBy = t.AckedBy,
+            AckedAt = t.AckedAt,
+            AckNote = t.AckNote,
+            CreationTime = t.CreationTime,
+        }).ToList());
+    }
+
+    /// <summary>
+    /// 确认已知（Anomaly → Acked 终态）：管理员核实后的留痕动作（谁、何时、备注）。
+    /// CAS：并发双击只有一个赢家；非 Anomaly 拒绝。
+    /// </summary>
+    public virtual async Task AckHotWalletTxnAsync(Guid id, string? note = null)
+    {
+        AssertHost();
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var txn = await dbContext.HotWalletTxns.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id);
+        if (txn == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.HotWalletTxnNotFound).WithData("HotWalletTxnId", id);
+        }
+
+        if (txn.Status != HotWalletTxnStatus.Anomaly)
+        {
+            throw new BusinessException(CollectionErrorCodes.HotWalletTxnNotAckable)
+                .WithData("Reason", $"仅异常状态可确认（当前 {txn.Status}）");
+        }
+
+        var now = Clock.Now;
+        var rows = await dbContext.HotWalletTxns
+            .Where(t => t.Id == id && t.Status == HotWalletTxnStatus.Anomaly)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.Status, HotWalletTxnStatus.Acked)
+                .SetProperty(t => t.AckedBy, CurrentUser.UserName ?? "system")
+                .SetProperty(t => t.AckedAt, now)
+                .SetProperty(t => t.AckNote, note));
+        if (rows == 0)
+        {
+            Logger.LogWarning("热钱包流水 {TxnId} 确认被并发处置（0 行），幂等返回", id);
+        }
+
+        await uow.CompleteAsync();
     }
 
     /// <summary>重试广播失败单（有哈希先验回执；无哈希过近期同地址付款双花门）。</summary>

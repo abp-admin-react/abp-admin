@@ -38,6 +38,10 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
     public DbSet<ColWithdrawOrder> WithdrawOrders { get; set; } = default!;
 
+    public DbSet<ColHotWalletTxn> HotWalletTxns { get; set; } = default!;
+
+    public DbSet<ColHotWalletWatchState> HotWalletWatchStates { get; set; } = default!;
+
     public CollectionDbContext(DbContextOptions<CollectionDbContext> options)
         : base(options)
     {
@@ -263,6 +267,38 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.Status, x.StatusChangedAt });
             // 双花门：近期是否已向该地址付过款
             b.HasIndex(x => new { x.ToAddress, x.CompleteTime });
+        });
+
+        builder.Entity<ColHotWalletTxn>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "HotWalletTxns");
+            b.ConfigureByConvention();
+
+            b.Property(x => x.Symbol).IsRequired().HasMaxLength(16);
+            b.Property(x => x.TxHash).IsRequired().HasMaxLength(66);
+            b.Property(x => x.From).IsRequired().HasMaxLength(42);
+            b.Property(x => x.To).IsRequired().HasMaxLength(42);
+            b.Property(x => x.RawAmount).IsRequired().HasMaxLength(96);
+            b.Property(x => x.Amount).HasPrecision(28, 18);
+            b.Property(x => x.AckedBy).HasMaxLength(64);
+            b.Property(x => x.AckNote).HasMaxLength(CollectionConsts.MaxNoteLength);
+
+            // 重扫幂等：同一 Transfer 日志只落一行（tokentx 分页重合/重启重扫由它吸收）
+            b.HasIndex(x => new { x.TxHash, x.LogIndex }).IsUnique();
+            // 管理端流水分页（默认最新在前）与异常筛选
+            b.HasIndex(x => x.CreationTime);
+            b.HasIndex(x => new { x.Status, x.CreationTime });
+        });
+
+        builder.Entity<ColHotWalletWatchState>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "HotWalletWatchStates");
+            b.ConfigureByConvention();
+
+            b.Property(x => x.Symbol).IsRequired().HasMaxLength(16);
+            b.Property(x => x.LastError).HasMaxLength(CollectionConsts.MaxNoteLength);
+
+            b.HasIndex(x => x.TokenId).IsUnique();
         });
     }
 }

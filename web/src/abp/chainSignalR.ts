@@ -2,13 +2,14 @@ import * as SignalR from '@microsoft/signalr';
 import { getAccessToken } from './oidc';
 
 /**
- * 收付款模块 SignalR 客户端（四个管理页面共用）。
+ * 收付款模块 SignalR 客户端（管理页面共用）。
  *
  * 事件：
  * - ChainScanProgress  代币通道扫链进度（扫链 worker 轮末推送）
  * - ChainDepositChanged 进款单新增/变更
  * - ChainSweepChanged  归集任务状态变更
  * - ChainVaultCheck    金库核对留痕
+ * - ChainHotWalletChanged 热钱包监控流水新增/异常
  *
  * 可靠性：与 exchange 项目同款双轨重连（SignalR 自动 5s×12 + 指数退避 1s→10s 无限），
  * 连接状态暴露给页面状态条。
@@ -52,12 +53,24 @@ export interface ChainVaultCheckPayload {
   checkedAt: string;
 }
 
+export interface ChainHotWalletChangedPayload {
+  txnId: string;
+  symbol: string;
+  status: string;
+  direction: string;
+  txHash: string;
+  amount: string;
+  to: string;
+  blockNumber: number;
+}
+
 export type ChainConnState = 'connecting' | 'connected' | 'disconnected';
 
 type ProgressListener = (item: ChainScanProgressPayload) => void;
 type DepositListener = (item: ChainDepositChangedPayload) => void;
 type SweepListener = (item: ChainSweepChangedPayload) => void;
 type VaultListener = (item: ChainVaultCheckPayload) => void;
+type HotWalletListener = (item: ChainHotWalletChangedPayload) => void;
 type ConnListener = (state: ChainConnState) => void;
 
 let connection: SignalR.HubConnection | null = null;
@@ -65,6 +78,7 @@ const progressListeners = new Set<ProgressListener>();
 const depositListeners = new Set<DepositListener>();
 const sweepListeners = new Set<SweepListener>();
 const vaultListeners = new Set<VaultListener>();
+const hotWalletListeners = new Set<HotWalletListener>();
 const connListeners = new Set<ConnListener>();
 
 let connState: ChainConnState = 'disconnected';
@@ -144,6 +158,12 @@ const ensureConn = () => {
       fn(item);
     });
   });
+  connection.on('ChainHotWalletChanged', (item: ChainHotWalletChangedPayload) => {
+    if (!item) return;
+    hotWalletListeners.forEach((fn) => {
+      fn(item);
+    });
+  });
 
   return connection;
 };
@@ -194,4 +214,9 @@ export const onChainSweepChanged = (fn: SweepListener) => {
 export const onChainVaultCheck = (fn: VaultListener) => {
   vaultListeners.add(fn);
   return () => vaultListeners.delete(fn);
+};
+
+export const onChainHotWalletChanged = (fn: HotWalletListener) => {
+  hotWalletListeners.add(fn);
+  return () => hotWalletListeners.delete(fn);
 };

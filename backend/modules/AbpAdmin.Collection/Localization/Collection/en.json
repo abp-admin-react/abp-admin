@@ -118,6 +118,8 @@
     "Permission:WithdrawAdmin": "Withdrawal admin (approve/reject/refund/backfill)",
     "AbpAdmin.Collection:DepositNotReleasable": "Deposit order is not releasable (must be Confirmed with no sweep task).",
     "AbpAdmin.Collection:SweepTaskNotFound": "Sweep task not found.",
-    "AbpAdmin.Collection:SweepTaskNotRetryable": "Sweep task is not retryable (only Failed tasks can be retried)."
+    "AbpAdmin.Collection:SweepTaskNotRetryable": "Sweep task is not retryable (only Failed tasks can be retried).",
+    "AbpAdmin.Collection:HotWalletTxnNotFound": "Hot wallet transaction not found.",
+    "AbpAdmin.Collection:HotWalletTxnNotAckable": "Hot wallet transaction is not ackable (only Anomaly rows can be acknowledged)."
   }
 }

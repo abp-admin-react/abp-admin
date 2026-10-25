@@ -4,9 +4,11 @@ const request = vi.fn();
 vi.mock('@umijs/max', () => ({ request: (...a: unknown[]) => request(...a) }));
 
 import {
+  ackHotWalletTxn,
   approveWithdraw,
   backfillOpening,
   completeWithdraw,
+  getHotWalletTxns,
   refundWithdraw,
   rejectWithdraw,
   retryWithdraw,
@@ -30,6 +32,7 @@ describe('withdrawal write requests skip global error handler', () => {
       () => setWithdrawVault('0x' + '1'.repeat(40), '0x' + '2'.repeat(32)),
     ],
     ['backfillOpening', () => backfillOpening()],
+    ['ackHotWalletTxn', () => ackHotWalletTxn('t1', '运营手动转出')],
   ];
 
   it.each(cases)('%s 携带 skipErrorHandler', async (_name, call) => {
@@ -51,6 +54,29 @@ describe('withdrawal write requests skip global error handler', () => {
       '/api/app/collection-withdraw-admin/w1/complete?txHash=' +
         encodeURIComponent('0x' + 'ab'.repeat(32)),
     );
+  });
+
+  // 热钱包监控：ack 路径段 + note 查询参数；流水查询是 GET query 形态
+  it('ackHotWalletTxn 路径段 / getHotWalletTxns query 形态', async () => {
+    request.mockClear();
+    await ackHotWalletTxn('t1', '运营手动转出').catch(() => {});
+    expect(request.mock.calls[0][0]).toBe(
+      '/api/app/collection-withdraw-admin/t1/ack',
+    );
+    expect(request.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      params: { note: '运营手动转出' },
+    });
+
+    request.mockClear();
+    request.mockResolvedValue({ totalCount: 0, items: [] });
+    await getHotWalletTxns({ status: 'Anomaly', direction: 'Out' });
+    expect(request.mock.calls[0][0]).toBe(
+      '/api/app/collection-withdraw-admin/hot-wallet-txns',
+    );
+    expect(request.mock.calls[0][1]).toMatchObject({
+      params: { status: 'Anomaly', direction: 'Out' },
+    });
   });
 });
 

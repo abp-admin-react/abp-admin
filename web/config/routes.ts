@@ -409,6 +409,12 @@ export default [
         component: './collection/withdrawals',
       },
       {
+        path: '/collection/hot-wallet',
+        name: 'collection-hot-wallet',
+        access: 'canAdminWithdrawals',
+        component: './collection/hot-wallet',
+      },
+      {
         path: '/collection/network',
         name: 'collection-network',
         access: 'canAdminNetwork',

@@ -109,6 +109,11 @@ public class ChainWorkerRegistrationTests
             .LockKeyExposeForTest()
             .ShouldBe(AbpAdmin.Collection.CollectionConsts.WithdrawBroadcastLockKey);
 
+        // 热钱包监控 worker 的轮锁键（同族互不重叠）
+        new HotWalletWatchWorker(null!, null!, null!, new CollectionChainWorkerOptions(), null!)
+            .LockKeyExposeForTest()
+            .ShouldBe(AbpAdmin.Collection.CollectionConsts.HotWalletWatchLockKey);
+
         // DbMigrator 项目不引用宿主工程（编译期隔离），这里核对宿主模块才调用扩展：
         var hostModuleSource = System.IO.File.ReadAllText(System.IO.Path.Combine(LocateHostDirectory(), "AbpAdminHttpApiHostModule.cs"));
         hostModuleSource.ShouldContain("AddCollectionChainWorkers");

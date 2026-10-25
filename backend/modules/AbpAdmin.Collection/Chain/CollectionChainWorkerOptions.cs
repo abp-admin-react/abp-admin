@@ -68,6 +68,8 @@ public static class CollectionChainWorkersCollectionExtensions
         services.AddHostedService<SweepWorker>();
         // 提现广播（M3）：同一 Redis 锁纪律；Collection.Withdraw.Enabled=false 时每轮纯睡眠（基类开关语义）
         services.AddHostedService<AbpAdmin.Collection.Withdrawals.WithdrawBroadcastWorker>();
+        // 热钱包逐笔监控：Collection.Chain.HotWalletWatchEnabled=false 时每轮纯睡眠
+        services.AddHostedService<HotWalletWatchWorker>();
         return services;
     }
 }

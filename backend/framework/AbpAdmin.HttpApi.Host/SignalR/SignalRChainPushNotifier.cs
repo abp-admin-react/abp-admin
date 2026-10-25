@@ -43,4 +43,10 @@ public class SignalRChainPushNotifier : Contracts.IChainPushNotifier, ITransient
         await _hubContext.Clients.Group(ChainHubGroups.Host)
             .SendAsync(ChainHubGroups.VaultCheckEvent, check);
     }
+
+    public async Task PushHotWalletChangedAsync(Contracts.ChainHotWalletChangedEto txn)
+    {
+        await _hubContext.Clients.Group(ChainHubGroups.Host)
+            .SendAsync(ChainHubGroups.HotWalletChangedEvent, txn);
+    }
 }

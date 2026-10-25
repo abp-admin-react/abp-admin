@@ -69,7 +69,8 @@ public static class MenuTemplateDefinition
         new("collection-vault", "collection", MenuTypeEnum.Menu, "金库核对", "collection-vault", "/collection/vault", "audit", 50, "AbpAdmin.Collection.Collections"),
         // 提现管理（M3）：资金出账高危动作，独立权限 WithdrawAdmin（与链网运维同级）
         new("collection-withdrawals", "collection", MenuTypeEnum.Menu, "提现管理", "collection-withdrawals", "/collection/withdrawals", "withdraw", 51, "AbpAdmin.Collection.WithdrawAdmin"),
-        new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 52, "AbpAdmin.Collection.Network.Admin"),
+        new("collection-hot-wallet", "collection", MenuTypeEnum.Menu, "热钱包监控", "collection-hot-wallet", "/collection/hot-wallet", "monitor", 52, "AbpAdmin.Collection.WithdrawAdmin"),
+        new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 53, "AbpAdmin.Collection.Network.Admin"),
         new("current-session", null, MenuTypeEnum.Menu, "当前会话", "current-session", "/current-session", "user", 50),
     };
 }

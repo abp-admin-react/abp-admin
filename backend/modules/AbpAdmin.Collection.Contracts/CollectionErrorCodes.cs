@@ -129,4 +129,16 @@ public static class CollectionErrorCodes
 
     /// <summary>进款单不满足放行条件（非 Confirmed 或已挂归集任务）。</summary>
     public const string DepositNotReleasable = Namespace + ":DepositNotReleasable";
+
+    /// <summary>归集任务不存在。</summary>
+    public const string SweepTaskNotFound = Namespace + ":SweepTaskNotFound";
+
+    /// <summary>归集任务当前状态不可重试（仅 Failed 可重试，冷却由自动拉回管、手动重试跳过冷却）。</summary>
+    public const string SweepTaskNotRetryable = Namespace + ":SweepTaskNotRetryable";
+
+    /// <summary>热钱包监控流水不存在。</summary>
+    public const string HotWalletTxnNotFound = Namespace + ":HotWalletTxnNotFound";
+
+    /// <summary>热钱包流水当前状态不可确认（仅 Anomaly 可「确认已知」）。</summary>
+    public const string HotWalletTxnNotAckable = Namespace + ":HotWalletTxnNotAckable";
 }

@@ -68,6 +68,56 @@ export type WithdrawOpeningBackfillResultDto = {
   skipped: number;
 };
 
+/** 热钱包监控流水行（金额超精度时 amount 为 null，展示回退 rawAmount） */
+export type HotWalletTxnDto = {
+  id: string;
+  symbol: string;
+  txHash: string;
+  logIndex: number;
+  from: string;
+  to: string;
+  /** Out / In */
+  direction: string;
+  amount?: string;
+  rawAmount: string;
+  blockNumber: number;
+  /** Matched / ExternalIn / Anomaly / Acked */
+  status: string;
+  matchedWithdrawId?: string;
+  ackedBy?: string;
+  ackedAt?: string;
+  ackNote?: string;
+  creationTime: string;
+};
+
+/** 热钱包监控状态卡（游标/异常计数；余额熔断走 getHotWallet） */
+export type HotWalletWatchStatusDto = {
+  anomalyOpenCount: number;
+  tokens: {
+    symbol: string;
+    lastScannedBlock?: number;
+    lastScanAt?: string;
+    lastError?: string;
+  }[];
+};
+
+/** 热钱包流水状态（色板与文案是页面唯一口径） */
+export const HW_TXN_STATUS_LABELS: Record<
+  string,
+  { color: string; text: string }
+> = {
+  Matched: { color: 'success', text: '已匹配' },
+  ExternalIn: { color: 'cyan', text: '外部转入' },
+  Anomaly: { color: 'error', text: '未匹配出账' },
+  Acked: { color: 'default', text: '已确认' },
+};
+
+export const HW_DIRECTION_LABELS: Record<string, { color: string; text: string }> =
+  {
+    Out: { color: 'volcano', text: '出' },
+    In: { color: 'geekblue', text: '入' },
+  };
+
 /** 提现单状态（与后端 WithdrawStatus 对齐）：色板与文案是页面唯一口径 */
 export const WD_STATUS_LABELS: Record<string, { color: string; text: string }> =
   {
@@ -109,6 +159,21 @@ export async function getWithdrawStatus(): Promise<WithdrawStatusDto> {
 /** 热钱包状态卡 */
 export async function getHotWallet(): Promise<WithdrawHotWalletStatusDto> {
   return request(`${BASE}/hot-wallet`);
+}
+
+/** 热钱包监控状态卡（各币游标/最近扫描/未处置异常计数） */
+export async function getHotWalletWatchStatus(): Promise<HotWalletWatchStatusDto> {
+  return request(`${BASE}/hot-wallet-watch-status`);
+}
+
+/** 热钱包监控流水分页（可按状态/方向筛选，最新在前） */
+export async function getHotWalletTxns(params: {
+  skipCount?: number;
+  maxResultCount?: number;
+  status?: string;
+  direction?: string;
+}): Promise<PagedResult<HotWalletTxnDto>> {
+  return request(`${BASE}/hot-wallet-txns`, { params });
 }
 
 // ── 动作 ───────────────────────────────────────────────────────────────────────────────
@@ -182,4 +247,14 @@ export async function setWithdrawVault(
 /** 存量余额开账回填（上线提现前执行一次；幂等可重跑） */
 export async function backfillOpening(): Promise<WithdrawOpeningBackfillResultDto> {
   return request(`${BASE}/backfill-opening`, { method: 'POST', ...WD_REQ });
+}
+
+/** 确认已知（Anomaly → Acked 终态；note 为核实备注） */
+// 单 Guid 参数端点为路径段形态（?id= 会 302——E2E 实测，同 retryWithdraw）
+export async function ackHotWalletTxn(id: string, note?: string): Promise<void> {
+  await request(`${BASE}/${id}/ack`, {
+    method: 'POST',
+    params: note ? { note } : undefined,
+    ...WD_REQ,
+  });
 }

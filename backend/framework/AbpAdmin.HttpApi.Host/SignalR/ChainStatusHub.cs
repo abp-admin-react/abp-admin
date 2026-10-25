@@ -42,4 +42,7 @@ public static class ChainHubGroups
 
     /// <summary>金库核对新留痕推送。</summary>
     public const string VaultCheckEvent = "ChainVaultCheck";
+
+    /// <summary>热钱包监控流水新增/异常推送。</summary>
+    public const string HotWalletChangedEvent = "ChainHotWalletChanged";
 }

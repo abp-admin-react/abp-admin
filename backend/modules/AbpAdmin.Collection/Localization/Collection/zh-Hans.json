@@ -118,6 +118,8 @@
     "Permission:WithdrawAdmin": "提现管理（审核/拒绝/退款/开账回填）",
     "AbpAdmin.Collection:DepositNotReleasable": "进款单当前状态不可放行（需 Confirmed 且未挂归集任务）。",
     "AbpAdmin.Collection:SweepTaskNotFound": "归集任务不存在。",
-    "AbpAdmin.Collection:SweepTaskNotRetryable": "归集任务当前状态不可重试（仅 Failed 可重试）。"
+    "AbpAdmin.Collection:SweepTaskNotRetryable": "归集任务当前状态不可重试（仅 Failed 可重试）。",
+    "AbpAdmin.Collection:HotWalletTxnNotFound": "热钱包监控流水不存在。",
+    "AbpAdmin.Collection:HotWalletTxnNotAckable": "该流水当前状态不可确认（仅异常状态可「确认已知」）。"
   }
 }
