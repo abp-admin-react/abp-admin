@@ -87,9 +87,11 @@ public class ColHotWalletTxn : BasicAggregateRoot<Guid>
 }
 
 /// <summary>
-/// 热钱包监控游标（按币一行）：LastScannedBlock 之后的区块下一轮才扫。
-/// 首跑基线 = 当时安全链头（历史无基线可完整回扫——tokentx 分页有上限，余额核对重放留二期）；
-/// 分页不完整时LastError 记录且游标不前进（下一轮重扫，流水表幂等吸收重复）。
+/// 热钱包监控游标（按币一行）：LastScannedBlock 随每个完成的小窗即时持久化推进
+///（预算取消/重启不丢已扫进度——大积压场景的活锁防线）；首跑基线 = 当时安全链头
+///（历史无基线可完整回扫，余额核对重放留二期）。区间读不全时缩半分窗自愈；
+/// 单块仍读不全（超分页上限）按块跳过推进——LastError 聚合留痕跳块范围 + [Alert:] 告警，
+/// 绝不静默卡死游标；流水表 (TxHash,LogIndex) 唯一键吸收一切重扫。
 /// </summary>
 public class ColHotWalletWatchState : BasicAggregateRoot<Guid>
 {

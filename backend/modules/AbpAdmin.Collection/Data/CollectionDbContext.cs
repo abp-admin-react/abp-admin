@@ -269,6 +269,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.ToAddress, x.CompleteTime });
             // 热钱包监控按 TxHash 批量对账（部分索引：广播前 NULL 行不进索引；否则每轮每币全表扫）
             b.HasIndex(x => x.TxHash).HasFilter("\"TxHash\" IS NOT NULL");
+            // 资金看板「今日」窗口（CreationTime 打头；复合索引 (UserId,CreationTime) 前导列不符用不上）
+            b.HasIndex(x => x.CreationTime);
         });
 
         builder.Entity<ColHotWalletTxn>(b =>
@@ -289,6 +291,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.TxHash, x.LogIndex }).IsUnique();
             // 管理端流水分页（默认最新在前：块高序与落库时间同向）
             b.HasIndex(x => new { x.BlockNumber, x.LogIndex });
+            // 资金看板「今日」窗口（同提现表）
+            b.HasIndex(x => x.CreationTime);
             // 管理端流水分页（默认最新在前）与异常筛选
             b.HasIndex(x => x.CreationTime);
             b.HasIndex(x => new { x.Status, x.CreationTime });

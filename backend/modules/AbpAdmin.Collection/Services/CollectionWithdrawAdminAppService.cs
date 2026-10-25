@@ -479,6 +479,22 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         await uow.CompleteAsync();
     }
 
+    /// <summary>
+    /// 提现总闸（Halt=紧急停机：拒绝新提交 + 阻断全部审批；广播中订单仍走卡单恢复处置）。
+    /// 与 Enabled 同拦一条付币管线，同走 WithdrawAdmin 权限位与确认弹窗——
+    /// 评审：Halt 此前留在通用设置页（Text 控件 + AbpAdmin.SettingUi.Update 权限），
+    /// 低权限者可松闸恢复付币，且文本框敲 "True" 会静默不拉闸（fail-open 于停机语义）。
+    /// 读侧 SubmitAsync/WithdrawBroadcastManager 照旧热读同一设置键。
+    /// </summary>
+    public virtual async Task SetWithdrawHaltAsync(bool halt)
+    {
+        AssertHost();
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        await _settingManager.SetGlobalAsync(
+            CollectionSettings.Withdraw.Halt, halt ? "true" : "false");
+        await uow.CompleteAsync();
+    }
+
     /// <summary>重试广播失败单（有哈希先验回执；无哈希过近期同地址付款双花门）。</summary>
     public virtual async Task RetryAsync(Guid id)
     {

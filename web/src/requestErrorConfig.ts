@@ -175,5 +175,28 @@ export const errorConfig: RequestConfig = {
       };
     },
   ],
-  responseInterceptors: [],
+  responseInterceptors: [
+    // SPA 兜底契约守卫（E2E 两轮实锤的 bug 类别封口）：/api 请求被 nginx try_files
+    // 兜底成 200 + text/html（路由未命中/URL 形态漂移）时，调用方会拿到字符串/undefined
+    // 后 .items 崩溃或“假成功”。2xx 且 content-type 为 HTML 一律抛契约错误——只拦
+    // HTML（不是“非 JSON 全拦”），204/空体/blob 下载不受影响。
+    // 注：umi 的 response 拦截器是 Axios 形态（headers 为普通对象、url 在 config 上）。
+    async (response: any) => {
+      const url: string = response?.config?.url || '';
+      const contentType: string =
+        response?.headers?.['content-type'] || response?.headers?.get?.('content-type') || '';
+      const status: number = response?.status ?? 0;
+      if (
+        (url.includes('/api/') || url.includes('/signalr-hubs/')) &&
+        status >= 200 &&
+        status < 300 &&
+        contentType.includes('text/html')
+      ) {
+        throw new Error(
+          `接口返回了 HTML 而不是 JSON（URL 未命中后端路由或被 SPA 兜底）：${url}`,
+        );
+      }
+      return response;
+    },
+  ],
 };

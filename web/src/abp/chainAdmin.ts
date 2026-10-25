@@ -170,54 +170,6 @@ export async function getVaultChecks(params: {
   return request(`${BASE}/vault-checks`, { params });
 }
 
-/** 状态桶（计数 + 金额合计） */
-export interface StatusBucketDto {
-  status: string;
-  count: number;
-  total: string;
-}
-
-export interface UserBalanceBucketDto {
-  currency: string;
-  balance: string;
-  frozen: string;
-}
-
-export interface VaultCheckLatestDto {
-  symbol: string;
-  vaultBalance: string;
-  userTotal: string;
-  /** VaultBalance - UserTotal；负 = 金库 < 用户余额（缺口） */
-  difference: string;
-  checkedAt: string;
-}
-
-/** 资金看板（纯 DB 聚合；热钱包余额/熔断在热钱包监控页） */
-export interface TreasuryDashboardDto {
-  generatedAt: string;
-  depositByStatus: StatusBucketDto[];
-  withdrawByStatus: StatusBucketDto[];
-  heldDepositCount: number;
-  heldDepositTotal: string;
-  depositTodayCount: number;
-  depositTodayAmount: string;
-  withdrawTodayCount: number;
-  withdrawTodayAmount: string;
-  /** 充值手续费累计（Swept） */
-  depositFeeTotal: string;
-  /** 提现手续费累计（Completed） */
-  withdrawFeeTotal: string;
-  /** 在途提现净额（Pending/Processing/Broadcasting） */
-  withdrawInFlightAmount: string;
-  userBalances: UserBalanceBucketDto[];
-  vaultChecks: VaultCheckLatestDto[];
-}
-
-/** 资金看板聚合（收款查看权限位——端点在 collection-balance-admin 服务；今日 = UTC 日界） */
-export async function getTreasuryDashboard(): Promise<TreasuryDashboardDto> {
-  return request('/api/app/collection-balance-admin/dashboard');
-}
-
 /**
  * 链上总开关（高危：误开扫链/归集烧 Gas）。写设置库，worker 下一轮热生效；
  * 只传要改的参数（未传的不动）。
@@ -300,9 +252,11 @@ export async function setApiKeyEnabled(
   id: string,
   isEnabled: boolean,
 ): Promise<void> {
-  await request(`${BASE}/set-api-key-enabled`, {
+  // 单 Guid 参数端点为路径段（?id= 形态不命中路由→SPA 兜底 200 HTML→开关“假成功”——
+  // api-definition 实测：POST /{id}/set-api-key-enabled；E2E 二轮实锤）
+  await request(`${BASE}/${id}/set-api-key-enabled`, {
     method: 'POST',
-    params: { id, isEnabled },
+    params: { isEnabled },
   });
 }
 

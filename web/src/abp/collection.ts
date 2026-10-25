@@ -56,36 +56,13 @@ export type CollectionDto = {
 
 // ── M2：用户侧余额接口（CollectionBalanceAppService，计划第 3.1 节） ──────────────────
 
-/** 我的某币余额（金额十进制字符串） */
-export type MyBalanceDto = {
-  currency: string;
-  balance: string;
-};
+// 余额 DTO 与动作色板单源在 collectionAdmin.ts（my-txns 会返回全部 7 种动作，
+// 管理端镜像已全量对齐后端 BalanceActions；此处复用导出，勿再复制第二份）
+import type { BalanceTxnDto, MemberBalanceDto } from './collectionAdmin';
 
-/** 我的余额流水行（amount 带符号：充值/回冲为正，扣款为负） */
-export type BalanceTxnDto = {
-  id: string;
-  action: string;
-  currency: string;
-  amount: string;
-  balanceAfter: string;
-  creationTime: string;
-  /** 业务类型（TopUp / Order …）；无归因为 null */
-  businessType?: string;
-  /** 业务单 Id（充值行 = 流水自身 Id；扣款行 = 订单 Id） */
-  businessId?: string;
-  /** 回冲行的原扣款流水 Id */
-  refTxnId?: string;
-  /** 充值行的链上转账凭证（ColDepositOrders.TxHash 回填） */
-  txHash?: string;
-};
-
-/** 余额动作（与后端 BalanceActions 对齐） */
-export const BALANCE_ACTION_LABELS: Record<string, string> = {
-  DepositCredit: '充值',
-  BusinessDebit: '支付扣款',
-  DebitReverse: '扣款回冲',
-};
+type MyBalanceDto = MemberBalanceDto; // 本文件内的历史名（消费方从本文件导入）
+export type { MemberBalanceDto as MyBalanceDto, BalanceTxnDto };
+export { BALANCE_ACTION_LABELS } from './collectionAdmin';
 
 /** 我的 USDT / USDC 余额（没有余额行时后端返回 0，不缺项） */
 export async function getMyBalances(): Promise<MyBalanceDto[]> {

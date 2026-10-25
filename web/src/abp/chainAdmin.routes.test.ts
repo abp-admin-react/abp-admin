@@ -4,9 +4,11 @@ const request = vi.fn();
 vi.mock('@umijs/max', () => ({ request: (...a: unknown[]) => request(...a) }));
 
 import {
+  addApiKey,
   approveLargeDeposit,
-  getTreasuryDashboard,
+  removeApiKey,
   retrySweepTask,
+  setApiKeyEnabled,
   setChainSwitches,
   setDepositPolicy,
 } from './chainAdmin';
@@ -42,11 +44,30 @@ describe('chainAdmin write endpoint URL shapes', () => {
     });
   });
 
-  it('getTreasuryDashboard 指向收款查看权限位的服务（随端点迁移锁 BASE）', async () => {
-    await getTreasuryDashboard();
+  it('setApiKeyEnabled 使用路径段（E2E 二轮实锤：query 形态假成功）', async () => {
+    await setApiKeyEnabled('k1', true);
     expect(request.mock.calls[0][0]).toBe(
-      '/api/app/collection-balance-admin/dashboard',
+      '/api/app/collection-network-admin/k1/set-api-key-enabled',
     );
+    expect(request.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      params: { isEnabled: true },
+    });
+  });
+
+  it('KEY 池另两个端点形状（add=query / remove=路径段）', async () => {
+    request.mockClear();
+    await addApiKey('RpcBsc', 'key', 'label');
+    expect(request.mock.calls[0][0]).toBe(
+      '/api/app/collection-network-admin/api-key',
+    );
+
+    request.mockClear();
+    await removeApiKey('k1');
+    expect(request.mock.calls[0][0]).toBe(
+      '/api/app/collection-network-admin/k1/api-key',
+    );
+    expect(request.mock.calls[0][1]).toMatchObject({ method: 'DELETE' });
   });
 
   it('setChainSwitches 只传提供的参数', async () => {

@@ -267,3 +267,12 @@ export async function setWithdrawEnabled(enabled: boolean): Promise<void> {
     ...WD_REQ,
   });
 }
+
+/** 提现总闸（Halt=紧急停机：拒新提交+阻断审批；与总开关同权限位治理，确认弹窗在前端） */
+export async function setWithdrawHalt(halt: boolean): Promise<void> {
+  await request(`${BASE}/set-withdraw-halt`, {
+    method: 'POST',
+    params: { halt },
+    ...WD_REQ,
+  });
+}

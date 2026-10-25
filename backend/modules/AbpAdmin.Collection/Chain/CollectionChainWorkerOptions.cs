@@ -36,14 +36,14 @@ public class CollectionChainWorkerOptions
                 .Select(x => Guid.TryParse(x, out var g) ? g : Guid.Empty)
                 .Where(g => g != Guid.Empty)
                 .ToArray(),
-            ChainRoundBudgetSeconds = configuration.GetValue(
-                Settings.CollectionSettings.Host.ChainRoundBudgetSeconds, 240),
-            WithdrawRoundBudgetSeconds = configuration.GetValue(
-                Settings.CollectionSettings.Host.WithdrawRoundBudgetSeconds, 120),
         };
-        // 回退 = 本类默认值（初始化器里不能自引用属性，构造后回填）
+        // 回退 = 本类默认值（初始化器里不能自引用属性，构造后回填；默认值单源=属性初始化器）
         options.EtherscanV2Endpoint =
             configuration[Settings.CollectionSettings.Host.EtherscanV2Endpoint] ?? options.EtherscanV2Endpoint;
+        options.ChainRoundBudgetSeconds = configuration.GetValue(
+            Settings.CollectionSettings.Host.ChainRoundBudgetSeconds, options.ChainRoundBudgetSeconds);
+        options.WithdrawRoundBudgetSeconds = configuration.GetValue(
+            Settings.CollectionSettings.Host.WithdrawRoundBudgetSeconds, options.WithdrawRoundBudgetSeconds);
         return options;
     }
 }

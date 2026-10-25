@@ -25,8 +25,9 @@ public class SweepRetryAdminTests : CollectionTestBase
     {
         var (network, usdt) = await SeedMinimalChainAsync();
         // 仅人工失败样例（打油超上限）：自动拉回永远不碰它，手动重试必须允许
+        // 造数 Retryable=true：端点 CAS 的「置 false」才有断言面（false→false 是空断言）
         var taskId = await InsertSweepTaskAsync(network.Id, usdt.Id, SweepTaskStatus.Failed,
-            failReason: "打油金额 0.02 BNB 超过上限 0.005（gas 价格异常？）");
+            failReason: "打油金额 0.02 BNB 超过上限 0.005（gas 价格异常？）", retryable: true);
 
         var admin = GetRequiredService<CollectionNetworkAdminAppService>();
         await admin.RetrySweepTaskAsync(taskId);
@@ -100,7 +101,8 @@ public class SweepRetryAdminTests : CollectionTestBase
     }
 
     private async Task<Guid> InsertSweepTaskAsync(
-        Guid networkId, Guid tokenId, SweepTaskStatus status, string? failReason = null)
+        Guid networkId, Guid tokenId, SweepTaskStatus status,
+        string? failReason = null, bool retryable = false)
     {
         using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
         var dbContext = await DbAsync();
@@ -114,7 +116,7 @@ public class SweepRetryAdminTests : CollectionTestBase
             AddressIndex = 2,
             Amount = 25m,
             Status = status,
-            Retryable = false,
+            Retryable = retryable,
             FailReason = failReason,
             StatusChangedAt = DateTime.UtcNow,
             CreationTime = DateTime.UtcNow,

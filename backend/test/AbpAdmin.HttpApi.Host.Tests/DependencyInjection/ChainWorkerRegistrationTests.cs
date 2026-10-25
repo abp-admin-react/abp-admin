@@ -98,6 +98,8 @@ public class ChainWorkerRegistrationTests
     [InlineData(5, true, 5)]    // 边界等值不钳
     [InlineData(30, true, 30)]  // 正常值直通
     [InlineData(1, false, 5)]   // 关闭态同样钳（下轮睡眠间隔兜底）
+    [InlineData(0, true, 5)]    // 0/负值走同一 < min 分支（设置页可配出的形态）
+    [InlineData(-60, true, 5)]
     public void WorkerRoundPlan_Clamps_Interval_To_Minimum(int seconds, bool enabled, int expectedSeconds)
     {
         var plan = WorkerRoundPlan.Create(enabled, TimeSpan.FromSeconds(seconds));
@@ -130,6 +132,29 @@ public class ChainWorkerRegistrationTests
         // DbMigrator 项目不引用宿主工程（编译期隔离），这里核对宿主模块才调用扩展：
         var hostModuleSource = System.IO.File.ReadAllText(System.IO.Path.Combine(LocateHostDirectory(), "AbpAdminHttpApiHostModule.cs"));
         hostModuleSource.ShouldContain("AddCollectionChainWorkers");
+    }
+
+    [Fact]
+    public void Compose_Migrator_Must_Join_Shared_Redis_For_Seed_Cache_Invalidation()
+    {
+        // E2E 实锤类别的唯一可自动化防线：migrator 不连 Redis 时，种子写设置的缓存失效
+        // 只落迁移进程内存，Host 读共享 Redis 一直拿旧值（开关种 true 读 false）。
+        // compose 重构丢掉这两行即回到事故态——文件契约锁（同 appsettings 迁移锁先例）。
+        var dir = new System.IO.DirectoryInfo(LocateHostDirectory());
+        while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "docker-compose.yml")))
+        {
+            dir = dir.Parent!;
+        }
+        dir.ShouldNotBeNull("repo root with docker-compose.yml not found");
+        var compose = System.IO.File.ReadAllText(System.IO.Path.Combine(dir.FullName, "docker-compose.yml"));
+        // migrator 段到下一个两空格缩进服务名（^  name:）为止——文本切片，不引 YAML 解析依赖
+        var afterMigrator = compose.Split("migrator:")[1];
+        var nextService = System.Text.RegularExpressions.Regex.Match(afterMigrator, @"(?m)^  [a-z_-]+:");
+        nextService.Success.ShouldBeTrue("compose 结构漂移：migrator 后找不到下一个服务名");
+        var migratorSection = afterMigrator.Substring(0, nextService.Index);
+        migratorSection.ShouldContain("Redis__Configuration");
+        migratorSection.ShouldContain("Redis__IsEnabled");
+        compose.ShouldContain("redis:6379");
     }
 
     private static string Inv(decimal value)

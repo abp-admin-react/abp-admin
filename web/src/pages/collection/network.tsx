@@ -227,6 +227,8 @@ export default function NetworkConfigPage() {
       message.success('充值政策已更新（费率只影响新单——建单快照）');
       setPolicyOpen(false);
       reload();
+    } catch {
+      /* interceptor：全局弹错，Modal 保持打开可改可重试 */
     } finally {
       setPolicySaving(false);
     }

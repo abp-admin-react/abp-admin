@@ -59,14 +59,16 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             W(CollectionSettings.Withdraw.MaxDailyAmount, DefMaxDailyAmount),
             W(CollectionSettings.Withdraw.MaxDailyCount, DefMaxDailyCount),
             W(CollectionSettings.Withdraw.AutoApproveMaxAmount, DefAutoApproveMaxAmount),
-            W(CollectionSettings.Withdraw.Halt, "false"),
+            S(CollectionSettings.Withdraw.Halt),
             W(CollectionSettings.Withdraw.BroadcastTimeoutMinutes, DefBroadcastTimeoutMinutes),
             W(CollectionSettings.Withdraw.MaxRetries, DefMaxRetries),
             W(CollectionSettings.Withdraw.HotWalletUsdtFloor, DefHotWalletUsdtFloor),
             W(CollectionSettings.Withdraw.MinHotWalletBnb, DefMinHotWalletBnb),
 
             // 链上 worker 参数热改（宿主配置迁移）：数值/阈值参数在设置页管理（热改免重启）；
-            // 四个总开关（扫链/归集/热钱包监控/提现）不进设置页——资金面高危杠杆改由域权限端点把守
+            // 资金面开关族（扫链/归集/热钱包监控/提现总开关/提现总闸 Halt）不进设置页——
+            // 高危杠杆改由域权限端点把守（Halt 与 Enabled 同拦一条付币管线，同权限位治理；
+            // 评审：布尔闸门渲染成自由文本框还有敲 "True" 静默不拉闸的 fail-open 面）
             //（SetChainSwitchesAsync=Network.Admin / SetWithdrawEnabledAsync=WithdrawAdmin，
             // 评审：通用 AbpAdmin.SettingUi.Update 挡不住烧 Gas/付币开关），worker 照旧每轮热读。
             W(CollectionSettings.Withdraw.BroadcastIntervalSeconds, DefBroadcastIntervalSeconds),
@@ -146,9 +148,10 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
     }
 
     /// <summary>
-    /// 布尔总开关定义（无 UI——不进设置页）：默认 "false"（fail-closed，垃圾值解析为关），
-    /// 读侧 worker 每轮热读；写侧走域权限管理端点（SetChainSwitchesAsync=Network.Admin /
-    /// SetWithdrawEnabledAsync=WithdrawAdmin——资金面高危杠杆不交给通用设置页权限）。
+    /// 布尔资金闸门定义（无 UI——不进设置页）：默认 "false"（fail-closed，垃圾值解析为关），
+    /// 读侧 worker/提交闸每轮热读；写侧走域权限管理端点（SetChainSwitchesAsync=Network.Admin；
+    /// SetWithdrawEnabledAsync/SetWithdrawHaltAsync=WithdrawAdmin——资金面高危杠杆
+    /// 不交给通用 AbpAdmin.SettingUi.Update 权限）。
     /// </summary>
     private static SettingDefinition S(string key)
     {

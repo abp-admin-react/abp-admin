@@ -248,7 +248,11 @@ export default function OrderingPage() {
       title: '类型',
       dataIndex: 'action',
       width: 110,
-      render: (_, t) => BALANCE_ACTION_LABELS[t.action] ?? t.action,
+      // 色板单源后值为 {color,text}（原用户侧裸字符串副本缺 4 个提现动作）
+      render: (_, t) => {
+        const cfg = BALANCE_ACTION_LABELS[t.action];
+        return cfg ? <Tag color={cfg.color}>{cfg.text}</Tag> : t.action;
+      },
     },
     {
       title: '金额',

@@ -13,6 +13,7 @@ import {
   rejectWithdraw,
   retryWithdraw,
   setWithdrawEnabled,
+  setWithdrawHalt,
   setWithdrawVault,
   WD_STATUS_LABELS,
 } from './withdrawal';
@@ -35,6 +36,7 @@ describe('withdrawal write requests skip global error handler', () => {
     ['backfillOpening', () => backfillOpening()],
     ['ackHotWalletTxn', () => ackHotWalletTxn('t1', '运营手动转出')],
     ['setWithdrawEnabled', () => setWithdrawEnabled(true)],
+    ['setWithdrawHalt', () => setWithdrawHalt(true)],
   ];
 
   it.each(cases)('%s 携带 skipErrorHandler', async (_name, call) => {

@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   type TreasuryDashboardDto,
   getTreasuryDashboard,
-} from '@/abp/chainAdmin';
+} from '@/abp/collectionAdmin';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const { Text } = Typography;

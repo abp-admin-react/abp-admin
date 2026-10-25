@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Services;
 using AbpAdmin.Collection.Settings;
 using AbpAdmin.Collection.Withdrawals;
@@ -89,15 +90,44 @@ public class WithdrawSwitchSettingsTests : CollectionTestBase
         var (network, _) = await SeedNetworkOnlyAsync();
         try
         {
+            // 先播种 true：断言「未提供的参数不动」才区分得了 null 跳过 vs 覆盖成默认 false
+            await admin.SetChainSwitchesAsync(sweepEnabled: true);
             await admin.SetChainSwitchesAsync(scanEnabled: true, hotWalletWatchEnabled: true);
             var status = await networkAdmin.GetStatusAsync(network.Id);
             status.ScanEnabled.ShouldBeTrue();
-            status.SweepEnabled.ShouldBeFalse(); // 未提供的参数不动
+            status.SweepEnabled.ShouldBeTrue(); // 未提供的参数不动（原 true 不被 null 翻回）
             status.HotWalletWatchEnabled.ShouldBeTrue();
         }
         finally
         {
-            await admin.SetChainSwitchesAsync(scanEnabled: false, hotWalletWatchEnabled: false);
+            await admin.SetChainSwitchesAsync(
+                scanEnabled: false, sweepEnabled: false, hotWalletWatchEnabled: false);
+        }
+    }
+
+    [Fact]
+    public async Task Halt_Endpoint_Flips_Hotly_And_Gates_Submission()
+    {
+        // Halt 与 Enabled 同族治理（域权限端点而非通用设置页）——锁：写后热生效 + 提交被拒
+        var admin = GetRequiredService<CollectionWithdrawAdminAppService>();
+        var manager = GetRequiredService<WithdrawManager>();
+        var settings = GetRequiredService<ISettingManager>();
+        try
+        {
+            await admin.SetWithdrawHaltAsync(true);
+            (await GetRequiredService<ISettingProvider>().IsTrueAsync(CollectionSettings.Withdraw.Halt))
+                .ShouldBeTrue();
+            await Should.ThrowAsync<Volo.Abp.BusinessException>(async () =>
+            {
+                using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
+                await manager.SubmitAsync(Guid.NewGuid(), CollectionCurrency.Usdt,
+                    "0x4444444444444444444444444444444444444444", 100m);
+                await uow.CompleteAsync();
+            });
+        }
+        finally
+        {
+            await settings.SetGlobalAsync(CollectionSettings.Withdraw.Halt, "false");
         }
     }
 

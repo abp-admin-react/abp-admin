@@ -256,6 +256,9 @@ public class CollectionNetworkAdminAppService : ApplicationService
 
     /// <summary>
     /// 链上总开关（高危运维动作：扫链/归集误开会烧 Gas）：写入设置库（worker 每轮热读，
+    /// 下一轮生效免重启）。三个链上 worker 开关统一由 Network.Admin 把守（含只读的
+    /// 热钱包监控——按 worker 家族而非数据消费者归属治理，监控页的 WithdrawAdmin
+    /// 操作员只读消费产物，开关权在链网运维）。
     /// 下一轮生效免重启）。只写显式提供的参数。此前经 SettingUi 通用设置页可改——评审定为
     /// 权限错位（资金面开关须由 Network.Admin 把守，而非通用 AbpAdmin.SettingUi.Update）。
     /// </summary>
@@ -370,6 +373,11 @@ public class CollectionNetworkAdminAppService : ApplicationService
             throw new BusinessException(CollectionErrorCodes.SweepTaskNotRetryable)
                 .WithData("Reason", $"仅 Failed 任务可重试（当前 {task.Status}）");
         }
+
+        // 重试清除 FailReason 前先在操作日志留痕原始失败原因（资金动作的取证链：
+        // 实体无历史表，重试成功后该原因将不可再得——OCR 二轮）
+        Logger.LogWarning("归集任务 {SweepTaskId} 手动重试：历史失败原因「{FailReason}」将被清除",
+            id, task.FailReason);
 
         var now = Clock.Now;
         var rows = await dbContext.SweepTasks

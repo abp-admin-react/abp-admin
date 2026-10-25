@@ -374,6 +374,9 @@ public class WithdrawManager : DomainService
             : fallback;
     }
 
+    // 与 ChainSettingReader.GetIntAsync 的唯一语义分叉：此处 v >= 0（0 合法——
+    // MaxDailyCount=0 = 当日全拒的 fail-closed 哨兵），Reader 是 v > 0（0 回退默认）。
+    // 合并前必须保留 allowZero 语义，勿"顺手统一"把限额从 fail-closed 变 fail-open。
     private async Task<int> GetSettingIntAsync(string key, int fallback)
     {
         var raw = await _settings.GetOrNullAsync(key);

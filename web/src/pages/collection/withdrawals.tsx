@@ -29,6 +29,7 @@ import {
   rejectWithdraw,
   retryWithdraw,
   setWithdrawEnabled,
+  setWithdrawHalt,
   setWithdrawVault,
   WD_STATUS_LABELS,
   type WithdrawHotWalletStatusDto,
@@ -382,13 +383,34 @@ export default function WithdrawalsPage() {
               </Space>
               <Space size={6}>
                 总闸（紧急停机）：
-                <Switch
-                  checked={status.halt}
-                  checkedChildren="已拉闸"
-                  unCheckedChildren="正常"
-                  disabled
-                  size="small"
-                />
+                <Popconfirm
+                  title={`确认${status.halt ? '恢复' : '拉下'}提现总闸？`}
+                  description={
+                    status.halt
+                      ? '恢复后新提交与审批立即放行（下一轮热生效）。'
+                      : '拉闸后拒绝新提交、阻断全部审批（广播中订单仍走卡单恢复处置）。'
+                  }
+                  onConfirm={async () => {
+                    try {
+                      await setWithdrawHalt(!status.halt);
+                      message.success(
+                        `总闸已${status.halt ? '恢复' : '拉下'}`,
+                      );
+                      await reloadCards();
+                    } catch (e) {
+                      message.error(financeErrorText(e));
+                    }
+                  }}
+                  okText="确认"
+                  cancelText="取消"
+                >
+                  <Switch
+                    checked={status.halt}
+                    checkedChildren="已拉闸"
+                    unCheckedChildren="正常"
+                    size="small"
+                  />
+                </Popconfirm>
               </Space>
               <Text>单笔最小 {status.minAmount}</Text>
               <Text>费率 {status.feeRate}</Text>

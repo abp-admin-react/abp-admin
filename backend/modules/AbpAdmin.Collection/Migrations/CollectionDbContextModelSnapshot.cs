@@ -812,6 +812,8 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CreationTime");
+
                     b.HasIndex("TxHash")
                         .HasFilter("\"TxHash\" IS NOT NULL");
 

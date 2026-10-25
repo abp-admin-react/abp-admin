@@ -1,6 +1,7 @@
 /**
- * 会员资金查询 API 镜像（对应 CollectionBalanceAdminAppService，收款查看权限）。
- * 用户名 → userId 的解析走 identity 的 getUsers（模块不做身份耦合）。
+ * 余额域管理端 API 镜像（对应 CollectionBalanceAdminAppService，收款查看权限）：
+ * 会员资金（member-*）+ 资金看板（dashboard）。用户名 → userId 解析走 identity 的
+ * getUsers（模块不做身份耦合）。余额 DTO/动作色板在此单源，用户侧 collection.ts 复用。
  */
 import { request } from '@umijs/max';
 
@@ -60,3 +61,51 @@ export const BALANCE_ACTION_LABELS: Record<
   WithdrawSettle: { color: 'purple', text: '提现出账' },
   WithdrawRefund: { color: 'default', text: '提现退款' },
 };
+
+/** 状态桶（计数 + 金额合计） */
+export interface StatusBucketDto {
+  status: string;
+  count: number;
+  total: string;
+}
+
+export interface UserBalanceBucketDto {
+  currency: string;
+  balance: string;
+  frozen: string;
+}
+
+export interface VaultCheckLatestDto {
+  symbol: string;
+  vaultBalance: string;
+  userTotal: string;
+  /** VaultBalance - UserTotal；负 = 金库 < 用户余额（缺口） */
+  difference: string;
+  checkedAt: string;
+}
+
+/** 资金看板（纯 DB 聚合；热钱包余额/熔断在热钱包监控页） */
+export interface TreasuryDashboardDto {
+  generatedAt: string;
+  depositByStatus: StatusBucketDto[];
+  withdrawByStatus: StatusBucketDto[];
+  heldDepositCount: number;
+  heldDepositTotal: string;
+  depositTodayCount: number;
+  depositTodayAmount: string;
+  withdrawTodayCount: number;
+  withdrawTodayAmount: string;
+  /** 充值手续费累计（Swept） */
+  depositFeeTotal: string;
+  /** 提现手续费累计（Completed） */
+  withdrawFeeTotal: string;
+  /** 在途提现净额（Pending/Processing/Broadcasting） */
+  withdrawInFlightAmount: string;
+  userBalances: UserBalanceBucketDto[];
+  vaultChecks: VaultCheckLatestDto[];
+}
+
+/** 资金看板聚合（收款查看权限位；今日 = UTC 日界，与当日笔数限额同口径） */
+export async function getTreasuryDashboard(): Promise<TreasuryDashboardDto> {
+  return request(`${BASE}/dashboard`);
+}

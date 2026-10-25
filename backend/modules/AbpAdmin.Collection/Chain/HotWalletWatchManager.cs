@@ -116,11 +116,15 @@ public class HotWalletWatchManager : DomainService
         }
 
         var fromBlock = state.LastScannedBlock.HasValue ? state.LastScannedBlock.Value + 1 : safeHead;
-        string? roundError = null; // 跳块留痕：轮末与游标一起落库（不被清错覆盖）
+        // 游标不回退：确认数被热调大或 RPC 节点短暂落后会使 safeHead 低于已扫值——
+        // 回写更小值会触发等于回退深度的整段重扫（幂等但白耗 Etherscan 配额）
+        var effectiveHead = Math.Max(safeHead, state.LastScannedBlock ?? safeHead);
+        var skippedBlocks = new List<long>(); // 跳块留痕（聚合进轮末 LastError 与告警）
+        var roundAnomalies = new List<ColHotWalletTxn>(); // 轮级聚合：告警/推送每轮每币一条（防刷屏）
         while (fromBlock <= safeHead && !ct.IsCancellationRequested)
         {
             // ② 分页拉全（RPC 在事务外；读不全缩半区间重试——对齐 DepositScanManager 的缩半纪律，
-            //    单块仍读不全按告警跳过推进：监控卡死比漏一段更危险，跳过必带 [Alert:] 留痕）
+            //    单块仍读不全按计数跳过推进：监控卡死比漏一段更危险，跳块轮末统一告警留痕）
             var windowEnd = safeHead;
             List<TokenTransferLog> logs;
             while (true)
@@ -138,26 +142,47 @@ public class HotWalletWatchManager : DomainService
                     continue;
                 }
 
-                // 单块也读不全（>MaxPages×PageSize 笔）：告警后跳过该块，绝不静默卡死游标
-                await _alerts.RaiseAsync(CollectionConsts.AlertPrefixWithdrawHotWallet,
-                    $"热钱包监控：{token.Symbol} 区间 [{fromBlock},{windowEnd}] 单块流水超出分页上限，已跳过该块",
-                    "该块内的热钱包转账本轮未入库（Etherscan 分页读不全）。请人工核查该块的出站流水后决定是否补救。");
-                roundError = $"块 {fromBlock} 流水超分页上限，已跳过";
+                // 单块也读不全（>MaxPages×PageSize 笔）：跳过该块（轮末统一告警），绝不静默卡死游标
+                skippedBlocks.Add(fromBlock);
                 fromBlock += 1;
                 logs = new List<TokenTransferLog>();
                 break;
             }
 
-            // ③ 分类 + 落库（事务；游标在轮末统一推进——行先落、游标后走，重扫由唯一键吸收）
+            // ③ 分类 + 落库（事务），游标随每窗持久化推进——预算取消/进程重启不会把已扫窗
+            //    的分页成本白做一遍（大积压场景的活锁防线）；重扫由唯一键吸收
             var newAnomalies = await PersistWindowAsync(network, token, logs, walletAddress, ct);
-            await AlertAndPushAsync(token, newAnomalies);
+            roundAnomalies.AddRange(newAnomalies);
             fromBlock = windowEnd + 1;
+            if (fromBlock > effectiveHead)
+            {
+                break; // 全窗完成，轮末统一写终值（含跳块留痕/清错）
+            }
+
+            await SaveStateAsync(network, token, windowEnd, RenderSkipError(skippedBlocks));
         }
 
         if (!ct.IsCancellationRequested)
         {
-            await SaveStateAsync(network, token, safeHead, roundError); // 轮末心跳 + 跳块留痕
+            await SaveStateAsync(network, token, effectiveHead, RenderSkipError(skippedBlocks));
         }
+
+        // ④ 轮级统一出口：未匹配出账聚合一条告警（私钥泄漏检测信号不能因分窗而刷屏/降级）+
+        //    跳块聚合一条告警；SignalR 逐笔推送（失败不挡轮次）
+        await AlertAndPushAsync(token, roundAnomalies, skippedBlocks);
+    }
+
+    /// <summary>跳块留痕文案：一轮多块全量列出（运维据此评估监控缺口范围）。</summary>
+    private static string? RenderSkipError(List<long> skippedBlocks)
+    {
+        if (skippedBlocks.Count == 0)
+        {
+            return null;
+        }
+
+        return skippedBlocks.Count == 1
+            ? $"块 {skippedBlocks[0]} 流水超分页上限，已跳过"
+            : $"跳过 {skippedBlocks.Count} 块（{skippedBlocks.Min()}..{skippedBlocks.Max()}）流水超分页上限";
     }
 
     /// <summary>
@@ -256,9 +281,23 @@ public class HotWalletWatchManager : DomainService
         return newAnomalies;
     }
 
-    /// <summary>告警（每币每轮聚合一条防刷屏）+ SignalR 推送（失败不挡轮次）。</summary>
-    private async Task AlertAndPushAsync(ColToken token, List<ColHotWalletTxn> newAnomalies)
+    /// <summary>
+    /// 轮级统一告警/推送出口：未匹配出账一条聚合告警 + SignalR 逐笔推送；跳块一条聚合告警。
+    /// （每轮每币各至多一条 [Alert:WithdrawHotWallet]——分窗不应改变告警纪律）
+    /// </summary>
+    private async Task AlertAndPushAsync(
+        ColToken token, List<ColHotWalletTxn> newAnomalies, List<long> skippedBlocks)
     {
+        if (skippedBlocks.Count > 0)
+        {
+            var range = skippedBlocks.Count == 1
+                ? $"块 {skippedBlocks[0]}"
+                : $"{skippedBlocks.Count} 块（{skippedBlocks.Min()}..{skippedBlocks.Max()}）";
+            await _alerts.RaiseAsync(CollectionConsts.AlertPrefixWithdrawHotWallet,
+                $"热钱包监控：{token.Symbol} 已跳过 {range}（单块流水超出分页上限）",
+                "被跳块内的热钱包转账本轮未入库（Etherscan 分页读不全）。请人工核查这些块的出站流水后决定是否补救。");
+        }
+
         if (newAnomalies.Count == 0)
         {
             return;
@@ -328,15 +367,7 @@ public class HotWalletWatchManager : DomainService
     {
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        await WriteStateAsync(dbContext, network, token, lastScannedBlock, lastError, _clock.Now);
-        await dbContext.SaveChangesAsync();
-        await uow.CompleteAsync();
-    }
-
-    private async Task WriteStateAsync(
-        CollectionDbContext dbContext, ColNetwork network, ColToken token,
-        long? lastScannedBlock, string? lastError, DateTime now)
-    {
+        var now = _clock.Now;
         var state = await dbContext.HotWalletWatchStates
             .FirstOrDefaultAsync(s => s.TokenId == token.Id);
         if (state == null)
@@ -352,12 +383,16 @@ public class HotWalletWatchManager : DomainService
                 CreationTime = now,
                 UpdatedAt = now,
             });
-            return;
+        }
+        else
+        {
+            state.LastScannedBlock = lastScannedBlock;
+            state.LastScanAt = now;
+            state.LastError = lastError;
+            state.UpdatedAt = now;
         }
 
-        state.LastScannedBlock = lastScannedBlock;
-        state.LastScanAt = now;
-        state.LastError = lastError;
-        state.UpdatedAt = now;
+        await dbContext.SaveChangesAsync();
+        await uow.CompleteAsync();
     }
 }

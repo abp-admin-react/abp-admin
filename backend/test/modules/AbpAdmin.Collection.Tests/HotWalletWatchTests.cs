@@ -241,6 +241,67 @@ public class HotWalletWatchTests : CollectionTestBase
             .Code.ShouldContain("HotWalletTxnNotFound");
     }
 
+    [Fact]
+    public async Task Page_Overlap_Duplicates_Are_Deduped_In_Batch()
+    {
+        // Etherscan 页界重叠：同一笔出现在两页 → 批内去重必须吸收（否则唯一键炸整个事务）
+        var (network, usdt) = await SeedChainWithWalletAsync();
+        var gateway = new FakeChainGateway(head: 500) { PageSizeOverlap = true };
+        var manager = Manager();
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
+
+        gateway.Head = 520;
+        // 两条不同哈希 + fake 重叠语义：页2 首条重复页1 末条
+        gateway.Logs[usdt.ContractAddress] = new()
+        {
+            Log("0xaaa", Wallet, User1, "1000000000000000000", 490),
+            Log("0xbbb", Wallet, User1, "1000000000000000000", 491),
+        };
+
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
+
+        var txns = await ReadTxnsAsync();
+        txns.Count.ShouldBe(2); // 重叠页不产生重复行
+    }
+
+    [Fact]
+    public async Task Skip_Error_Is_Cleared_By_Next_Clean_Round()
+    {
+        // 跳块留痕 → 干净轮清错（状态卡不能永久报错）
+        var (network, usdt) = await SeedChainWithWalletAsync();
+        var gateway = new FakeChainGateway(head: 500);
+        var manager = Manager();
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
+
+        gateway.Head = 520;
+        gateway.TruncateThreshold = 2;
+        gateway.Logs[usdt.ContractAddress] = new()
+        {
+            Log("0xaaa", Wallet, User1, "1000000000000000000", 490),
+            Log("0xbbb", Wallet, User1, "1000000000000000000", 490),
+        };
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
+        (await ReadStatesAsync())[0].LastError.ShouldNotBeNull();
+
+        gateway.TruncateThreshold = int.MaxValue;
+        gateway.Logs[usdt.ContractAddress] = new(); // 干净轮：无新流水
+        gateway.Head = 540;
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
+        (await ReadStatesAsync())[0].LastError.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Ack_Note_Length_Is_Enforced_Server_Side()
+    {
+        var (network, usdt) = await SeedChainWithWalletAsync();
+        var anomalyId = await InsertTxnAsync(network.Id, usdt.Id, "0xerr", HotWalletTxnStatus.Anomaly);
+
+        var admin = GetRequiredService<CollectionWithdrawAdminAppService>();
+        var ex = await Should.ThrowAsync<BusinessException>(() =>
+            admin.AckHotWalletTxnAsync(anomalyId, new string('长', 600)));
+        ex.Code.ShouldContain("HotWalletTxnNotAckable");
+    }
+
     // ── 造数 ─────────────────────────────────────────────────────────────────────────────
 
     private HotWalletWatchManager Manager() => GetRequiredService<HotWalletWatchManager>();

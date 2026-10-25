@@ -981,12 +981,33 @@ public class FakeChainGateway : IBscChainGateway
             throw new ChainRpcException("simulated channel failure");
         }
 
-        var logs = Logs.TryGetValue(contractAddress, out var list)
+        var window = Logs.TryGetValue(contractAddress, out var list)
             ? list.Where(l => l.BlockNumber >= fromBlock && l.BlockNumber <= toBlock).ToList()
             : new List<TokenTransferLog>();
-        var complete = TruncateThreshold == int.MaxValue || logs.Count < TruncateThreshold;
-        return Task.FromResult(new AddressTransferPage(logs, !complete));
+        // 真分页语义（Etherscan tokentx 同款）：offset 切片 + Incomplete=还有下一页；
+        // 页界重叠一条（下一页首条=上一页末条）——真实 tokentx 分页边界会出现同一笔跨页，
+        // 监控的批内 (TxHash,LogIndex) 去重依赖这个形态才测得到
+        if (PageSizeOverlap && page > 1 && window.Count > 0)
+        {
+            var start = (page - 1) * pageSize - 1;
+            if (start >= window.Count)
+            {
+                return Task.FromResult(new AddressTransferPage(new List<TokenTransferLog>(), false));
+            }
+            var slice = window.Skip(start).Take(pageSize + 1).ToList();
+            return Task.FromResult(new AddressTransferPage(slice, start + slice.Count < window.Count));
+        }
+        var hasMore = TruncateThreshold != int.MaxValue && window.Count >= TruncateThreshold;
+        if (!hasMore)
+        {
+            var slice = window.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+            return Task.FromResult(new AddressTransferPage(slice, false));
+        }
+        return Task.FromResult(new AddressTransferPage(window, true));
     }
+
+    /// <summary>地址通道按页重叠一条返回（监控批内去重用例的开关）。</summary>
+    public bool PageSizeOverlap { get; set; }
 
     /// <summary>按 (合约, 地址) 的代币原始余额（提现护栏用；缺省 0）。</summary>
     public Dictionary<string, string> TokenBalances { get; } = new();
