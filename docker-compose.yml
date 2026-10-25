@@ -70,6 +70,10 @@ services:
       dockerfile: framework/AbpAdmin.DbMigrator/Dockerfile
     environment:
       ConnectionStrings__Default: "Host=db;Port=5432;Database=${POSTGRES_DB:-abpadmin};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
+      # 连同一 Redis：种子写设置（Bootstrap 开关等）的缓存失效才能作用到 Host 读的共享缓存——
+      # 不配则失效只落在迁移进程内存，Host 一直读旧值（E2E 实测踩过：开关种了 true Host 读 false）
+      Redis__IsEnabled: "true"
+      Redis__Configuration: "redis:6379"
       # ABP 设置项加密口令（种子落库的 isEncrypted 设置项用它加密，Host 侧必须同值才能解）
       StringEncryption__DefaultPassPhrase: ${STRING_ENCRYPTION_PASSPHRASE:-dev-only-change-me}
       # OIDC 客户端回调地址种到数据库：SPA/Swagger 的回调都指前端源（浏览器可达的唯一入口）。

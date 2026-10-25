@@ -93,9 +93,9 @@ export default function MemberFundsPage() {
           maxResultCount: pageSize,
         }),
       ]);
-      setBalances(balanceResult.items);
-      setTxns(txnResult.items);
-      setTotal(txnResult.totalCount);
+      setBalances(balanceResult.items ?? []); // 形态漂移防御：缺 items 不白屏（空列表可自查控制台）
+      setTxns(txnResult.items ?? []);
+      setTotal(txnResult.totalCount ?? 0);
     } catch {
       /* interceptor */
     } finally {

@@ -4,6 +4,13 @@
 # 注：扫链/归集/提现开关已迁设置页（Collection.Chain.* / Collection.Withdraw.*），
 # 宿主起来后也可在设置页直接热改；Bootstrap 键只在首次（设置从未显式写入时）生效。
 services:
+  # 引导键必须同时给 migrator（种子在迁移进程跑）与 host（兜底）
+  migrator:
+    environment:
+      Collection__Bootstrap__ScanEnabled: "true"
+      Collection__Bootstrap__SweepEnabled: "true"
+      Collection__Bootstrap__WithdrawEnabled: "true"
+      Collection__MasterKey: "e2e-master-key-2026"
   host:
     environment:
       Collection__Bootstrap__ScanEnabled: "true"

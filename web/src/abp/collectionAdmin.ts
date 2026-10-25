@@ -28,18 +28,23 @@ export type BalanceTxnDto = {
   txHash?: string;
 };
 
+// 单 Guid 参数端点 ABP 生成路径段（?userId= 形态不匹配路由→SPA 兜底 HTML，E2E 实测同
+// approveLargeDeposit 教训；api-definition 确认：GET api/app/collection-balance-admin/member-balances/{userId}）
 export async function getMemberBalances(
   userId: string,
 ): Promise<{ items: MemberBalanceDto[] }> {
-  return request(`${BASE}/member-balances`, { params: { userId } });
+  return request(`${BASE}/member-balances/${userId}`);
 }
 
+/** 会员流水：userId 路径段 + 分页 query */
 export async function getMemberTxns(params: {
   userId: string;
   skipCount?: number;
   maxResultCount?: number;
 }): Promise<{ totalCount: number; items: BalanceTxnDto[] }> {
-  return request(`${BASE}/member-txns`, { params });
+  return request(`${BASE}/member-txns/${params.userId}`, {
+    params: { skipCount: params.skipCount, maxResultCount: params.maxResultCount },
+  });
 }
 
 /** 余额动作（与后端 BalanceActions 对齐）：色板与文案是页面唯一口径 */
