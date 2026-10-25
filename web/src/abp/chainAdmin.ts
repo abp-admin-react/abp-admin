@@ -31,6 +31,10 @@ export interface NetworkStatusDto {
   gasLowAlertedAt?: string;
   scanEnabled: boolean;
   sweepEnabled: boolean;
+  /** 大额门持有中进款单数（Confirmed 且未挂归集任务，等放行敞口） */
+  heldDepositCount: number;
+  /** 持有中进款毛额合计（十进制字符串） */
+  heldDepositTotal: string;
   tokens: TokenStatusDto[];
 }
 

@@ -753,6 +753,11 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         order.Status.ShouldBe(DepositOrderStatus.Confirmed);
         order.SweepTaskId.ShouldBeNull(); // 大额门：确认但不挂队
 
+        // 状态卡持有敞口：Confirmed 且未挂任务的单计入 held 计数（放行前 1 笔 25）
+        var adminSvc = GetRequiredService<Services.CollectionNetworkAdminAppService>();
+        var statusBefore = await adminSvc.GetStatusAsync(network.Id);
+        statusBefore.HeldDepositCount.ShouldBeGreaterThanOrEqualTo(1);
+
         // 管理端放行（只入队）→ 挂上任务；重复放行被状态门拒绝
         var admin = GetRequiredService<Services.CollectionNetworkAdminAppService>();
         await admin.ApproveLargeDepositAsync(orderId);

@@ -160,7 +160,12 @@ export default function DepositsPage() {
       title: '状态',
       dataIndex: 'status',
       width: 120,
-      render: (v: string) => {
+      render: (v: string, row?: DepositOrderListDto) => {
+        // Confirmed 且未挂任务 = 大额门持有（等放行）——区别于普通"已确认/待归集"，
+        // 运营一眼看出哪些单在等放行按钮（与操作列的放行按钮同判据）
+        if (v === 'Confirmed' && row && !row.sweepTaskId) {
+          return <Tag color="purple">大额待放行</Tag>;
+        }
         const cfg = DEPOSIT_STATUS_LABELS[v] ?? { color: 'default', text: v };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },

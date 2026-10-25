@@ -38,6 +38,13 @@ public class NetworkStatusDto
     public DateTime? GasLowAlertedAt { get; set; }
     public bool ScanEnabled { get; set; }
     public bool SweepEnabled { get; set; }
+
+    /// <summary>大额门持有中进款单数（Confirmed 且未挂归集任务；等管理端放行的敞口规模）。</summary>
+    public int HeldDepositCount { get; set; }
+
+    /// <summary>持有中进款毛额合计（十进制字符串）。</summary>
+    public string HeldDepositTotal { get; set; } = default!;
+
     public List<TokenStatusDto> Tokens { get; set; } = new();
 }
 
@@ -167,23 +174,38 @@ public class CollectionNetworkAdminAppService : ApplicationService
     // ── 查询 ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>链网运行状态（含代币通道进度/告警冷却/开关状态）。</summary>
-    public virtual async Task<NetworkStatusDto> GetStatusAsync()
+    public virtual async Task<NetworkStatusDto> GetStatusAsync(Guid? networkId = null)
     {
         AssertHost();
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var network = await dbContext.Networks.OrderBy(n => n.CreationTime).FirstOrDefaultAsync()
-                      ?? throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
+        // networkId 缺省取最早网络（单网络现状）；显式传入用于多网络/测试隔离
+        var network = networkId.HasValue
+            ? await dbContext.Networks.FirstOrDefaultAsync(n => n.Id == networkId.Value)
+            : await dbContext.Networks.OrderBy(n => n.CreationTime).FirstOrDefaultAsync();
+        if (network == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
+        }
 
         var tokens = await dbContext.Tokens
             .Where(t => t.NetworkId == network.Id)
             .OrderBy(t => t.Symbol)
             .ToListAsync();
         var head = network.LatestChainHead ?? 0;
+
+        // 大额门持有敞口（Confirmed 且未挂归集任务）：运维状态卡一眼看到等放行的规模
+        var held = await dbContext.DepositOrders.AsNoTracking()
+            .Where(o => o.NetworkId == network.Id && o.Status == DepositOrderStatus.Confirmed && o.SweepTaskId == null)
+            .GroupBy(_ => 1)
+            .Select(g => new { Count = g.Count(), Total = g.Sum(o => o.Amount ?? 0m) })
+            .FirstOrDefaultAsync();
         await uow.CompleteAsync();
 
         return new NetworkStatusDto
         {
+            HeldDepositCount = held?.Count ?? 0,
+            HeldDepositTotal = CollectionAmounts.Format(held?.Total ?? 0m),
             Network = network.Name,
             ChainId = network.ChainId,
             HasMnemonic = !string.IsNullOrEmpty(network.MnemonicCipher),
