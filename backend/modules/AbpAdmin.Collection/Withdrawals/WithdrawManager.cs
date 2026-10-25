@@ -1,3 +1,4 @@
+using AbpAdmin.Collection.Ledger;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -21,7 +22,7 @@ namespace AbpAdmin.Collection.Withdrawals;
 /// <summary>
 /// 提现编排（提现 M2）：提交/撤单/审核/拒绝/失败退款。纪律——
 /// 每个动作一个事务性 UoW（加入环境事务或自开），余额原语（CollectionBalanceManager）、
-/// 状态迁移（CAS 条件 UPDATE）与账本过账（WithdrawLedgerPoster）三者同事务提交或回滚。
+/// 状态迁移（CAS 条件 UPDATE）与账本过账（CollectionLedgerPoster）三者同事务提交或回滚。
 /// 当日额度在冻结锁内计数（并发提交串行化在余额行锁上，exchange 同款次序）。
 /// 广播/卡单恢复/重试在 M3 的 WithdrawBroadcastWorker。
 /// </summary>
@@ -31,7 +32,7 @@ public class WithdrawManager : DomainService
     public const string BlackHoleAddress = "0x0000000000000000000000000000000000000000";
 
     private readonly CollectionBalanceManager _balances;
-    private readonly WithdrawLedgerPoster _ledger;
+    private readonly CollectionLedgerPoster _ledger;
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly ISettingProvider _settings;
     private readonly IConfiguration _configuration;
@@ -40,7 +41,7 @@ public class WithdrawManager : DomainService
 
     public WithdrawManager(
         CollectionBalanceManager balances,
-        WithdrawLedgerPoster ledger,
+        CollectionLedgerPoster ledger,
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         ISettingProvider settings,
         IConfiguration configuration,

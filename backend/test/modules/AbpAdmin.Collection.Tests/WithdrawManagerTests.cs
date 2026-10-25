@@ -6,6 +6,7 @@ using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Withdrawals;
+using AbpAdmin.Collection.Ledger;
 using AbpAdmin.Ledger.Integration.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,7 +33,7 @@ public class WithdrawManagerTests : CollectionTestBase
 
     private WithdrawManager Manager => GetRequiredService<WithdrawManager>();
     private CollectionBalanceManager Balances => GetRequiredService<CollectionBalanceManager>();
-    private WithdrawLedgerPoster Poster => GetRequiredService<WithdrawLedgerPoster>();
+    private CollectionLedgerPoster Poster => GetRequiredService<CollectionLedgerPoster>();
     private ILedgerIntegrationService Ledger => GetRequiredService<ILedgerIntegrationService>();
 
     private async Task FundAsync(Guid userId, decimal amount, CollectionCurrency currency = CollectionCurrency.Usdt)

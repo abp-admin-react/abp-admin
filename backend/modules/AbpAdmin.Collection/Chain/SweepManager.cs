@@ -1,3 +1,4 @@
+using AbpAdmin.Collection.Ledger;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -38,7 +39,7 @@ public class SweepManager : DomainService
 {
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly CollectionBalanceManager _balanceManager;
-    private readonly AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster _ledgerPoster;
+    private readonly CollectionLedgerPoster _ledgerPoster;
     private readonly ChainAlertService _alerts;
     private readonly IStringEncryptionService _encryptor;
     private readonly IClock _clock;
@@ -47,7 +48,7 @@ public class SweepManager : DomainService
     public SweepManager(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         CollectionBalanceManager balanceManager,
-        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster ledgerPoster,
+        CollectionLedgerPoster ledgerPoster,
         ChainAlertService alerts,
         IStringEncryptionService encryptor,
         IClock clock,
@@ -439,7 +440,7 @@ public class SweepManager : DomainService
                 // 账本按线上口径过毛额（借 1001 / 贷 2201）再扣手续费（借 2201 / 贷 6003），
                 // 2201 净额 = 毛额 − fee = 余额行。若两侧都用净额+fee 再扣会把用户扣两遍（实测抓出）。
                 var gross = order.Amount ?? 0m;
-                var credit = AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(
+                var credit = CollectionLedgerPoster.ResolveCreditAmount(
                     order.Amount, order.ActualAmount, order.Fee);
                 var currency = MapCurrency(token.Symbol);
                 await _balanceManager.CreditAsync(

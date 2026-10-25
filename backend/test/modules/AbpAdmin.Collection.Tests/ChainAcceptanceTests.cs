@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Balances;
 using AbpAdmin.Collection.Chain;
+using AbpAdmin.Collection.Ledger;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
@@ -792,15 +793,15 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
     public void Deposit_Fee_Pure_Functions()
     {
         // 快照：向零 8 位、费率 0 = 不收费、null 毛额（超精度路径）安全
-        DepositScanManager.SnapshotDepositFee(0.001m, 20m).ShouldBe((0.001m, 0.02m, 19.98m));
-        DepositScanManager.SnapshotDepositFee(0m, 20m).ShouldBe((0m, 0m, 20m));
-        DepositScanManager.SnapshotDepositFee(0.003m, 10.123456789m).ShouldBe((0.003m, 0.03037037m, 10.093086419m));
-        DepositScanManager.SnapshotDepositFee(0.001m, null).ShouldBe((0.001m, 0m, 0m));
+        CollectionLedgerPoster.SnapshotDepositFee(0.001m, 20m).ShouldBe((0.001m, 0.02m, 19.98m));
+        CollectionLedgerPoster.SnapshotDepositFee(0m, 20m).ShouldBe((0m, 0m, 20m));
+        CollectionLedgerPoster.SnapshotDepositFee(0.003m, 10.123456789m).ShouldBe((0.003m, 0.03037037m, 10.093086419m));
+        CollectionLedgerPoster.SnapshotDepositFee(0.001m, null).ShouldBe((0.001m, 0m, 0m));
 
         // 净额解析：快照优先；历史单（无快照无手续费）回退毛额；历史单有 fee 无快照 → 0（不入账，人工）
-        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, 19.98m, 0.02m).ShouldBe(19.98m);
-        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, null, null).ShouldBe(20m);
-        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, null, 0.02m).ShouldBe(19.98m); // 重建净额而非 0（0 会卡死归集确认 UoW）
+        AbpAdmin.Collection.Ledger.CollectionLedgerPoster.ResolveCreditAmount(20m, 19.98m, 0.02m).ShouldBe(19.98m);
+        AbpAdmin.Collection.Ledger.CollectionLedgerPoster.ResolveCreditAmount(20m, null, null).ShouldBe(20m);
+        AbpAdmin.Collection.Ledger.CollectionLedgerPoster.ResolveCreditAmount(20m, null, 0.02m).ShouldBe(19.98m); // 重建净额而非 0（0 会卡死归集确认 UoW）
     }
 
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────

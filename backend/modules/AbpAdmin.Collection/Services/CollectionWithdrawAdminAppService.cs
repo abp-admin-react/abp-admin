@@ -8,6 +8,7 @@ using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Permissions;
 using AbpAdmin.Collection.Settings;
 using AbpAdmin.Collection.Withdrawals;
+using AbpAdmin.Collection.Ledger;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp;
@@ -44,7 +45,7 @@ public class SetWithdrawVaultInput
 public class CollectionWithdrawAdminAppService : ApplicationService
 {
     private readonly WithdrawManager _withdraws;
-    private readonly WithdrawLedgerPoster _ledger;
+    private readonly CollectionLedgerPoster _ledger;
     private readonly WithdrawGuard _guard;
     private readonly WithdrawBroadcastManager _broadcast;
     private readonly AbpAdmin.Collection.Chain.ChainGatewayFactory _gatewayFactory;
@@ -53,7 +54,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
 
     public CollectionWithdrawAdminAppService(
         WithdrawManager withdraws,
-        WithdrawLedgerPoster ledger,
+        CollectionLedgerPoster ledger,
         WithdrawGuard guard,
         WithdrawBroadcastManager broadcast,
         AbpAdmin.Collection.Chain.ChainGatewayFactory gatewayFactory,
@@ -141,7 +142,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var gateway = await _gatewayFactory.CreateAsync(dbContext, wallet.Network, wallet.Network.NodeLogResultCap ?? 10000);
-        var symbol = WithdrawLedgerPoster.CurrencyCode(order.Currency);
+        var symbol = CollectionLedgerPoster.CurrencyCode(order.Currency);
         var token = await dbContext.Tokens.AsNoTracking()
             .FirstAsync(t => t.NetworkId == wallet.Network.Id && t.Symbol == symbol);
         await _guard.EnsureCanPayAsync(wallet, gateway, token, order.ActualAmount);

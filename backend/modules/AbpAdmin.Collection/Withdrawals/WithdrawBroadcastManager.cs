@@ -1,3 +1,4 @@
+using AbpAdmin.Collection.Ledger;
 using System;
 using System.Linq;
 using System.Threading;
@@ -37,7 +38,7 @@ public class WithdrawBroadcastManager : DomainService
     private readonly ISettingProvider _settings;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
     private readonly WithdrawManager _withdraws;
-    private readonly WithdrawLedgerPoster _ledger;
+    private readonly CollectionLedgerPoster _ledger;
     private readonly WithdrawGuard _guard;
     private readonly IClock _clock;
     private readonly Volo.Abp.Security.Encryption.IStringEncryptionService _encryptor;
@@ -49,7 +50,7 @@ public class WithdrawBroadcastManager : DomainService
         ISettingProvider settings,
         IUnitOfWorkManager unitOfWorkManager,
         WithdrawManager withdraws,
-        WithdrawLedgerPoster ledger,
+        CollectionLedgerPoster ledger,
         WithdrawGuard guard,
         IClock clock,
         Volo.Abp.Security.Encryption.IStringEncryptionService encryptor,
@@ -765,7 +766,7 @@ public class WithdrawBroadcastManager : DomainService
 
     private async Task<ColToken> FindTokenAsync(CollectionDbContext dbContext, ColNetwork network, CollectionCurrency currency, CancellationToken ct)
     {
-        var symbol = WithdrawLedgerPoster.CurrencyCode(currency);
+        var symbol = CollectionLedgerPoster.CurrencyCode(currency);
         return await dbContext.Tokens.AsNoTracking()
                    .FirstOrDefaultAsync(t => t.NetworkId == network.Id && t.Symbol == symbol, ct)
                ?? throw new Volo.Abp.AbpException($"网络 {network.Name} 缺少代币 {symbol}（种子未建或被禁用）");

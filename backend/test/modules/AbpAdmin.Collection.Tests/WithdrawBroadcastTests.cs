@@ -9,6 +9,7 @@ using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Settings;
 using AbpAdmin.Collection.Withdrawals;
+using AbpAdmin.Collection.Ledger;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -40,7 +41,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
 
     private WithdrawManager Manager => GetRequiredService<WithdrawManager>();
     private CollectionBalanceManager Balances => GetRequiredService<CollectionBalanceManager>();
-    private WithdrawLedgerPoster Poster => GetRequiredService<WithdrawLedgerPoster>();
+    private CollectionLedgerPoster Poster => GetRequiredService<CollectionLedgerPoster>();
     private WithdrawGuard Guard => GetRequiredService<WithdrawGuard>();
     private WithdrawBroadcastManager Broadcast => GetRequiredService<WithdrawBroadcastManager>();
 

@@ -221,7 +221,7 @@ public class DepositScanManager : DomainService
         var amount = TryScaleRaw(log.RawAmount, token.Decimals, out var overflow);
 
         // 手续费/净额快照（对齐线上 SnapshotFee：费率取网络行、向零 8 位；费率 0 = 不收费）
-        var (feeRate, fee, actual) = SnapshotDepositFee(network.DepositFeeRate, amount);
+        var (feeRate, fee, actual) = Ledger.CollectionLedgerPoster.SnapshotDepositFee(network.DepositFeeRate, amount);
 
         DepositOrderStatus status;
         decimal? finalAmount;
@@ -369,26 +369,7 @@ public class DepositScanManager : DomainService
         }
     }
 
-    /// <summary>
-    /// 充值手续费快照（对齐线上 SnapshotFee）：fee = truncate8(毛额 × 费率)，actual = 毛额 − fee。
-    /// 费率 0 = 不收费（fee=0、actual=毛额）。overflow 时调用方已走终态，不入此函数语义。
-    /// </summary>
-    internal static (decimal FeeRate, decimal Fee, decimal Actual) SnapshotDepositFee(decimal feeRate, decimal? gross)
-    {
-        if (gross is not { } value)
-        {
-            return (feeRate, 0m, 0m);
-        }
-
-        // 费率钳制 [0,1]：≤0 不收费；≥1 视作全额费（actual≤0 由建单路径转终态）。
-        // 不钳制时 DB 直改的荒谬费率（如 1e19）会让 value×rate×1e8 溢出抛 OverflowException，
-        // 中断该币整轮扫链且游标停摆（OCR function 镜头：fail-open 方向对扫描器是错的）
-        var rate = Math.Clamp(feeRate, 0m, 1m);
-        var fee = rate <= 0 ? 0m : decimal.Truncate(value * rate * 100_000_000m) / 100_000_000m;
-        return (feeRate, fee, value - fee);
-    }
-
-    private async Task CheckSkipRatioAsync(
+private async Task CheckSkipRatioAsync(
         ColToken token, CollectionDbContext dbContext, DateTime now,
         TimeSpan window, decimal threshold, CancellationToken ct)
     {

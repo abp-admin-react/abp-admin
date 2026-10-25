@@ -4,20 +4,20 @@ using AbpAdmin.Collection.Entities;
 using AbpAdmin.Ledger.Integration.Contracts;
 using Volo.Abp.Domain.Services;
 
-namespace AbpAdmin.Collection.Withdrawals;
+namespace AbpAdmin.Collection.Ledger;
 
 /// <summary>
-/// 提现/充值的账本过账薄封装：FinanceBizEvent 构造收口在此（From/To、金额口径、幂等 BizRefId），
+/// Collection→总账的过账薄封装（充值入账/手续费、提现全状态机、存量开账、币种码收口）：FinanceBizEvent 构造收口在此（From/To、金额口径、幂等 BizRefId），
 /// 业务管理器只挑 phase。所有过账加入调用方事务（ILedgerIntegrationService 进程内实现），
 /// 幂等由引擎的 (BizType, BizRefId, Phase) 唯一键承担——BizRefId 统一 = 提现单/进款单 Id 的 "D" 格式。
 /// 金额口径：freeze/unfreeze = Amount+Fee（冻结总额）；approve/payout/refund = ActualAmount（净额）；
 /// fee-take/fee-refund = Fee。
 /// </summary>
-public class WithdrawLedgerPoster : DomainService
+public class CollectionLedgerPoster : DomainService
 {
     private readonly ILedgerIntegrationService _ledger;
 
-    public WithdrawLedgerPoster(ILedgerIntegrationService ledger)
+    public CollectionLedgerPoster(ILedgerIntegrationService ledger)
     {
         _ledger = ledger;
     }
@@ -61,6 +61,26 @@ public class WithdrawLedgerPoster : DomainService
             From: Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()),
             To: Ref(FinanceAccountCodes.WithdrawFeeIncome),
             Summary: $"充值手续费 {fee:0.########} {CurrencyCode(currency)}"));
+    }
+
+    /// <summary>
+    /// 充值手续费快照（建单时调用，与 <see cref="ResolveCreditAmount"/> 是费率策略的两半——
+    /// 同文件共置：费数学分裂两处是双扣费险些发生的原因，OCR design 抓出）。
+    /// fee = truncate8(毛额 × 费率)，actual = 毛额 − fee。费率 0 = 不收费。
+    /// 费率钳制 [0,1]：≤0 不收费；≥1 视作全额费（actual≤0 由建单路径转终态）。
+    /// 不钳制时 DB 直改的荒谬费率（如 1e19）会让 value×rate×1e8 溢出抛 OverflowException，
+    /// 中断该币整轮扫链且游标停摆。null 毛额（超精度路径）安全返回 0。
+    /// </summary>
+    internal static (decimal FeeRate, decimal Fee, decimal Actual) SnapshotDepositFee(decimal feeRate, decimal? gross)
+    {
+        if (gross is not { } value)
+        {
+            return (feeRate, 0m, 0m);
+        }
+
+        var rate = Math.Clamp(feeRate, 0m, 1m);
+        var fee = rate <= 0 ? 0m : decimal.Truncate(value * rate * 100_000_000m) / 100_000_000m;
+        return (feeRate, fee, value - fee);
     }
 
     /// <summary>入账净额解析：优先快照 ActualAmount；历史单（null/0 且无手续费）回退毛额（线上同款兼容）。</summary>
