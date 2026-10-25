@@ -1,0 +1,10 @@
+# E2E 测试 override：开启链上（扫链/归集）与提现开关 + 固定链网主密钥。
+# 用法：docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build
+# 仅本地体验栈使用；MasterKey 轮换会使已存密文（RpcCipher/热钱包私钥）不可解。
+services:
+  host:
+    environment:
+      Collection__Chain__ScanEnabled: "true"
+      Collection__Chain__SweepEnabled: "true"
+      Collection__Withdraw__Enabled: "true"
+      Collection__MasterKey: "e2e-master-key-2026"
