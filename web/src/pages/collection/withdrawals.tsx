@@ -39,11 +39,12 @@ const { Text } = Typography;
 
 /**
  * 提现管理页（/collection/withdrawals，提现 M3/M4）：
- * 状态卡（开关/总闸/限额 + 热钱包余额/熔断）+ 四态 Tab 列表；
- * 审批/拒绝/重试/人工完结/退款拒绝；写动作错误就地提示（skipErrorHandler 语义）。
+ * 状态卡（开关/总闸/限额 + 热钱包余额/熔断）+ 列表（默认待审）；
+ * 审批/拒绝/重试/人工完结/退款拒绝 + 批量通过/批量拒绝（串行逐单、偿付护栏逐单检查）；
+ * 写动作错误就地提示（skipErrorHandler 语义）。
  */
 export default function WithdrawalsPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [data, setData] = useState<WithdrawOrderDto[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -102,6 +103,47 @@ export default function WithdrawalsPage() {
   const [remark, setRemark] = useState('');
   const [txHashInput, setTxHashInput] = useState('');
   const [acting, setActing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<React.Key[]>([]);
+  const [batchRejectOpen, setBatchRejectOpen] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+
+  /** 批量动作：串行逐单（对齐线上做法），逐单成败计数汇总；失败的单保持原状态不影响后续。 */
+  const runBatch = async (
+    action: (id: string) => Promise<void>,
+    okText: string,
+  ) => {
+    setBatchRunning(true);
+    let ok = 0;
+    let fail = 0;
+    let firstErr = '';
+    try {
+      for (const key of selectedIds) {
+        try {
+          await action(String(key));
+          ok += 1;
+        } catch (e) {
+          fail += 1;
+          if (!firstErr) {
+            firstErr = financeErrorText(e);
+          }
+        }
+      }
+    } finally {
+      setBatchRunning(false);
+    }
+    if (fail === 0) {
+      message.success(`${okText}：${ok} 笔全部成功`);
+    } else if (ok === 0) {
+      message.error(`${okText}：${fail} 笔全部失败。${firstErr}`);
+    } else {
+      message.warning(
+        `${okText}：成功 ${ok} 笔，失败 ${fail} 笔（保持待审）。首个错误：${firstErr}`,
+      );
+    }
+    setSelectedIds([]);
+    await reload();
+    await reloadCards();
+  };
 
   const guard = async (fn: () => Promise<void>, ok: string) => {
     setActing(true);
@@ -382,21 +424,52 @@ export default function WithdrawalsPage() {
         <Card
           title="提现单"
           extra={
-            <Select
-              style={{ width: 140 }}
-              value={statusFilter}
-              onChange={(v) => {
-                setStatusFilter(v);
-                setPage(1);
-              }}
-              options={[
-                { value: '', label: '全部状态' },
-                ...Object.entries(WD_STATUS_LABELS).map(([value, cfg]) => ({
-                  value,
-                  label: cfg.text,
-                })),
-              ]}
-            />
+            <Space>
+              <Select
+                style={{ width: 140 }}
+                value={statusFilter}
+                onChange={(v) => {
+                  setStatusFilter(v);
+                  setPage(1);
+                }}
+                options={[
+                  { value: '', label: '全部状态' },
+                  ...Object.entries(WD_STATUS_LABELS).map(([value, cfg]) => ({
+                    value,
+                    label: cfg.text,
+                  })),
+                ]}
+              />
+              <Button
+                size="small"
+                type="primary"
+                disabled={!selectedIds.length}
+                loading={batchRunning}
+                onClick={() =>
+                  modal.confirm({
+                    title: `批量通过 ${selectedIds.length} 笔提现？`,
+                    content:
+                      '逐单执行（偿付护栏逐单检查），中途失败的单保持待审不影响后续。',
+                    okText: '批量通过',
+                    cancelText: '取消',
+                    onOk: () => runBatch(approveWithdraw, '批量通过'),
+                  })
+                }
+              >
+                批量通过（{selectedIds.length}）
+              </Button>
+              <Button
+                size="small"
+                danger
+                disabled={!selectedIds.length}
+                onClick={() => {
+                  setRemark('');
+                  setBatchRejectOpen(true);
+                }}
+              >
+                批量拒绝（{selectedIds.length}）
+              </Button>
+            </Space>
           }
         >
           <Table<WithdrawOrderDto>
@@ -406,6 +479,14 @@ export default function WithdrawalsPage() {
             columns={columns}
             size="small"
             scroll={{ x: 1500 }}
+            rowSelection={{
+              selectedRowKeys: selectedIds,
+              preserveSelectedRowKeys: true,
+              onChange: (keys) => setSelectedIds(keys),
+              getCheckboxProps: (row) => ({
+                disabled: row.status !== 'Pending',
+              }),
+            }}
             pagination={{
               current: page,
               pageSize,
@@ -441,6 +522,39 @@ export default function WithdrawalsPage() {
           showCount
           placeholder="拒绝原因（必填，用户可见）"
         />
+      </Modal>
+
+      <Modal
+        title={`批量拒绝 ${selectedIds.length} 笔提现`}
+        open={batchRejectOpen}
+        confirmLoading={batchRunning}
+        okText="批量拒绝"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        onCancel={() => setBatchRejectOpen(false)}
+        onOk={async () => {
+          if (!remark.trim()) {
+            message.warning('拒绝原因必填');
+            return;
+          }
+          await runBatch(
+            (id) => rejectWithdraw(id, remark.trim()),
+            '批量拒绝',
+          );
+          setBatchRejectOpen(false);
+        }}
+      >
+        <Input.TextArea
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+          maxLength={500}
+          showCount
+          placeholder="拒绝原因（必填，应用于所选全部提现单）"
+        />
+        <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+          同一原因将应用于所选 {selectedIds.length}{' '}
+          笔；逐单执行并解冻，失败的单保持待审。
+        </Text>
       </Modal>
 
       <Modal

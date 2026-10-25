@@ -31,6 +31,10 @@ export interface NetworkStatusDto {
   gasLowAlertedAt?: string;
   scanEnabled: boolean;
   sweepEnabled: boolean;
+  /** 充值手续费率（网络级 [0,1]；建单快照，改只影响新单） */
+  depositFeeRate: number;
+  /** 大额放行门（毛额超过它停在 Confirmed 等放行；0 = 全部等放行；十进制字符串） */
+  autoCreditMaxAmount: string;
   /** 大额门持有中进款单数（Confirmed 且未挂归集任务，等放行敞口） */
   heldDepositCount: number;
   /** 持有中进款毛额合计（十进制字符串） */
@@ -135,6 +139,26 @@ export async function getSweepTasks(params: {
 // ABP 自动路由对单 Guid 参数生成路径段（?id= 形态 302 未处理——E2E 实测）
 export async function approveLargeDeposit(id: string): Promise<void> {
   await request(`${BASE}/${id}/approve-large-deposit`, { method: 'POST' });
+}
+
+/**
+ * 手动重试归集任务（对齐线上 retrySweepTask）：仅 Failed 可重试，跳过冷却立即拉回 Queued；
+ * 仅人工失败（打油超限/链上 revert 等）同样允许——管理员显式决策。
+ * 单 Guid 参数走路径段（同 approveLargeDeposit 的 302 实测教训）。
+ */
+export async function retrySweepTask(id: string): Promise<void> {
+  await request(`${BASE}/${id}/retry`, { method: 'POST' });
+}
+
+/** 设置充值政策：费率 [0,1]（建单快照，改只影响新单）+ 大额放行门（≥0，0 = 全部等放行）。 */
+export async function setDepositPolicy(
+  feeRate: string,
+  autoCreditMaxAmount: string,
+): Promise<void> {
+  await request(`${BASE}/set-deposit-policy`, {
+    method: 'POST',
+    params: { feeRate, autoCreditMaxAmount },
+  });
 }
 
 export async function getVaultChecks(params: {

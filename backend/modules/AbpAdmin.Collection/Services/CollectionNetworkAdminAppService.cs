@@ -47,6 +47,12 @@ public class NetworkStatusDto
     /// <summary>持有中进款毛额合计（十进制字符串）。</summary>
     public string HeldDepositTotal { get; set; } = default!;
 
+    /// <summary>充值手续费率（网络级，[0,1]；建单时快照，改费率只影响新单）。</summary>
+    public decimal DepositFeeRate { get; set; }
+
+    /// <summary>大额放行门（毛额超过它的进款单停在 Confirmed 等放行；0 = 全部等放行；十进制字符串）。</summary>
+    public string AutoCreditMaxAmount { get; set; } = default!;
+
     public List<TokenStatusDto> Tokens { get; set; } = new();
 }
 
@@ -221,6 +227,8 @@ public class CollectionNetworkAdminAppService : ApplicationService
             GasLowAlertedAt = network.GasLowAlertedAt,
             ScanEnabled = await SettingProvider.IsTrueAsync(CollectionSettings.Chain.ScanEnabled),
             SweepEnabled = await SettingProvider.IsTrueAsync(CollectionSettings.Chain.SweepEnabled),
+            DepositFeeRate = network.DepositFeeRate,
+            AutoCreditMaxAmount = Contracts.CollectionAmounts.Format(network.AutoCreditMaxAmount),
             Tokens = tokens.Select(t => new TokenStatusDto
             {
                 Id = t.Id,
@@ -292,6 +300,46 @@ public class CollectionNetworkAdminAppService : ApplicationService
         if (linked == 0)
         {
             Logger.LogWarning("进款单 {OrderId} 放行链接被并发处置（0 行），幂等返回", id);
+        }
+
+        await uow.CompleteAsync();
+    }
+
+    /// <summary>
+    /// 手动重试归集任务（对齐线上 retrySweepTask）：仅 Failed 可重试。可再试（Retryable）的冷却
+    /// 由归集 worker 自动拉回管，这里跳过冷却立即拉回；仅人工失败（打油超限/无链接单/金额溢出/
+    /// 链上 revert）同样允许——管理员显式决策重试。拉回写法与 SweepManager 冷却拉回同款
+    ///（Retryable 置 false，再失败由 FailAsync 重新判定）；CAS Failed→Queued，0 行=已被并发拉回，
+    /// 幂等成功。链接进款单在任务失败时保持 Sweeping，重激活条件天然满足。
+    /// </summary>
+    public virtual async Task RetrySweepTaskAsync(Guid id)
+    {
+        AssertHost();
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var task = await dbContext.SweepTasks.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id);
+        if (task == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.SweepTaskNotFound).WithData("SweepTaskId", id);
+        }
+
+        if (task.Status != SweepTaskStatus.Failed)
+        {
+            throw new BusinessException(CollectionErrorCodes.SweepTaskNotRetryable)
+                .WithData("Reason", $"仅 Failed 任务可重试（当前 {task.Status}）");
+        }
+
+        var now = Clock.Now;
+        var rows = await dbContext.SweepTasks
+            .Where(t => t.Id == id && t.Status == SweepTaskStatus.Failed)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.Status, SweepTaskStatus.Queued)
+                .SetProperty(t => t.Retryable, false)
+                .SetProperty(t => t.FailReason, (string?)null)
+                .SetProperty(t => t.StatusChangedAt, now));
+        if (rows == 0)
+        {
+            Logger.LogWarning("归集任务 {SweepTaskId} 重试被并发处置（0 行），幂等返回", id);
         }
 
         await uow.CompleteAsync();

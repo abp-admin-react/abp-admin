@@ -26,6 +26,7 @@ import {
   type NetworkStatusDto,
   removeApiKey,
   setApiKeyEnabled,
+  setDepositPolicy,
   setMinDeposit,
   setNodeLogResultCap,
   // 组件内有同名 useState setter（rpcUrl 输入框），别名避免遮蔽——
@@ -72,6 +73,10 @@ export default function NetworkConfigPage() {
   const [minDepSymbol, setMinDepSymbol] = useState('USDT');
   const [minDepVal, setMinDepVal] = useState('');
   const [minDepSaving, setMinDepSaving] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const [policyFeeRate, setPolicyFeeRate] = useState('');
+  const [policyMax, setPolicyMax] = useState('');
+  const [policySaving, setPolicySaving] = useState(false);
   const [mnemonicResult, setMnemonicResult] = useState<string | null>(null);
 
   // 扫链 KEY 池（同服务商多把，网关遇限流/认证错误自动轮换）
@@ -201,6 +206,27 @@ export default function NetworkConfigPage() {
       reload();
     } finally {
       setMinDepSaving(false);
+    }
+  };
+  const submitPolicy = async () => {
+    const fee = parseFloat(policyFeeRate);
+    const max = parseFloat(policyMax);
+    if (Number.isNaN(fee) || fee < 0 || fee > 1) {
+      message.warning('充值费率必须是 [0,1] 内的小数');
+      return;
+    }
+    if (Number.isNaN(max) || max < 0) {
+      message.warning('大额放行门必须 ≥ 0（0 = 全部等放行）');
+      return;
+    }
+    setPolicySaving(true);
+    try {
+      await setDepositPolicy(policyFeeRate, policyMax);
+      message.success('充值政策已更新（费率只影响新单——建单快照）');
+      setPolicyOpen(false);
+      reload();
+    } finally {
+      setPolicySaving(false);
     }
   };
   const doGenerateMnemonic = () => {
@@ -565,6 +591,35 @@ export default function NetworkConfigPage() {
                   <Tag color="default">无持有</Tag>
                 )}
               </Descriptions.Item>
+              <Descriptions.Item label="充值费率">
+                <Space>
+                  <Text>{(status.depositFeeRate * 100).toFixed(2)}%</Text>
+                  <Button
+                    size="small"
+                    type="link"
+                    onClick={() => {
+                      setPolicyFeeRate(String(status.depositFeeRate));
+                      setPolicyMax(status.autoCreditMaxAmount);
+                      setPolicyOpen(true);
+                    }}
+                  >
+                    政策
+                  </Button>
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="大额放行门">
+                <Text>{status.autoCreditMaxAmount}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="开关（设置页）">
+                <Space>
+                  <Tag color={status.scanEnabled ? 'green' : 'default'}>
+                    扫链{status.scanEnabled ? '开' : '关'}
+                  </Tag>
+                  <Tag color={status.sweepEnabled ? 'green' : 'default'}>
+                    归集{status.sweepEnabled ? '开' : '关'}
+                  </Tag>
+                </Space>
+              </Descriptions.Item>
             </Descriptions>
           )}
         </Card>
@@ -750,6 +805,40 @@ export default function NetworkConfigPage() {
           value={minDepVal}
           onChange={(e) => setMinDepVal(e.target.value)}
         />
+      </Modal>
+      <Modal
+        title="充值政策（费率 + 大额放行门）"
+        open={policyOpen}
+        onOk={submitPolicy}
+        onCancel={() => setPolicyOpen(false)}
+        confirmLoading={policySaving}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+          费率对充值毛额计（建单时快照，修改只影响新单）；毛额超过放行门的进款单停在
+          Confirmed 等管理端放行，0 = 全部等放行。
+        </Paragraph>
+        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+          <div>
+            <Text type="secondary">充值手续费率（0-1，如 0.001 = 0.1%）</Text>
+            <Input
+              placeholder="0.001"
+              value={policyFeeRate}
+              onChange={(e) => setPolicyFeeRate(e.target.value)}
+            />
+          </div>
+          <div>
+            <Text type="secondary">
+              大额放行门（≥ 0；超过它的进款单等人工放行）
+            </Text>
+            <Input
+              placeholder="5000"
+              value={policyMax}
+              onChange={(e) => setPolicyMax(e.target.value)}
+            />
+          </div>
+        </Space>
       </Modal>
       <Modal
         title="助记词（只显示这一次）"

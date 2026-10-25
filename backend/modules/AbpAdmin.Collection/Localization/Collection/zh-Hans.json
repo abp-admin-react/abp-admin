@@ -116,6 +116,8 @@
     "DisplayName:Collection.Chain.SkipRatioThreshold": "跳过比例告警阈值",
     "Description:Collection.Chain.SkipRatioThreshold": "窗口内跳过+溢出占比超过此值（0-1）告警（疑似粉尘攻击或费率配置错误）。",
     "Permission:WithdrawAdmin": "提现管理（审核/拒绝/退款/开账回填）",
-    "AbpAdmin.Collection:DepositNotReleasable": "进款单当前状态不可放行（需 Confirmed 且未挂归集任务）。"
+    "AbpAdmin.Collection:DepositNotReleasable": "进款单当前状态不可放行（需 Confirmed 且未挂归集任务）。",
+    "AbpAdmin.Collection:SweepTaskNotFound": "归集任务不存在。",
+    "AbpAdmin.Collection:SweepTaskNotRetryable": "归集任务当前状态不可重试（仅 Failed 可重试）。"
   }
 }
