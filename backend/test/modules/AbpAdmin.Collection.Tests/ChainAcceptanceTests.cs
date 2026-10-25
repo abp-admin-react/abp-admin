@@ -700,6 +700,11 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         }
 
         _openUows.Clear();
+
+        // 必须补调基类：显式接口实现会遮蔽基类 public Dispose（应用释放 + Respawn 清库都在那）。
+        // 此前漏调 → 本类用例间从不清库，Col/Fin 数据跨用例累计——账本科目全量断言（如 1001
+        // 链上资产合计）实测 60 而非 20 抓出；旧用例靠"每用例新 GUID"的相对断言侥幸未炸。
+        base.Dispose();
     }
 
     /// <summary>种一笔进款单；默认 PendingConfirm 且块号落在首扫窗口（head 500，游标 100 → 扫 101..150）。</summary>
