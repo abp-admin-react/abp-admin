@@ -150,18 +150,19 @@ export async function refundWithdraw(
 }
 
 /** 重试广播失败单（有哈希先验回执；无哈希过近期同地址付款双花门） */
+// 单 Guid 参数端点为路径段形态（?id= 会 302——E2E 实测）
 export async function retryWithdraw(id: string): Promise<void> {
-  await request(`${BASE}/retry`, { method: 'POST', params: { id }, ...WD_REQ });
+  await request(`${BASE}/${id}/retry`, { method: 'POST', ...WD_REQ });
 }
 
 /** 人工完结（BroadcastFailed 单补录链上哈希；服务端强制回执且状态必须成功） */
+// id 为路径段，txHash 是附加查询参数（?id= 形态会 302——E2E 实测）
 export async function completeWithdraw(
   id: string,
   txHash: string,
 ): Promise<void> {
-  await request(`${BASE}/complete`, {
+  await request(`${BASE}/${id}/complete?txHash=${encodeURIComponent(txHash)}`, {
     method: 'POST',
-    params: { id, txHash },
     ...WD_REQ,
   });
 }

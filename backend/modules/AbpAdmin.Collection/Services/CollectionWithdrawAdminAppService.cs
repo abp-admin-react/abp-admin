@@ -234,6 +234,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     /// 密文入库（版本前缀 + Collection:MasterKey），明文不落日志不回显。
     /// 与归集助记词必须不同源——泄露一个不应危及另一个。
     /// </summary>
+    [Volo.Abp.Auditing.DisableAuditing] // 私钥不得进审计日志（AbpAuditLogActions.Parameters）；回归锁：E2E 轮2 实测曾因后续签名改写丢此属性致 6 行泄密
     public virtual async Task SetWithdrawVaultAsync(SetWithdrawVaultInput input)
     {
         AssertHost();

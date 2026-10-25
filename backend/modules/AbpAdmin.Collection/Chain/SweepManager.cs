@@ -200,13 +200,30 @@ public class SweepManager : DomainService
         var now = _clock.Now;
 
         // 先条件占位任务（WHERE Status='Queued'）；落空 = 已被并发激活。
-        // 重签宽限以 BroadcastAt 计，激活重置 StatusChangedAt 不影响它
-        var claimed = await dbContext.SweepTasks
-            .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Queued)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(t => t.Amount, sum)
-                .SetProperty(t => t.Status, SweepTaskStatus.Fueling)
-                .SetProperty(t => t.StatusChangedAt, now), ct);
+        // 重签宽限以 BroadcastAt 计，激活重置 StatusChangedAt 不影响它。
+        // 地址级互斥索引（AddressId 上 Status IN (1,2)）会把「同地址已有 Fueling/Sweeping
+        // 僵尸任务」的激活打成 23505——是「地址被占」的正常语义而非故障：捕获后本轮跳过该
+        // 任务（卡死告警段会盯住僵尸），此前未捕获会炸掉整轮归集（E2E 实测：Sweeping 僵尸
+        // 占位 + 8433 进款单堆积，激活每轮必撞、归集全线停摆）
+        int claimed;
+        try
+        {
+            claimed = await dbContext.SweepTasks
+                .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Queued)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.Amount, sum)
+                    .SetProperty(t => t.Status, SweepTaskStatus.Fueling)
+                    .SetProperty(t => t.StatusChangedAt, now), ct);
+        }
+        catch (Npgsql.PostgresException ex) when (ex.SqlState == "23505")
+        {
+            // ExecuteUpdateAsync 把约束冲突的 PostgresException 直接抛出（不包 DbUpdateException——
+            // E2E 实测穿透了只捕 DbUpdateException 的第一版谓词）
+            Logger.LogWarning(
+                "任务 {TaskId} 激活被地址互斥拦下（同地址存在 Fueling/Sweeping 任务），本轮跳过；僵尸由卡死告警段处置",
+                task.Id);
+            return;
+        }
         if (claimed == 0)
         {
             return;

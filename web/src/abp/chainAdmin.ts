@@ -128,11 +128,9 @@ export async function getSweepTasks(params: {
 }
 
 /** 大额进款放行（只入队；入账仍走归集确认的净额路径）。仅 Confirmed 且未挂任务的单。 */
+// ABP 自动路由对单 Guid 参数生成路径段（?id= 形态 302 未处理——E2E 实测）
 export async function approveLargeDeposit(id: string): Promise<void> {
-  await request(`${BASE}/approve-large-deposit`, {
-    method: 'POST',
-    params: { id },
-  });
+  await request(`${BASE}/${id}/approve-large-deposit`, { method: 'POST' });
 }
 
 export async function getVaultChecks(params: {
