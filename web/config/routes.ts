@@ -379,6 +379,12 @@ export default [
     routes: [
       { path: '/collection', redirect: '/collection/orders' },
       {
+        path: '/collection/dashboard',
+        name: 'collection-dashboard',
+        access: 'canViewCollections',
+        component: './collection/dashboard',
+      },
+      {
         path: '/collection/orders',
         name: 'collection-orders',
         access: 'canViewOrders',
@@ -401,6 +407,12 @@ export default [
         name: 'collection-vault',
         access: 'canViewCollections',
         component: './collection/vault',
+      },
+      {
+        path: '/collection/member-funds',
+        name: 'collection-member-funds',
+        access: 'canViewCollections',
+        component: './collection/member-funds',
       },
       {
         path: '/collection/withdrawals',

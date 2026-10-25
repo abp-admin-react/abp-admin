@@ -64,13 +64,15 @@ public static class MenuTemplateDefinition
         // 模型 admin 同时持有两个权限位，实际不受影响）。前端 access.ts 的 canViewTrade 是 OR 口径。
         new("collection", null, MenuTypeEnum.Catalog, "收付款", "collection", "/collection", "payCircle", 46, "AbpAdmin.Ordering.Orders"),
         new("collection-orders", "collection", MenuTypeEnum.Menu, "订单", "collection-orders", "/collection/orders", "shoppingCart", 47, "AbpAdmin.Ordering.Orders"),
-        new("collection-deposits", "collection", MenuTypeEnum.Menu, "充值单", "collection-deposits", "/collection/deposits", "deposit", 48, "AbpAdmin.Collection.Collections"),
-        new("collection-sweeps", "collection", MenuTypeEnum.Menu, "归集任务", "collection-sweeps", "/collection/sweeps", "send", 49, "AbpAdmin.Collection.Collections"),
-        new("collection-vault", "collection", MenuTypeEnum.Menu, "金库核对", "collection-vault", "/collection/vault", "audit", 50, "AbpAdmin.Collection.Collections"),
+        new("collection-dashboard", "collection", MenuTypeEnum.Menu, "资金看板", "collection-dashboard", "/collection/dashboard", "dashboard", 48, "AbpAdmin.Collection.Collections"),
+        new("collection-deposits", "collection", MenuTypeEnum.Menu, "充值单", "collection-deposits", "/collection/deposits", "deposit", 49, "AbpAdmin.Collection.Collections"),
+        new("collection-sweeps", "collection", MenuTypeEnum.Menu, "归集任务", "collection-sweeps", "/collection/sweeps", "send", 50, "AbpAdmin.Collection.Collections"),
+        new("collection-vault", "collection", MenuTypeEnum.Menu, "金库核对", "collection-vault", "/collection/vault", "audit", 51, "AbpAdmin.Collection.Collections"),
+        new("collection-member-funds", "collection", MenuTypeEnum.Menu, "会员资金", "collection-member-funds", "/collection/member-funds", "userSearch", 52, "AbpAdmin.Collection.Collections"),
         // 提现管理（M3）：资金出账高危动作，独立权限 WithdrawAdmin（与链网运维同级）
-        new("collection-withdrawals", "collection", MenuTypeEnum.Menu, "提现管理", "collection-withdrawals", "/collection/withdrawals", "withdraw", 51, "AbpAdmin.Collection.WithdrawAdmin"),
-        new("collection-hot-wallet", "collection", MenuTypeEnum.Menu, "热钱包监控", "collection-hot-wallet", "/collection/hot-wallet", "monitor", 52, "AbpAdmin.Collection.WithdrawAdmin"),
-        new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 53, "AbpAdmin.Collection.Network.Admin"),
+        new("collection-withdrawals", "collection", MenuTypeEnum.Menu, "提现管理", "collection-withdrawals", "/collection/withdrawals", "withdraw", 53, "AbpAdmin.Collection.WithdrawAdmin"),
+        new("collection-hot-wallet", "collection", MenuTypeEnum.Menu, "热钱包监控", "collection-hot-wallet", "/collection/hot-wallet", "monitor", 54, "AbpAdmin.Collection.WithdrawAdmin"),
+        new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 55, "AbpAdmin.Collection.Network.Admin"),
         new("current-session", null, MenuTypeEnum.Menu, "当前会话", "current-session", "/current-session", "user", 50),
     };
 }
