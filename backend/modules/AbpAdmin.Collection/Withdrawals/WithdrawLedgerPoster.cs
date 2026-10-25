@@ -116,23 +116,26 @@ public class WithdrawLedgerPoster : DomainService
             summary: "提现退手续费"));
     }
 
-    /// <summary>存量余额开账回填（BizRefId = opening:{userId}:{currency}，幂等防重跑）。</summary>
-    public virtual Task<Guid> PostOpeningAsync(Guid userId, string currency, decimal amount)
+    /// <summary>存量余额开账回填（BizRefId = opening:{userId}:{currency}，幂等防重跑）。
+    /// 币种收枚举：调用方曾传 Currency.ToString()（"Usdt"）与提现侧 "USDT" 错位成两个子户，
+    /// E2E 实测抓出——币种码唯一入口是 <see cref="CurrencyCode"/>。</summary>
+    public virtual Task<Guid> PostOpeningAsync(Guid userId, Contracts.CollectionCurrency currency, decimal amount)
     {
+        var code = CurrencyCode(currency);
         return _ledger.PostAsync(new FinanceBizEvent(
-            FinanceBizTypes.Wallet, $"opening:{userId:N}:{currency}", FinanceBizTypes.Phases.Post,
-            currency, amount,
+            FinanceBizTypes.Wallet, $"opening:{userId:N}:{code}", FinanceBizTypes.Phases.Post,
+            code, amount,
             UserId: userId,
             From: Ref(FinanceAccountCodes.OnChainAsset),
             To: Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()),
             Summary: $"存量余额开账 {amount:0.########} {currency}"));
     }
 
-    /// <summary>查用户可用科目的账本投影余额（开账回填的差额计算用）。</summary>
-    public virtual Task<decimal> GetUserAvailableBalanceAsync(Guid userId, string currency)
+    /// <summary>查用户可用科目的账本投影余额（开账回填的差额计算用；币种同样收枚举收口）。</summary>
+    public virtual Task<decimal> GetUserAvailableBalanceAsync(Guid userId, Contracts.CollectionCurrency currency)
     {
         return _ledger.GetBalanceAsync(
-            Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()), currency);
+            Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()), CurrencyCode(currency));
     }
 
     private static FinanceBizEvent Event(

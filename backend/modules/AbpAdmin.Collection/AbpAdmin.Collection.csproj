@@ -41,6 +41,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Localization\Collection\*.json" />
+    <!-- 测试直调 internal 纯函数（BuildEtherscanUrl 等 URL/编码形状锁） -->
+    <InternalsVisibleTo Include="AbpAdmin.Collection.Tests" />
   </ItemGroup>
 
 </Project>

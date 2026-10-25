@@ -20,6 +20,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { financeErrorText } from '@/abp/finance';
 import {
   approveWithdraw,
+  backfillOpening,
   completeWithdraw,
   getHotWallet,
   getWithdrawals,
@@ -27,6 +28,7 @@ import {
   refundWithdraw,
   rejectWithdraw,
   retryWithdraw,
+  setWithdrawVault,
   WD_STATUS_LABELS,
   type WithdrawHotWalletStatusDto,
   type WithdrawOrderDto,
@@ -92,6 +94,8 @@ export default function WithdrawalsPage() {
     reloadCards();
   }, [reloadCards]);
 
+  const [walletModal, setWalletModal] = useState(false);
+  const [walletForm, setWalletForm] = useState({ address: '', privateKey: '' });
   const [rejectTarget, setRejectTarget] = useState<WithdrawOrderDto>();
   const [refundTarget, setRefundTarget] = useState<WithdrawOrderDto>();
   const [completeTarget, setCompleteTarget] = useState<WithdrawOrderDto>();
@@ -276,7 +280,29 @@ export default function WithdrawalsPage() {
   return (
     <PageContainer>
       <Space direction="vertical" style={{ width: '100%' }} size={16}>
-        <Card title="提现状态" size="small">
+        <Card
+          title="提现状态"
+          size="small"
+          extra={
+            <Space size={8}>
+              <Button size="small" onClick={() => { setWalletModal(true); setWalletForm({ address: '', privateKey: '' }); }}>
+                配置热钱包
+              </Button>
+              <Popconfirm
+                title="存量余额开账回填？"
+                description="把 ColBalance 与账本 2201 的差额一次性过账（幂等可重跑），上线提现前执行一次。"
+                onConfirm={() =>
+                  guard(async () => {
+                    const r = await backfillOpening();
+                    message.success(`开账完成：用户 ${r.users}，过账 ${r.posted}，跳过 ${r.skipped}`);
+                  }, '开账完成')
+                }
+              >
+                <Button size="small" loading={acting}>存量开账</Button>
+              </Popconfirm>
+            </Space>
+          }
+        >
           {status ? (
             <Space size={32} wrap>
               <Space size={6}>
@@ -464,6 +490,32 @@ export default function WithdrawalsPage() {
         <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
           服务端会强制核对该哈希的回执且状态必须成功。
         </Text>
+      </Modal>
+      <Modal title="配置提现热钱包" open={walletModal} confirmLoading={acting}
+        okText="保存" cancelText="取消"
+        onCancel={() => setWalletModal(false)}
+        onOk={() => {
+          if (!/^0x[0-9a-fA-F]{40}$/.test(walletForm.address.trim())) {
+            message.warning('地址需为 0x + 40 位十六进制');
+            return;
+          }
+          guard(async () => {
+            await setWithdrawVault(walletForm.address.trim(), walletForm.privateKey.trim());
+            message.success('热钱包已配置（密文入库）');
+          }, '热钱包已配置');
+        }}>
+        <Descriptions column={1} size="small" style={{ marginBottom: 12 }}>
+          <Descriptions.Item label="地址">热钱包地址（0x + 40 位十六进制）</Descriptions.Item>
+          <Descriptions.Item label="私钥">
+            服务端校验私钥与地址匹配后加密入库；明文不落日志不回显。必须与归集助记词不同源。
+          </Descriptions.Item>
+        </Descriptions>
+        <Input placeholder="热钱包地址" value={walletForm.address}
+          onChange={(e) => setWalletForm((f) => ({ ...f, address: e.target.value }))}
+          style={{ fontFamily: 'monospace', marginBottom: 8 }} />
+        <Input.Password placeholder="热钱包私钥" value={walletForm.privateKey}
+          onChange={(e) => setWalletForm((f) => ({ ...f, privateKey: e.target.value }))}
+          style={{ fontFamily: 'monospace' }} />
       </Modal>
     </PageContainer>
   );

@@ -39,7 +39,7 @@ public class WithdrawManagerTests : CollectionTestBase
     {
         // 生产口径：余额行入账 + 账本开账（上线回填路径 PostOpeningAsync）
         await Balances.CreditAsync(userId, currency, amount, $"dep-{Guid.NewGuid()}");
-        await Poster.PostOpeningAsync(userId, WithdrawLedgerPoster.CurrencyCode(currency), amount);
+        await Poster.PostOpeningAsync(userId, currency, amount);
     }
 
     [Fact]

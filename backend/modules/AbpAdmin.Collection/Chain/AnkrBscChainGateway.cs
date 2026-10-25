@@ -32,6 +32,24 @@ public class AnkrBscChainGateway : IBscChainGateway
     /// <summary>Etherscan V2 端点里 key 参数名（从配置端点截取基座，chainid 等参数跟配置走）。</summary>
     public const string EtherscanApiKeyParam = "apikey=";
 
+    /// <summary>
+    /// 组装 Etherscan V2 请求 URL。两条来源的端点形态不同：
+    /// key 池路径 = 基座以 "?apikey=KEY" 结尾（BuildEtherscanBase 截出）；回退路径 = 宿主配置裸端点
+    /// （可能没有任何查询参数，也可能自带）。query 以 "&" 开头，因此必须先保证端点已带 "?"，
+    /// 并统一补 V2 多链端点必需的 chainid=56——此前回退路径拼出 "v2/api&contractaddress=…"
+    ///（连 ? 都没有，E2E 真链实测抓出），key 池路径则缺 chainid 被 V2 拒绝。
+    /// </summary>
+    internal static string BuildEtherscanUrl(string endpoint, string query)
+    {
+        var hasQuery = endpoint.Contains('?');
+        if (endpoint.Contains("chainid=", System.StringComparison.OrdinalIgnoreCase))
+        {
+            return hasQuery ? endpoint + query : endpoint + "?" + query[1..];
+        }
+
+        return endpoint + (hasQuery ? "&" : "?") + "chainid=56" + query;
+    }
+
     private readonly HttpClient _http;
     private readonly ILogger<AnkrBscChainGateway> _logger;
     private readonly string[] _rpcEndpoints;
@@ -132,7 +150,7 @@ public class AnkrBscChainGateway : IBscChainGateway
         for (var attempt = 0; attempt < _etherscanEndpoints.Length; attempt++)
         {
             var idx = (_etherscanStart + attempt) % _etherscanEndpoints.Length;
-            using var resp = await _http.GetAsync(_etherscanEndpoints[idx] + query, ct);
+            using var resp = await _http.GetAsync(BuildEtherscanUrl(_etherscanEndpoints[idx], query), ct);
             if (IsKeyWorthRotating(resp.StatusCode))
             {
                 if (attempt < _etherscanEndpoints.Length - 1)

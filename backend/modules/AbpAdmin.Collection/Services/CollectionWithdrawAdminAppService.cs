@@ -320,8 +320,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         var skipped = 0;
         foreach (var b in balances)
         {
-            var currency = b.Currency.ToString();
-            var ledgerBalance = await _ledger.GetUserAvailableBalanceAsync(b.UserId, currency);
+            var ledgerBalance = await _ledger.GetUserAvailableBalanceAsync(b.UserId, b.Currency);
             var diff = b.Total - ledgerBalance;
             if (diff <= 0)
             {
@@ -329,7 +328,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
                 continue;
             }
 
-            await _ledger.PostOpeningAsync(b.UserId, currency, diff);
+            await _ledger.PostOpeningAsync(b.UserId, b.Currency, diff);
             posted++;
         }
 

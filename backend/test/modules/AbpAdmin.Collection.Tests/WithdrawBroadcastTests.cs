@@ -81,7 +81,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
     private async Task<ColWithdrawOrder> FundSubmitApproveAsync(decimal amount = 50m, bool autoApprove = false)
     {
         await Balances.CreditAsync(User1, CollectionCurrency.Usdt, 1000m, $"dep-{Guid.NewGuid()}");
-        await Poster.PostOpeningAsync(User1, "USDT", 1000m);
+        await Poster.PostOpeningAsync(User1, CollectionCurrency.Usdt, 1000m);
         var order = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, ToAddress, amount);
         if (!autoApprove)
         {

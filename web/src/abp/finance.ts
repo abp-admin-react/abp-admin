@@ -1756,11 +1756,81 @@ export async function getBizDocs(
   return pageOf(list, q);
 }
 
+type SubAccountBalanceRow = {
+  accountCode: string;
+  ownerType: number;
+  ownerId: string;
+  currency: string;
+  balance: number;
+};
+
+/**
+ * live → A7 聚合形态：后端 sub-account-balances 返回逐子户行（2201/2202/2205 各一行），
+ * 页面期望「每 (用户, 币种) 一行 + 可用/冻结/预收三列」。此前 live 直通逐行导致三列全空
+ *（E2E 实测抓出；该页 mock 时代未暴露）。User 行按 (ownerId, currency) 聚合，
+ * 平台/渠道行保留独立行（ownerName = 科目码）。diff 需要 ColBalance 对账口径（P1），先不显示。
+ */
+function aggregateBalanceRows(rows: SubAccountBalanceRow[]): FinBalanceProjectionDto[] {
+  const users = new Map<string, FinBalanceProjectionDto>();
+  const others: FinBalanceProjectionDto[] = [];
+  for (const r of rows) {
+    if (r.ownerType === 1) {
+      const key = `${r.ownerId}|${r.currency}`;
+      const row =
+        users.get(key) ??
+        ({
+          id: key,
+          ownerType: 'User',
+          ownerId: r.ownerId,
+          currency: r.currency,
+          available: 0,
+          frozen: 0,
+          prepayment: 0,
+          ledgerDerived: 0,
+          diff: 0,
+          syncedAt: new Date().toISOString(),
+        } satisfies FinBalanceProjectionDto);
+      if (r.accountCode === '2201') row.available = r.balance;
+      else if (r.accountCode === '2202') row.frozen = r.balance;
+      else if (r.accountCode === '2205') row.prepayment = r.balance;
+      row.ledgerDerived = row.available + row.frozen + row.prepayment;
+      users.set(key, row);
+    } else {
+      others.push({
+        id: `${r.accountCode}|${r.ownerId}|${r.currency}`,
+        ownerType: String(r.ownerType),
+        ownerId: r.ownerId,
+        ownerName: r.accountCode,
+        currency: r.currency,
+        available: r.balance,
+        frozen: 0,
+        prepayment: 0,
+        ledgerDerived: r.balance,
+        diff: 0,
+        syncedAt: new Date().toISOString(),
+      });
+    }
+  }
+  return [...users.values(), ...others];
+}
+
 export async function getBalanceProjections(
   q: FinanceListQuery = {},
 ): Promise<PagedResultDto<FinBalanceProjectionDto>> {
-  if (!isMock())
-    return liveGet(API.balanceProjection, q as Record<string, unknown>);
+  if (!isMock()) {
+    const raw = await liveGet(API.balanceProjection, {
+      ...q,
+      MaxResultCount: 200,
+    } as Record<string, unknown>);
+    let list = aggregateBalanceRows((raw as { items?: SubAccountBalanceRow[] }).items ?? []);
+    if (q.filter) {
+      const f = q.filter.toLowerCase();
+      list = list.filter(
+        (x) => (x.ownerName || '').toLowerCase().includes(f) || x.ownerId.toLowerCase().includes(f),
+      );
+    }
+    return pageOf(list, q);
+  }
   let list = [...mockBalances];
   if (q.agentId) list = list.filter((x) => x.agentId === q.agentId);
   if (q.filter) {
