@@ -14,12 +14,21 @@ Cancelled(6)                                    │              回执失败(�
 Pending ──拒绝──→ Rejected(4)                    └── 发送异常（结果未知）──→ 保持 Broadcasting 无哈希
 BroadcastFailed ──重试(验回执/双花门)──→ Processing
 BroadcastFailed ──退款拒绝──→ Rejected（净额+手续费退回可用）
+无哈希超时 ──pending nonce ≤ NonceUsed（可证未出款）──→ 自动回 Processing 重播 / 超限自动退款→ Rejected
+无哈希超时 ──pending nonce > NonceUsed（在途/已挖）──→ Etherscan 认领哈希 → 回执路径完结
 ```
 
 - 所有迁移 CAS 条件 UPDATE，0 行 = `WithdrawInvalidStatus`。
-- **双花防线**：发送结果未知（无哈希超时）绝不重播，转 BroadcastFailed 等人工；
-  重试前有哈希先验回执、无哈希过「近期已向该地址付款」双花门；nonce 每次广播取热钱包
-  pending nonce，不复用缓存（杜绝替换重签）。
+- **无人工的自动仲裁（无哈希超时）**：nonce 在发送**前**落库（NonceUsed）——发送结果未知时，
+  用「热钱包 pending nonce vs NonceUsed」可证明地判定钱是否出去：
+  - `pending ≤ NonceUsed` → 交易从未进 mempool（或已被节点丢弃）＝**可证未出款**：
+    未超重试上限自动回 Processing 重播（新 nonce）；超限**自动退款**终态（净额+手续费回可用，告警留痕）。
+  - `pending > NonceUsed` → 交易在途/已挖：按热钱包出站转账（from/to/金额）从 Etherscan 扫回
+    哈希**认领**，交给正常回执路径完结；挖出会被扫到、被丢弃则 pending 回落进上一分支——自动收敛。
+  - 回执失败（revert＝可证未出款）+ 重试用尽 → 同样自动退款。
+  （参考项目 exchange 在此角落是转人工「需人工核查」——本实现用 nonce 判据把人工去掉。）
+- **双花防线**：重试/重播只在「可证未出款」时发生（nonce 未占用或回执 revert）；
+  管理端重试另有「近期已向该地址付款」双花门；nonce 每次广播取热钱包 pending nonce，不复用缓存。
 
 ## 余额两桶（ColBalances，M1）
 
@@ -79,8 +88,8 @@ BroadcastFailed ──退款拒绝──→ Rejected（净额+手续费退回可
 5. SettingUi 调限额/费率/地板值 → appsettings 开 `Collection:Withdraw:Enabled=true` 重启。
 6. 日常：管理页 `/collection/withdrawals`（状态卡 + 四态审核）；熔断告警走
    `[Alert:WithdrawHotWallet]` 日志 + ChainAlertService 站内信。
-7. 卡单处置：BroadcastFailed 无哈希 → 先链上核实热钱包近期出站 → 再重试或人工完结（补哈希，
-   服务端强制回执成功）或退款拒绝。
+7. 卡单处置：**全自动**（nonce 仲裁：可证未出款自动重播/退款；交易在途自动认领哈希完结）。
+   管理端重试/人工完结/退款拒绝保留为兜底工具（极端脏数据/审计需要时用），正常流程不需要人。
 
 ## 已知边界（后续里程碑）
 

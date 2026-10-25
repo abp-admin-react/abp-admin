@@ -230,7 +230,7 @@ public class WithdrawManager : DomainService
 
     // ── 广播失败退款（BroadcastFailed → Rejected 终态；净额+手续费退回可用）──────────────
 
-    public virtual async Task RefundAfterApproveAsync(Guid orderId, Guid auditUserId, string remark)
+    public virtual async Task RefundAfterApproveAsync(Guid orderId, Guid? auditUserId, string remark)
     {
         if (string.IsNullOrWhiteSpace(remark))
         {

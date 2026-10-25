@@ -124,20 +124,88 @@ public class WithdrawBroadcastTests : CollectionTestBase
     }
 
     [Fact]
-    public async Task Stuck_Broadcasting_Without_Hash_Goes_Manual_Never_Rebroadcasts()
+    public async Task NoHash_Timeout_WithUnoccupiedNonce_AutoRequeues_Without_Manual()
     {
         var gateway = await ArrangeWalletAsync();
         var network = await GetNetworkAsync();
         var order = await FundSubmitApproveAsync();
 
-        // 置为无哈希 Broadcasting 且已超时（模拟发送结果未知）
-        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60);
+        // 无哈希超时 + 热钱包 pending nonce(5) ≤ NonceUsed(7)：交易从未进 mempool——可证未出款，自动回 Processing
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, nonceUsed: 7);
+        gateway.TxCountSeed = 5;
 
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
-        after.Status.ShouldBe(WithdrawStatus.BroadcastFailed);
-        after.FailReason.ShouldContain("人工");
-        gateway.Broadcasts.Count.ShouldBe(0); // 绝不盲目重播
+        after.Status.ShouldBe(WithdrawStatus.Processing);
+        after.RetryCount.ShouldBe(1);
+        after.FailReason.ShouldContain("可证未出款");
+    }
+
+    [Fact]
+    public async Task NoHash_Timeout_UnoccupiedNonce_RetryExhausted_AutoRefunds()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+
+        // 可证未出款 + 重试次数用尽 → 自动退款终态（净额+手续费回可用），无人介入
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60,
+            retryCount: 3, nonceUsed: 7);
+        gateway.TxCountSeed = 5;
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        var after = await GetOrderAsync(order.Id);
+        after.Status.ShouldBe(WithdrawStatus.Rejected);
+        after.FailReason.ShouldContain("自动退款");
+
+        var balances = GetRequiredService<CollectionBalanceManager>();
+        (await BucketAsync(order.UserId)).balance.ShouldBe(1000m); // 提交冻结的 100 全额回可用
+    }
+
+    [Fact]
+    public async Task NoHash_Timeout_OccupiedNonce_AdoptsTxHash_FromAddressScan_And_Completes()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+
+        // pending nonce(8) > NonceUsed(7)：交易在途/已挖——从热钱包出站转账扫回哈希认领
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, nonceUsed: 7);
+        gateway.TxCountSeed = 8;
+        gateway.Logs[UsdtContract(gateway)] = new System.Collections.Generic.List<AbpAdmin.Collection.Chain.TokenTransferLog>
+        {
+            new("0xabababababababababababababababababababababababababababababababab", 0,
+                HotWallet, ToAddress, (order.ActualAmount * 1000000000000000000m).ToString("0"), 999),
+        };
+
+        // 第一轮：认领哈希（Broadcasting 带哈希，回执未出）
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        (await GetOrderAsync(order.Id)).TxHash.ShouldBe("0xabababababababababababababababababababababababababababababababab");
+
+        // 第二轮：回执成功 → 自动完结 + payout 过账
+        gateway.HasReceipt = true;
+        gateway.ReceiptStatusOverride = 1;
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Completed);
+    }
+
+    [Fact]
+    public async Task Receipt_Failed_RetryExhausted_AutoRefunds_Without_Manual()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+
+        // 带哈希超时 + 回执失败（revert = 可证未出款）+ 重试用尽 → 自动退款
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, "0xdeadbeef", minutesAgo: 60, retryCount: 3);
+        gateway.HasReceipt = true;
+        gateway.ReceiptStatusOverride = 0;
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        var after = await GetOrderAsync(order.Id);
+        after.Status.ShouldBe(WithdrawStatus.Rejected);
+        after.FailReason.ShouldContain("自动退款");
+        (await BucketAsync(order.UserId)).balance.ShouldBe(1000m);
     }
 
     [Fact]
@@ -255,9 +323,10 @@ public class WithdrawBroadcastTests : CollectionTestBase
         });
     }
 
-    /// <summary>直接置态（绕过状态机；模拟 worker/链上路径的中间态）。</summary>
+    /// <summary>直接置态（绕过状态机；模拟 worker/链上路径的中间态）。nonce 模拟发送前落库的 NonceUsed。</summary>
     private async Task ForceStateAsync(
-        Guid orderId, WithdrawStatus status, string? txHash, int minutesAgo, int retryCount = 0)
+        Guid orderId, WithdrawStatus status, string? txHash, int minutesAgo,
+        int retryCount = 0, long? nonceUsed = null)
     {
         var uowManager = GetRequiredService<IUnitOfWorkManager>();
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: true);
@@ -266,6 +335,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
         o.Status = status;
         o.TxHash = txHash;
         o.RetryCount = retryCount;
+        o.NonceUsed = nonceUsed;
         o.StatusChangedAt = DateTime.UtcNow.AddMinutes(-minutesAgo - 1);
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();
@@ -291,6 +361,17 @@ public class WithdrawBroadcastTests : CollectionTestBase
         });
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();
+    }
+
+    private async Task<(decimal balance, decimal frozen)> BucketAsync(Guid userId)
+    {
+        return await ReadAsync(async () =>
+        {
+            var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            var row = await dbContext.Balances.AsNoTracking()
+                .FirstOrDefaultAsync(b => b.UserId == userId && b.Currency == CollectionCurrency.Usdt);
+            return (row?.Balance ?? 0m, row?.Frozen ?? 0m);
+        });
     }
 
     private async Task<T> ReadAsync<T>(Func<Task<T>> read)
