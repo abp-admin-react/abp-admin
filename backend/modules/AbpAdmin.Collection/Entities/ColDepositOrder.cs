@@ -48,6 +48,15 @@ public class ColDepositOrder : BasicAggregateRoot<Guid>
     /// <summary>换算后的金额；PrecisionOverflow 时为 null。</summary>
     public decimal? Amount { get; set; }
 
+    /// <summary>充值手续费（建单时按网络 DepositFeeRate 快照，向零 8 位）。历史单为 null（回退 0）。</summary>
+    public decimal? Fee { get; set; }
+
+    /// <summary>入账净额 = 毛额 − 手续费（快照）。历史单为 null/0 时入账回退毛额（线上同款兼容）。</summary>
+    public decimal? ActualAmount { get; set; }
+
+    /// <summary>建单时的费率快照（对账解释 Fee 用）。</summary>
+    public decimal? FeeRateSnapshot { get; set; }
+
     public long BlockNumber { get; set; }
 
     public DateTime? BlockTime { get; set; }

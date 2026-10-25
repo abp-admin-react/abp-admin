@@ -43,6 +43,9 @@ public static class FinanceBizTypes
 
         /// <summary>提现失败退手续费：手续费收入 → 用户可用（与 fee-take 对称）。</summary>
         public const string FeeRefund = "fee-refund";
+
+        /// <summary>充值手续费：用户可用 → 手续费收入（净额入账后收取；Fee=0 不落凭证）。</summary>
+        public const string Fee = "fee";
     }
 
     /// <summary>

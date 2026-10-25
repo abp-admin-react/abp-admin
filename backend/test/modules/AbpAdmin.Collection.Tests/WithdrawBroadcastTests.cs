@@ -366,7 +366,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
         // 后继单已用同一 nonce 落哈希（同账户同 nonce 唯一 ⇒ 本单交易必未上链）→ 自动退款
         await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, retryCount: 3, nonceUsed: 7);
         gateway.TxCountSeed = 8;
-        await SeedLaterOrderWithHashAsync(nonce: 7);
+        await SeedLaterOrderWithHashAsync(nonce: 7, completed: true); // 证据收紧：后继必须已 Completed（广播≠上链）
 
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
@@ -446,8 +446,8 @@ public class WithdrawBroadcastTests : CollectionTestBase
         await uow.CompleteAsync();
     }
 
-    /// <summary>造一笔已带哈希的 Broadcasting 后继单（同 nonce 占用证据）。</summary>
-    private async Task SeedLaterOrderWithHashAsync(long nonce)
+    /// <summary>造一笔同 nonce 后继单（证据要求 Completed：必经回执成功，广播中不算）。</summary>
+    private async Task SeedLaterOrderWithHashAsync(long nonce, bool completed)
     {
         var uowManager = GetRequiredService<IUnitOfWorkManager>();
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: true);
@@ -459,7 +459,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
             NetworkName = "BSC",
             ToAddress = "0x4444444444444444444444444444444444444444",
             Amount = 10m, Fee = 0.04m, ActualAmount = 9.96m, FeeRate = 0.004m,
-            Status = WithdrawStatus.Broadcasting,
+            Status = completed ? WithdrawStatus.Completed : WithdrawStatus.Broadcasting,
             TxHash = "0x" + new string('e', 62) + "ff",
             NonceUsed = nonce,
             StatusChangedAt = DateTime.UtcNow.AddMinutes(-5),

@@ -65,6 +65,12 @@ public class DepositOrderListDto
     public string ToAddress { get; set; } = default!;
     public string FromAddress { get; set; } = default!;
     public string? Amount { get; set; }
+
+    /// <summary>充值手续费（建单快照；历史单 null）。</summary>
+    public string? Fee { get; set; }
+
+    /// <summary>入账净额（建单快照；历史单 null=回退毛额）。</summary>
+    public string? ActualAmount { get; set; }
     public string RawAmount { get; set; } = default!;
     public string Symbol { get; set; } = default!;
     /// <summary>来源网络名（ColNetwork.Name，如 "BSC"）——多链就绪的网络维度列。</summary>
@@ -206,6 +212,56 @@ public class CollectionNetworkAdminAppService : ApplicationService
     }
 
     /// <summary>进款单分页（管理端，可按状态/符号筛选）。</summary>
+    /// <summary>
+    /// 大额进款放行（只入队，不直接入账——入账仍走归集确认的净额路径，对齐线上 confirmDeposit）。
+    /// 目标单：Confirmed 且未挂归集任务（大额门停下的单；普通漏挂单同样可放，幂等）。
+    /// </summary>
+    public virtual async Task ApproveLargeDepositAsync(Guid id)
+    {
+        AssertHost();
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var order = await dbContext.DepositOrders.FirstOrDefaultAsync(o => o.Id == id);
+        if (order == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.CollectionNotFound).WithData("DepositOrderId", id);
+        }
+
+        if (order.Status != DepositOrderStatus.Confirmed || order.SweepTaskId != null)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidStatus)
+                .WithData("Reason", $"仅 Confirmed 且未挂归集任务的单可放行（当前 {order.Status}，任务 {order.SweepTaskId?.ToString() ?? "无"}）");
+        }
+
+        // 复用确认路径的挂队语义：同址已有 Queued 任务则并入，否则新建
+        var task = await dbContext.SweepTasks
+            .Where(t => t.TokenId == order.TokenId && t.Status == SweepTaskStatus.Queued && t.AddressId == order.AddressId)
+            .OrderBy(t => t.CreationTime).FirstOrDefaultAsync();
+        if (task == null)
+        {
+            var address = await dbContext.DepositAddresses.AsNoTracking()
+                .FirstAsync(a => a.Id == order.AddressId);
+            task = new ColSweepTask(Guid.NewGuid())
+            {
+                NetworkId = order.NetworkId,
+                TokenId = order.TokenId,
+                UserId = order.UserId,
+                AddressId = order.AddressId,
+                Address = order.ToAddress,
+                AddressIndex = address.AddressIndex,
+                Amount = 0m, // 激活时按已链接进款单求和
+                Status = SweepTaskStatus.Queued,
+                StatusChangedAt = DateTime.UtcNow,
+                CreationTime = DateTime.UtcNow,
+            };
+            dbContext.SweepTasks.Add(task);
+        }
+
+        order.SweepTaskId = task.Id;
+        await dbContext.SaveChangesAsync();
+        await uow.CompleteAsync();
+    }
+
     public virtual async Task<PagedResultDto<DepositOrderListDto>> GetDepositOrdersAsync(
         int skipCount, int maxResultCount, string? status = null, string? symbol = null)
     {
@@ -245,6 +301,8 @@ public class CollectionNetworkAdminAppService : ApplicationService
             ToAddress = o.ToAddress,
             FromAddress = o.FromAddress,
             Amount = o.Amount == null ? null : CollectionAmounts.Format(o.Amount.Value),
+            Fee = o.Fee == null ? null : CollectionAmounts.Format(o.Fee.Value),
+            ActualAmount = o.ActualAmount == null ? null : CollectionAmounts.Format(o.ActualAmount.Value),
             RawAmount = o.RawAmount,
             Symbol = symbols.TryGetValue(o.TokenId, out var s) ? s : "?",
             NetworkName = networkNames.TryGetValue(o.NetworkId, out var n) ? n : "?",

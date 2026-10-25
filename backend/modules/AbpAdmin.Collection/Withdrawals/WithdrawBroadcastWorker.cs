@@ -38,6 +38,9 @@ public class WithdrawBroadcastWorker : CollectionChainWorkerBase
 
     protected override string LockKey => CollectionConsts.WithdrawBroadcastLockKey;
 
+    /// <summary>测试桥：宿主注册测试断言轮锁键（internal + InternalsVisibleTo）。</summary>
+    internal string LockKeyExposeForTest() => LockKey;
+
     protected override bool Enabled => _options.WithdrawEnabled;
 
     protected override async Task RunRoundAsync(IServiceProvider scopedServices, CancellationToken ct)

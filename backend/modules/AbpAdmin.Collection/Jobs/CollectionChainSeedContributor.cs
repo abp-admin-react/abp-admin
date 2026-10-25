@@ -54,6 +54,10 @@ public class CollectionChainSeedContributor : IDataSeedContributor, ITransientDe
             {
                 Name = CollectionConsts.BscNetworkName,
                 ChainId = 56,
+                // 充值手续费/大额放行（对齐线上默认）：费率 0 = 不收费；自动归集额度 5000，
+                // 0 是「全部等人放行」哨兵不是「不限制」——既有行更新时不覆盖（运维显式改）
+                DepositFeeRate = 0m,
+                AutoCreditMaxAmount = 5000m,
                 CreationTime = _clock.Now,
             };
             await _networkRepository.InsertAsync(network, autoSave: true);

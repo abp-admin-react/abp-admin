@@ -169,7 +169,7 @@ public class DepositScanManager : DomainService
         foreach (var log in matched)
         {
             var (addressId, userId, addressIndex) = byAddress[log.To.ToLowerInvariant()];
-            await UpsertDepositOrderAsync(dbContext, network.Id, token, addressId, userId, log, ct);
+            await UpsertDepositOrderAsync(dbContext, network, token, addressId, userId, log, ct);
         }
 
         // 游标前进：确认读完才推进
@@ -214,14 +214,20 @@ public class DepositScanManager : DomainService
     }
 
     private async Task UpsertDepositOrderAsync(
-        CollectionDbContext dbContext, Guid networkId, ColToken token,
+        CollectionDbContext dbContext, Entities.ColNetwork network, ColToken token,
         Guid addressId, Guid userId, TokenTransferLog log, CancellationToken ct)
     {
         var now = _clock.Now;
         var amount = TryScaleRaw(log.RawAmount, token.Decimals, out var overflow);
 
+        // 手续费/净额快照（对齐线上 SnapshotFee：费率取网络行、向零 8 位；费率 0 = 不收费）
+        var (feeRate, fee, actual) = SnapshotDepositFee(network.DepositFeeRate, amount);
+
         DepositOrderStatus status;
         decimal? finalAmount;
+        decimal? finalFee = null;
+        decimal? finalActual = null;
+        decimal? finalFeeRate = null;
         if (overflow)
         {
             status = DepositOrderStatus.PrecisionOverflow;
@@ -232,15 +238,27 @@ public class DepositScanManager : DomainService
             status = DepositOrderStatus.SkippedBelowMinDeposit;
             finalAmount = amount;
         }
+        else if (actual <= 0)
+        {
+            // 手续费吃光毛额：终态不归集不加余额（快照留痕，等价线上 actual<=0 拒绝）
+            status = DepositOrderStatus.SkippedBelowMinDeposit;
+            finalAmount = amount;
+            finalFee = fee;
+            finalActual = actual;
+            finalFeeRate = feeRate;
+        }
         else
         {
             status = DepositOrderStatus.PendingConfirm;
             finalAmount = amount;
+            finalFee = fee;
+            finalActual = actual;
+            finalFeeRate = feeRate;
         }
 
         await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO "ColDepositOrders" ("Id", "NetworkId", "TokenId", "UserId", "AddressId", "ToAddress", "FromAddress", "TxHash", "LogIndex", "RawAmount", "Amount", "BlockNumber", "BlockTime", "Status", "SweepTaskId", "CreationTime")
-            VALUES ({_guidGenerator.Create()}, {networkId}, {token.Id}, {userId}, {addressId}, {log.To}, {log.From}, {log.TxHash}, {log.LogIndex}, {log.RawAmount}, {finalAmount}, {log.BlockNumber}, {now}, {(int)status}, NULL, {now})
+            INSERT INTO "ColDepositOrders" ("Id", "NetworkId", "TokenId", "UserId", "AddressId", "ToAddress", "FromAddress", "TxHash", "LogIndex", "RawAmount", "Amount", "Fee", "ActualAmount", "FeeRateSnapshot", "BlockNumber", "BlockTime", "Status", "SweepTaskId", "CreationTime")
+            VALUES ({_guidGenerator.Create()}, {network.Id}, {token.Id}, {userId}, {addressId}, {log.To}, {log.From}, {log.TxHash}, {log.LogIndex}, {log.RawAmount}, {finalAmount}, {finalFee}, {finalActual}, {finalFeeRate}, {log.BlockNumber}, {now}, {(int)status}, NULL, {now})
             ON CONFLICT ("TxHash", "LogIndex") DO NOTHING
             """, ct);
 
@@ -295,6 +313,20 @@ public class DepositScanManager : DomainService
             {
                 order.Status = DepositOrderStatus.Confirmed;
             }
+
+            // 大额放行门（线上 AutoCreditMaxAmount 同款）：毛额超过自动额度的单停在 Confirmed
+            // 不挂归集任务，等管理端放行（放行只入队，入账仍走归集确认的净额路径）。
+            // 复扫谓词会每轮重选这些单——每轮重判一次门槛，放行前幂等跳过
+            var gross = order.Amount ?? 0m;
+            var autoMax = network.AutoCreditMaxAmount;
+            if (autoMax >= 0 && gross > autoMax)
+            {
+                Logger.LogInformation(
+                    "进款单 {OrderId} 毛额 {Gross} 超过自动归集额度 {Max}，停在 Confirmed 等管理端放行",
+                    order.Id, gross, autoMax);
+                continue;
+            }
+
             // 已 Confirmed 的解链尾巴单：保持状态，仅重新链接到（新）Queued 任务
 
             if (!queuedByAddressDict.TryGetValue(order.AddressId, out var task))
@@ -322,6 +354,21 @@ public class DepositScanManager : DomainService
         }
 
         Logger.LogInformation("代币 {Symbol} 确认进款 {Count} 笔（待归集）", token.Symbol, pending.Count);
+    }
+
+    /// <summary>
+    /// 充值手续费快照（对齐线上 SnapshotFee）：fee = truncate8(毛额 × 费率)，actual = 毛额 − fee。
+    /// 费率 0 = 不收费（fee=0、actual=毛额）。overflow 时调用方已走终态，不入此函数语义。
+    /// </summary>
+    internal static (decimal FeeRate, decimal Fee, decimal Actual) SnapshotDepositFee(decimal feeRate, decimal? gross)
+    {
+        if (gross is not { } value)
+        {
+            return (feeRate, 0m, 0m);
+        }
+
+        var fee = feeRate <= 0 ? 0m : decimal.Truncate(value * feeRate * 100_000_000m) / 100_000_000m;
+        return (feeRate, fee, value - fee);
     }
 
     private async Task CheckSkipRatioAsync(

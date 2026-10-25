@@ -31,7 +31,10 @@ public class WithdrawLedgerPoster : DomainService
         return currency == Contracts.CollectionCurrency.Usdc ? "USDC" : "USDT";
     }
 
-    /// <summary>充值入账（归集确认路径调用，与 ColBalance CreditAsync 同事务）。</summary>
+    /// <summary>
+    /// 充值入账净额（归集确认路径调用，与 ColBalance CreditAsync 同事务）。
+    /// 有手续费时另过 <see cref="PostDepositFeeAsync"/>（借 2201 用户可用 / 贷 6003 手续费收入）。
+    /// </summary>
     public virtual Task<Guid> PostDepositCreditAsync(Guid depositOrderId, Guid userId, Contracts.CollectionCurrency currency, decimal amount)
     {
         return _ledger.PostAsync(new FinanceBizEvent(
@@ -41,6 +44,34 @@ public class WithdrawLedgerPoster : DomainService
             From: Ref(FinanceAccountCodes.OnChainAsset),
             To: Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()),
             Summary: $"充值入账 {amount:0.########} {currency}"));
+    }
+
+    /// <summary>充值手续费过账（Fee = 0 跳过；幂等键 = 同单 phase=fee）。</summary>
+    public virtual async Task<Guid?> PostDepositFeeAsync(Guid depositOrderId, Guid userId, Contracts.CollectionCurrency currency, decimal fee)
+    {
+        if (fee == 0m)
+        {
+            return null;
+        }
+
+        return await _ledger.PostAsync(new FinanceBizEvent(
+            FinanceBizTypes.Deposit, depositOrderId.ToString("D"), FinanceBizTypes.Phases.Fee,
+            CurrencyCode(currency), fee,
+            UserId: userId,
+            From: Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()),
+            To: Ref(FinanceAccountCodes.WithdrawFeeIncome),
+            Summary: $"充值手续费 {fee:0.########} {CurrencyCode(currency)}"));
+    }
+
+    /// <summary>入账净额解析：优先快照 ActualAmount；历史单（null/0 且无手续费）回退毛额（线上同款兼容）。</summary>
+    public static decimal ResolveCreditAmount(decimal? amount, decimal? actualAmount, decimal? fee)
+    {
+        if (actualAmount is { } actual && actual > 0m)
+        {
+            return actual;
+        }
+
+        return fee is > 0m ? 0m : amount ?? 0m;
     }
 
     /// <summary>提现提交冻结（可用→冻结，金额 = 总额）。</summary>

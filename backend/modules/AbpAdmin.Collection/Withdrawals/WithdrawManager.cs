@@ -73,6 +73,10 @@ public class WithdrawManager : DomainService
         }
 
         toAddress = ValidateAddress(toAddress);
+
+        // 金额先向零截断 8 位（对齐线上 RoundUsdt8：余额侧仍 18 位精度，只约束新申请粒度），
+        // 再验最低额/单笔上限/手续费——顺序与线上 SubmitWithdraw 一致
+        amount = Truncate8(amount);
         if (amount <= 0)
         {
             throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
@@ -84,6 +88,16 @@ public class WithdrawManager : DomainService
             throw new BusinessException(CollectionErrorCodes.WithdrawBelowMin)
                 .WithData("Amount", CollectionAmounts.Format(amount))
                 .WithData("Min", CollectionAmounts.Format(minAmount));
+        }
+
+        // MaxDailyAmount 沿用线上 MaxDailyWithdraw 语义 = 单笔上限（本笔 > 上限即拒，0/空 = 不限）：
+        // 不存在「当日金额加总池」，撤单/驳回也就无所谓释放金额额度
+        var maxAmount = await GetPerOrderAmountLimitAsync();
+        if (maxAmount > 0 && amount > maxAmount)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawDailyAmountExceeded)
+                .WithData("Amount", CollectionAmounts.Format(amount))
+                .WithData("Max", CollectionAmounts.Format(maxAmount));
         }
 
         var feeRate = await GetSettingDecimalAsync(CollectionSettings.Withdraw.FeeRate, WithdrawDefaults.FeeRate);
@@ -115,29 +129,33 @@ public class WithdrawManager : DomainService
         var orderId = GuidGenerator.Create();
         var now = _clock.Now;
 
-        // ① 冻结总额：条件 UPDATE 拿余额行锁（并发提交在此串行化），可用不足抛 InsufficientBalance
-        await _balances.FreezeAsync(userId, currency, amount, orderId);
-
-        // ② 锁内查当日额度（UTC 日；撤单/拒绝释放额度，所以只排除这两个终态）
-        var utcToday = now.Date;
-        var todays = await dbContext.WithdrawOrders.AsNoTracking()
-            .Where(o => o.UserId == userId && o.CreationTime >= utcToday
-                        && o.Status != WithdrawStatus.Cancelled && o.Status != WithdrawStatus.Rejected)
-            .ToListAsync();
-
-        var maxCount = await GetSettingIntAsync(CollectionSettings.Withdraw.MaxDailyCount, WithdrawDefaults.MaxDailyCount);
-        if (todays.Count >= maxCount)
+        // ①′ 先按固定币种序（USDT→USDC）把该用户两行余额都锁住，再冻结、再计数：
+        // 笔数按用户跨币种合并，锁序不统一时 USDT 单（锁序 USDT→USDC）与 USDC 单（USDC→USDT）
+        // 交叉加锁 → PG 死锁检测杀一侧（实测抓出）。对齐线上「先锁资金账户再数笔数」且锁序恒定。
+        // 无副作用的条件 UPDATE 拿行锁；行不存在时 0 行更新（退化为单币种行为）。
+        foreach (var lockCurrency in new[] { CollectionCurrency.Usdt, CollectionCurrency.Usdc })
         {
-            throw new BusinessException(CollectionErrorCodes.WithdrawDailyCountExceeded)
-                .WithData("Count", todays.Count).WithData("Max", maxCount);
+            await dbContext.Balances
+                .Where(b => b.UserId == userId && b.Currency == lockCurrency)
+                .ExecuteUpdateAsync(s => s.SetProperty(b => b.Version, b => b.Version + 1));
         }
 
-        var maxDaily = await GetDailyAmountLimitAsync();
-        if (todays.Sum(o => o.Amount) + amount > maxDaily)
+        // ① 冻结总额：条件 UPDATE 拿本币种余额行锁（同币种并发在此二次串行化），可用不足抛 InsufficientBalance
+        await _balances.FreezeAsync(userId, currency, amount, orderId);
+
+        // ② 锁内数当日笔数（UTC 日；按用户跨币种合并——线上按用户不按网络；取消/驳回不占）。
+        // 金额无当日池（单笔上限已在提交前验），此处只数笔数。
+        var utcToday = now.Date;
+        var todayCount = await dbContext.WithdrawOrders.AsNoTracking()
+            .Where(o => o.UserId == userId && o.CreationTime >= utcToday
+                        && o.Status != WithdrawStatus.Cancelled && o.Status != WithdrawStatus.Rejected)
+            .CountAsync();
+
+        var maxCount = await GetSettingIntAsync(CollectionSettings.Withdraw.MaxDailyCount, WithdrawDefaults.MaxDailyCount);
+        if (todayCount >= maxCount)
         {
-            throw new BusinessException(CollectionErrorCodes.WithdrawDailyAmountExceeded)
-                .WithData("Amount", CollectionAmounts.Format(amount))
-                .WithData("Max", CollectionAmounts.Format(maxDaily));
+            throw new BusinessException(CollectionErrorCodes.WithdrawDailyCountExceeded)
+                .WithData("Count", todayCount).WithData("Max", maxCount);
         }
 
         // ③ 落单 Pending（余额流水与订单共用 orderId 作为幂等/关联键）
@@ -164,15 +182,15 @@ public class WithdrawManager : DomainService
     }
 
     /// <summary>
-    /// 当日总额度：留空 = 不限。配置了但解析不出 = fail-closed 拒绝提交（模块教义：限额存在但读不出
-    /// 不得静默放开——原先回落 50000 会把运营收紧的额度悄悄放大）。
+    /// 单笔提现上限（沿用线上 MaxDailyWithdraw 语义）：空或 0 = 不限。配置了但解析不出 =
+    /// fail-closed 拒绝提交（模块教义：限额存在但读不出不得静默放开）。
     /// </summary>
-    private async Task<decimal> GetDailyAmountLimitAsync()
+    private async Task<decimal> GetPerOrderAmountLimitAsync()
     {
         var raw = await _settings.GetOrNullAsync(CollectionSettings.Withdraw.MaxDailyAmount);
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return decimal.MaxValue;
+            return 0m;
         }
 
         if (!decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
@@ -271,7 +289,16 @@ public class WithdrawManager : DomainService
     /// <summary>功能总开关（宿主配置 Collection:Withdraw:Enabled，默认 false）。</summary>
     public virtual bool IsEnabled()
     {
-        return bool.TryParse(_configuration[CollectionSettings.WithdrawConfig.Enabled], out var v) && v;
+        return IsEnabled(_configuration[CollectionSettings.WithdrawConfig.Enabled]);
+    }
+
+    /// <summary>
+    /// 开关解析纯函数（Cursor 计划 enabled-false-predicate）：仅 "true"/"True" 等布尔真值为开，
+    /// null/空/垃圾值一律关（fail-closed）。表驱动测试锁。
+    /// </summary>
+    internal static bool IsEnabled(string? raw)
+    {
+        return bool.TryParse(raw, out var v) && v;
     }
 
     private void AssertEnabled()

@@ -291,6 +291,10 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("ActualAmount")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
                     b.Property<Guid>("AddressId")
                         .HasColumnType("uuid");
 
@@ -306,6 +310,14 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.Property<DateTime>("CreationTime")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<decimal?>("Fee")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<decimal?>("FeeRateSnapshot")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)");
 
                     b.Property<string>("FromAddress")
                         .IsRequired()
@@ -368,11 +380,17 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("AutoCreditMaxAmount")
+                        .HasColumnType("numeric");
+
                     b.Property<long>("ChainId")
                         .HasColumnType("bigint");
 
                     b.Property<DateTime>("CreationTime")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<decimal>("DepositFeeRate")
+                        .HasColumnType("numeric");
 
                     b.Property<DateTime?>("GasLowAlertedAt")
                         .HasColumnType("timestamp without time zone");

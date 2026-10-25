@@ -26,6 +26,9 @@ public class CollectionLedgerSeedProvider : ILedgerSeedProvider, ITransientDepen
         // 充值入账（归集确认同事务过账）：链上资产增、欠用户增
         new(FinanceBizTypes.Deposit, FinanceBizTypes.Phases.Pay, "充值入账",
             "[{\"debit\":\"1001\",\"credit\":\"2201\",\"note\":\"充值入账\"}]"),
+        // 充值手续费：净额入账后从用户可用收取（Fee=0 跳过，不落零额凭证）
+        new(FinanceBizTypes.Deposit, FinanceBizTypes.Phases.Fee, "充值手续费",
+            "[{\"debit\":\"2201\",\"credit\":\"6003\",\"note\":\"充值手续费\"}]"),
 
         // 提现状态机：冻结/解冻是负债内部重分类；审核把负债转应付；打款清应付减链上资产
         new(FinanceBizTypes.Withdraw, FinanceBizTypes.Phases.Freeze, "提现冻结：可用→冻结",

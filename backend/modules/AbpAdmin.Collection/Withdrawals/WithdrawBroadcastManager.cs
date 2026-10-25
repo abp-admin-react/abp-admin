@@ -255,9 +255,12 @@ public class WithdrawBroadcastManager : DomainService
                     // pending > NonceUsed：nonce 已被某笔占用。两种可能：本单交易在途/已挖（去认领），
                     // 或本单发送从未抵达节点、nonce 被后继单占了（本单必未上链）。用「同 nonce 的其他单」
                     // 区分：同账户同 nonce 只能有一笔上链——别的单已带着该 nonce 落哈希/完结 ⇒ 本单必未出款。
+                    // 证据必须收紧到「后继单已 Completed」：Completed 必经回执成功 ⇒ 后继交易确实上链
+                    // 占用了该 nonce ⇒ 同账户同 nonce 本单必未上链（数学证明）。若只看 TxHash != null，
+                    // 后继已广播未挖、本单同 nonce 已挖的窗口会把已出款的单判成未出款而退款——双付。
                     var nonceTakenByOther = await dbContext.WithdrawOrders.AsNoTracking().AnyAsync(
                         o => o.Id != order.Id && o.NonceUsed == order.NonceUsed
-                             && (o.TxHash != null || o.Status == WithdrawStatus.Completed), ct);
+                             && o.Status == WithdrawStatus.Completed, ct);
                     if (nonceTakenByOther)
                     {
                         if (order.RetryCount + 1 >= maxRetries)

@@ -37,6 +37,18 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
     /// <summary>每用例唯一地址：用例共享同一 PG 库，固定地址会跨用例串行（实测踩过）。</summary>
     private static string WatchAddress => "0x" + Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N")[..8];
 
+    /// <summary>落库设置网络充值费率/自动归集额度（RunTokenRound 会重读网络行，内存改动无效）。</summary>
+    private async Task SetNetworkDepositPolicyAsync(Guid networkId, decimal feeRate, decimal autoMax)
+    {
+        using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
+        var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+        await dbContext.Networks.Where(n => n.Id == networkId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(n => n.DepositFeeRate, feeRate)
+                .SetProperty(n => n.AutoCreditMaxAmount, autoMax));
+        await uow.CompleteAsync();
+    }
+
     private async Task<(ColNetwork Network, ColToken Usdt, ColToken Usdc)> SeedChainAsync(bool scanRan = false)
     {
         using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
@@ -49,6 +61,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
             Name = "BSC-TEST-" + Guid.NewGuid().ToString("N")[..8],
             ChainId = 97,
             NodeLogResultCap = 100,
+            AutoCreditMaxAmount = 5000m, // 大额放行门默认（与生产种子同值；0=全拦哨兵）
             RpcCipher = "x",
             MnemonicCipher = mnemonicCipher,
             CreationTime = TestClock.Now,
@@ -664,6 +677,101 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         (await ledger.GetBalanceAsync(new AbpAdmin.Ledger.Integration.Contracts.AccountRef(
             AbpAdmin.Ledger.Integration.Contracts.FinanceAccountCodes.OnChainAsset,
             AbpAdmin.Ledger.Integration.Contracts.FinOwnerType.Platform, ""), "USDT")).ShouldBe(20m);
+    }
+
+    [Fact]
+    public async Task Deposit_Fee_Snapshot_And_Net_Credit()
+    {
+        var scUser = NewUser();
+        var watched = WatchAddress;
+        var (network, usdt, _) = await SeedChainAsync(scanRan: true);
+        usdt.VaultAddress = "0xvault";
+        await SetNetworkDepositPolicyAsync(network.Id, feeRate: 0.001m, autoMax: 5000m); // 千一充值手续费
+        var gateway = new FakeChainGateway(head: 500);
+        gateway.HasReceipt = true;
+        gateway.ReceiptConfirmationsMet = true;
+
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId, userId: scUser);
+        // 手工建单不走建单快照路径——补写快照列（快照属于扫描建单路径，此处模拟其产物）
+        using (var suow = GetRequiredService<IUnitOfWorkManager>().Begin())
+        {
+            var sdb = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await sdb.DepositOrders.Where(o => o.Id == orderId).ExecuteUpdateAsync(x => x
+                .SetProperty(o => o.FeeRateSnapshot, 0.001m)
+                .SetProperty(o => o.Fee, 0.02m)
+                .SetProperty(o => o.ActualAmount, 19.98m));
+            await suow.CompleteAsync();
+        }
+
+        // 先走扫描确认挂队（SweepManager 不推确认），再归集两轮（广播 + 回执确认入账）
+        await ActivateAsync(network, usdt, gateway, orderId);
+        var manager = NewSweepManager();
+        for (var i = 0; i < 2; i++)
+        {
+            await manager.RunTokenRoundAsync(network, usdt, gateway, 12, null, 0.005m,
+                TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        }
+
+        var dbContext = await DbAsync();
+        var order = await dbContext.DepositOrders.AsNoTracking().SingleAsync(o => o.Id == orderId);
+        order.Status.ShouldBe(DepositOrderStatus.Swept);
+
+        // 余额 = 净额 19.98（毛 20 − fee 0.02）；流水与 Eto 同净额
+        (await dbContext.Balances.SingleAsync(b => b.UserId == scUser)).Balance.ShouldBe(19.98m);
+
+        // 账本：deposit/pay 净额（借 1001 / 贷 2201 = 19.98）+ deposit/fee（借 2201 / 贷 6003 = 0.02）
+        var ledger = GetRequiredService<AbpAdmin.Ledger.Integration.Contracts.ILedgerIntegrationService>();
+        (await ledger.GetBalanceAsync(new AbpAdmin.Ledger.Integration.Contracts.AccountRef(
+            AbpAdmin.Ledger.Integration.Contracts.FinanceAccountCodes.UserAvailable,
+            AbpAdmin.Ledger.Integration.Contracts.FinOwnerType.User, scUser.ToString()), "USDT")).ShouldBe(19.98m);
+        (await ledger.GetBalanceAsync(new AbpAdmin.Ledger.Integration.Contracts.AccountRef(
+            AbpAdmin.Ledger.Integration.Contracts.FinanceAccountCodes.WithdrawFeeIncome,
+            AbpAdmin.Ledger.Integration.Contracts.FinOwnerType.Platform, ""), "USDT")).ShouldBe(0.02m);
+    }
+
+    [Fact]
+    public async Task Large_Deposit_Stays_Confirmed_Until_Approved()
+    {
+        var scUser = NewUser();
+        var watched = WatchAddress;
+        var (network, usdt, _) = await SeedChainAsync(scanRan: true);
+        usdt.VaultAddress = "0xvault";
+        await SetNetworkDepositPolicyAsync(network.Id, feeRate: 0m, autoMax: 20m); // 超过 20 的进款等人放行
+        var gateway = new FakeChainGateway(head: 500);
+
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, usdt, watched, 25m, addressId, userId: scUser, blockNumber: 480);
+
+        var scan = GetRequiredService<DepositScanManager>();
+        await scan.RunTokenRoundAsync(network, usdt, gateway, 12, 50, 1440,
+            TimeSpan.FromMinutes(1440), 0.9m, CancellationToken.None);
+
+        var dbContext = await DbAsync();
+        var order = await dbContext.DepositOrders.AsNoTracking().SingleAsync(o => o.Id == orderId);
+        order.Status.ShouldBe(DepositOrderStatus.Confirmed);
+        order.SweepTaskId.ShouldBeNull(); // 大额门：确认但不挂队
+
+        // 管理端放行（只入队）→ 挂上任务；重复放行被状态门拒绝
+        var admin = GetRequiredService<Services.CollectionNetworkAdminAppService>();
+        await admin.ApproveLargeDepositAsync(orderId);
+        (await dbContext.DepositOrders.AsNoTracking().SingleAsync(o => o.Id == orderId)).SweepTaskId.ShouldNotBeNull();
+        await Should.ThrowAsync<Volo.Abp.BusinessException>(() => admin.ApproveLargeDepositAsync(orderId));
+    }
+
+    [Fact]
+    public void Deposit_Fee_Pure_Functions()
+    {
+        // 快照：向零 8 位、费率 0 = 不收费、null 毛额（超精度路径）安全
+        DepositScanManager.SnapshotDepositFee(0.001m, 20m).ShouldBe((0.001m, 0.02m, 19.98m));
+        DepositScanManager.SnapshotDepositFee(0m, 20m).ShouldBe((0m, 0m, 20m));
+        DepositScanManager.SnapshotDepositFee(0.003m, 10.123456789m).ShouldBe((0.003m, 0.03037037m, 10.093086419m));
+        DepositScanManager.SnapshotDepositFee(0.001m, null).ShouldBe((0.001m, 0m, 0m));
+
+        // 净额解析：快照优先；历史单（无快照无手续费）回退毛额；历史单有 fee 无快照 → 0（不入账，人工）
+        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, 19.98m, 0.02m).ShouldBe(19.98m);
+        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, null, null).ShouldBe(20m);
+        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, null, 0.02m).ShouldBe(0m);
     }
 
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────

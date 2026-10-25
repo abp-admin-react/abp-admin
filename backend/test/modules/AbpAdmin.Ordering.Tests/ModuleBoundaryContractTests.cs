@@ -63,6 +63,24 @@ public class ModuleBoundaryContractTests
     }
 
     [Fact]
+    public void Collection_References_Only_Ledger_Contracts_Not_Implementation()
+    {
+        // Collection → Ledger 接线边界（Cursor 计划补锁）：只允许引用纯契约工程
+        // AbpAdmin.Ledger.Integration.Contracts（ILedgerIntegrationService/ILedgerSeedProvider），
+        // 不得引用 Ledger 实现（AbpAdmin.Ledger）——否则模块反向耦合总账实现。
+        var repoRoot = FindRepoRoot(Path.GetDirectoryName(typeof(ModuleBoundaryContractTests).Assembly.Location)!);
+        var collectionProject = Directory.GetFiles(
+            Path.Combine(repoRoot, "modules", "AbpAdmin.Collection"), "AbpAdmin.Collection.csproj").Single();
+        var collectionRefs = System.Xml.Linq.XDocument.Load(collectionProject)
+            .Descendants("ProjectReference")
+            .Select(e => (string)e.Attribute("Include")!)
+            .Select(x => x.Replace('\\', '/'))
+            .ToList();
+        collectionRefs.ShouldContain(x => x.EndsWith("AbpAdmin.Ledger.Integration.Contracts.csproj"));
+        collectionRefs.ShouldNotContain(x => x.EndsWith("AbpAdmin.Ledger/AbpAdmin.Ledger.csproj"));
+    }
+
+    [Fact]
     public void Both_Module_DbContexts_Declare_Default_Connection_String()
     {
         AssertDefaultConnectionString(typeof(Data.OrderingDbContext));

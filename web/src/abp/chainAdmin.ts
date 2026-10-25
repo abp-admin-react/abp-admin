@@ -42,6 +42,10 @@ export interface DepositOrderListDto {
   toAddress: string;
   fromAddress: string;
   amount?: string;
+  /** 充值手续费（建单快照；历史单 undefined） */
+  fee?: string;
+  /** 入账净额（建单快照；历史单 undefined = 回退毛额） */
+  actualAmount?: string;
   rawAmount: string;
   symbol: string;
   /** 网络名（ColNetwork.Name，如 BSC） */
@@ -123,6 +127,14 @@ export async function getSweepTasks(params: {
   return request(`${BASE}/sweep-tasks`, { params });
 }
 
+/** 大额进款放行（只入队；入账仍走归集确认的净额路径）。仅 Confirmed 且未挂任务的单。 */
+export async function approveLargeDeposit(id: string): Promise<void> {
+  await request(`${BASE}/approve-large-deposit`, {
+    method: 'POST',
+    params: { id },
+  });
+}
+
 export async function getVaultChecks(params: {
   skipCount?: number;
   maxResultCount?: number;
@@ -135,19 +147,40 @@ export async function setRpcUrl(rpcUrl: string): Promise<void> {
 }
 
 export async function setNodeLogResultCap(cap: number): Promise<void> {
-  await request(`${BASE}/set-node-log-result-cap`, { method: 'POST', params: { cap } });
+  await request(`${BASE}/set-node-log-result-cap`, {
+    method: 'POST',
+    params: { cap },
+  });
 }
 
-export async function setVaultAddress(symbol: string, vaultAddress: string): Promise<void> {
-  await request(`${BASE}/set-vault-address`, { method: 'POST', params: { symbol, vaultAddress } });
+export async function setVaultAddress(
+  symbol: string,
+  vaultAddress: string,
+): Promise<void> {
+  await request(`${BASE}/set-vault-address`, {
+    method: 'POST',
+    params: { symbol, vaultAddress },
+  });
 }
 
-export async function setMinDeposit(symbol: string, minDeposit: string): Promise<void> {
-  await request(`${BASE}/set-min-deposit`, { method: 'POST', params: { symbol, minDeposit } });
+export async function setMinDeposit(
+  symbol: string,
+  minDeposit: string,
+): Promise<void> {
+  await request(`${BASE}/set-min-deposit`, {
+    method: 'POST',
+    params: { symbol, minDeposit },
+  });
 }
 
-export async function setTokenEnabled(symbol: string, isEnabled: boolean): Promise<void> {
-  await request(`${BASE}/set-token-enabled`, { method: 'POST', params: { symbol, isEnabled } });
+export async function setTokenEnabled(
+  symbol: string,
+  isEnabled: boolean,
+): Promise<void> {
+  await request(`${BASE}/set-token-enabled`, {
+    method: 'POST',
+    params: { symbol, isEnabled },
+  });
 }
 
 export async function generateMnemonic(): Promise<string> {
@@ -160,20 +193,36 @@ export async function getApiKeys(): Promise<ChainApiKeysDto> {
 }
 
 /** 添加一把扫链 KEY（明文只传不存；provider: RpcBsc / EtherscanV2）。ABP 约定路由：Add 前缀动词省略 → POST /api-key */
-export async function addApiKey(provider: string, key: string, label?: string): Promise<ChainApiKeyDto> {
-  return request(`${BASE}/api-key`, { method: 'POST', params: { provider, key, label } });
+export async function addApiKey(
+  provider: string,
+  key: string,
+  label?: string,
+): Promise<ChainApiKeyDto> {
+  return request(`${BASE}/api-key`, {
+    method: 'POST',
+    params: { provider, key, label },
+  });
 }
 
 export async function removeApiKey(id: string): Promise<void> {
   await request(`${BASE}/${id}/api-key`, { method: 'DELETE' });
 }
 
-export async function setApiKeyEnabled(id: string, isEnabled: boolean): Promise<void> {
-  await request(`${BASE}/set-api-key-enabled`, { method: 'POST', params: { id, isEnabled } });
+export async function setApiKeyEnabled(
+  id: string,
+  isEnabled: boolean,
+): Promise<void> {
+  await request(`${BASE}/set-api-key-enabled`, {
+    method: 'POST',
+    params: { id, isEnabled },
+  });
 }
 
 /** 状态标签色 */
-export const DEPOSIT_STATUS_LABELS: Record<string, { color: string; text: string }> = {
+export const DEPOSIT_STATUS_LABELS: Record<
+  string,
+  { color: string; text: string }
+> = {
   PendingConfirm: { color: 'processing', text: '待确认' },
   Confirmed: { color: 'cyan', text: '已确认/待归集' },
   SkippedBelowMinDeposit: { color: 'default', text: '低于最低额' },
@@ -182,7 +231,10 @@ export const DEPOSIT_STATUS_LABELS: Record<string, { color: string; text: string
   Swept: { color: 'success', text: '已入账' },
 };
 
-export const SWEEP_STATUS_LABELS: Record<string, { color: string; text: string }> = {
+export const SWEEP_STATUS_LABELS: Record<
+  string,
+  { color: string; text: string }
+> = {
   Queued: { color: 'default', text: '排队中' },
   Fueling: { color: 'orange', text: '打油中' },
   Sweeping: { color: 'processing', text: '归集中' },

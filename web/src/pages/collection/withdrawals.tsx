@@ -332,7 +332,8 @@ export default function WithdrawalsPage() {
               <Text>单笔最小 {status.minAmount}</Text>
               <Text>费率 {status.feeRate}</Text>
               <Text>
-                当日额度 {status.maxDailyAmount} / {status.maxDailyCount} 笔
+                单笔上限 {status.maxDailyAmount} · 每日 {status.maxDailyCount}{' '}
+                笔
               </Text>
               <Text>小额自动审 ≤ {status.autoApproveMaxAmount}</Text>
               <Text>待审 {status.pendingCount}</Text>

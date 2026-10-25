@@ -416,13 +416,20 @@ public class SweepManager : DomainService
                 .ToListAsync(ct);
             foreach (var order in linked)
             {
+                // 入账净额（线上口径：充值入账的是建单快照净额；历史单无快照回退毛额）。
+                // BalanceCreditedEto 在 CreditAsync 内携带同一净额，只发一次。
+                // 两本一致收敛到净额：余额行直接入净额（BalanceCreditedEto 同净额，只发一次）；
+                // 账本按线上口径过毛额（借 1001 / 贷 2201）再扣手续费（借 2201 / 贷 6003），
+                // 2201 净额 = 毛额 − fee = 余额行。若两侧都用净额+fee 再扣会把用户扣两遍（实测抓出）。
+                var gross = order.Amount ?? 0m;
+                var credit = AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(
+                    order.Amount, order.ActualAmount, order.Fee);
+                var currency = MapCurrency(token.Symbol);
                 await _balanceManager.CreditAsync(
-                    order.UserId, MapCurrency(token.Symbol), order.Amount!.Value,
+                    order.UserId, currency, credit,
                     idempotencyKey: BalanceIdempotencyKeys.ForDepositOrder(order.Id));
-                // 账本入账（deposit/pay 借 1001 链上资产 / 贷 2201 用户可用，同事务；
-                // BizRefId = 进款单 Id，幂等）。余额侧已有 IdempotencyKey 兜底，账本重放安全。
-                await _ledgerPoster.PostDepositCreditAsync(
-                    order.Id, order.UserId, MapCurrency(token.Symbol), order.Amount!.Value);
+                await _ledgerPoster.PostDepositCreditAsync(order.Id, order.UserId, currency, gross);
+                await _ledgerPoster.PostDepositFeeAsync(order.Id, order.UserId, currency, order.Fee ?? 0m);
                 order.Status = DepositOrderStatus.Swept;
             }
 

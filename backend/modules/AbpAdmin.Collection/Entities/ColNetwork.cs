@@ -39,6 +39,17 @@ public class ColNetwork : BasicAggregateRoot<Guid>
     /// <summary>提现热钱包地址（0x + 40 位十六进制）。null = 未配置（审批/广播拒绝）。</summary>
     public string? WithdrawVaultAddress { get; set; }
 
+    // ── 充值手续费与大额放行（对齐线上 DepositCreditService）：网络级，USDT/USDC 共用 ──
+
+    /// <summary>充值手续费率（0-1，按毛额计，建单时向零截断 8 位快照）。0 = 不收费。</summary>
+    public decimal DepositFeeRate { get; set; }
+
+    /// <summary>
+    /// 进款毛额超过此值的单不自动进归集，停在 Confirmed 等管理端放行（放行只入队，入账仍走归集确认）。
+    /// 0 = 全部等放行；负值视为 0。线上 AutoCreditMaxAmount 同语义。
+    /// </summary>
+    public decimal AutoCreditMaxAmount { get; set; }
+
     /// <summary>
     /// 提现热钱包私钥密文（版本前缀 + ABP StringEncryption，口令 = Collection:MasterKey）。
     /// 管理端设置时校验地址与私钥匹配；明文只在签名临界区内短暂解出，不落日志。

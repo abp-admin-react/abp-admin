@@ -27,6 +27,21 @@ public class ChainWorkerRegistrationTests
             BuildConfiguration(services));
         options.ScanEnabled.ShouldBeFalse();
         options.SweepEnabled.ShouldBeFalse();
+        options.WithdrawEnabled.ShouldBeFalse(); // 提现开关同样默认关（Cursor 计划补锁）
+    }
+
+    [Fact]
+    public async Task Withdraw_On_Without_Redis_Backend_Lock_Fails_Fast()
+    {
+        var exception = await Record.ExceptionAsync(() =>
+            HostUnderTest.CreateServiceCollectionAsync(new Dictionary<string, string?>
+            {
+                ["Collection:Withdraw:Enabled"] = "true",
+                ["Redis:IsEnabled"] = "false",
+            }));
+
+        exception.ShouldNotBeNull();
+        exception.ShouldBeOfType<Volo.Abp.AbpInitializationException>();
     }
 
     [Fact]
@@ -65,6 +80,8 @@ public class ChainWorkerRegistrationTests
         // 并断言 worker 类型本身是 IHostedService（注册语义正确性）
         typeof(CollectionChainWorkerBase).IsAssignableFrom(typeof(DepositScanWorker)).ShouldBeTrue();
         typeof(CollectionChainWorkerBase).IsAssignableFrom(typeof(SweepWorker)).ShouldBeTrue();
+        typeof(CollectionChainWorkerBase)
+            .IsAssignableFrom(typeof(AbpAdmin.Collection.Withdrawals.WithdrawBroadcastWorker)).ShouldBeTrue();
 
         // DbMigrator 项目不引用宿主工程（编译期隔离），这里核对宿主模块才调用扩展：
         var hostModuleSource = System.IO.File.ReadAllText(System.IO.Path.Combine(LocateHostDirectory(), "AbpAdminHttpApiHostModule.cs"));

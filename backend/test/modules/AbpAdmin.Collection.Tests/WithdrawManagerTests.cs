@@ -127,21 +127,23 @@ public class WithdrawManagerTests : CollectionTestBase
     }
 
     [Fact]
-    public async Task Concurrent_Submits_Respect_Daily_Amount_Under_Row_Lock()
+    public async Task Concurrent_Cross_Currency_Submits_Do_Not_Pierce_Daily_Count()
     {
-        await SetSettingAsync(AbpAdmin.Collection.Settings.CollectionSettings.Withdraw.MaxDailyAmount, "150");
-        await FundAsync(User1, 1000m);
+        // 笔数按用户跨币种合并（线上按用户不按网络）；并发异币种提交曾可同时读到旧计数双双穿透——
+        // 现在提交锁住 USDT+USDC 两行余额再计数（Cursor 计划：对齐线上「先锁资金账户再数笔数」）
+        await SetSettingAsync(AbpAdmin.Collection.Settings.CollectionSettings.Withdraw.MaxDailyCount, "1");
+        await Balances.CreditAsync(User1, CollectionCurrency.Usdt, 1000m, $"dep-a-{Guid.NewGuid()}");
+        await Poster.PostOpeningAsync(User1, CollectionCurrency.Usdt, 1000m);
+        await Balances.CreditAsync(User1, CollectionCurrency.Usdc, 1000m, $"dep-b-{Guid.NewGuid()}");
+        await Poster.PostOpeningAsync(User1, CollectionCurrency.Usdc, 1000m);
 
-        // 两笔并发各 100：冻结行锁串行化，先到者过（Σ100 ≤ 150），后到者 Σ200 > 150 拒绝并整体回滚
         var tasks = Task.WhenAll(
-            SubmitInNewScopeAsync(User1, 100m),
-            SubmitInNewScopeAsync(User1, 100m));
+            SubmitInNewScopeAsync(User1, CollectionCurrency.Usdt, 100m),
+            SubmitInNewScopeAsync(User1, CollectionCurrency.Usdc, 100m));
         var ex = await Should.ThrowAsync<BusinessException>(() => tasks);
-        ex.Code.ShouldBe(CollectionErrorCodes.WithdrawDailyAmountExceeded);
+        ex.Code.ShouldBe(CollectionErrorCodes.WithdrawDailyCountExceeded);
 
-        (await BalanceOfAsync(User1)).ShouldBe(900m);
-        (await FrozenOfAsync(User1)).ShouldBe(100m);
-        (await CountOrdersAsync(User1)).ShouldBe(1);
+        (await CountOrdersAsync(User1)).ShouldBe(1); // 只有一笔立住，另一笔被笔数挡下
     }
 
     [Fact]
@@ -264,20 +266,51 @@ public class WithdrawManagerTests : CollectionTestBase
     }
 
     [Fact]
-    public async Task Daily_Amount_Boundary_And_Excess()
+    public async Task Per_Order_Amount_Limit_Matches_Online_Semantics()
     {
         await SetSettingAsync(AbpAdmin.Collection.Settings.CollectionSettings.Withdraw.MaxDailyAmount, "150");
         await FundAsync(User1, 1000m);
         var address = "0x1111111111111111111111111111111111111111";
 
-        // 等额边界：Σ=100 + 50 = 150 ≤ 150 放行
-        await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 100m);
-        await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 50m);
-
-        // 超限：+100 → 250 > 150 拒绝（1 会先撞 MinAmount=10，用 100 隔离额度断言）
+        // 单笔上限口径（线上 MaxDailyWithdraw 同语义）：本笔 > 150 拒绝；两笔各自 ≤ 150、
+        // 合计 > 150 仍可过——没有当日金额池（Cursor 计划核实修正：原加总口径作废）
         var ex = await Should.ThrowAsync<BusinessException>(
-            () => Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 100m));
+            () => Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 150.5m));
         ex.Code.ShouldBe(CollectionErrorCodes.WithdrawDailyAmountExceeded);
+
+        var first = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 100m);
+        var second = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 50m);
+        first.Status.ShouldBe(WithdrawStatus.Pending);
+        second.Status.ShouldBe(WithdrawStatus.Pending);
+    }
+
+    [Fact]
+    public async Task Per_Order_Limit_Zero_Or_Empty_Means_Unlimited()
+    {
+        await FundAsync(User1, 10000m);
+        var address = "0x1111111111111111111111111111111111111111";
+
+        // 空/0 = 不限：先把笔数放开以隔离金额断言（默认 MaxDailyCount=3 会先拦）
+        await SetSettingAsync(AbpAdmin.Collection.Settings.CollectionSettings.Withdraw.MaxDailyCount, "99");
+        var big = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 5000m);
+        big.Status.ShouldBe(WithdrawStatus.Pending);
+
+        await SetSettingAsync(AbpAdmin.Collection.Settings.CollectionSettings.Withdraw.MaxDailyAmount, "0");
+        var another = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 3000m);
+        another.Status.ShouldBe(WithdrawStatus.Pending);
+    }
+
+    [Fact]
+    public async Task Submit_Amount_Truncated_To_8dp_Before_Limits()
+    {
+        await FundAsync(User1, 1000m);
+        // 18 位毛额先向零截 8 位（线上 RoundUsdt8）：100.123456789123 → 100.12345678，
+        // 手续费按截断后金额计（0.004 × 100.12345678 = 0.400493827…截 8 位 → 0.40049382）
+        var order = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt,
+            "0x1111111111111111111111111111111111111111", 100.123456789123m);
+        order.Amount.ShouldBe(100.12345678m);
+        order.Fee.ShouldBe(0.40049382m);
+        order.ActualAmount.ShouldBe(99.72296296m);
     }
 
     [Fact]
@@ -298,11 +331,12 @@ public class WithdrawManagerTests : CollectionTestBase
 
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────
 
-    private async Task<ColWithdrawOrder> SubmitInNewScopeAsync(Guid userId, decimal amount)
+    private async Task<ColWithdrawOrder> SubmitInNewScopeAsync(
+        Guid userId, CollectionCurrency currency, decimal amount)
     {
         using var scope = ServiceProvider.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<WithdrawManager>();
-        return await manager.SubmitAsync(userId, CollectionCurrency.Usdt,
+        return await manager.SubmitAsync(userId, currency,
             "0x1111111111111111111111111111111111111111", amount);
     }
 

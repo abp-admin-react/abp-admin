@@ -176,6 +176,9 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.Property(x => x.FromAddress).IsRequired().HasMaxLength(42);
             b.Property(x => x.RawAmount).IsRequired().HasMaxLength(96);
             b.Property(x => x.Amount).HasPrecision(28, 18);
+            b.Property(x => x.Fee).HasPrecision(28, 18);
+            b.Property(x => x.ActualAmount).HasPrecision(28, 18);
+            b.Property(x => x.FeeRateSnapshot).HasPrecision(18, 8);
 
             // 计划第 5.6 节：唯一 (TxHash, LogIndex)——重启不重复建单
             b.HasIndex(x => new { x.TxHash, x.LogIndex }).IsUnique();
