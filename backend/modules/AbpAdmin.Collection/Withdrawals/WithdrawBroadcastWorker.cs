@@ -5,35 +5,36 @@ using System.Threading.Tasks;
 using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Collection.Settings;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Volo.Abp.DistributedLocking;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.Settings;
 using Volo.Abp.Uow;
 
 namespace AbpAdmin.Collection.Withdrawals;
 
 /// <summary>
 /// 提现广播 worker（M3 薄壳）：轮次逻辑在 <see cref="WithdrawBroadcastManager"/>（可注入假网关直测）。
-/// 开关 Collection:Withdraw:Enabled（默认 false——纯睡眠不取锁不碰链）；Redis 轮锁 + 墙钟预算
-/// 与扫链/归集 worker 同纪律（CollectionChainWorkerBase）。
+/// 开关 Collection.Withdraw.Enabled（设置页热改，默认 false——纯睡眠不取锁不碰链；与提交总闸同键同源）；
+/// 广播节奏（间隔/批量）同样热读。Redis 轮锁 + 墙钟预算与扫链/归集 worker 同纪律（CollectionChainWorkerBase）。
 /// </summary>
 public class WithdrawBroadcastWorker : CollectionChainWorkerBase
 {
-    private readonly CollectionChainWorkerOptions _options;
-
     public WithdrawBroadcastWorker(
         IAbpDistributedLock distributedLock,
         IServiceScopeFactory scopeFactory,
+        IConfiguration configuration,
         CollectionChainWorkerOptions options,
         ILogger<WithdrawBroadcastWorker> logger)
-        : base(distributedLock, scopeFactory,
-            TimeSpan.FromSeconds(options.WithdrawBroadcastIntervalSeconds),
+        : base(distributedLock, scopeFactory, configuration,
+            TimeSpan.FromSeconds(WithdrawDefaults.BroadcastIntervalSeconds),
             TimeSpan.FromSeconds(options.WithdrawRoundBudgetSeconds),
             logger)
     {
-        _options = options;
     }
 
     protected override string LockKey => CollectionConsts.WithdrawBroadcastLockKey;
@@ -41,7 +42,14 @@ public class WithdrawBroadcastWorker : CollectionChainWorkerBase
     /// <summary>测试桥：宿主注册测试断言轮锁键（internal + InternalsVisibleTo）。</summary>
     internal string LockKeyExposeForTest() => LockKey;
 
-    protected override bool Enabled => _options.WithdrawEnabled;
+    protected override async Task<WorkerRoundPlan> GetRoundPlanAsync(IServiceProvider scopedServices)
+    {
+        var settings = scopedServices.GetRequiredService<ISettingProvider>();
+        return WorkerRoundPlan.Create(
+            await settings.IsTrueAsync(CollectionSettings.Withdraw.Enabled),
+            TimeSpan.FromSeconds(await settings.GetIntAsync(
+                CollectionSettings.Withdraw.BroadcastIntervalSeconds, WithdrawDefaults.BroadcastIntervalSeconds)));
+    }
 
     protected override async Task RunRoundAsync(IServiceProvider scopedServices, CancellationToken ct)
     {
@@ -49,6 +57,7 @@ public class WithdrawBroadcastWorker : CollectionChainWorkerBase
         var factory = scopedServices.GetRequiredService<ChainGatewayFactory>();
         var manager = scopedServices.GetRequiredService<WithdrawBroadcastManager>();
         var uowManager = scopedServices.GetRequiredService<IUnitOfWorkManager>();
+        var settings = scopedServices.GetRequiredService<ISettingProvider>();
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await dbContextProvider.GetDbContextAsync();
@@ -68,7 +77,10 @@ public class WithdrawBroadcastWorker : CollectionChainWorkerBase
             return;
         }
 
-        await manager.RunRoundAsync(network, gateway,
-            _options.WithdrawAutoApproveBatchSize, _options.WithdrawBroadcastBatchSize, ct);
+        var autoApproveBatch = await settings.GetIntAsync(
+            CollectionSettings.Withdraw.AutoApproveBatchSize, WithdrawDefaults.AutoApproveBatchSize);
+        var broadcastBatch = await settings.GetIntAsync(
+            CollectionSettings.Withdraw.BroadcastBatchSize, WithdrawDefaults.BroadcastBatchSize);
+        await manager.RunRoundAsync(network, gateway, autoApproveBatch, broadcastBatch, ct);
     }
 }

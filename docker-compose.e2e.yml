@@ -1,10 +1,12 @@
-# E2E 测试 override：开启链上（扫链/归集）与提现开关 + 固定链网主密钥。
+# E2E 测试 override：一次性引导开关（Collection:Bootstrap:* → 种子把设置库开关写成开）+ 固定链网主密钥。
 # 用法：docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build
 # 仅本地体验栈使用；MasterKey 轮换会使已存密文（RpcCipher/热钱包私钥）不可解。
+# 注：扫链/归集/提现开关已迁设置页（Collection.Chain.* / Collection.Withdraw.*），
+# 宿主起来后也可在设置页直接热改；Bootstrap 键只在首次（设置从未显式写入时）生效。
 services:
   host:
     environment:
-      Collection__Chain__ScanEnabled: "true"
-      Collection__Chain__SweepEnabled: "true"
-      Collection__Withdraw__Enabled: "true"
+      Collection__Bootstrap__ScanEnabled: "true"
+      Collection__Bootstrap__SweepEnabled: "true"
+      Collection__Bootstrap__WithdrawEnabled: "true"
       Collection__MasterKey: "e2e-master-key-2026"

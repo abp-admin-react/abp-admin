@@ -9,6 +9,7 @@ using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Collection.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp;
@@ -18,6 +19,7 @@ using Volo.Abp.Application.Services;
 using Volo.Abp.DistributedLocking;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Security.Encryption;
+using Volo.Abp.Settings;
 using Volo.Abp.Uow;
 
 namespace AbpAdmin.Collection.Services;
@@ -149,7 +151,7 @@ public class ChainApiKeysDto
 /// 链网管理接口（计划第 5.6/5.7 节的运维面，Host 专用）：
 /// 配置 RPC（密文入库、明文只传不存）、一次性生成助记词（只展示一次）、回填测量上限、
 /// 设金库地址/最低充值额。权限独立（Collection.Network.Admin）——链上配置是高危运维动作。
-/// 扫链/归集开关也在此页面切换（写入 Collection:Chain 配置节，热生效）。
+/// 扫链/归集开关与节奏在设置页（Collection.Chain.*，SettingUi 热改免重启）。
 /// </summary>
 [Authorize(AbpAdmin.Collection.Permissions.CollectionPermissions.Network.Admin)]
 public class CollectionNetworkAdminAppService : ApplicationService
@@ -217,8 +219,8 @@ public class CollectionNetworkAdminAppService : ApplicationService
             ScanBehindAlertedAt = network.ScanBehindAlertedAt,
             SweepStuckAlertedAt = network.SweepStuckAlertedAt,
             GasLowAlertedAt = network.GasLowAlertedAt,
-            ScanEnabled = (_configuration.GetSection("Collection:Chain").GetValue("ScanEnabled", false)),
-            SweepEnabled = (_configuration.GetSection("Collection:Chain").GetValue("SweepEnabled", false)),
+            ScanEnabled = await SettingProvider.IsTrueAsync(CollectionSettings.Chain.ScanEnabled),
+            SweepEnabled = await SettingProvider.IsTrueAsync(CollectionSettings.Chain.SweepEnabled),
             Tokens = tokens.Select(t => new TokenStatusDto
             {
                 Id = t.Id,

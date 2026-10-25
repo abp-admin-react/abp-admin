@@ -6,66 +6,24 @@ using Microsoft.Extensions.DependencyInjection;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 链上 worker 运行参数（宿主配置；开关默认关——不配置即不跑，见计划第 5.6 节与 65 行守卫）。
+/// 链上 worker 的宿主配置残留项（appsettings/secrets，冒号键）：密钥/端点/告警收件人与
+/// 墙钟预算——都不热改（预算是挂死防护阀；密钥不进设置页）。
+/// 开关/间隔/确认数/归集阈值等运行期参数已迁设置页（Collection.Chain.* / Collection.Withdraw.*，
+/// SettingUi 热改，worker 每轮热读，默认值单源 ChainDefaults/WithdrawDefaults）。
 /// </summary>
 public class CollectionChainWorkerOptions
 {
-    public bool ScanEnabled { get; set; }
-
-    public bool SweepEnabled { get; set; }
-
-    public int ScanIntervalSeconds { get; set; } = 20;
-
-    public int SweepIntervalSeconds { get; set; } = 60;
-
-    /// <summary>每轮墙钟预算（秒）。</summary>
-    public int RoundBudgetSeconds { get; set; } = 240;
-
-    /// <summary>确认数：按测量与终局说明设定（BSC 0.75s/块，15 块 ≈ 11 秒 + 深度余量；不写死「至少 12」的教条，配置即口径）。</summary>
-    public int Confirmations { get; set; } = 15;
-
-    /// <summary>单轮块区间（测量 p95 150 条/块 × 50 = 7500 &lt; 0.8×cap 10000）。</summary>
-    public int BlockRange { get; set; } = 50;
-
-    /// <summary>归集每轮取出上限（null = 不限）。</summary>
-    public decimal? SweepRoundLimit { get; set; }
-
-    public decimal FuelBnbLimit { get; set; } = 0.005m;
-
-    public decimal GasBnbAlertThreshold { get; set; } = 0.02m;
-
-    public int RetryCooldownMinutes { get; set; } = 10;
-
-    public int RebroadcastGraceMinutes { get; set; } = 30;
-
-    public int SweepStuckMinutes { get; set; } = 120;
-
-    public int ScanBehindBlocks { get; set; } = 2000;
-
-    public int SkipRatioWindowMinutes { get; set; } = 1440;
-
-    public decimal SkipRatioThreshold { get; set; } = 0.9m;
-
     public string? MasterKey { get; set; }
 
     public string? EtherscanV2Endpoint { get; set; } = "https://api.etherscan.io/v2/api";
 
     public Guid[] AlertRecipientUserIds { get; set; } = Array.Empty<Guid>();
 
-    // ── 提现（M3）：独立开关与节奏（Collection:Withdraw 节，与 Chain 平级）────────────────
+    /// <summary>扫链/归集每轮墙钟预算（秒）。</summary>
+    public int ChainRoundBudgetSeconds { get; set; } = 240;
 
-    /// <summary>提现总开关：false 时提交拒绝、广播 worker 睡眠不碰锁不碰链。</summary>
-    public bool WithdrawEnabled { get; set; }
-
-    public int WithdrawBroadcastIntervalSeconds { get; set; } = 15;
-
+    /// <summary>提现广播每轮墙钟预算（秒）。</summary>
     public int WithdrawRoundBudgetSeconds { get; set; } = 120;
-
-    /// <summary>广播队列每轮取件上限。</summary>
-    public int WithdrawBroadcastBatchSize { get; set; } = 5;
-
-    /// <summary>小额自动审每轮取件上限。</summary>
-    public int WithdrawAutoApproveBatchSize { get; set; } = 20;
 
     public static CollectionChainWorkerOptions FromConfiguration(IConfiguration configuration)
     {
@@ -73,22 +31,6 @@ public class CollectionChainWorkerOptions
         var w = configuration.GetSection("Collection:Withdraw");
         var options = new CollectionChainWorkerOptions
         {
-            ScanEnabled = s.GetValue("ScanEnabled", false),
-            SweepEnabled = s.GetValue("SweepEnabled", false),
-            ScanIntervalSeconds = s.GetValue("ScanIntervalSeconds", 20),
-            SweepIntervalSeconds = s.GetValue("SweepIntervalSeconds", 60),
-            RoundBudgetSeconds = s.GetValue("RoundBudgetSeconds", 240),
-            Confirmations = s.GetValue("Confirmations", 15),
-            BlockRange = s.GetValue("BlockRange", 50),
-            SweepRoundLimit = s.GetValue<decimal?>("SweepRoundLimit"),
-            FuelBnbLimit = s.GetValue("FuelBnbLimit", 0.005m),
-            GasBnbAlertThreshold = s.GetValue("GasBnbAlertThreshold", 0.02m),
-            RetryCooldownMinutes = s.GetValue("RetryCooldownMinutes", 10),
-            RebroadcastGraceMinutes = s.GetValue("RebroadcastGraceMinutes", 30),
-            SweepStuckMinutes = s.GetValue("SweepStuckMinutes", 120),
-            ScanBehindBlocks = s.GetValue("ScanBehindBlocks", 2000),
-            SkipRatioWindowMinutes = s.GetValue("SkipRatioWindowMinutes", 1440),
-            SkipRatioThreshold = s.GetValue("SkipRatioThreshold", 0.9m),
             MasterKey = configuration["Collection:MasterKey"],
             EtherscanV2Endpoint = s["EtherscanV2Endpoint"] ?? "https://api.etherscan.io/v2/api",
             AlertRecipientUserIds = (s["AlertRecipientUserIds"] ?? "")
@@ -96,11 +38,8 @@ public class CollectionChainWorkerOptions
                 .Select(x => Guid.TryParse(x, out var g) ? g : Guid.Empty)
                 .Where(g => g != Guid.Empty)
                 .ToArray(),
-            WithdrawEnabled = w.GetValue("Enabled", false),
-            WithdrawBroadcastIntervalSeconds = w.GetValue("BroadcastIntervalSeconds", 15),
+            ChainRoundBudgetSeconds = s.GetValue("RoundBudgetSeconds", 240),
             WithdrawRoundBudgetSeconds = w.GetValue("RoundBudgetSeconds", 120),
-            WithdrawBroadcastBatchSize = w.GetValue("BroadcastBatchSize", 5),
-            WithdrawAutoApproveBatchSize = w.GetValue("AutoApproveBatchSize", 20),
         };
         return options;
     }
@@ -108,10 +47,10 @@ public class CollectionChainWorkerOptions
 
 /// <summary>
 /// worker 注册扩展（计划第 59 行）：宿主调 AddCollectionChainWorkers；DbMigrator 不调——
-/// 迁移进程不起调度器（HostServiceGraphValidationTests 钉住 DbMigrator 服务图无这两个 hosted service）。
-/// 守卫（第 65 行）：开关为开而 Redis 不是「由 Redis 支撑的分布式锁」时启动失败——
-/// 判定读配置（Redis:IsEnabled 缺失/空 = 启用，显式 false = 关闭；Redis:Configuration 空白 = 未配置），
-/// 不在运行时判断锁对象类型。非法值抛 AbpInitializationException。
+/// 迁移进程不起调度器（HostServiceGraphValidationTests 钉住 DbMigrator 服务图无这些 hosted service）。
+/// workers 无条件注册（默认关 = 纯睡眠）；开关热开后启动期无法预知，
+/// Redis 支撑守卫由基类在轮内懒检查（CollectionChainWorkerBase.EnsureRedisBackedLockBackend，
+/// fail-closed 拒绝执行 + [Alert:LockBackend] 告警）。
 /// </summary>
 public static class CollectionChainWorkersCollectionExtensions
 {
@@ -120,11 +59,6 @@ public static class CollectionChainWorkersCollectionExtensions
     {
         var options = CollectionChainWorkerOptions.FromConfiguration(configuration);
 
-        if (options.ScanEnabled || options.SweepEnabled || options.WithdrawEnabled)
-        {
-            GuardRedisBackedLock(configuration);
-        }
-
         services.AddSingleton(options);
         services.AddSingleton<ChainAlertService>(sp => new ChainAlertService(
             options.AlertRecipientUserIds,
@@ -132,22 +66,8 @@ public static class CollectionChainWorkersCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChainAlertService>>()));
         services.AddHostedService<DepositScanWorker>();
         services.AddHostedService<SweepWorker>();
-        // 提现广播（M3）：同一 Redis 锁纪律；WithdrawEnabled=false 时每轮纯睡眠（base 类开关语义）
+        // 提现广播（M3）：同一 Redis 锁纪律；Collection.Withdraw.Enabled=false 时每轮纯睡眠（基类开关语义）
         services.AddHostedService<AbpAdmin.Collection.Withdrawals.WithdrawBroadcastWorker>();
         return services;
-    }
-
-    private static void GuardRedisBackedLock(IConfiguration configuration)
-    {
-        var redisEnabledValue = configuration["Redis:IsEnabled"];
-        var redisEnabled = !string.Equals(redisEnabledValue, "false", StringComparison.OrdinalIgnoreCase);
-        var redisConfiguration = configuration["Redis:Configuration"];
-
-        if (!redisEnabled || string.IsNullOrWhiteSpace(redisConfiguration))
-        {
-            throw new Volo.Abp.AbpInitializationException(
-                "扫链/归集已开启，但分布式锁不是 Redis 支撑（Redis:IsEnabled 显式 false，或 Redis:Configuration 空白）。" +
-                "多实例下进程挂死会永久占锁/丢轮；请先启用 Redis，或先关闭扫链与归集开关（计划第 5.6 节守卫）。");
-        }
     }
 }

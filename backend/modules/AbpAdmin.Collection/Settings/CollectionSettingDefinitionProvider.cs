@@ -63,7 +63,31 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             W(CollectionSettings.Withdraw.BroadcastTimeoutMinutes, DefBroadcastTimeoutMinutes),
             W(CollectionSettings.Withdraw.MaxRetries, DefMaxRetries),
             W(CollectionSettings.Withdraw.HotWalletUsdtFloor, DefHotWalletUsdtFloor),
-            W(CollectionSettings.Withdraw.MinHotWalletBnb, DefMinHotWalletBnb));
+            W(CollectionSettings.Withdraw.MinHotWalletBnb, DefMinHotWalletBnb),
+
+            // 链上 worker 开关/节奏热改（宿主配置迁移）：总开关默认关（fail-closed），Checkbox 呈现；
+            // 广播节奏（提现 worker）与链上阈值参数，默认值单源 = ChainDefaults/WithdrawDefaults
+            SW(CollectionSettings.Withdraw.Enabled),
+            W(CollectionSettings.Withdraw.BroadcastIntervalSeconds, DefBroadcastIntervalSeconds),
+            W(CollectionSettings.Withdraw.BroadcastBatchSize, DefBroadcastBatchSize),
+            W(CollectionSettings.Withdraw.AutoApproveBatchSize, DefAutoApproveBatchSize),
+            SW(CollectionSettings.Chain.ScanEnabled),
+            SW(CollectionSettings.Chain.SweepEnabled),
+            SW(CollectionSettings.Chain.HotWalletWatchEnabled),
+            W(CollectionSettings.Chain.ScanIntervalSeconds, DefScanIntervalSeconds),
+            W(CollectionSettings.Chain.SweepIntervalSeconds, DefSweepIntervalSeconds),
+            W(CollectionSettings.Chain.HotWalletWatchIntervalSeconds, DefHotWalletWatchIntervalSeconds),
+            W(CollectionSettings.Chain.Confirmations, DefConfirmations),
+            W(CollectionSettings.Chain.BlockRange, DefBlockRange),
+            W(CollectionSettings.Chain.ScanBehindBlocks, DefScanBehindBlocks),
+            W(CollectionSettings.Chain.SweepRoundLimit, ""),
+            W(CollectionSettings.Chain.FuelBnbLimit, DefFuelBnbLimit),
+            W(CollectionSettings.Chain.GasBnbAlertThreshold, DefGasBnbAlertThreshold),
+            W(CollectionSettings.Chain.RetryCooldownMinutes, DefRetryCooldownMinutes),
+            W(CollectionSettings.Chain.RebroadcastGraceMinutes, DefRebroadcastGraceMinutes),
+            W(CollectionSettings.Chain.SweepStuckMinutes, DefSweepStuckMinutes),
+            W(CollectionSettings.Chain.SkipRatioWindowMinutes, DefSkipRatioWindowMinutes),
+            W(CollectionSettings.Chain.SkipRatioThreshold, DefSkipRatioThreshold));
     }
 
     // 常量 → 设置默认值字符串（不变文化）。静态字段而非方法调用——csc 10.0.401 对本文件
@@ -78,13 +102,34 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
     private static readonly string DefMaxRetries = Inv(WithdrawDefaults.MaxRetries);
     private static readonly string DefHotWalletUsdtFloor = Inv(WithdrawDefaults.HotWalletUsdtFloor);
     private static readonly string DefMinHotWalletBnb = Inv(WithdrawDefaults.MinHotWalletBnb);
+    private static readonly string DefBroadcastIntervalSeconds = Inv(WithdrawDefaults.BroadcastIntervalSeconds);
+    private static readonly string DefBroadcastBatchSize = Inv(WithdrawDefaults.BroadcastBatchSize);
+    private static readonly string DefAutoApproveBatchSize = Inv(WithdrawDefaults.AutoApproveBatchSize);
+    private static readonly string DefScanIntervalSeconds = Inv(ChainDefaults.ScanIntervalSeconds);
+    private static readonly string DefSweepIntervalSeconds = Inv(ChainDefaults.SweepIntervalSeconds);
+    private static readonly string DefHotWalletWatchIntervalSeconds = Inv(ChainDefaults.HotWalletWatchIntervalSeconds);
+    private static readonly string DefConfirmations = Inv(ChainDefaults.Confirmations);
+    private static readonly string DefBlockRange = Inv(ChainDefaults.BlockRange);
+    private static readonly string DefScanBehindBlocks = Inv(ChainDefaults.ScanBehindBlocks);
+    private static readonly string DefFuelBnbLimit = Inv(ChainDefaults.FuelBnbLimit);
+    private static readonly string DefGasBnbAlertThreshold = Inv(ChainDefaults.GasBnbAlertThreshold);
+    private static readonly string DefRetryCooldownMinutes = Inv(ChainDefaults.RetryCooldownMinutes);
+    private static readonly string DefRebroadcastGraceMinutes = Inv(ChainDefaults.RebroadcastGraceMinutes);
+    private static readonly string DefSweepStuckMinutes = Inv(ChainDefaults.SweepStuckMinutes);
+    private static readonly string DefSkipRatioWindowMinutes = Inv(ChainDefaults.SkipRatioWindowMinutes);
+    private static readonly string DefSkipRatioThreshold = Inv(ChainDefaults.SkipRatioThreshold);
 
     private static string Inv(decimal value)
     {
         return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    /// <summary>提现参数定义样板：显示名/描述键 = DisplayName:{键} / Description:{键}。</summary>
+    private static string Inv(int value)
+    {
+        return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>数值参数定义样板：显示名/描述键 = DisplayName:{键} / Description:{键}。</summary>
     private static SettingDefinition W(string key, string defaultValue)
     {
         return new SettingDefinition(
@@ -96,6 +141,20 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
                 GlobalSettingValueProvider.ProviderName,
                 DefaultValueSettingValueProvider.ProviderName)
             .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Text);
+    }
+
+    /// <summary>布尔开关样板：默认 "false"（fail-closed，垃圾值解析为关），Checkbox 呈现。</summary>
+    private static SettingDefinition SW(string key)
+    {
+        return new SettingDefinition(
+                key,
+                "false",
+                L("DisplayName:" + key),
+                L("Description:" + key))
+            .WithProviders(
+                GlobalSettingValueProvider.ProviderName,
+                DefaultValueSettingValueProvider.ProviderName)
+            .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Checkbox);
     }
 
     private static LocalizableString L(string name)

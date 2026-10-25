@@ -210,7 +210,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
 
         return new WithdrawStatusDto
         {
-            Enabled = _withdraws.IsEnabled(),
+            Enabled = await _withdraws.IsEnabledAsync(),
             Halt = await _settings.IsTrueAsync(CollectionSettings.Withdraw.Halt),
             // 展示兜底走 WithdrawDefaults 单源（原先三处手抄字符串会各自漂移）
             MinAmount = await _settings.GetOrNullAsync(CollectionSettings.Withdraw.MinAmount)

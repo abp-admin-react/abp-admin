@@ -13,9 +13,11 @@ using Volo.Abp.DistributedLocking;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 扫链/归集 worker 公共骨架（计划第 5.6 节）：开关关闭时空转退出（默认关）；
+/// 扫链/归集/提现广播 worker 公共骨架（计划第 5.6 节）：开关与轮间隔每轮经短命 scope 热读设置
+///（SettingUi 改完下一轮生效，免重启）；开关关闭时空转退出（默认关）；
 /// 每轮取 Redis 分布式锁（等待 5 秒不是租期），轮内有墙钟预算——超时取消并告警
 ///（Redis 锁自动续期，挂死进程不能永久占锁）；一种代币失败不挡住另一种。
+/// 开关热开后启动期已无法预知，Redis 支撑守卫改为轮内懒检查（见 <see cref="EnsureRedisBackedLockBackend"/>）。
 /// </summary>
 public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.BackgroundService
 {
@@ -23,74 +25,57 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
 
     private readonly IAbpDistributedLock _distributedLock;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly TimeSpan _interval;
+    private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
+
+    /// <summary>兜底轮间隔（设置读不出/解析失败时睡眠用；计划间隔来自 <see cref="GetRoundPlanAsync"/>）。</summary>
+    private readonly TimeSpan _defaultInterval;
+
+    /// <summary>每轮墙钟预算（宿主配置，不热改——挂死防护阀防误配）。</summary>
     private readonly TimeSpan _roundBudget;
+
+    private bool _lockBackendAlerted;
 
     protected CollectionChainWorkerBase(
         IAbpDistributedLock distributedLock,
         IServiceScopeFactory scopeFactory,
-        TimeSpan interval,
+        Microsoft.Extensions.Configuration.IConfiguration configuration,
+        TimeSpan defaultInterval,
         TimeSpan roundBudget,
         ILogger logger)
     {
         _distributedLock = distributedLock;
         _scopeFactory = scopeFactory;
-        _interval = interval;
+        _configuration = configuration;
+        _defaultInterval = defaultInterval;
         _roundBudget = roundBudget;
         Logger = logger;
     }
 
     protected abstract string LockKey { get; }
 
-    /// <summary>开关（Collection:Chain:ScanEnabled / SweepEnabled）：默认关——关闭时每轮直接睡间隔，不取锁不碰链。</summary>
-    protected abstract bool Enabled { get; }
+    /// <summary>每轮计划：开关 + 轮间隔（在短命 scope 里热读设置组装；间隔由 Create 钳制 ≥5s）。</summary>
+    protected abstract Task<WorkerRoundPlan> GetRoundPlanAsync(IServiceProvider scopedServices);
 
     /// <summary>一轮：scope 内解析依赖，逐代币执行 RunTokenAsync。</summary>
     protected abstract Task RunRoundAsync(IServiceProvider scopedServices, CancellationToken ct);
 
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Logger.LogInformation("{Worker} 启动（轮间隔 {Interval}s，墙钟预算 {Budget}s）",
-            GetType().Name, _interval.TotalSeconds, _roundBudget.TotalSeconds);
+        var interval = _defaultInterval;
+        Logger.LogInformation("{Worker} 启动（默认轮间隔 {Interval}s，墙钟预算 {Budget}s；开关与间隔每轮热读设置）",
+            GetType().Name, _defaultInterval.TotalSeconds, _roundBudget.TotalSeconds);
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (!Enabled)
-            {
-                // 开关默认关（计划第 5.6 节）：不取锁、不碰链、不打 RPC——纯睡眠等待运维开启
-                try { await Task.Delay(_interval, stoppingToken); } catch (OperationCanceledException) { break; }
-                continue;
-            }
-
+            var runRound = false;
             try
             {
-                await using var lockHandle =
-                    await _distributedLock.TryAcquireAsync(LockKey, timeout: TimeSpan.FromSeconds(5),
-                        stoppingToken);
-                if (lockHandle == null)
+                using (var planScope = _scopeFactory.CreateScope())
                 {
-                    Logger.LogDebug("{Worker} 未拿到锁 {Key}，等下一轮", GetType().Name, LockKey);
-                }
-                else
-                {
-                    using var budget = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                    budget.CancelAfter(_roundBudget);
-                    var stopwatch = Stopwatch.StartNew();
-                    try
-                    {
-                        using var scope = _scopeFactory.CreateScope();
-                        await RunRoundAsync(scope.ServiceProvider, budget.Token);
-                    }
-                    catch (OperationCanceledException) when (budget.IsCancellationRequested
-                                                             && !stoppingToken.IsCancellationRequested)
-                    {
-                        // 墙钟预算耗尽：锁在 using 释放（自动续期终止），告警提示
-                        Logger.LogError("[Collection] {Worker} 一轮超过墙钟预算 {Budget}s，已取消并释放锁",
-                            GetType().Name, _roundBudget.TotalSeconds);
-                    }
-
-                    stopwatch.Stop();
-                    Logger.LogDebug("{Worker} 一轮完成 {Elapsed}ms", GetType().Name, stopwatch.ElapsedMilliseconds);
+                    var plan = await GetRoundPlanAsync(planScope.ServiceProvider);
+                    interval = plan.Interval;
+                    // 开关默认关（计划第 5.6 节）：不取锁、不碰链、不打 RPC——纯睡眠等待运维开启
+                    runRound = plan.Enabled && EnsureRedisBackedLockBackend();
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -99,13 +84,58 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
             }
             catch (Exception ex)
             {
-                // 一轮失败不挡下一轮（对齐「单币失败不挡另一种」的同族纪律）
-                Logger.LogError(ex, "{Worker} 一轮异常，等下一轮重试", GetType().Name);
+                // 读不出计划（如设置库瞬断）按关处理：fail-closed，绝不在开关状态未知时碰链
+                Logger.LogError(ex, "{Worker} 读取轮计划失败，本轮跳过（按开关关闭处理）", GetType().Name);
+                interval = _defaultInterval;
+            }
+
+            if (runRound)
+            {
+                try
+                {
+                    await using var lockHandle =
+                        await _distributedLock.TryAcquireAsync(LockKey, timeout: TimeSpan.FromSeconds(5),
+                            stoppingToken);
+                    if (lockHandle == null)
+                    {
+                        Logger.LogDebug("{Worker} 未拿到锁 {Key}，等下一轮", GetType().Name, LockKey);
+                    }
+                    else
+                    {
+                        using var budget = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                        budget.CancelAfter(_roundBudget);
+                        var stopwatch = Stopwatch.StartNew();
+                        try
+                        {
+                            using var scope = _scopeFactory.CreateScope();
+                            await RunRoundAsync(scope.ServiceProvider, budget.Token);
+                        }
+                        catch (OperationCanceledException) when (budget.IsCancellationRequested
+                                                                 && !stoppingToken.IsCancellationRequested)
+                        {
+                            // 墙钟预算耗尽：锁在 using 释放（自动续期终止），告警提示
+                            Logger.LogError("[Collection] {Worker} 一轮超过墙钟预算 {Budget}s，已取消并释放锁",
+                                GetType().Name, _roundBudget.TotalSeconds);
+                        }
+
+                        stopwatch.Stop();
+                        Logger.LogDebug("{Worker} 一轮完成 {Elapsed}ms", GetType().Name, stopwatch.ElapsedMilliseconds);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    // 一轮失败不挡下一轮（对齐「单币失败不挡另一种」的同族纪律）
+                    Logger.LogError(ex, "{Worker} 一轮异常，等下一轮重试", GetType().Name);
+                }
             }
 
             try
             {
-                await Task.Delay(_interval, stoppingToken);
+                await Task.Delay(interval, stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -114,6 +144,38 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
         }
 
         Logger.LogInformation("{Worker} 已停止", GetType().Name);
+    }
+
+    /// <summary>
+    /// 懒 Redis 支撑守卫（原启动期守卫的热改等价物）：开关开着而分布式锁不是 Redis 支撑
+    /// （Redis:IsEnabled 显式 false，或 Redis:Configuration 空白）→ 拒绝执行本轮（fail-closed），
+    /// 多实例下进程内锁会永久占锁/丢轮。每轮重查（配置可热载），告警只发一次防刷屏。
+    /// </summary>
+    private bool EnsureRedisBackedLockBackend()
+    {
+        if (IsRedisBackedLockConfigured(_configuration))
+        {
+            return true;
+        }
+
+        if (!_lockBackendAlerted)
+        {
+            _lockBackendAlerted = true;
+            Logger.LogError(
+                "{Prefix}{Worker} 开关已开但分布式锁不是 Redis 支撑（Redis:IsEnabled 显式 false 或 Redis:Configuration 空白），拒绝执行本轮。多实例下进程锁会永久占锁/丢轮；请启用 Redis 或在设置页关闭开关（计划第 5.6 节守卫）",
+                CollectionConsts.AlertPrefixLockBackend, GetType().Name);
+        }
+
+        return false;
+    }
+
+    /// <summary>Redis 支撑判定（配置口径与旧启动守卫一致；internal 供注册契约测试直测）。</summary>
+    internal static bool IsRedisBackedLockConfigured(Microsoft.Extensions.Configuration.IConfiguration configuration)
+    {
+        var redisEnabledValue = configuration["Redis:IsEnabled"];
+        var redisEnabled = !string.Equals(redisEnabledValue, "false", StringComparison.OrdinalIgnoreCase);
+        var redisConfiguration = configuration["Redis:Configuration"];
+        return redisEnabled && !string.IsNullOrWhiteSpace(redisConfiguration);
     }
 
     /// <summary>
@@ -301,5 +363,18 @@ public class ChainGatewayFactory
         // 调用方 CreateGatewayAsync 已确保池或 RpcCipher 至少一个非空；null 时返回 null（仅日志排查用途）
         if (cipher == null) return null;
         return _encryptor.Decrypt(cipher.StartsWith('\u0001') ? cipher[1..] : cipher, masterKey);
+    }
+}
+
+/// <summary>
+/// 每轮计划（热读设置组装）：开关 + 轮间隔。间隔统一经 <see cref="Create"/> 钳制 ≥5s——
+/// 防设置页误配 1s 间隔打爆 RPC/扫链 API（下限单源 ChainDefaults.MinIntervalSeconds）。
+/// </summary>
+public sealed record WorkerRoundPlan(bool Enabled, TimeSpan Interval)
+{
+    public static WorkerRoundPlan Create(bool enabled, TimeSpan interval)
+    {
+        var min = TimeSpan.FromSeconds(Settings.ChainDefaults.MinIntervalSeconds);
+        return new WorkerRoundPlan(enabled, interval < min ? min : interval);
     }
 }

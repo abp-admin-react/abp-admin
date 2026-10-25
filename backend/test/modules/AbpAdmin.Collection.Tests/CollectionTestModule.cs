@@ -75,14 +75,12 @@ public class CollectionTestModule : AbpModule
         });
 
         // 链网管理服务从 IConfiguration 读 Collection:MasterKey（解密助记词/RPC/KEY 密文）——
-        // 测试用与 HdKeyService.Protect 相同的 "test-master-key"，叠加在既有配置之上；
-        // Collection:Withdraw:Enabled 默认开（提现用例需要，宿主 appsettings 默认关互不影响）
+        // 测试用与 HdKeyService.Protect 相同的 "test-master-key"，叠加在既有配置之上
         var testConfig = new ConfigurationBuilder()
             .AddConfiguration(context.Services.GetConfiguration())
             .AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
             {
                 ["Collection:MasterKey"] = "test-master-key",
-                ["Collection:Withdraw:Enabled"] = "true",
             })
             .Build();
         context.Services.Replace(

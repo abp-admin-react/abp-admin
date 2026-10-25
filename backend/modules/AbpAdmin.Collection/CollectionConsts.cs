@@ -57,4 +57,7 @@ public static class CollectionConsts
 
     /// <summary>提现热钱包熔断/异常告警前缀（提现 M3）。</summary>
     public const string AlertPrefixWithdrawHotWallet = "[Alert:WithdrawHotWallet] ";
+
+    /// <summary>worker 开关开着但分布式锁非 Redis 支撑（懒守卫拒绝执行）告警前缀。</summary>
+    public const string AlertPrefixLockBackend = "[Alert:LockBackend] ";
 }

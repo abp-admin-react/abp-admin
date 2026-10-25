@@ -2,11 +2,15 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Collection.Settings;
 using AbpAdmin.ScheduledJobs;
+using Microsoft.Extensions.Configuration;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Guids;
+using Volo.Abp.Settings;
+using Volo.Abp.SettingManagement;
 using Volo.Abp.Timing;
 using Volo.Abp.Uow;
 
@@ -16,6 +20,7 @@ namespace AbpAdmin.Collection.Jobs;
 /// 链网种子（计划第 5.6 节表清单）：BSC 网络行 + USDT/USDC 代币行（合约为主网公认地址，
 /// MinDeposit 按运行说明上调，先给保守值）+ 金库核对作业（Host 专用、默认停用，同两模块种子纪律）。
 /// 密文（RPC/助记词）不进种子——由运维经管理接口写入。NodeLogResultCap 留空 = 扫链不可开（无缺省）。
+/// 另含开关的一次性部署引导（Collection:Bootstrap:* → 设置库；见 SeedBootstrapSwitchesAsync）。
 /// </summary>
 public class CollectionChainSeedContributor : IDataSeedContributor, ITransientDependency
 {
@@ -24,19 +29,28 @@ public class CollectionChainSeedContributor : IDataSeedContributor, ITransientDe
     private readonly IRepository<ScheduledJob, Guid> _jobRepository;
     private readonly IGuidGenerator _guidGenerator;
     private readonly IClock _clock;
+    private readonly IConfiguration _configuration;
+    private readonly ISettingManager _settingManager;
+    private readonly ISettingManagementStore _settingStore;
 
     public CollectionChainSeedContributor(
         IRepository<ColNetwork, Guid> networkRepository,
         IRepository<ColToken, Guid> tokenRepository,
         IRepository<ScheduledJob, Guid> jobRepository,
         IGuidGenerator guidGenerator,
-        IClock clock)
+        IClock clock,
+        IConfiguration configuration,
+        ISettingManager settingManager,
+        ISettingManagementStore settingStore)
     {
         _networkRepository = networkRepository;
         _tokenRepository = tokenRepository;
         _jobRepository = jobRepository;
         _guidGenerator = guidGenerator;
         _clock = clock;
+        _configuration = configuration;
+        _settingManager = settingManager;
+        _settingStore = settingStore;
     }
 
     [UnitOfWork]
@@ -46,6 +60,8 @@ public class CollectionChainSeedContributor : IDataSeedContributor, ITransientDe
         {
             return;
         }
+
+        await SeedBootstrapSwitchesAsync();
 
         var network = await _networkRepository.FirstOrDefaultAsync(n => n.Name == CollectionConsts.BscNetworkName);
         if (network == null)
@@ -95,6 +111,36 @@ public class CollectionChainSeedContributor : IDataSeedContributor, ITransientDe
                 cronExpression: "0 40 4 * * ?",
                 description: "金库核对：按币 balanceOf(金库) vs 用户余额合计，追加 ColVaultChecks，负差额告警（每日）",
                 isEnabled: false));
+        }
+    }
+
+    /// <summary>
+    /// 开关的一次性部署引导：Collection:Bootstrap:ScanEnabled 等配置为 true 时把对应设置（全局）写成开。
+    /// 幂等口径：只写「从未显式设置过」的键（G 存储无值）——之后再跑种子不会覆盖设置页的管理动作
+    /// （部署时开了、运营中在设置页关掉，重跑迁移不会又被翻开）。用途：首次部署/e2e 用环境变量打开
+    /// 扫链/归集/提现，之后一律设置页热改。
+    /// </summary>
+    private async Task SeedBootstrapSwitchesAsync()
+    {
+        foreach (var (bootstrapKey, settingKey) in new[]
+                 {
+                     (CollectionSettings.Host.Bootstrap.ScanEnabled, CollectionSettings.Chain.ScanEnabled),
+                     (CollectionSettings.Host.Bootstrap.SweepEnabled, CollectionSettings.Chain.SweepEnabled),
+                     (CollectionSettings.Host.Bootstrap.WithdrawEnabled, CollectionSettings.Withdraw.Enabled),
+                     (CollectionSettings.Host.Bootstrap.HotWalletWatchEnabled,
+                         CollectionSettings.Chain.HotWalletWatchEnabled),
+                 })
+        {
+            if (!_configuration.GetValue(bootstrapKey, false))
+            {
+                continue;
+            }
+
+            var stored = await _settingStore.GetOrNullAsync(settingKey, GlobalSettingValueProvider.ProviderName, null);
+            if (stored == null)
+            {
+                await _settingManager.SetGlobalAsync(settingKey, "true");
+            }
         }
     }
 }

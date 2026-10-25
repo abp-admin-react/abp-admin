@@ -8,7 +8,6 @@ using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Settings;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.Domain.Services;
@@ -35,7 +34,6 @@ public class WithdrawManager : DomainService
     private readonly CollectionLedgerPoster _ledger;
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly ISettingProvider _settings;
-    private readonly IConfiguration _configuration;
     private readonly IClock _clock;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
 
@@ -44,7 +42,6 @@ public class WithdrawManager : DomainService
         CollectionLedgerPoster ledger,
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         ISettingProvider settings,
-        IConfiguration configuration,
         IClock clock,
         IUnitOfWorkManager unitOfWorkManager)
     {
@@ -52,7 +49,6 @@ public class WithdrawManager : DomainService
         _ledger = ledger;
         _dbContextProvider = dbContextProvider;
         _settings = settings;
-        _configuration = configuration;
         _clock = clock;
         _unitOfWorkManager = unitOfWorkManager;
     }
@@ -66,7 +62,7 @@ public class WithdrawManager : DomainService
     public virtual async Task<ColWithdrawOrder> SubmitAsync(
         Guid userId, CollectionCurrency currency, string toAddress, decimal amount)
     {
-        AssertEnabled();
+        await AssertEnabledAsync();
         await AssertNotHaltedAsync();
         if (currency != CollectionCurrency.Usdt && currency != CollectionCurrency.Usdc)
         {
@@ -287,24 +283,18 @@ public class WithdrawManager : DomainService
 
     // ── 内部 ─────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>功能总开关（宿主配置 Collection:Withdraw:Enabled，默认 false）。</summary>
-    public virtual bool IsEnabled()
-    {
-        return IsEnabled(_configuration[CollectionSettings.WithdrawConfig.Enabled]);
-    }
-
     /// <summary>
-    /// 开关解析纯函数（Cursor 计划 enabled-false-predicate）：仅 "true"/"True" 等布尔真值为开，
-    /// null/空/垃圾值一律关（fail-closed）。表驱动测试锁。
+    /// 功能总开关（设置 Collection.Withdraw.Enabled，默认 false，设置页热改——与广播 worker 同键同源：
+    /// 关 = 提交拒绝 + worker 纯睡眠）。fail-closed：垃圾值解析为关。
     /// </summary>
-    internal static bool IsEnabled(string? raw)
+    public virtual async Task<bool> IsEnabledAsync()
     {
-        return bool.TryParse(raw, out var v) && v;
+        return await _settings.IsTrueAsync(CollectionSettings.Withdraw.Enabled);
     }
 
-    private void AssertEnabled()
+    private async Task AssertEnabledAsync()
     {
-        if (!IsEnabled())
+        if (!await IsEnabledAsync())
         {
             throw new BusinessException(CollectionErrorCodes.WithdrawDisabled);
         }

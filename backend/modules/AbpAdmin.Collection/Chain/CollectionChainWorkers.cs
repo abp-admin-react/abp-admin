@@ -4,36 +4,47 @@ using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Collection.Settings;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Uow;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Volo.Abp.DistributedLocking;
+using Volo.Abp.Settings;
 
 namespace AbpAdmin.Collection.Chain;
 
-/// <summary>扫链 worker：逐代币跑 DepositScanManager（一币一游标，一币失败不挡另一币）。轮末推 SignalR 进度。</summary>
+/// <summary>
+/// 扫链 worker：逐代币跑 DepositScanManager（一币一游标，一币失败不挡另一币）。轮末推 SignalR 进度。
+/// 开关/间隔/扫链参数每轮热读设置（Collection.Chain.*，SettingUi 免重启）。
+/// </summary>
 public class DepositScanWorker : CollectionChainWorkerBase
 {
     public DepositScanWorker(
         IAbpDistributedLock distributedLock,
         IServiceScopeFactory scopeFactory,
+        IConfiguration configuration,
         CollectionChainWorkerOptions options,
         ILogger<DepositScanWorker> logger)
-        : base(distributedLock, scopeFactory,
-            TimeSpan.FromSeconds(options.ScanIntervalSeconds),
-            TimeSpan.FromSeconds(options.RoundBudgetSeconds),
+        : base(distributedLock, scopeFactory, configuration,
+            TimeSpan.FromSeconds(ChainDefaults.ScanIntervalSeconds),
+            TimeSpan.FromSeconds(options.ChainRoundBudgetSeconds),
             logger)
     {
-        _options = options;
     }
-
-    private readonly CollectionChainWorkerOptions _options;
 
     protected override string LockKey => CollectionConsts.ScannerLockKey;
 
-    protected override bool Enabled => _options.ScanEnabled;
+    protected override async Task<WorkerRoundPlan> GetRoundPlanAsync(IServiceProvider scopedServices)
+    {
+        var settings = scopedServices.GetRequiredService<ISettingProvider>();
+        return WorkerRoundPlan.Create(
+            await settings.IsTrueAsync(CollectionSettings.Chain.ScanEnabled),
+            TimeSpan.FromSeconds(await settings.GetIntAsync(
+                CollectionSettings.Chain.ScanIntervalSeconds, ChainDefaults.ScanIntervalSeconds)));
+    }
 
     protected override async Task RunRoundAsync(IServiceProvider scopedServices, CancellationToken ct)
     {
@@ -42,6 +53,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
         var scanManager = scopedServices.GetRequiredService<DepositScanManager>();
         var pusher = scopedServices.GetService<Contracts.IChainPushNotifier>();
         var uowManager = scopedServices.GetRequiredService<Volo.Abp.Uow.IUnitOfWorkManager>();
+        var settings = scopedServices.GetRequiredService<ISettingProvider>();
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var db = await dbContext.GetDbContextAsync();
@@ -57,6 +69,16 @@ public class DepositScanWorker : CollectionChainWorkerBase
         await uow.CompleteAsync();
 
         var enabledTokens = tokens.Where(t => t.IsEnabled).ToList();
+        var confirmations = await settings.GetIntAsync(
+            CollectionSettings.Chain.Confirmations, ChainDefaults.Confirmations);
+        var blockRange = await settings.GetIntAsync(
+            CollectionSettings.Chain.BlockRange, ChainDefaults.BlockRange);
+        var scanBehindBlocks = await settings.GetIntAsync(
+            CollectionSettings.Chain.ScanBehindBlocks, ChainDefaults.ScanBehindBlocks);
+        var skipWindow = TimeSpan.FromMinutes(await settings.GetIntAsync(
+            CollectionSettings.Chain.SkipRatioWindowMinutes, ChainDefaults.SkipRatioWindowMinutes));
+        var skipThreshold = await settings.GetDecimalAsync(
+            CollectionSettings.Chain.SkipRatioThreshold, ChainDefaults.SkipRatioThreshold);
 
         foreach (var token in enabledTokens)
         {
@@ -65,8 +87,8 @@ public class DepositScanWorker : CollectionChainWorkerBase
             {
                 await scanManager.RunTokenRoundAsync(
                     network, token, gateway,
-                    _options.Confirmations, _options.BlockRange, _options.ScanBehindBlocks,
-                    TimeSpan.FromMinutes(_options.SkipRatioWindowMinutes), _options.SkipRatioThreshold,
+                    confirmations, blockRange, scanBehindBlocks,
+                    skipWindow, skipThreshold,
                     ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -102,27 +124,35 @@ public class DepositScanWorker : CollectionChainWorkerBase
     }
 }
 
-/// <summary>归集 worker：逐代币跑 SweepManager。轮末推 SignalR 任务变更快照。</summary>
+/// <summary>
+/// 归集 worker：逐代币跑 SweepManager。轮末推 SignalR 任务变更快照。
+/// 开关/间隔/归集参数每轮热读设置（Collection.Chain.*，SettingUi 免重启）。
+/// </summary>
 public class SweepWorker : CollectionChainWorkerBase
 {
     public SweepWorker(
         IAbpDistributedLock distributedLock,
         IServiceScopeFactory scopeFactory,
+        IConfiguration configuration,
         CollectionChainWorkerOptions options,
         ILogger<SweepWorker> logger)
-        : base(distributedLock, scopeFactory,
-            TimeSpan.FromSeconds(options.SweepIntervalSeconds),
-            TimeSpan.FromSeconds(options.RoundBudgetSeconds),
+        : base(distributedLock, scopeFactory, configuration,
+            TimeSpan.FromSeconds(ChainDefaults.SweepIntervalSeconds),
+            TimeSpan.FromSeconds(options.ChainRoundBudgetSeconds),
             logger)
     {
-        _options = options;
     }
-
-    private readonly CollectionChainWorkerOptions _options;
 
     protected override string LockKey => CollectionConsts.SweepLockKey;
 
-    protected override bool Enabled => _options.SweepEnabled;
+    protected override async Task<WorkerRoundPlan> GetRoundPlanAsync(IServiceProvider scopedServices)
+    {
+        var settings = scopedServices.GetRequiredService<ISettingProvider>();
+        return WorkerRoundPlan.Create(
+            await settings.IsTrueAsync(CollectionSettings.Chain.SweepEnabled),
+            TimeSpan.FromSeconds(await settings.GetIntAsync(
+                CollectionSettings.Chain.SweepIntervalSeconds, ChainDefaults.SweepIntervalSeconds)));
+    }
 
     protected override async Task RunRoundAsync(IServiceProvider scopedServices, CancellationToken ct)
     {
@@ -131,6 +161,7 @@ public class SweepWorker : CollectionChainWorkerBase
         var sweepManager = scopedServices.GetRequiredService<SweepManager>().WithMasterKey(factory.MasterKey);
         var pusher = scopedServices.GetService<Contracts.IChainPushNotifier>();
         var uowManager = scopedServices.GetRequiredService<Volo.Abp.Uow.IUnitOfWorkManager>();
+        var settings = scopedServices.GetRequiredService<ISettingProvider>();
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var db = await dbContext.GetDbContextAsync();
@@ -146,6 +177,20 @@ public class SweepWorker : CollectionChainWorkerBase
         if (gateway == null) return;
         await uow.CompleteAsync();
 
+        var confirmations = await settings.GetIntAsync(
+            CollectionSettings.Chain.Confirmations, ChainDefaults.Confirmations);
+        var roundLimit = await settings.GetOptionalPositiveDecimalAsync(CollectionSettings.Chain.SweepRoundLimit);
+        var fuelBnbLimit = await settings.GetDecimalAsync(
+            CollectionSettings.Chain.FuelBnbLimit, ChainDefaults.FuelBnbLimit);
+        var retryCooldown = TimeSpan.FromMinutes(await settings.GetIntAsync(
+            CollectionSettings.Chain.RetryCooldownMinutes, ChainDefaults.RetryCooldownMinutes));
+        var rebroadcastGrace = TimeSpan.FromMinutes(await settings.GetIntAsync(
+            CollectionSettings.Chain.RebroadcastGraceMinutes, ChainDefaults.RebroadcastGraceMinutes));
+        var sweepStuck = TimeSpan.FromMinutes(await settings.GetIntAsync(
+            CollectionSettings.Chain.SweepStuckMinutes, ChainDefaults.SweepStuckMinutes));
+        var gasAlertThreshold = await settings.GetDecimalAsync(
+            CollectionSettings.Chain.GasBnbAlertThreshold, ChainDefaults.GasBnbAlertThreshold);
+
         foreach (var token in tokens)
         {
             ct.ThrowIfCancellationRequested();
@@ -153,11 +198,11 @@ public class SweepWorker : CollectionChainWorkerBase
             {
                 await sweepManager.RunTokenRoundAsync(
                     network, token, gateway,
-                    _options.Confirmations, _options.SweepRoundLimit, _options.FuelBnbLimit,
-                    TimeSpan.FromMinutes(_options.RetryCooldownMinutes),
-                    TimeSpan.FromMinutes(_options.RebroadcastGraceMinutes),
-                    TimeSpan.FromMinutes(_options.SweepStuckMinutes),
-                    _options.GasBnbAlertThreshold,
+                    confirmations, roundLimit, fuelBnbLimit,
+                    retryCooldown,
+                    rebroadcastGrace,
+                    sweepStuck,
+                    gasAlertThreshold,
                     ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
