@@ -870,4 +870,10 @@ public class FakeChainGateway : IBscChainGateway
     }
 
     public Task<decimal> GetGasPriceGweiAsync(CancellationToken ct = default) => Task.FromResult(1m);
+
+    /// <summary>按哈希的交易 nonce（提现认领校验用；缺省 null = 节点不认识该交易）。</summary>
+    public System.Collections.Generic.Dictionary<string, long> TxNonces { get; } = new();
+
+    public Task<long?> GetTransactionNonceAsync(string txHash, CancellationToken ct = default)
+        => Task.FromResult(TxNonces.TryGetValue(txHash, out var n) ? n : (long?)null);
 }

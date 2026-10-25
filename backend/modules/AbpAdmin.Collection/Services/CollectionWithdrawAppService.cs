@@ -26,10 +26,13 @@ public class CreateWithdrawInput
     public string Amount { get; set; } = default!;
 }
 
-/// <summary>提现单视图（金额一律十进制字符串）。</summary>
+/// <summary>提现单视图（金额一律十进制字符串）。用户/管理两个服务共用一份映射（原先两处 15 字段手抄会漂移）。</summary>
 public class WithdrawOrderDto
 {
     public Guid Id { get; set; }
+
+    /// <summary>提现用户 Id（管理端「用户」列展示）。</summary>
+    public Guid UserId { get; set; }
 
     public string Currency { get; set; } = default!;
 
@@ -58,6 +61,30 @@ public class WithdrawOrderDto
     public DateTime? CompleteTime { get; set; }
 
     public DateTime CreationTime { get; set; }
+
+    /// <summary>实体→DTO 唯一映射（管理端 GetWithdrawalsAsync 同用）。</summary>
+    public static WithdrawOrderDto From(AbpAdmin.Collection.Entities.ColWithdrawOrder o)
+    {
+        return new WithdrawOrderDto
+        {
+            Id = o.Id,
+            UserId = o.UserId,
+            Currency = o.Currency.ToString(),
+            NetworkName = o.NetworkName,
+            ToAddress = o.ToAddress,
+            Amount = CollectionAmounts.Format(o.Amount),
+            Fee = CollectionAmounts.Format(o.Fee),
+            ActualAmount = CollectionAmounts.Format(o.ActualAmount),
+            Status = o.Status.ToString(),
+            TxHash = o.TxHash,
+            RetryCount = o.RetryCount,
+            FailReason = o.FailReason,
+            AuditRemark = o.AuditRemark,
+            AuditTime = o.AuditTime,
+            CompleteTime = o.CompleteTime,
+            CreationTime = o.CreationTime,
+        };
+    }
 }
 
 /// <summary>
@@ -91,7 +118,7 @@ public class CollectionWithdrawAppService : ApplicationService
 
         var amount = CollectionAmounts.Parse(input.Amount);
         var order = await _withdraws.SubmitAsync(userId, currency, input.ToAddress, amount);
-        return ToDto(order);
+        return WithdrawOrderDto.From(order);
     }
 
     /// <summary>撤单（仅 Pending 且本人；解冻并释放当日额度）。</summary>
@@ -128,29 +155,7 @@ public class CollectionWithdrawAppService : ApplicationService
             .ToListAsync();
 
         return new PagedResultDto<WithdrawOrderDto>(
-            total, rows.Select(ToDto).ToList());
-    }
-
-    private static WithdrawOrderDto ToDto(AbpAdmin.Collection.Entities.ColWithdrawOrder o)
-    {
-        return new WithdrawOrderDto
-        {
-            Id = o.Id,
-            Currency = o.Currency.ToString(),
-            NetworkName = o.NetworkName,
-            ToAddress = o.ToAddress,
-            Amount = CollectionAmounts.Format(o.Amount),
-            Fee = CollectionAmounts.Format(o.Fee),
-            ActualAmount = CollectionAmounts.Format(o.ActualAmount),
-            Status = o.Status.ToString(),
-            TxHash = o.TxHash,
-            RetryCount = o.RetryCount,
-            FailReason = o.FailReason,
-            AuditRemark = o.AuditRemark,
-            AuditTime = o.AuditTime,
-            CompleteTime = o.CompleteTime,
-            CreationTime = o.CreationTime,
-        };
+            total, rows.Select(WithdrawOrderDto.From).ToList());
     }
 
     private void AssertHost()

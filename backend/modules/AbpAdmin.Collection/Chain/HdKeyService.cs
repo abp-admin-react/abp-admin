@@ -76,11 +76,6 @@ public static class HdKeyService
         return encryptor.Decrypt(cipher[1..], masterKey);
     }
 
-    /// <summary>加密任意敏感明文（与 Protect 同一协议；提现热钱包私钥用）。</summary>
-    public static string ProtectPlain(string plaintext, string masterKey, IStringEncryptionService encryptor)
-    {
-        return '\u0001' + encryptor.Encrypt(plaintext, masterKey);
-    }
 
     public static string DeriveAddress(string words, int index)
     {

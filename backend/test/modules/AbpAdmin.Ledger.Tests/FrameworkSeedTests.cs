@@ -13,6 +13,7 @@ public class FrameworkSeedTests
     {
         FinanceAccountCodes.OnChainAsset, FinanceAccountCodes.UserAvailable, FinanceAccountCodes.UserFrozen,
         FinanceAccountCodes.AgentPayable, FinanceAccountCodes.RentIncome, FinanceAccountCodes.CommissionExpense,
+        FinanceAccountCodes.WithdrawFeeIncome, // 6003：Collection 提现播种的业务科目（OCR 补锁）
     };
 
     private static readonly string[] BusinessWords =

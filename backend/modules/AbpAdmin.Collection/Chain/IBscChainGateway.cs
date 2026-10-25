@@ -57,6 +57,12 @@ public interface IBscChainGateway
     Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default);
 
     /// <summary>
+    /// 交易的 nonce（eth_getTransactionByHash）；交易不存在或节点不给 nonce 返回 null。
+    /// 哈希认领用它核对「这笔链上交易确实占用的是本单落库的 NonceUsed」——Transfer 日志不带 nonce。
+    /// </summary>
+    Task<long?> GetTransactionNonceAsync(string txHash, CancellationToken ct = default);
+
+    /// <summary>
     /// 签名并广播一笔 EIP-155 legacy 交易（nonce 显式传入：重签替换必须复用原 nonce，
     /// 由调用方持久化在归集任务上）。dataHex 空串 = 普通 BNB 转账。返回交易哈希。
     /// </summary>

@@ -163,7 +163,10 @@ public class WithdrawManager : DomainService
         return order;
     }
 
-    /// <summary>当日总额度：留空 = 不限（decimal.MaxValue）。</summary>
+    /// <summary>
+    /// 当日总额度：留空 = 不限。配置了但解析不出 = fail-closed 拒绝提交（模块教义：限额存在但读不出
+    /// 不得静默放开——原先回落 50000 会把运营收紧的额度悄悄放大）。
+    /// </summary>
     private async Task<decimal> GetDailyAmountLimitAsync()
     {
         var raw = await _settings.GetOrNullAsync(CollectionSettings.Withdraw.MaxDailyAmount);
@@ -172,10 +175,14 @@ public class WithdrawManager : DomainService
             return decimal.MaxValue;
         }
 
-        return decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
-                   System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0
-            ? v
-            : WithdrawDefaults.MaxDailyAmount;
+        if (!decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var v) || v < 0)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount)
+                .WithData("Reason", $"MaxDailyAmount 配置非法：{raw}");
+        }
+
+        return v;
     }
 
     // ── 撤单（仅 Pending，本人）──────────────────────────────────────────────────────────

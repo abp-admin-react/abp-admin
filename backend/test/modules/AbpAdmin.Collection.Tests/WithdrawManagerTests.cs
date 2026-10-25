@@ -263,6 +263,39 @@ public class WithdrawManagerTests : CollectionTestBase
         (await PlatformBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(0m);
     }
 
+    [Fact]
+    public async Task Daily_Amount_Boundary_And_Excess()
+    {
+        await SetSettingAsync(AbpAdmin.Collection.Settings.CollectionSettings.Withdraw.MaxDailyAmount, "150");
+        await FundAsync(User1, 1000m);
+        var address = "0x1111111111111111111111111111111111111111";
+
+        // 等额边界：Σ=100 + 50 = 150 ≤ 150 放行
+        await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 100m);
+        await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 50m);
+
+        // 超限：+100 → 250 > 150 拒绝（1 会先撞 MinAmount=10，用 100 隔离额度断言）
+        var ex = await Should.ThrowAsync<BusinessException>(
+            () => Manager.SubmitAsync(User1, CollectionCurrency.Usdt, address, 100m));
+        ex.Code.ShouldBe(CollectionErrorCodes.WithdrawDailyAmountExceeded);
+    }
+
+    [Fact]
+    public async Task Zero_Fee_Rate_Skips_Fee_Postings()
+    {
+        await SetSettingAsync(AbpAdmin.Collection.Settings.CollectionSettings.Withdraw.FeeRate, "0");
+        await FundAsync(User1, 1000m);
+        var order = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt,
+            "0x1111111111111111111111111111111111111111", 100m);
+        order.Fee.ShouldBe(0m);
+        order.ActualAmount.ShouldBe(100m);
+
+        await Manager.ApproveAsync(order.Id, Admin, null);
+        (await PlatformBalanceAsync(AbpAdmin.Ledger.Integration.Contracts.FinanceAccountCodes.WithdrawFeeIncome))
+            .ShouldBe(0m); // 无零额凭证，收入科目不动
+        (await UserFrozenAsync(User1)).ShouldBe(0m);
+    }
+
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────
 
     private async Task<ColWithdrawOrder> SubmitInNewScopeAsync(Guid userId, decimal amount)

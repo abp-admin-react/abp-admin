@@ -52,7 +52,7 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
                     DefaultValueSettingValueProvider.ProviderName)
                 .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Text),
 
-            // 提现 M2/M3 运行期参数（点键，SettingUi 可改；代码默认值见 WithdrawDefaults）
+            // 提现 M2/M3 运行期参数：默认值与 WithdrawDefaults 手工保持同步（OCR 建议~单源~后仍三处漂移，至少两处）
             W(CollectionSettings.Withdraw.MinAmount, "10"),
             W(CollectionSettings.Withdraw.FeeRate, "0.004"),
             W(CollectionSettings.Withdraw.MaxDailyAmount, "50000"),

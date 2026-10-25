@@ -1770,7 +1770,9 @@ type SubAccountBalanceRow = {
  *（E2E 实测抓出；该页 mock 时代未暴露）。User 行按 (ownerId, currency) 聚合，
  * 平台/渠道行保留独立行（ownerName = 科目码）。diff 需要 ColBalance 对账口径（P1），先不显示。
  */
-function aggregateBalanceRows(rows: SubAccountBalanceRow[]): FinBalanceProjectionDto[] {
+function aggregateBalanceRows(
+  rows: SubAccountBalanceRow[],
+): FinBalanceProjectionDto[] {
   const users = new Map<string, FinBalanceProjectionDto>();
   const others: FinBalanceProjectionDto[] = [];
   for (const r of rows) {
@@ -1818,15 +1820,29 @@ export async function getBalanceProjections(
   q: FinanceListQuery = {},
 ): Promise<PagedResultDto<FinBalanceProjectionDto>> {
   if (!isMock()) {
-    const raw = await liveGet(API.balanceProjection, {
-      ...q,
-      MaxResultCount: 200,
-    } as Record<string, unknown>);
-    let list = aggregateBalanceRows((raw as { items?: SubAccountBalanceRow[] }).items ?? []);
+    // 分页拉全子户行（原先单页 200 会静默截断——用户行被切半、搜索误报不存在）；
+    // 20 页防御上限（4000 行 ≈ 1300 用户），超限说明该换服务端聚合端点
+    const pageSize = 200;
+    const rows: SubAccountBalanceRow[] = [];
+    let total = Number.POSITIVE_INFINITY;
+    for (let skip = 0; skip < 20 * pageSize && rows.length < total; skip += pageSize) {
+      const raw = await liveGet(API.balanceProjection, {
+        ...q,
+        SkipCount: skip,
+        MaxResultCount: pageSize,
+      } as Record<string, unknown>);
+      const page = raw as { items?: SubAccountBalanceRow[]; totalCount?: number };
+      rows.push(...(page.items ?? []));
+      total = page.totalCount ?? rows.length;
+      if ((page.items ?? []).length < pageSize) break;
+    }
+    let list = aggregateBalanceRows(rows);
     if (q.filter) {
       const f = q.filter.toLowerCase();
       list = list.filter(
-        (x) => (x.ownerName || '').toLowerCase().includes(f) || x.ownerId.toLowerCase().includes(f),
+        (x) =>
+          (x.ownerName || '').toLowerCase().includes(f) ||
+          x.ownerId.toLowerCase().includes(f),
       );
     }
     return pageOf(list, q);

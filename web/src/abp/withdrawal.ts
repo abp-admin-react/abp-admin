@@ -17,6 +17,8 @@ export const WD_REQ = { skipErrorHandler: true } as const;
 /** 提现单视图（金额十进制字符串；与后端 WithdrawOrderDto 对齐） */
 export type WithdrawOrderDto = {
   id: string;
+  /** 提现用户 Id（管理端「用户」列） */
+  userId: string;
   currency: string;
   networkName: string;
   toAddress: string;

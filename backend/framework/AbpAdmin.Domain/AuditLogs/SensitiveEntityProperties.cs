@@ -27,6 +27,6 @@ public static class SensitiveEntityProperties
         "Payload", "ReferenceId", "ClientSecret",
         // 链上（M5 计划第 5.6 节）：ColNetworks 上的助记词密文与 RPC 密文（含密钥的连接串）、
         // ColChainApiKeys 上的扫链 key 密文。列名独特、按属性名全局黑名单生效；变更审计不留密文历史
-        "MnemonicCipher", "RpcCipher", "KeyCipher",
+        "MnemonicCipher", "RpcCipher", "KeyCipher", "WithdrawVaultKeyCipher",
     };
 }

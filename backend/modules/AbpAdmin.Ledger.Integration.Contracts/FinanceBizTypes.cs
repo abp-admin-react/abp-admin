@@ -29,13 +29,13 @@ public static class FinanceBizTypes
         public const string Settled = "settled";
         public const string Post = "post";
 
-        /// <summary>提现审核通过：冻结 → 渠道清算（净额出账）。</summary>
+        /// <summary>提现审核通过：冻结 → 应付账款 2241（净额待付；不用 1002 渠道清算——资产类科目，贷记等于链上资产提前减少）。</summary>
         public const string Approve = "approve";
 
         /// <summary>提现手续费实现：冻结 → 手续费收入。</summary>
         public const string FeeTake = "fee-take";
 
-        /// <summary>提现打款完成：渠道清算 → 链上资产（真实资金流出）。</summary>
+        /// <summary>提现打款完成：应付账款 2241 → 链上资产 1001（真实资金流出时刻）。</summary>
         public const string Payout = "payout";
 
         /// <summary>提现撤单/拒绝：冻结 → 可用（与 freeze 对称）。</summary>

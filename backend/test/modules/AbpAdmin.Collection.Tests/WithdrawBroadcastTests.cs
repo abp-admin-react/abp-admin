@@ -177,6 +177,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
             new("0xabababababababababababababababababababababababababababababababab", 0,
                 HotWallet, ToAddress, (order.ActualAmount * 1000000000000000000m).ToString("0"), 999),
         };
+        gateway.TxNonces["0xabababababababababababababababababababababababababababababababab"] = 7; // 认领 nonce 复核（同 nonce 才可认领）
 
         // 第一轮：认领哈希（Broadcasting 带哈希，回执未出）
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
@@ -312,6 +313,110 @@ public class WithdrawBroadcastTests : CollectionTestBase
         ex.Code.ShouldBe(CollectionErrorCodes.WithdrawRetryLimitReached);
     }
 
+    [Fact]
+    public async Task Adoption_Rejects_Transfer_With_Mismatched_Nonce()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+
+        // 窗口内有一笔 (from,to,amount) 全匹配的转账，但它的链上 nonce ≠ 本单 NonceUsed
+        //（同地址同金额的历史付款——认领唯一键是 nonce，不匹配绝不认领）
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, nonceUsed: 7);
+        gateway.TxCountSeed = 8;
+        var hash = "0x" + new string('c', 62) + "dd";
+        gateway.Logs[UsdtContract(gateway)] = new System.Collections.Generic.List<AbpAdmin.Collection.Chain.TokenTransferLog>
+        {
+            new(hash, 0, HotWallet, ToAddress, (order.ActualAmount * 1000000000000000000m).ToString("0"), 999),
+        };
+        gateway.TxNonces[hash] = 3; // 历史交易的 nonce=3 ≠ 本单 7
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        var after = await GetOrderAsync(order.Id);
+        after.TxHash.ShouldBeNull(); // 未认领
+        after.Status.ShouldBe(WithdrawStatus.Broadcasting);
+    }
+
+    [Fact]
+    public async Task OccupiedNonce_WithNoMatch_DoesNotRefund()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+
+        // pending(8) > NonceUsed(7) 但窗口空：可能仍在 mempool / 索引滞后——退款会双付，
+        // 必须保持 Broadcasting 等下一轮（双花守卫的行为锁）
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, nonceUsed: 7);
+        gateway.TxCountSeed = 8;
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        var after = await GetOrderAsync(order.Id);
+        after.Status.ShouldBe(WithdrawStatus.Broadcasting);
+        after.TxHash.ShouldBeNull();
+        (await BucketAsync(order.UserId)).balance.ShouldBe(950m); // 未退款（提交 50 审批出账后可用 950）
+    }
+
+    [Fact]
+    public async Task Nonce_Occupied_By_Later_Order_With_Hash_Provably_Unsent_AutoRefunds()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync(50m, autoApprove: true);
+
+        // 后继单已用同一 nonce 落哈希（同账户同 nonce 唯一 ⇒ 本单交易必未上链）→ 自动退款
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, retryCount: 3, nonceUsed: 7);
+        gateway.TxCountSeed = 8;
+        await SeedLaterOrderWithHashAsync(nonce: 7);
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        var after = await GetOrderAsync(order.Id);
+        after.Status.ShouldBe(WithdrawStatus.Rejected);
+        after.FailReason.ShouldContain("后继提现占用");
+        (await BucketAsync(order.UserId)).balance.ShouldBe(1000m);
+    }
+
+    [Fact]
+    public async Task CompleteFromReceipt_Is_Idempotent_For_Same_Hash_And_Rejects_Wrong_State()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, "0xdeadbeef", minutesAgo: 0);
+        gateway.HasReceipt = true;
+        gateway.ReceiptStatusOverride = 1;
+
+        await Broadcast.CompleteFromReceiptAsync(order.Id, "0xdeadbeef");
+        // 同哈希重放：幂等
+        await Broadcast.CompleteFromReceiptAsync(order.Id, "0xdeadbeef");
+        (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Completed);
+
+        // 状态不符（新单 Pending + 无关哈希）：必须报错而不是静默成功
+        var other = await FundSubmitApproveAsync(50m, autoApprove: false);
+        var ex = await Should.ThrowAsync<BusinessException>(
+            () => Broadcast.CompleteFromReceiptAsync(other.Id, "0xdeadbeef"));
+        ex.Code.ShouldBe(CollectionErrorCodes.WithdrawInvalidStatus);
+    }
+
+    [Fact]
+    public async Task HotWallet_Status_Breaker_Ors_Across_Tokens()
+    {
+        await ConfigureHotWalletAsync();
+        var gateway = new FakeChainGateway(1000);
+        var usdtContract = UsdtContract(gateway);
+        // USDT 富（2000 ≥ 1000 地板）、USDC 贫（500 < 1000）→ 任一低于即熔断
+        gateway.TokenBalances[usdtContract + ":" + HotWallet] = (2000m * 1000000000000000000m).ToString("0");
+        gateway.TokenBalances["0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d:" + HotWallet] = (500m * 1000000000000000000m).ToString("0");
+
+        var uowManager = GetRequiredService<IUnitOfWorkManager>();
+        using var uow = uowManager.Begin();
+        var status = await Guard.GetStatusAsync(gateway);
+        await uow.CompleteAsync();
+        status.Configured.ShouldBeTrue();
+        status.BreakerOpen.ShouldBeTrue();
+        status.TokenBalances["USDT"].ShouldBe("2000");
+    }
+
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────
 
     private async Task<ColWithdrawOrder> GetOrderAsync(Guid id)
@@ -337,6 +442,29 @@ public class WithdrawBroadcastTests : CollectionTestBase
         o.RetryCount = retryCount;
         o.NonceUsed = nonceUsed;
         o.StatusChangedAt = DateTime.UtcNow.AddMinutes(-minutesAgo - 1);
+        await dbContext.SaveChangesAsync();
+        await uow.CompleteAsync();
+    }
+
+    /// <summary>造一笔已带哈希的 Broadcasting 后继单（同 nonce 占用证据）。</summary>
+    private async Task SeedLaterOrderWithHashAsync(long nonce)
+    {
+        var uowManager = GetRequiredService<IUnitOfWorkManager>();
+        using var uow = uowManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+        dbContext.WithdrawOrders.Add(new ColWithdrawOrder(Guid.NewGuid())
+        {
+            UserId = Guid.NewGuid(),
+            Currency = CollectionCurrency.Usdt,
+            NetworkName = "BSC",
+            ToAddress = "0x4444444444444444444444444444444444444444",
+            Amount = 10m, Fee = 0.04m, ActualAmount = 9.96m, FeeRate = 0.004m,
+            Status = WithdrawStatus.Broadcasting,
+            TxHash = "0x" + new string('e', 62) + "ff",
+            NonceUsed = nonce,
+            StatusChangedAt = DateTime.UtcNow.AddMinutes(-5),
+            CreationTime = DateTime.UtcNow,
+        });
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();
     }

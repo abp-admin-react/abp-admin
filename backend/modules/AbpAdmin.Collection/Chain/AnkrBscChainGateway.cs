@@ -253,6 +253,18 @@ public class AnkrBscChainGateway : IBscChainGateway
             Convert.ToInt32(result.Value.GetProperty("status").GetString()!.Substring(2), 16));
     }
 
+    public async Task<long?> GetTransactionNonceAsync(string txHash, CancellationToken ct = default)
+    {
+        var result = await RpcAsync("eth_getTransactionByHash", new object[] { txHash }, ct);
+        if (result is null || result.Value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var nonceHex = result.Value.TryGetProperty("nonce", out var nonce) ? nonce.GetString() : null;
+        return nonceHex is null ? null : Convert.ToInt64(nonceHex.Substring(2), 16);
+    }
+
     public async Task<string> SendTransactionAsync(
         string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
         CancellationToken ct = default)

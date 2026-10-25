@@ -44,5 +44,11 @@ public class EtherscanUrlShapeTests
             "https://api.etherscan.io/v2/api?chainid=56",
             "https://api.etherscan.io/v2/api?chainid=56&contractaddress=",
         };
+        // 自带其它查询参数（无 chainid）：& 连接后补 chainid（OCR 补锁：唯一未覆盖分支）
+        yield return new object[]
+        {
+            "https://api.etherscan.io/v2/api?foo=1",
+            "https://api.etherscan.io/v2/api?foo=1&chainid=56&contractaddress=",
+        };
     }
 }

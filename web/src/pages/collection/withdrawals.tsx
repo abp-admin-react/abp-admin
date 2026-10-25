@@ -140,13 +140,13 @@ export default function WithdrawalsPage() {
     },
     {
       title: '用户',
-      dataIndex: 'id',
-      width: 110,
-      render: (_: unknown, row: WithdrawOrderDto) => (
-        // 列表 DTO 未带 userId 明细列——用单号前缀代替；后续需要用户列时后端补字段
-        <Tooltip title={row.id}>
+      dataIndex: 'userId',
+      width: 130,
+      ellipsis: true,
+      render: (v: string) => (
+        <Tooltip title={v}>
           <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>
-            {shortId(row.id)}
+            {`${v.slice(0, 8)}...`}
           </Text>
         </Tooltip>
       ),
@@ -285,7 +285,13 @@ export default function WithdrawalsPage() {
           size="small"
           extra={
             <Space size={8}>
-              <Button size="small" onClick={() => { setWalletModal(true); setWalletForm({ address: '', privateKey: '' }); }}>
+              <Button
+                size="small"
+                onClick={() => {
+                  setWalletModal(true);
+                  setWalletForm({ address: '', privateKey: '' });
+                }}
+              >
                 配置热钱包
               </Button>
               <Popconfirm
@@ -294,11 +300,15 @@ export default function WithdrawalsPage() {
                 onConfirm={() =>
                   guard(async () => {
                     const r = await backfillOpening();
-                    message.success(`开账完成：用户 ${r.users}，过账 ${r.posted}，跳过 ${r.skipped}`);
+                    message.success(
+                      `开账完成：用户 ${r.users}，过账 ${r.posted}，跳过 ${r.skipped}`,
+                    );
                   }, '开账完成')
                 }
               >
-                <Button size="small" loading={acting}>存量开账</Button>
+                <Button size="small" loading={acting}>
+                  存量开账
+                </Button>
               </Popconfirm>
             </Space>
           }
@@ -491,8 +501,12 @@ export default function WithdrawalsPage() {
           服务端会强制核对该哈希的回执且状态必须成功。
         </Text>
       </Modal>
-      <Modal title="配置提现热钱包" open={walletModal} confirmLoading={acting}
-        okText="保存" cancelText="取消"
+      <Modal
+        title="配置提现热钱包"
+        open={walletModal}
+        confirmLoading={acting}
+        okText="保存"
+        cancelText="取消"
         onCancel={() => setWalletModal(false)}
         onOk={() => {
           if (!/^0x[0-9a-fA-F]{40}$/.test(walletForm.address.trim())) {
@@ -500,22 +514,38 @@ export default function WithdrawalsPage() {
             return;
           }
           guard(async () => {
-            await setWithdrawVault(walletForm.address.trim(), walletForm.privateKey.trim());
+            await setWithdrawVault(
+              walletForm.address.trim(),
+              walletForm.privateKey.trim(),
+            );
             message.success('热钱包已配置（密文入库）');
           }, '热钱包已配置');
-        }}>
+        }}
+      >
         <Descriptions column={1} size="small" style={{ marginBottom: 12 }}>
-          <Descriptions.Item label="地址">热钱包地址（0x + 40 位十六进制）</Descriptions.Item>
+          <Descriptions.Item label="地址">
+            热钱包地址（0x + 40 位十六进制）
+          </Descriptions.Item>
           <Descriptions.Item label="私钥">
             服务端校验私钥与地址匹配后加密入库；明文不落日志不回显。必须与归集助记词不同源。
           </Descriptions.Item>
         </Descriptions>
-        <Input placeholder="热钱包地址" value={walletForm.address}
-          onChange={(e) => setWalletForm((f) => ({ ...f, address: e.target.value }))}
-          style={{ fontFamily: 'monospace', marginBottom: 8 }} />
-        <Input.Password placeholder="热钱包私钥" value={walletForm.privateKey}
-          onChange={(e) => setWalletForm((f) => ({ ...f, privateKey: e.target.value }))}
-          style={{ fontFamily: 'monospace' }} />
+        <Input
+          placeholder="热钱包地址"
+          value={walletForm.address}
+          onChange={(e) =>
+            setWalletForm((f) => ({ ...f, address: e.target.value }))
+          }
+          style={{ fontFamily: 'monospace', marginBottom: 8 }}
+        />
+        <Input.Password
+          placeholder="热钱包私钥"
+          value={walletForm.privateKey}
+          onChange={(e) =>
+            setWalletForm((f) => ({ ...f, privateKey: e.target.value }))
+          }
+          style={{ fontFamily: 'monospace' }}
+        />
       </Modal>
     </PageContainer>
   );

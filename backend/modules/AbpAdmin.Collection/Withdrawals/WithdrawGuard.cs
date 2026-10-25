@@ -144,6 +144,9 @@ public class WithdrawGuard : DomainService
             UsdtFloor = CollectionAmounts.Format(floor),
             MinBnb = CollectionAmounts.Format(minBnb),
             Bnb = CollectionAmounts.Format(await gateway.GetBnbBalanceAsync(wallet.Address, ct)),
+            // 熔断口径与 EnsureCanPayAsync 统一：任一启用币种余额低于地板即熔断（原先只看 USDT 一行，
+            // USDT 被禁用时状态卡静默显示健康——与审批侧实际判定分裂）；无任何启用币种也视为熔断
+            BreakerOpen = tokens.Count == 0,
         };
         foreach (var token in tokens)
         {
@@ -151,9 +154,9 @@ public class WithdrawGuard : DomainService
             var scaled = DepositScanManager.TryScaleRaw(raw, token.Decimals, out var overflow);
             var value = overflow || scaled == null ? 0m : scaled.Value;
             dto.TokenBalances[token.Symbol] = CollectionAmounts.Format(value);
-            if (token.Symbol.Equals("USDT", StringComparison.OrdinalIgnoreCase))
+            if (value < floor)
             {
-                dto.BreakerOpen = value < floor;
+                dto.BreakerOpen = true;
             }
         }
 
@@ -165,7 +168,7 @@ public class WithdrawGuard : DomainService
     {
         var masterKey = _configuration["Collection:MasterKey"]
                         ?? throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
-        return HdKeyService.ProtectPlain(privateKey.Trim(), masterKey, _encryptor);
+        return HdKeyService.Protect(privateKey.Trim(), masterKey, _encryptor); // Protect 即通用敏感明文加密（原 ProtectPlain 与其逐字重复，已删）
     }
 
     private async Task<decimal> GetSettingDecimalAsync(string key, decimal fallback)
