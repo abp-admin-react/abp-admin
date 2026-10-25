@@ -36,6 +36,22 @@ describe('withdrawal write requests skip global error handler', () => {
     await call().catch(() => {});
     expect(request.mock.calls[0][1]).toMatchObject({ skipErrorHandler: true });
   });
+
+  // URL 形状锁（E2E 两次踩中：单 Guid 参数端点必须路径段，?id= 形态 302 假成功）
+  it('retryWithdraw / completeWithdraw 使用路径段 URL', async () => {
+    request.mockClear();
+    await retryWithdraw('w1').catch(() => {});
+    expect(request.mock.calls[0][0]).toBe(
+      '/api/app/collection-withdraw-admin/w1/retry',
+    );
+
+    request.mockClear();
+    await completeWithdraw('w1', '0x' + 'ab'.repeat(32)).catch(() => {});
+    expect(request.mock.calls[0][0]).toBe(
+      '/api/app/collection-withdraw-admin/w1/complete?txHash=' +
+        encodeURIComponent('0x' + 'ab'.repeat(32)),
+    );
+  });
 });
 
 // 私钥只经 body 传递（不进 URL/访问日志）——配置热钱包的形状锁

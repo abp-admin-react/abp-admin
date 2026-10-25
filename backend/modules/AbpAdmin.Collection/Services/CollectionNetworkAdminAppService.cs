@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Configuration;using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;using System.Threading.Tasks;
 using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
@@ -215,13 +216,15 @@ public class CollectionNetworkAdminAppService : ApplicationService
     /// <summary>
     /// 大额进款放行（只入队，不直接入账——入账仍走归集确认的净额路径，对齐线上 confirmDeposit）。
     /// 目标单：Confirmed 且未挂归集任务（大额门停下的单；普通漏挂单同样可放，幂等）。
+    /// 链接写入用 CAS（WHERE SweepTaskId IS NULL）：并发双击/与扫链轮竞争时输家 0 行即返回，
+    /// 不再各自建任务留下永孤 Queued（OCR：竞态窗口实存，靠地址互斥索引兜底只是不双扫）。
     /// </summary>
     public virtual async Task ApproveLargeDepositAsync(Guid id)
     {
         AssertHost();
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var order = await dbContext.DepositOrders.FirstOrDefaultAsync(o => o.Id == id);
+        var order = await dbContext.DepositOrders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id);
         if (order == null)
         {
             throw new BusinessException(CollectionErrorCodes.CollectionNotFound).WithData("DepositOrderId", id);
@@ -229,7 +232,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
 
         if (order.Status != DepositOrderStatus.Confirmed || order.SweepTaskId != null)
         {
-            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidStatus)
+            throw new BusinessException(CollectionErrorCodes.DepositNotReleasable)
                 .WithData("Reason", $"仅 Confirmed 且未挂归集任务的单可放行（当前 {order.Status}，任务 {order.SweepTaskId?.ToString() ?? "无"}）");
         }
 
@@ -241,7 +244,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
         {
             var address = await dbContext.DepositAddresses.AsNoTracking()
                 .FirstAsync(a => a.Id == order.AddressId);
-            task = new ColSweepTask(Guid.NewGuid())
+            task = new ColSweepTask(GuidGenerator.Create())
             {
                 NetworkId = order.NetworkId,
                 TokenId = order.TokenId,
@@ -251,14 +254,22 @@ public class CollectionNetworkAdminAppService : ApplicationService
                 AddressIndex = address.AddressIndex,
                 Amount = 0m, // 激活时按已链接进款单求和
                 Status = SweepTaskStatus.Queued,
-                StatusChangedAt = DateTime.UtcNow,
-                CreationTime = DateTime.UtcNow,
+                StatusChangedAt = Clock.Now,
+                CreationTime = Clock.Now,
             };
             dbContext.SweepTasks.Add(task);
+            await dbContext.SaveChangesAsync(); // 先落任务拿 Id，CAS 链接才能引用
         }
 
-        order.SweepTaskId = task.Id;
-        await dbContext.SaveChangesAsync();
+        // CAS 链接：并发放行/扫链挂队只有一个赢家；输家 0 行＝已被并发处置，幂等返回
+        var linked = await dbContext.DepositOrders
+            .Where(o => o.Id == id && o.Status == DepositOrderStatus.Confirmed && o.SweepTaskId == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(o => o.SweepTaskId, task.Id));
+        if (linked == 0)
+        {
+            Logger.LogWarning("进款单 {OrderId} 放行链接被并发处置（0 行），幂等返回", id);
+        }
+
         await uow.CompleteAsync();
     }
 
@@ -473,6 +484,35 @@ public class CollectionNetworkAdminAppService : ApplicationService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var token = await RequireTokenAsync(dbContext, symbol);
         token.VaultAddress = vaultAddress;
+        await dbContext.SaveChangesAsync();
+        await uow.CompleteAsync();
+    }
+
+    /// <summary>
+    /// 设置充值策略：手续费率 DepositFeeRate（钳制 [0,1]）与自动归集额度 AutoCreditMaxAmount
+    /// （钳制 ≥0，0=全部等放行）。建单时快照——改费率只影响新单，符合快照纪律。
+    /// （OCR design：此前只有种子能写这两列，事故时无法经管理面降门/抬门。）
+    /// </summary>
+    public virtual async Task SetDepositPolicyAsync(decimal feeRate, decimal autoCreditMaxAmount)
+    {
+        AssertHost();
+        if (feeRate < 0m || feeRate > 1m)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount)
+                .WithData("Reason", $"DepositFeeRate 必须在 [0,1]：{feeRate}");
+        }
+
+        if (autoCreditMaxAmount < 0m)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount)
+                .WithData("Reason", $"AutoCreditMaxAmount 必须 ≥ 0（0=全部等放行）：{autoCreditMaxAmount}");
+        }
+
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var network = await RequireNetworkAsync(dbContext);
+        network.DepositFeeRate = feeRate;
+        network.AutoCreditMaxAmount = autoCreditMaxAmount;
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();
     }

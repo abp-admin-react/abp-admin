@@ -399,6 +399,25 @@ public class WithdrawBroadcastTests : CollectionTestBase
     }
 
     [Fact]
+    public async Task Nonce_Evidence_Requires_Completed_Not_Mere_TxHash()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync(50m, autoApprove: true);
+
+        // 后继单有 TxHash 但仍 Broadcasting（广播≠上链）：不构成「本单必未出款」的证据——
+        // 该窗口里本单同 nonce 可能已挖。必须保持 Broadcasting 不退款（防护侧锁：回退到
+        // TxHash!=null 旧谓词时此测试会红，双付窗口即复活）
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, retryCount: 3, nonceUsed: 7);
+        gateway.TxCountSeed = 8;
+        await SeedLaterOrderWithHashAsync(nonce: 7, completed: false); // 仅广播未完结
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Broadcasting); // 不退款、不重播
+        (await BucketAsync(order.UserId)).balance.ShouldBe(950m);
+    }
+
+    [Fact]
     public async Task HotWallet_Status_Breaker_Ors_Across_Tokens()
     {
         await ConfigureHotWalletAsync();

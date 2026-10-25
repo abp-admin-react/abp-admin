@@ -126,4 +126,7 @@ public static class CollectionErrorCodes
 
     /// <summary>近期已向该地址付过款（双花门），禁止盲目重播。</summary>
     public const string WithdrawRecentPayoutExists = Namespace + ":WithdrawRecentPayoutExists";
+
+    /// <summary>进款单不满足放行条件（非 Confirmed 或已挂归集任务）。</summary>
+    public const string DepositNotReleasable = Namespace + ":DepositNotReleasable";
 }

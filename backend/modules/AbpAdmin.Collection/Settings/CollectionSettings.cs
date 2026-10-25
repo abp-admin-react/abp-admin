@@ -108,7 +108,7 @@ public static class CollectionSettings
         /// <summary>提现费率（0-1 小数，对总额计；手续费 = 总额×费率，8 位截断）。默认 0.004。</summary>
         public const string FeeRate = Prefix + ".Withdraw.FeeRate";
 
-        /// <summary>当日提现总额度（UTC 日；撤单/拒绝释放额度）。默认 50000；空值 = 不限。</summary>
+        /// <summary>单笔提现上限（线上 MaxDailyWithdraw 同语义）：本笔 &gt; 上限即拒；0 或空 = 不限。默认 50000。</summary>
         public const string MaxDailyAmount = Prefix + ".Withdraw.MaxDailyAmount";
 
         /// <summary>当日提现笔数限额。默认 3。</summary>

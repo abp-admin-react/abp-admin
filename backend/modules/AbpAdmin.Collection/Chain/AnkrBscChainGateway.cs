@@ -207,9 +207,16 @@ public class AnkrBscChainGateway : IBscChainGateway
                 continue;
             }
 
+            // LogIndex 优先（Etherscan tokentx 提供 logIndex）：进款单唯一键是 (TxHash, LogIndex)，
+            // transactionIndex 在「一笔交易多笔同代币 Transfer」时重复（拆分/批量合约给两个用户地址
+            // 打款），会把第二笔塌缩掉——链上到了钱、归集扫走了、却没有进款单，静默少记用户账
+            // （OCR security 抓出）。旧端点无 logIndex 字段时回退 transactionIndex（原行为）
+            var logIndex = t.TryGetProperty("logIndex", out var li) && li.GetString() is { } liRaw
+                ? int.Parse(liRaw)
+                : int.Parse(t.GetProperty("transactionIndex").GetString()!);
             logs.Add(new TokenTransferLog(
                 t.GetProperty("hash").GetString()!.ToLowerInvariant(),
-                int.Parse(t.GetProperty("transactionIndex").GetString()!),
+                logIndex,
                 t.GetProperty("from").GetString()!,
                 t.GetProperty("to").GetString()!,
                 t.GetProperty("value").GetString()!,

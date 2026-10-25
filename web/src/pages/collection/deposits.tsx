@@ -153,8 +153,8 @@ export default function DepositsPage() {
       dataIndex: 'actualAmount',
       width: 110,
       align: 'right' as const,
-      render: (v?: string, row?: DepositOrderListDto) =>
-        v ?? (row?.fee ? <Tag color="warning">待人工</Tag> : row?.amount),
+      // 快照两列同写同无（后端契约）——无快照的历史单直接回退毛额展示
+      render: (v?: string, row?: DepositOrderListDto) => v ?? row?.amount,
     },
     {
       title: '状态',

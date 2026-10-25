@@ -42,7 +42,7 @@
     "AbpAdmin.Collection:WithdrawNotOwner": "只能操作本人的提现单。",
     "AbpAdmin.Collection:WithdrawInvalidAddress": "收款地址无效（需 0x + 40 位十六进制，且不能是全零地址）。",
     "AbpAdmin.Collection:WithdrawBelowMin": "低于单笔最小提现额。",
-    "AbpAdmin.Collection:WithdrawDailyAmountExceeded": "超过当日提现总额度。",
+    "AbpAdmin.Collection:WithdrawDailyAmountExceeded": "超过单笔提现上限。",
     "AbpAdmin.Collection:WithdrawDailyCountExceeded": "超过当日提现笔数限额。",
     "AbpAdmin.Collection:WithdrawInvalidStatus": "提现单状态已变化，请刷新后重试。",
     "AbpAdmin.Collection:WithdrawRemarkRequired": "拒绝提现必须填写原因。",
@@ -57,8 +57,8 @@
     "Description:Collection.Withdraw.MinAmount": "低于此总额（含手续费）的提现申请直接拒绝。",
     "DisplayName:Collection.Withdraw.FeeRate": "提现费率",
     "Description:Collection.Withdraw.FeeRate": "0-1 小数，按提现总额计；手续费 8 位小数截断。",
-    "DisplayName:Collection.Withdraw.MaxDailyAmount": "当日提现总额度",
-    "Description:Collection.Withdraw.MaxDailyAmount": "UTC 日累计（撤单/拒绝释放额度）；留空不限。",
+    "DisplayName:Collection.Withdraw.MaxDailyAmount": "单笔提现上限",
+    "Description:Collection.Withdraw.MaxDailyAmount": "单笔金额超过此值即拒（线上 MaxDailyWithdraw 同语义）；0 或留空 = 不限。",
     "DisplayName:Collection.Withdraw.MaxDailyCount": "当日提现笔数",
     "Description:Collection.Withdraw.MaxDailyCount": "UTC 日累计有效提现笔数上限。",
     "DisplayName:Collection.Withdraw.AutoApproveMaxAmount": "小额自动审阈值",
@@ -73,6 +73,7 @@
     "Description:Collection.Withdraw.HotWalletUsdtFloor": "热钱包链上 USDT 低于此值则阻断所有提现审批并告警。",
     "DisplayName:Collection.Withdraw.MinHotWalletBnb": "热钱包最低 BNB",
     "Description:Collection.Withdraw.MinHotWalletBnb": "热钱包 BNB 低于此值拒绝审批（付不了 gas）。",
-    "Permission:WithdrawAdmin": "提现管理（审核/拒绝/退款/开账回填）"
+    "Permission:WithdrawAdmin": "提现管理（审核/拒绝/退款/开账回填）",
+    "AbpAdmin.Collection:DepositNotReleasable": "进款单当前状态不可放行（需 Confirmed 且未挂归集任务）。"
   }
 }

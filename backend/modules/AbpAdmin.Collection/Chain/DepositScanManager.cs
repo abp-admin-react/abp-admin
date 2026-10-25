@@ -307,6 +307,8 @@ public class DepositScanManager : DomainService
             .Where(a => addressIds.Contains(a.Id))
             .ToDictionaryAsync(a => a.Id, a => (int?)a.AddressIndex, ct);
 
+        var heldCount = 0;
+        var heldTotal = 0m;
         foreach (var order in pending)
         {
             if (order.Status == DepositOrderStatus.PendingConfirm)
@@ -316,14 +318,15 @@ public class DepositScanManager : DomainService
 
             // 大额放行门（线上 AutoCreditMaxAmount 同款）：毛额超过自动额度的单停在 Confirmed
             // 不挂归集任务，等管理端放行（放行只入队，入账仍走归集确认的净额路径）。
-            // 复扫谓词会每轮重选这些单——每轮重判一次门槛，放行前幂等跳过
+            // 复扫谓词会每轮重选这些单——每轮重判一次门槛，放行前幂等跳过。
+            // 负值钳为 0（实体文档口径「负值视为 0」＝全部等放行）：此前 autoMax>=0 前置条件
+            // 让负值直接关闭整个门（fail-open，OCR 三镜头共访）
             var gross = order.Amount ?? 0m;
-            var autoMax = network.AutoCreditMaxAmount;
-            if (autoMax >= 0 && gross > autoMax)
+            var autoMax = Math.Max(0m, network.AutoCreditMaxAmount);
+            if (gross > autoMax)
             {
-                Logger.LogInformation(
-                    "进款单 {OrderId} 毛额 {Gross} 超过自动归集额度 {Max}，停在 Confirmed 等管理端放行",
-                    order.Id, gross, autoMax);
+                heldCount++;
+                heldTotal += gross;
                 continue;
             }
 
@@ -353,7 +356,17 @@ public class DepositScanManager : DomainService
             order.SweepTaskId = task.Id;
         }
 
-        Logger.LogInformation("代币 {Symbol} 确认进款 {Count} 笔（待归集）", token.Symbol, pending.Count);
+        if (heldCount > 0)
+        {
+            // 门持有单每轮重扫重判（幂等）：逐单日志会以 20s/条无限刷屏——聚合为一行/轮
+            Logger.LogInformation(
+                "代币 {Symbol} 确认入队 {Enqueued} 笔；大额门持有 {Held} 笔合计 {HeldTotal}（AutoCreditMaxAmount={Max}，等管理端放行）",
+                token.Symbol, pending.Count - heldCount, heldCount, heldTotal, Math.Max(0m, network.AutoCreditMaxAmount));
+        }
+        else
+        {
+            Logger.LogInformation("代币 {Symbol} 确认进款 {Count} 笔（待归集）", token.Symbol, pending.Count);
+        }
     }
 
     /// <summary>
@@ -367,7 +380,11 @@ public class DepositScanManager : DomainService
             return (feeRate, 0m, 0m);
         }
 
-        var fee = feeRate <= 0 ? 0m : decimal.Truncate(value * feeRate * 100_000_000m) / 100_000_000m;
+        // 费率钳制 [0,1]：≤0 不收费；≥1 视作全额费（actual≤0 由建单路径转终态）。
+        // 不钳制时 DB 直改的荒谬费率（如 1e19）会让 value×rate×1e8 溢出抛 OverflowException，
+        // 中断该币整轮扫链且游标停摆（OCR function 镜头：fail-open 方向对扫描器是错的）
+        var rate = Math.Clamp(feeRate, 0m, 1m);
+        var fee = rate <= 0 ? 0m : decimal.Truncate(value * rate * 100_000_000m) / 100_000_000m;
         return (feeRate, fee, value - fee);
     }
 

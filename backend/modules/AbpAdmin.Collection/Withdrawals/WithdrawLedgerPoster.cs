@@ -71,7 +71,15 @@ public class WithdrawLedgerPoster : DomainService
             return actual;
         }
 
-        return fee is > 0m ? 0m : amount ?? 0m;
+        // 「有 Fee 无快照净额」（仅手工改库可达）：重建 amount−fee 而非返回 0——0 会让
+        // CreditAsync 抛 InvalidAmount 回滚整个归集确认 UoW，任务永久卡 Sweeping 并
+        // 阻塞同任务其它进款单（OCR function：管道不可达，但原 0 值已被纯函数测试锁成契约）
+        if (amount is not { } gross)
+        {
+            return 0m;
+        }
+
+        return fee is > 0m ? gross - fee.Value : gross;
     }
 
     /// <summary>提现提交冻结（可用→冻结，金额 = 总额）。</summary>

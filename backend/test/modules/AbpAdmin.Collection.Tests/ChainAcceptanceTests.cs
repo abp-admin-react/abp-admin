@@ -704,10 +704,10 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
             await suow.CompleteAsync();
         }
 
-        // 先走扫描确认挂队（SweepManager 不推确认），再归集两轮（广播 + 回执确认入账）
+        // 先走扫描确认挂队（SweepManager 不推确认），再归集两轮（广播 + 回执确认入账）+ 一轮重放
         await ActivateAsync(network, usdt, gateway, orderId);
         var manager = NewSweepManager();
-        for (var i = 0; i < 2; i++)
+        for (var i = 0; i < 3; i++)
         {
             await manager.RunTokenRoundAsync(network, usdt, gateway, 12, null, 0.005m,
                 TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
@@ -760,6 +760,35 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
     }
 
     [Fact]
+    public async Task Deposit_Gate_Boundary_Equality_AutoEnqueues_Negative_ClampsToHoldAll()
+    {
+        var scUser = NewUser();
+        var watched = WatchAddress;
+        var (network, usdt, _) = await SeedChainAsync(scanRan: true);
+        usdt.VaultAddress = "0xvault";
+        var gateway = new FakeChainGateway(head: 500);
+        var scan = GetRequiredService<DepositScanManager>();
+
+        // 边界等值：毛额 == 额度 → 严格 > 判定 → 自动入队
+        await SetNetworkDepositPolicyAsync(network.Id, 0m, 20m);
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var boundaryId = await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId, userId: scUser, blockNumber: 480);
+        await scan.RunTokenRoundAsync(network, usdt, gateway, 12, 50, 1440,
+            TimeSpan.FromMinutes(1440), 0.9m, CancellationToken.None);
+        var dbContext = await DbAsync();
+        (await dbContext.DepositOrders.AsNoTracking().SingleAsync(o => o.Id == boundaryId)).SweepTaskId.ShouldNotBeNull();
+
+        // 负值：钳为 0 = 全部持有（实体文档口径；此前 autoMax>=0 前置条件会 fail-open 放行一切）
+        await SetNetworkDepositPolicyAsync(network.Id, 0m, -5m);
+        var heldId = await SeedOrderAsync(network.Id, usdt, watched, 30m, addressId, userId: scUser, blockNumber: 481);
+        await scan.RunTokenRoundAsync(network, usdt, gateway, 12, 50, 1440,
+            TimeSpan.FromMinutes(1440), 0.9m, CancellationToken.None);
+        var held = await dbContext.DepositOrders.AsNoTracking().SingleAsync(o => o.Id == heldId);
+        held.Status.ShouldBe(DepositOrderStatus.Confirmed);
+        held.SweepTaskId.ShouldBeNull();
+    }
+
+    [Fact]
     public void Deposit_Fee_Pure_Functions()
     {
         // 快照：向零 8 位、费率 0 = 不收费、null 毛额（超精度路径）安全
@@ -771,7 +800,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         // 净额解析：快照优先；历史单（无快照无手续费）回退毛额；历史单有 fee 无快照 → 0（不入账，人工）
         AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, 19.98m, 0.02m).ShouldBe(19.98m);
         AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, null, null).ShouldBe(20m);
-        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, null, 0.02m).ShouldBe(0m);
+        AbpAdmin.Collection.Withdrawals.WithdrawLedgerPoster.ResolveCreditAmount(20m, null, 0.02m).ShouldBe(19.98m); // 重建净额而非 0（0 会卡死归集确认 UoW）
     }
 
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────

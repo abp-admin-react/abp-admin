@@ -42,7 +42,7 @@
     "AbpAdmin.Collection:WithdrawNotOwner": "Only the owner can operate this withdrawal.",
     "AbpAdmin.Collection:WithdrawInvalidAddress": "Invalid recipient address (0x + 40 hex digits, all-zero rejected).",
     "AbpAdmin.Collection:WithdrawBelowMin": "Below the minimum withdrawal amount.",
-    "AbpAdmin.Collection:WithdrawDailyAmountExceeded": "Daily withdrawal amount limit exceeded.",
+    "AbpAdmin.Collection:WithdrawDailyAmountExceeded": "Exceeds the per-order withdrawal limit.",
     "AbpAdmin.Collection:WithdrawDailyCountExceeded": "Daily withdrawal count limit exceeded.",
     "AbpAdmin.Collection:WithdrawInvalidStatus": "Withdrawal status changed; refresh and retry.",
     "AbpAdmin.Collection:WithdrawRemarkRequired": "A rejection reason is required.",
@@ -57,8 +57,8 @@
     "Description:Collection.Withdraw.MinAmount": "Withdrawal requests below this gross amount are rejected.",
     "DisplayName:Collection.Withdraw.FeeRate": "Withdrawal fee rate",
     "Description:Collection.Withdraw.FeeRate": "Decimal fraction of the gross amount; fee truncated to 8 decimals.",
-    "DisplayName:Collection.Withdraw.MaxDailyAmount": "Daily withdrawal amount limit",
-    "Description:Collection.Withdraw.MaxDailyAmount": "UTC-day cumulative (cancel/reject releases quota); empty = unlimited.",
+    "DisplayName:Collection.Withdraw.MaxDailyAmount": "Per-order withdrawal limit",
+    "Description:Collection.Withdraw.MaxDailyAmount": "Reject any single order above this amount (online MaxDailyWithdraw semantics); 0 or empty = unlimited.",
     "DisplayName:Collection.Withdraw.MaxDailyCount": "Daily withdrawal count limit",
     "Description:Collection.Withdraw.MaxDailyCount": "Max valid withdrawals per UTC day.",
     "DisplayName:Collection.Withdraw.AutoApproveMaxAmount": "Auto-approve threshold",
@@ -73,6 +73,7 @@
     "Description:Collection.Withdraw.HotWalletUsdtFloor": "Approvals are blocked when hot-wallet USDT falls below this floor.",
     "DisplayName:Collection.Withdraw.MinHotWalletBnb": "Hot wallet minimum BNB",
     "Description:Collection.Withdraw.MinHotWalletBnb": "Approvals are refused when hot-wallet BNB is below this.",
-    "Permission:WithdrawAdmin": "Withdrawal admin (approve/reject/refund/backfill)"
+    "Permission:WithdrawAdmin": "Withdrawal admin (approve/reject/refund/backfill)",
+    "AbpAdmin.Collection:DepositNotReleasable": "Deposit order is not releasable (must be Confirmed with no sweep task)."
   }
 }
