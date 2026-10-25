@@ -643,10 +643,27 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var order = await dbContext.DepositOrders.SingleAsync(o => o.Id == orderId);
         order.Status.ShouldBe(DepositOrderStatus.Swept);
 
-        // 重启（重跑）不重复入账：任务已 Swept，再来一轮不动余额
+        // 账本闭环（提现 M2 起归集确认同事务过账 deposit/pay 借 1001 / 贷 2201）：
+        // 用户可用科目投影 == 余额行，链上资产科目 == 入账金额——两侧账本数值必须咬合
+        var ledger = GetRequiredService<AbpAdmin.Ledger.Integration.Contracts.ILedgerIntegrationService>();
+        (await ledger.GetBalanceAsync(new AbpAdmin.Ledger.Integration.Contracts.AccountRef(
+            AbpAdmin.Ledger.Integration.Contracts.FinanceAccountCodes.UserAvailable,
+            AbpAdmin.Ledger.Integration.Contracts.FinOwnerType.User, scUser.ToString()), "USDT")).ShouldBe(20m);
+        (await ledger.GetBalanceAsync(new AbpAdmin.Ledger.Integration.Contracts.AccountRef(
+            AbpAdmin.Ledger.Integration.Contracts.FinanceAccountCodes.OnChainAsset,
+            AbpAdmin.Ledger.Integration.Contracts.FinOwnerType.Platform, ""), "USDT")).ShouldBe(20m);
+
+        // 重启（重跑）不重复入账也不过账：任务已 Swept，再来一轮两侧账本都不动
         await manager.RunTokenRoundAsync(network, usdt, gateway, 12, null, 0.005m,
             TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
-        (await DbAsync()).Balances.Single(b => b.UserId == scUser).Balance.ShouldBe(20m);
+        var after = await DbAsync();
+        after.Balances.Single(b => b.UserId == scUser).Balance.ShouldBe(20m);
+        (await ledger.GetBalanceAsync(new AbpAdmin.Ledger.Integration.Contracts.AccountRef(
+            AbpAdmin.Ledger.Integration.Contracts.FinanceAccountCodes.UserAvailable,
+            AbpAdmin.Ledger.Integration.Contracts.FinOwnerType.User, scUser.ToString()), "USDT")).ShouldBe(20m);
+        (await ledger.GetBalanceAsync(new AbpAdmin.Ledger.Integration.Contracts.AccountRef(
+            AbpAdmin.Ledger.Integration.Contracts.FinanceAccountCodes.OnChainAsset,
+            AbpAdmin.Ledger.Integration.Contracts.FinOwnerType.Platform, ""), "USDT")).ShouldBe(20m);
     }
 
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────
