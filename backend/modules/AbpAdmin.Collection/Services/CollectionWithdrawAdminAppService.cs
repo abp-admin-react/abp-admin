@@ -333,12 +333,24 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         await uow.CompleteAsync();
     }
 
-    /// <summary>热钱包状态卡（余额/门槛/熔断；无密钥信息）。</summary>
+    /// <summary>
+    /// 热钱包状态卡（余额/门槛/熔断；无密钥信息）。只读展示面：全新环境 RPC/key 池
+    /// 未配置时降级为 Configured=false（页面显示「未配置」），不抛 500——资金路径
+    ///（审批/广播/重试）不走此降级，仍经网关工厂 fail-closed（用户实测踩中，记录两轮的已知项）。
+    /// </summary>
     public virtual async Task<AbpAdmin.Collection.Withdrawals.WithdrawHotWalletStatusDto> GetHotWalletAsync()
     {
         AssertHost();
-        var (_, gateway) = await CreateWithdrawGatewayAsync();
-        return await _guard.GetStatusAsync(gateway);
+        try
+        {
+            var (_, gateway) = await CreateWithdrawGatewayAsync();
+            return await _guard.GetStatusAsync(gateway);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("无可用 RPC") || ex.Message.Contains("MasterKey"))
+        {
+            Logger.LogWarning("热钱包状态卡降级为未配置（网关组装失败，仅展示面）：{Message}", ex.Message);
+            return new AbpAdmin.Collection.Withdrawals.WithdrawHotWalletStatusDto { Configured = false };
+        }
     }
 
     /// <summary>
