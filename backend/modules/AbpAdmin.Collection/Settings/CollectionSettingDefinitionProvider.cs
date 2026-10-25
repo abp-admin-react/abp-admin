@@ -65,15 +65,17 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             W(CollectionSettings.Withdraw.HotWalletUsdtFloor, DefHotWalletUsdtFloor),
             W(CollectionSettings.Withdraw.MinHotWalletBnb, DefMinHotWalletBnb),
 
-            // 链上 worker 开关/节奏热改（宿主配置迁移）：总开关默认关（fail-closed），Checkbox 呈现；
-            // 广播节奏（提现 worker）与链上阈值参数，默认值单源 = ChainDefaults/WithdrawDefaults
-            SW(CollectionSettings.Withdraw.Enabled),
+            // 链上 worker 参数热改（宿主配置迁移）：数值/阈值参数在设置页管理（热改免重启）；
+            // 四个总开关（扫链/归集/热钱包监控/提现）不进设置页——资金面高危杠杆改由域权限端点把守
+            //（SetChainSwitchesAsync=Network.Admin / SetWithdrawEnabledAsync=WithdrawAdmin，
+            // 评审：通用 AbpAdmin.SettingUi.Update 挡不住烧 Gas/付币开关），worker 照旧每轮热读。
             W(CollectionSettings.Withdraw.BroadcastIntervalSeconds, DefBroadcastIntervalSeconds),
             W(CollectionSettings.Withdraw.BroadcastBatchSize, DefBroadcastBatchSize),
             W(CollectionSettings.Withdraw.AutoApproveBatchSize, DefAutoApproveBatchSize),
-            SW(CollectionSettings.Chain.ScanEnabled),
-            SW(CollectionSettings.Chain.SweepEnabled),
-            SW(CollectionSettings.Chain.HotWalletWatchEnabled),
+            S(CollectionSettings.Withdraw.Enabled),
+            S(CollectionSettings.Chain.ScanEnabled),
+            S(CollectionSettings.Chain.SweepEnabled),
+            S(CollectionSettings.Chain.HotWalletWatchEnabled),
             W(CollectionSettings.Chain.ScanIntervalSeconds, DefScanIntervalSeconds),
             W(CollectionSettings.Chain.SweepIntervalSeconds, DefSweepIntervalSeconds),
             W(CollectionSettings.Chain.HotWalletWatchIntervalSeconds, DefHotWalletWatchIntervalSeconds),
@@ -143,8 +145,12 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Text);
     }
 
-    /// <summary>布尔开关样板：默认 "false"（fail-closed，垃圾值解析为关），Checkbox 呈现。</summary>
-    private static SettingDefinition SW(string key)
+    /// <summary>
+    /// 布尔总开关定义（无 UI——不进设置页）：默认 "false"（fail-closed，垃圾值解析为关），
+    /// 读侧 worker 每轮热读；写侧走域权限管理端点（SetChainSwitchesAsync=Network.Admin /
+    /// SetWithdrawEnabledAsync=WithdrawAdmin——资金面高危杠杆不交给通用设置页权限）。
+    /// </summary>
+    private static SettingDefinition S(string key)
     {
         return new SettingDefinition(
                 key,
@@ -153,8 +159,7 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
                 L("Description:" + key))
             .WithProviders(
                 GlobalSettingValueProvider.ProviderName,
-                DefaultValueSettingValueProvider.ProviderName)
-            .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Checkbox);
+                DefaultValueSettingValueProvider.ProviderName);
     }
 
     private static LocalizableString L(string name)

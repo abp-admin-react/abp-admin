@@ -80,6 +80,14 @@ public class HotWalletWatchTests : CollectionTestBase
         externalIn.Status.ShouldBe(HotWalletTxnStatus.ExternalIn);
         externalIn.Direction.ShouldBe(HotWalletDirection.In);
 
+        // 安全载荷锁：每笔未匹配出账恰推一条 ChainHotWalletChanged（匹配/入站不推）
+        var pushed = Fakes.FakeChainPushNotifier.Instance.HotWallet
+            .Where(e => e.TxHash == "0xbbb").ToList();
+        pushed.Count.ShouldBe(1);
+        pushed[0].Symbol.ShouldBe("USDT");
+        pushed[0].Direction.ShouldBe("Out");
+        Fakes.FakeChainPushNotifier.Instance.HotWallet.Count.ShouldBe(1);
+
         (await ReadStatesAsync())[0].LastError.ShouldBeNull();
         (await ReadStatesAsync())[0].LastScannedBlock.ShouldBe(505);
 
@@ -87,18 +95,91 @@ public class HotWalletWatchTests : CollectionTestBase
         gateway.Head = 540;
         await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
         (await ReadTxnsAsync()).Count.ShouldBe(3);
+        Fakes.FakeChainPushNotifier.Instance.HotWallet.Count.ShouldBe(1); // 重扫不重推
     }
 
     [Fact]
-    public async Task Incomplete_Pages_Keep_Cursor_And_Retry_Succeeds()
+    public async Task Overrun_Halves_Window_And_Converges()
     {
         var (network, usdt) = await SeedChainWithWalletAsync();
         var gateway = new FakeChainGateway(head: 500);
         var manager = Manager();
         await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None); // 基线 485
 
+        // 两笔流水在不同块：阈值 2 → 整窗读不全 → 缩半分窗后每窗 1 笔可读全 → 自愈推进
         gateway.Head = 520;
-        gateway.TruncateThreshold = 1; // 每页都报未读完 → 分页超限
+        gateway.TruncateThreshold = 2;
+        gateway.Logs[usdt.ContractAddress] = new()
+        {
+            Log("0xaaa", Wallet, User1, "1000000000000000000", 490),
+            Log("0xbbb", Wallet, User1, "1000000000000000000", 494),
+        };
+
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
+
+        var txns = await ReadTxnsAsync();
+        txns.Count.ShouldBe(2); // 缩半自愈：两笔全部入库（未匹配出账 → 均为异常）
+        txns.All(t => t.Status == HotWalletTxnStatus.Anomaly).ShouldBeTrue();
+        (await ReadStatesAsync())[0].LastScannedBlock.ShouldBe(505); // 游标推到头
+        (await ReadStatesAsync())[0].LastError.ShouldBeNull(); // 自愈不留错
+    }
+
+    [Fact]
+    public async Task Single_Block_Overrun_Alerts_Skips_Block_And_Advances()
+    {
+        var (network, usdt) = await SeedChainWithWalletAsync();
+        var gateway = new FakeChainGateway(head: 500);
+        var manager = Manager();
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None); // 基线 485
+
+        // 同块两笔 + 阈值 2：缩到单块仍读不全 → 告警跳块推进（监控卡死比漏一段更危险）
+        gateway.Head = 520;
+        gateway.TruncateThreshold = 2;
+        gateway.Logs[usdt.ContractAddress] = new()
+        {
+            Log("0xaaa", Wallet, User1, "1000000000000000000", 490),
+            Log("0xbbb", Wallet, User1, "1000000000000000000", 490),
+            Log("0xccc", Wallet, User1, "1000000000000000000", 495), // 块 495 单笔可读全
+        };
+
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
+
+        var txns = await ReadTxnsAsync();
+        txns.Count.ShouldBe(1);
+        txns.Single().TxHash.ShouldBe("0xccc"); // 跳过的块不落行，后续块照常
+        var state = (await ReadStatesAsync())[0];
+        state.LastScannedBlock.ShouldBe(505); // 不卡死：游标照常推到头
+        state.LastError.ShouldNotBeNull(); // 跳块留痕
+        state.LastError.ShouldContain("490");
+    }
+
+    [Fact]
+    public async Task One_Token_Failure_Does_Not_Block_The_Other()
+    {
+        var (network, usdt) = await SeedChainWithWalletAsync();
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
+        {
+            var dbContext = await DbAsync();
+            await dbContext.Tokens.AddAsync(new ColToken(Guid.NewGuid())
+            {
+                NetworkId = network.Id,
+                Symbol = "USDC",
+                ContractAddress = "0xusdc",
+                Decimals = 18,
+                MinDeposit = "10",
+                IsEnabled = true,
+                CreationTime = DateTime.UtcNow,
+            });
+            await dbContext.SaveChangesAsync();
+            await uow.CompleteAsync();
+        }
+
+        var gateway = new FakeChainGateway(head: 500);
+        var manager = Manager();
+        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None); // 双币基线
+
+        gateway.Head = 520;
+        gateway.ThrowOnContract = "0xusdc"; // 第二币通道故障
         gateway.Logs[usdt.ContractAddress] = new()
         {
             Log("0xaaa", Wallet, User1, "1000000000000000000", 490),
@@ -106,17 +187,12 @@ public class HotWalletWatchTests : CollectionTestBase
 
         await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
 
-        var state = (await ReadStatesAsync())[0];
-        state.LastScannedBlock.ShouldBe(485); // 游标未推进
-        state.LastError.ShouldNotBeNull();
-        (await CountTxnsAsync()).ShouldBe(0); // 不完整区间不落任何行
-
-        // 下一轮读全（阈值放开 + 头再涨）：同区间重扫落行
-        gateway.TruncateThreshold = int.MaxValue;
-        gateway.Head = 540;
-        await manager.RunRoundAsync(network, gateway, 15, CancellationToken.None);
-        (await CountTxnsAsync()).ShouldBe(1);
-        (await ReadStatesAsync())[0].LastError.ShouldBeNull();
+        (await ReadTxnsAsync()).Count.ShouldBe(1); // USDT 正常落行
+        var states = await ReadStatesAsync();
+        states.Count.ShouldBe(2); // 双币游标行都在
+        states.Single(s => s.Symbol == "USDT").LastScannedBlock.ShouldBe(505);
+        // USDC 抛错被逐币 catch：游标留待下轮（本轮安全链头未推），不挡 USDT
+        states.Single(s => s.Symbol == "USDC").LastScannedBlock.ShouldBe(485);
     }
 
     [Fact]
@@ -152,7 +228,8 @@ public class HotWalletWatchTests : CollectionTestBase
                 .SingleAsync(t => t.Id == anomalyId);
         });
         acked!.Status.ShouldBe(HotWalletTxnStatus.Acked);
-        acked.AckedBy.ShouldNotBeNull();
+        acked.AckedBy.ShouldNotBeNullOrWhiteSpace(); // 测试上下文为已登录 admin；生产行为=当前用户名
+        acked.AckedAt.ShouldNotBeNull();
         acked.AckNote.ShouldBe("已核实：运营手动转出");
 
         // 状态门：非 Anomaly 拒绝、不存在拒绝

@@ -149,12 +149,14 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
     /// <summary>
     /// 懒 Redis 支撑守卫（原启动期守卫的热改等价物）：开关开着而分布式锁不是 Redis 支撑
     /// （Redis:IsEnabled 显式 false，或 Redis:Configuration 空白）→ 拒绝执行本轮（fail-closed），
-    /// 多实例下进程内锁会永久占锁/丢轮。每轮重查（配置可热载），告警只发一次防刷屏。
+    /// 多实例下进程内锁会永久占锁/丢轮。每轮重查（配置可热载）；告警只在「由好变坏」时发
+    /// 一次（恢复后清旗，再次失守会再告警——监控断续不失明）。
     /// </summary>
     private bool EnsureRedisBackedLockBackend()
     {
         if (IsRedisBackedLockConfigured(_configuration))
         {
+            _lockBackendAlerted = false; // 恢复即重置：下一次失守会再次告警
             return true;
         }
 
@@ -162,7 +164,7 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
         {
             _lockBackendAlerted = true;
             Logger.LogError(
-                "{Prefix}{Worker} 开关已开但分布式锁不是 Redis 支撑（Redis:IsEnabled 显式 false 或 Redis:Configuration 空白），拒绝执行本轮。多实例下进程锁会永久占锁/丢轮；请启用 Redis 或在设置页关闭开关（计划第 5.6 节守卫）",
+                "{Prefix}{Worker} 开关已开但分布式锁不是 Redis 支撑（Redis:IsEnabled 显式 false 或 Redis:Configuration 空白），拒绝执行本轮。多实例下进程锁会永久占锁/丢轮；请启用 Redis 或关闭开关（计划第 5.6 节守卫）",
                 CollectionConsts.AlertPrefixLockBackend, GetType().Name);
         }
 

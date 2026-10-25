@@ -7,7 +7,6 @@ import {
   Descriptions,
   Input,
   Modal,
-  Popconfirm,
   Select,
   Space,
   Spin,
@@ -108,12 +107,23 @@ export default function HotWalletWatchPage() {
 
   useEffect(() => {
     const offConn = onChainConnState(setConnState);
+    // 异常突发（一轮可到上百条）合并刷新：3s 尾沿防抖，避免 K 条事件 × K 组请求打满后端/RPC
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const offHotWallet = onChainHotWalletChanged(() => {
-      reload();
-      reloadCards();
+      if (timer != null) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(() => {
+        timer = null;
+        reload();
+        reloadCards();
+      }, 3000);
     });
     startChainSignalR();
     return () => {
+      if (timer != null) {
+        clearTimeout(timer);
+      }
       offConn();
       offHotWallet();
     };
@@ -206,15 +216,13 @@ export default function HotWalletWatchPage() {
       title: '匹配提现单',
       dataIndex: 'matchedWithdrawId',
       width: 130,
-      render: (v: string | undefined, row: HotWalletTxnDto) =>
+      render: (v: string | undefined) =>
         v ? (
           <Tooltip title={v}>
             <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{`${v.slice(0, 8)}...`}</Text>
           </Tooltip>
-        ) : row.status === 'Matched' ? (
-          '-'
         ) : (
-          <Text type="secondary">—</Text>
+          '-'
         ),
     },
     {

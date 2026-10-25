@@ -258,3 +258,12 @@ export async function ackHotWalletTxn(id: string, note?: string): Promise<void> 
     ...WD_REQ,
   });
 }
+
+/** 提现总开关（资金面高危杠杆：开=广播 worker 付币/提交放行；WithdrawAdmin 权限位端点） */
+export async function setWithdrawEnabled(enabled: boolean): Promise<void> {
+  await request(`${BASE}/set-withdraw-enabled`, {
+    method: 'POST',
+    params: { enabled },
+    ...WD_REQ,
+  });
+}

@@ -12,6 +12,7 @@ using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Timing;
+using AbpAdmin.Collection.Settings;
 using Volo.Abp.Uow;
 
 namespace AbpAdmin.Collection.Services;
@@ -74,7 +75,7 @@ public class CollectionDepositAppService : ApplicationService
     {
         AssertHost();
         var networkId = await _depositAddressManager
-            .WithMasterKey(_configuration["Collection:MasterKey"])
+            .WithMasterKey(_configuration[CollectionSettings.Host.MasterKey])
             .ResolveBscNetworkIdAsync();
         var (address, enabled, notice) = await _depositAddressManager
             .GetOrDeriveAsync(networkId, CurrentUser.Id!.Value);

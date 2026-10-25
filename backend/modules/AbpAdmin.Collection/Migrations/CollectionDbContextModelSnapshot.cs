@@ -448,6 +448,8 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.HasIndex("CreationTime");
 
+                    b.HasIndex("BlockNumber", "LogIndex");
+
                     b.HasIndex("Status", "CreationTime");
 
                     b.HasIndex("TxHash", "LogIndex")
@@ -809,6 +811,9 @@ namespace AbpAdmin.Collection.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TxHash")
+                        .HasFilter("\"TxHash\" IS NOT NULL");
 
                     b.HasIndex("Status", "StatusChangedAt");
 

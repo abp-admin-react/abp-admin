@@ -92,6 +92,19 @@ public class ChainWorkerRegistrationTests
         CollectionChainWorkerBase.IsRedisBackedLockConfigured(configuration).ShouldBe(expected);
     }
 
+    /// <summary>轮间隔钳制（防设置页误配 1s 打爆 RPC）：低于下限一律钳到 MinIntervalSeconds。</summary>
+    [Theory]
+    [InlineData(1, true, 5)]    // 1s → 5s（钳制生效，与 enabled 无关）
+    [InlineData(5, true, 5)]    // 边界等值不钳
+    [InlineData(30, true, 30)]  // 正常值直通
+    [InlineData(1, false, 5)]   // 关闭态同样钳（下轮睡眠间隔兜底）
+    public void WorkerRoundPlan_Clamps_Interval_To_Minimum(int seconds, bool enabled, int expectedSeconds)
+    {
+        var plan = WorkerRoundPlan.Create(enabled, TimeSpan.FromSeconds(seconds));
+        plan.Enabled.ShouldBe(enabled);
+        plan.Interval.ShouldBe(TimeSpan.FromSeconds(expectedSeconds));
+    }
+
     [Fact]
     public async Task Chain_Workers_Are_Not_Registered_In_DbMigrator_Service_Graph()
     {

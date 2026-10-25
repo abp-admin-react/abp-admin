@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const request = vi.fn();
 vi.mock('@umijs/max', () => ({ request: (...a: unknown[]) => request(...a) }));
 
-import { approveLargeDeposit, getTreasuryDashboard, retrySweepTask, setDepositPolicy } from './chainAdmin';
+import {
+  approveLargeDeposit,
+  getTreasuryDashboard,
+  retrySweepTask,
+  setChainSwitches,
+  setDepositPolicy,
+} from './chainAdmin';
 
 // 链网运维写端点的 URL 形状锁（E2E 实测：单 Guid 参数端点 ?id= 形态 302 假成功，必须路径段）
 describe('chainAdmin write endpoint URL shapes', () => {
@@ -36,10 +42,21 @@ describe('chainAdmin write endpoint URL shapes', () => {
     });
   });
 
-  it('getTreasuryDashboard 是 GET query-less 端点', async () => {
+  it('getTreasuryDashboard 指向收款查看权限位的服务（随端点迁移锁 BASE）', async () => {
     await getTreasuryDashboard();
     expect(request.mock.calls[0][0]).toBe(
-      '/api/app/collection-network-admin/dashboard',
+      '/api/app/collection-balance-admin/dashboard',
     );
+  });
+
+  it('setChainSwitches 只传提供的参数', async () => {
+    await setChainSwitches({ scanEnabled: true });
+    expect(request.mock.calls[0][0]).toBe(
+      '/api/app/collection-network-admin/set-chain-switches',
+    );
+    expect(request.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      params: { scanEnabled: true },
+    });
   });
 });

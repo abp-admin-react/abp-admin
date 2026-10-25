@@ -76,7 +76,7 @@ public static class CollectionErrorCodes
 
     // —— 提现（M2 审核/状态机；M3 补热钱包/双花门）—————————————————————————————
 
-    /// <summary>提现功能未开启（Collection:Withdraw:Enabled=false）。</summary>
+    /// <summary>提现功能未开启（设置 Collection.Withdraw.Enabled=false，设置页热读）。</summary>
     public const string WithdrawDisabled = Namespace + ":WithdrawDisabled";
 
     /// <summary>提现总闸拉下（运行时设置，紧急停机用）。</summary>

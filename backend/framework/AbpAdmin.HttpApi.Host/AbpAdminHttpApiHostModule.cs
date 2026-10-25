@@ -276,8 +276,9 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.Kind = DateTimeKind.Utc;
         });
 
-        // 链上 worker（M5 计划第 59 行）：扫链/归集 BackgroundService 只在宿主注册（DbMigrator 不调）；
-        // 开关默认关（不配置即不跑）；开启时守卫强制 Redis 支撑的分布式锁（扩展内抛 AbpInitializationException）
+        // 链上 worker（M5 计划第 59 行）：扫链/归集/热钱包监控/提现广播 BackgroundService 只在宿主注册
+        //（DbMigrator 不调）；开关/间隔/阈值已迁设置页（worker 每轮热读）；Redis 支撑守卫在
+        // worker 基类轮内懒检查（fail-closed 拒轮 + [Alert:LockBackend]），不在启动期判定
         context.Services.AddHttpClient("collection-chain")
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(60));
         context.Services.AddSingleton<ChainGatewayFactory>(sp =>

@@ -26,6 +26,7 @@ import {
   type NetworkStatusDto,
   removeApiKey,
   setApiKeyEnabled,
+  setChainSwitches,
   setDepositPolicy,
   setMinDeposit,
   setNodeLogResultCap,
@@ -221,12 +222,27 @@ export default function NetworkConfigPage() {
     }
     setPolicySaving(true);
     try {
-      await setDepositPolicy(policyFeeRate, policyMax);
+      // 发送解析后的值（原始串里 1e-3/尾空格类输入能过 parseFloat 但过不了后端模型绑定）
+      await setDepositPolicy(String(fee), String(max));
       message.success('充值政策已更新（费率只影响新单——建单快照）');
       setPolicyOpen(false);
       reload();
     } finally {
       setPolicySaving(false);
+    }
+  };
+  const doToggleSwitch = async (
+    key: 'scanEnabled' | 'sweepEnabled' | 'hotWalletWatchEnabled',
+    checked: boolean,
+  ) => {
+    const label =
+      key === 'scanEnabled' ? '扫链' : key === 'sweepEnabled' ? '归集' : '热钱包监控';
+    try {
+      await setChainSwitches({ [key]: checked });
+      message.success(`${label}已${checked ? '开启' : '关闭'}（worker 下一轮生效）`);
+      reload();
+    } catch {
+      /* interceptor */
     }
   };
   const doGenerateMnemonic = () => {
@@ -610,14 +626,46 @@ export default function NetworkConfigPage() {
               <Descriptions.Item label="大额放行门">
                 <Text>{status.autoCreditMaxAmount}</Text>
               </Descriptions.Item>
-              <Descriptions.Item label="开关（设置页）">
-                <Space>
-                  <Tag color={status.scanEnabled ? 'green' : 'default'}>
-                    扫链{status.scanEnabled ? '开' : '关'}
-                  </Tag>
-                  <Tag color={status.sweepEnabled ? 'green' : 'default'}>
-                    归集{status.sweepEnabled ? '开' : '关'}
-                  </Tag>
+              <Descriptions.Item label="链上开关">
+                <Space size={12}>
+                  <Space size={4}>
+                    <Text type="secondary">扫链</Text>
+                    <Popconfirm
+                      title={`确认${status.scanEnabled ? '关闭' : '开启'}扫链？`}
+                      description="误开会扫链烧 Gas；worker 下一轮热生效。"
+                      onConfirm={() => doToggleSwitch('scanEnabled', !status.scanEnabled)}
+                      okText="确认"
+                      cancelText="取消"
+                    >
+                      <Switch checked={status.scanEnabled} size="small" />
+                    </Popconfirm>
+                  </Space>
+                  <Space size={4}>
+                    <Text type="secondary">归集</Text>
+                    <Popconfirm
+                      title={`确认${status.sweepEnabled ? '关闭' : '开启'}归集？`}
+                      description="归集会向用户地址打 BNB 并签名转账；worker 下一轮热生效。"
+                      onConfirm={() => doToggleSwitch('sweepEnabled', !status.sweepEnabled)}
+                      okText="确认"
+                      cancelText="取消"
+                    >
+                      <Switch checked={status.sweepEnabled} size="small" />
+                    </Popconfirm>
+                  </Space>
+                  <Space size={4}>
+                    <Text type="secondary">热钱包监控</Text>
+                    <Popconfirm
+                      title={`确认${status.hotWalletWatchEnabled ? '关闭' : '开启'}热钱包逐笔监控？`}
+                      description="只读监控不碰签名面；worker 下一轮热生效。"
+                      onConfirm={() =>
+                        doToggleSwitch('hotWalletWatchEnabled', !status.hotWalletWatchEnabled)
+                      }
+                      okText="确认"
+                      cancelText="取消"
+                    >
+                      <Switch checked={status.hotWalletWatchEnabled} size="small" />
+                    </Popconfirm>
+                  </Space>
                 </Space>
               </Descriptions.Item>
             </Descriptions>

@@ -10,7 +10,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BALANCE_ACTION_LABELS,
   type BalanceTxnDto,
@@ -41,12 +41,24 @@ export default function MemberFundsPage() {
   const [loading, setLoading] = useState(false);
   const pageSize = 20;
 
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (searchTimer.current != null) {
+        clearTimeout(searchTimer.current);
+      }
+    },
+    [],
+  );
   const searchUsers = useCallback(async (keyword: string) => {
-    if (!keyword.trim()) {
+    // 至少 2 字符才搜（每键一次 DB LIKE，不设门槛就是噪声）
+    if (keyword.trim().length < 2) {
       setUserOptions([]);
       return;
     }
     setSearching(true);
+    setSearchError(null);
     try {
       const result = await getUsers({ filter: keyword.trim(), pageSize: 20 });
       setUserOptions(
@@ -56,7 +68,9 @@ export default function MemberFundsPage() {
         })),
       );
     } catch {
-      /* interceptor */
+      // 用户查询需要身份管理权限（AbpIdentity.Users）——无权限时明示而不是空下拉装死
+      setUserOptions([]);
+      setSearchError('用户搜索失败（可能缺少身份管理查询权限，或服务不可用）');
     } finally {
       setSearching(false);
     }
@@ -182,14 +196,30 @@ export default function MemberFundsPage() {
           message="会员资金（只读）：按用户名搜索后查看该用户的稳定币余额与流水；金额与用户侧「我的余额」同口径。"
         />
         <Card title="选择用户" size="small">
+          {searchError && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message={searchError}
+            />
+          )}
           <Select
             showSearch
             filterOption={false}
-            placeholder="输入用户名或邮箱搜索（identity 用户）"
+            placeholder="输入用户名或邮箱搜索（至少 2 个字符）"
             style={{ width: 420 }}
             loading={searching}
             value={userId}
-            onSearch={searchUsers}
+            onSearch={(kw: string) => {
+              if (searchTimer.current != null) {
+                clearTimeout(searchTimer.current);
+              }
+              searchTimer.current = setTimeout(() => {
+                searchTimer.current = null;
+                searchUsers(kw);
+              }, 300);
+            }}
             onChange={(v) => {
               setUserId(v);
               setPage(1);

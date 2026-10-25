@@ -87,8 +87,11 @@ public class CollectionTestModule : AbpModule
             ServiceDescriptor.Singleton<
                 Microsoft.Extensions.Configuration.IConfiguration>(testConfig));
 
-        // 渠道网关假实现：静态双实例（微信/支付宝）单例注册——测试先配置行为再调被测服务
+        // 渲染假实现：渠道网关静态双实例（微信/支付宝）+ 推送收集假件（热钱包监控推送断言）——
+        // 测试先配置行为/复位再调被测服务
         context.Services.AddSingleton<Channels.ICollectionChannelGateway>(Fakes.FakeChannelGateway.Wechat);
         context.Services.AddSingleton<Channels.ICollectionChannelGateway>(Fakes.FakeChannelGateway.Alipay);
+        context.Services.AddSingleton<Fakes.FakeChainPushNotifier>(Fakes.FakeChainPushNotifier.Instance);
+        context.Services.AddSingleton<Contracts.IChainPushNotifier>(Fakes.FakeChainPushNotifier.Instance);
     }
 }

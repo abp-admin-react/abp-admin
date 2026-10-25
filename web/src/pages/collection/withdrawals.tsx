@@ -28,6 +28,7 @@ import {
   refundWithdraw,
   rejectWithdraw,
   retryWithdraw,
+  setWithdrawEnabled,
   setWithdrawVault,
   WD_STATUS_LABELS,
   type WithdrawHotWalletStatusDto,
@@ -359,7 +360,25 @@ export default function WithdrawalsPage() {
             <Space size={32} wrap>
               <Space size={6}>
                 功能开关：
-                <Switch checked={status.enabled} disabled size="small" />
+                <Popconfirm
+                  title={`确认${status.enabled ? '关闭' : '开启'}提现功能？`}
+                  description="关闭后拒绝新提交、广播 worker 睡眠；开启即恢复付币（下一轮热生效）。"
+                  onConfirm={async () => {
+                    try {
+                      await setWithdrawEnabled(!status.enabled);
+                      message.success(
+                        `提现功能已${status.enabled ? '关闭' : '开启'}`,
+                      );
+                      await reloadCards();
+                    } catch (e) {
+                      message.error(financeErrorText(e));
+                    }
+                  }}
+                  okText="确认"
+                  cancelText="取消"
+                >
+                  <Switch checked={status.enabled} size="small" />
+                </Popconfirm>
               </Space>
               <Space size={6}>
                 总闸（紧急停机）：

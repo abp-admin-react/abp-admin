@@ -17,6 +17,7 @@ using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Settings;
+using Volo.Abp.SettingManagement;
 using Volo.Abp.Uow;
 
 namespace AbpAdmin.Collection.Services;
@@ -106,6 +107,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     private readonly AbpAdmin.Collection.Chain.ChainGatewayFactory _gatewayFactory;
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly ISettingProvider _settings;
+    private readonly Volo.Abp.SettingManagement.ISettingManager _settingManager;
 
     public CollectionWithdrawAdminAppService(
         WithdrawManager withdraws,
@@ -114,7 +116,8 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         WithdrawBroadcastManager broadcast,
         AbpAdmin.Collection.Chain.ChainGatewayFactory gatewayFactory,
         IDbContextProvider<CollectionDbContext> dbContextProvider,
-        ISettingProvider settings)
+        ISettingProvider settings,
+        Volo.Abp.SettingManagement.ISettingManager settingManager)
     {
         _withdraws = withdraws;
         _ledger = ledger;
@@ -123,6 +126,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         _gatewayFactory = gatewayFactory;
         _dbContextProvider = dbContextProvider;
         _settings = settings;
+        _settingManager = settingManager;
     }
 
     /// <summary>提现单列表（可按状态/用户过滤，倒序分页）。</summary>
@@ -420,11 +424,17 @@ public class CollectionWithdrawAdminAppService : ApplicationService
 
     /// <summary>
     /// 确认已知（Anomaly → Acked 终态）：管理员核实后的留痕动作（谁、何时、备注）。
-    /// CAS：并发双击只有一个赢家；非 Anomaly 拒绝。
+    /// CAS：并发双击只有一个赢家；非 Anomaly 拒绝。备注限 512（列宽，超长给业务错而非 DB 500）。
     /// </summary>
     public virtual async Task AckHotWalletTxnAsync(Guid id, string? note = null)
     {
         AssertHost();
+        if (note != null && note.Length > 512)
+        {
+            throw new BusinessException(CollectionErrorCodes.HotWalletTxnNotAckable)
+                .WithData("Reason", "备注超长（≤512 字符）");
+        }
+
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var txn = await dbContext.HotWalletTxns.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id);
@@ -452,6 +462,20 @@ public class CollectionWithdrawAdminAppService : ApplicationService
             Logger.LogWarning("热钱包流水 {TxnId} 确认被并发处置（0 行），幂等返回", id);
         }
 
+        await uow.CompleteAsync();
+    }
+
+    /// <summary>
+    /// 提现总开关（资金面高危杠杆：开启后广播 worker 才会从热钱包付币）：写入设置库，
+    /// 提交闸与广播 worker 每轮热读（下一轮生效免重启）。挂在 WithdrawAdmin 权限位——
+    /// 此前经 SettingUi 通用设置页可改，评审定为权限错位（资金开关不交给通用设置更新权限）。
+    /// </summary>
+    public virtual async Task SetWithdrawEnabledAsync(bool enabled)
+    {
+        AssertHost();
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        await _settingManager.SetGlobalAsync(
+            CollectionSettings.Withdraw.Enabled, enabled ? "true" : "false");
         await uow.CompleteAsync();
     }
 

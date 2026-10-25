@@ -18,13 +18,15 @@ const { Text } = Typography;
 export default function CollectionDashboardPage() {
   const [data, setData] = useState<TreasuryDashboardDto>();
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
       setData(await getTreasuryDashboard());
+      setLoadError(false);
     } catch {
-      /* interceptor */
+      setLoadError(true); // 403/5xx 不静默吞：无限骨架比错误提示更糟
     } finally {
       setLoading(false);
     }
@@ -32,8 +34,22 @@ export default function CollectionDashboardPage() {
 
   useEffect(() => {
     reload();
-    const timer = setInterval(reload, 30_000);
-    return () => clearInterval(timer);
+    // 30s 轮询仅在页面可见时跑（后台标签页不打最贵的聚合端点），切回立即刷新
+    const timer = setInterval(() => {
+      if (!document.hidden) {
+        reload();
+      }
+    }, 30_000);
+    const onVisible = () => {
+      if (!document.hidden) {
+        reload();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [reload]);
 
   const fmtTime = (v?: string) => {
@@ -58,9 +74,16 @@ export default function CollectionDashboardPage() {
           showIcon
           message="资金看板（30 秒自动刷新；今日按 UTC 日界）。热钱包余额/熔断与逐笔异常在「热钱包监控」页。"
         />
+        {loadError && !data && (
+          <Alert
+            type="error"
+            showIcon
+            message="看板数据加载失败（无权限或服务不可用），30 秒后自动重试。"
+          />
+        )}
         {!data ? (
-          <Card loading>
-            <Spin />
+          <Card loading={!loadError}>
+            {loadError ? null : <Spin />}
           </Card>
         ) : (
           <>
@@ -69,7 +92,6 @@ export default function CollectionDashboardPage() {
                 statistic={{
                   title: `今日充值（${data.depositTodayCount} 笔）`,
                   value: data.depositTodayAmount,
-                  precision: 2,
                 }}
               />
               <StatisticCard.Divider />
@@ -77,7 +99,6 @@ export default function CollectionDashboardPage() {
                 statistic={{
                   title: `今日提现（${data.withdrawTodayCount} 笔）`,
                   value: data.withdrawTodayAmount,
-                  precision: 2,
                 }}
               />
               <StatisticCard.Divider />
@@ -85,7 +106,6 @@ export default function CollectionDashboardPage() {
                 statistic={{
                   title: '在途提现净额',
                   value: data.withdrawInFlightAmount,
-                  precision: 2,
                   description: '待审+待广播+广播中（热钱包待付敞口）',
                 }}
               />
@@ -94,7 +114,6 @@ export default function CollectionDashboardPage() {
                 statistic={{
                   title: '大额门持有',
                   value: data.heldDepositTotal,
-                  precision: 2,
                   description: `${data.heldDepositCount} 笔等放行`,
                 }}
               />
@@ -106,7 +125,6 @@ export default function CollectionDashboardPage() {
                   statistic={{
                     title: '充值手续费累计',
                     value: data.depositFeeTotal,
-                    precision: 2,
                     description: '已入账（Swept）单合计',
                   }}
                 />
@@ -116,7 +134,6 @@ export default function CollectionDashboardPage() {
                   statistic={{
                     title: '提现手续费累计',
                     value: data.withdrawFeeTotal,
-                    precision: 2,
                     description: '已完成（Completed）单合计',
                   }}
                 />

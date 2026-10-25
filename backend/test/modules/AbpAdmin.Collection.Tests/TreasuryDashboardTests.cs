@@ -55,7 +55,7 @@ public class TreasuryDashboardTests : CollectionTestBase
         using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
         {
             var dbContext = await DbAsync();
-            // Swept（含手续费）+ Confirmed 未挂任务（大额门持有）各一笔，CreationTime = 现在（今日 UTC）
+            // 今日三笔（Swept 含手续费 / Confirmed 未挂任务=大额门持有 / 昨日一笔不计入今日）
             dbContext.DepositOrders.Add(new ColDepositOrder(Guid.NewGuid())
             {
                 NetworkId = Guid.NewGuid(),
@@ -94,6 +94,26 @@ public class TreasuryDashboardTests : CollectionTestBase
                 Status = DepositOrderStatus.Confirmed, // 未挂任务 = 大额门持有
                 CreationTime = DateTime.UtcNow,
             });
+            // 昨日单：今日桶必须排除（UTC 日界锁——删掉 Where 过滤此断言即红）
+            dbContext.DepositOrders.Add(new ColDepositOrder(Guid.NewGuid())
+            {
+                NetworkId = Guid.NewGuid(),
+                TokenId = Guid.NewGuid(),
+                UserId = user2,
+                AddressId = Guid.NewGuid(),
+                TxHash = "0xd3",
+                LogIndex = 0,
+                FromAddress = "0xa",
+                ToAddress = "0xc",
+                RawAmount = "4000000000000000000",
+                Amount = 4m,
+                Fee = 0.004m,
+                ActualAmount = 3.996m,
+                BlockNumber = 99,
+                BlockTime = DateTime.UtcNow,
+                Status = DepositOrderStatus.Swept,
+                CreationTime = DateTime.UtcNow.AddDays(-2),
+            });
             dbContext.WithdrawOrders.Add(new ColWithdrawOrder(Guid.NewGuid())
             {
                 UserId = user1,
@@ -127,19 +147,20 @@ public class TreasuryDashboardTests : CollectionTestBase
             await uow.CompleteAsync();
         }
 
-        var admin = GetRequiredService<CollectionNetworkAdminAppService>();
+        // 看板端点已移入 CollectionBalanceAdminAppService（收款查看权限位，与菜单/路由一致）
+        var admin = GetRequiredService<CollectionBalanceAdminAppService>();
         var dashboard = await admin.GetDashboardAsync();
 
         dashboard.DepositByStatus.Single(b => b.Status == nameof(DepositOrderStatus.Swept))
-            .Count.ShouldBe(1);
+            .Count.ShouldBe(2);
         dashboard.HeldDepositCount.ShouldBe(1); // Confirmed 且未挂任务
-        dashboard.DepositFeeTotal.ShouldBe("0.001"); // 只算 Swept
+        dashboard.DepositFeeTotal.ShouldBe("0.005"); // 只算 Swept（0.001 + 昨日 0.004）
         dashboard.WithdrawByStatus.Single(b => b.Status == nameof(WithdrawStatus.Completed))
             .Count.ShouldBe(1);
         dashboard.WithdrawFeeTotal.ShouldBe("0.04"); // 只算 Completed
         dashboard.WithdrawInFlightAmount.ShouldBe("19.92"); // Processing 净额
-        dashboard.DepositTodayCount.ShouldBeGreaterThanOrEqualTo(2); // 今日 UTC 口径（造数即今日）
-        dashboard.WithdrawTodayCount.ShouldBeGreaterThanOrEqualTo(2);
+        dashboard.DepositTodayCount.ShouldBe(2); // 昨日单不计入（UTC 日界）
+        dashboard.WithdrawTodayCount.ShouldBe(2);
 
         var usdtBucket = dashboard.UserBalances.Single(b => b.Currency == "Usdt");
         usdtBucket.Balance.ShouldBe("140"); // 100 + 40

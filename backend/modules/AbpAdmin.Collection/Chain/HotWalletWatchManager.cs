@@ -22,9 +22,11 @@ namespace AbpAdmin.Collection.Chain;
 /// ERC20 Transfer（Etherscan tokentx 通道，与哈希认领同款分页模板）——
 /// 出站逐笔对账提现单 TxHash（匹配 = 正常付币），未匹配出账标异常 + [Alert:WithdrawHotWallet]
 /// 告警（每轮每币聚合一条）+ SignalR 推送，管理端「确认已知」终态化；
-/// 入站记为外部补币（提示性）。幂等：(TxHash, LogIndex) 唯一吸收重扫；游标只在整个区间
-/// 分页读全后推进，读不全记 LastError 下一轮重扫。首跑基线 = 当时安全链头（无历史基线可
-/// 完整回扫；余额核对点重放留二期）。私钥不参与——只读监控，不碰签名面。
+/// 入站记为外部补币（提示性）。幂等：(TxHash, LogIndex) 唯一吸收重扫，分页返回先按 (TxHash,LogIndex)
+/// 去重（页界重叠不炸唯一键）。区间读不全时缩半分窗自愈（对齐 DepositScanManager 缩半纪律）；
+/// 单块仍读不全（超分页上限）→ [Alert:] 告警后跳过该块推进——监控卡死比漏一段更危险。
+/// 首跑基线 = 当时安全链头（无历史基线可完整回扫；余额核对点重放留二期）。
+/// 私钥不参与——只读监控，不碰签名面。
 /// </summary>
 public class HotWalletWatchManager : DomainService
 {
@@ -107,133 +109,193 @@ public class HotWalletWatchManager : DomainService
 
         if (state == null)
         {
-            await SaveStateAsync(network, token, safeHead, lastError: null, baseline: true);
+            await SaveStateAsync(network, token, safeHead, lastError: null);
             Logger.LogInformation("热钱包监控 {Symbol} 首跑基线 = 安全链头 {Head}（历史区间不回扫）",
                 token.Symbol, safeHead);
             return;
         }
 
         var fromBlock = state.LastScannedBlock.HasValue ? state.LastScannedBlock.Value + 1 : safeHead;
-        if (fromBlock > safeHead)
+        string? roundError = null; // 跳块留痕：轮末与游标一起落库（不被清错覆盖）
+        while (fromBlock <= safeHead && !ct.IsCancellationRequested)
         {
-            return; // 无新区块
+            // ② 分页拉全（RPC 在事务外；读不全缩半区间重试——对齐 DepositScanManager 的缩半纪律，
+            //    单块仍读不全按告警跳过推进：监控卡死比漏一段更危险，跳过必带 [Alert:] 留痕）
+            var windowEnd = safeHead;
+            List<TokenTransferLog> logs;
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                logs = await PageAllAsync(gateway, token, walletAddress, fromBlock, windowEnd, ct);
+                if (logs != null)
+                {
+                    break;
+                }
+
+                if (windowEnd > fromBlock)
+                {
+                    windowEnd = fromBlock + (windowEnd - fromBlock) / 2; // 缩半重试
+                    continue;
+                }
+
+                // 单块也读不全（>MaxPages×PageSize 笔）：告警后跳过该块，绝不静默卡死游标
+                await _alerts.RaiseAsync(CollectionConsts.AlertPrefixWithdrawHotWallet,
+                    $"热钱包监控：{token.Symbol} 区间 [{fromBlock},{windowEnd}] 单块流水超出分页上限，已跳过该块",
+                    "该块内的热钱包转账本轮未入库（Etherscan 分页读不全）。请人工核查该块的出站流水后决定是否补救。");
+                roundError = $"块 {fromBlock} 流水超分页上限，已跳过";
+                fromBlock += 1;
+                logs = new List<TokenTransferLog>();
+                break;
+            }
+
+            // ③ 分类 + 落库（事务；游标在轮末统一推进——行先落、游标后走，重扫由唯一键吸收）
+            var newAnomalies = await PersistWindowAsync(network, token, logs, walletAddress, ct);
+            await AlertAndPushAsync(token, newAnomalies);
+            fromBlock = windowEnd + 1;
         }
 
-        // ② 分页拉全（RPC 在事务外；分页模板抄哈希认领）
+        if (!ct.IsCancellationRequested)
+        {
+            await SaveStateAsync(network, token, safeHead, roundError); // 轮末心跳 + 跳块留痕
+        }
+    }
+
+    /// <summary>
+    /// 区间分页拉全；任何一页报未读完且翻页超限时返回 null（区间太大）。
+    /// 返回前去重 (TxHash, LogIndex)——tokentx 分页边界重叠时同一笔可能出现两页
+    ///（幂等预查只挡 DB 既有行，批内重复会撞唯一键炸掉整个事务）。
+    /// </summary>
+    private async Task<List<TokenTransferLog>?> PageAllAsync(
+        IBscChainGateway gateway, ColToken token, string walletAddress,
+        long fromBlock, long toBlock, CancellationToken ct)
+    {
         var logs = new List<TokenTransferLog>();
         var page = 1;
         while (true)
         {
             var result = await gateway.GetTransfersForAddressAsync(
-                token.ContractAddress, walletAddress, fromBlock, safeHead, page, PageSize, ct);
+                token.ContractAddress, walletAddress, fromBlock, toBlock, page, PageSize, ct);
             logs.AddRange(result.Logs);
             if (!result.Incomplete)
             {
-                break;
+                return logs
+                    .GroupBy(l => (l.TxHash, l.LogIndex))
+                    .Select(g => g.First())
+                    .ToList();
             }
 
             page++;
             if (page > MaxPages)
             {
-                await SaveStateAsync(network, token, state.LastScannedBlock,
-                    $"区间 [{fromBlock},{safeHead}] 分页超过 {MaxPages} 页未读全，游标未推进", baseline: false);
-                Logger.LogError("热钱包监控 {Symbol} 区间 [{From},{To}] 分页超限，本轮放弃（游标未动）",
-                    token.Symbol, fromBlock, safeHead);
-                return;
+                return null; // 区间读不全：调用方缩半或跳块
             }
         }
+    }
 
-        // ③ 分类 + 落库 + 推游标（事务：流水与游标同提交——游标先走会丢行，行先走重扫由唯一键吸收）
+    private async Task<List<ColHotWalletTxn>> PersistWindowAsync(
+        ColNetwork network, ColToken token, List<TokenTransferLog> logs,
+        string walletAddress, CancellationToken ct)
+    {
         var newAnomalies = new List<ColHotWalletTxn>();
-        using (var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
+        if (logs.Count == 0)
         {
-            var dbContext = await _dbContextProvider.GetDbContextAsync();
-            var now = _clock.Now;
-
-            var hashes = logs.Select(l => l.TxHash).Distinct().ToList();
-            var existing = (await dbContext.HotWalletTxns.AsNoTracking()
-                    .Where(t => hashes.Contains(t.TxHash))
-                    .Select(t => new { t.TxHash, t.LogIndex })
-                    .ToListAsync(ct))
-                .Select(x => (x.TxHash, x.LogIndex))
-                .ToHashSet();
-            var matchedWithdraws = (await dbContext.WithdrawOrders.AsNoTracking()
-                    .Where(o => o.TxHash != null && hashes.Contains(o.TxHash))
-                    .Select(o => new { o.TxHash, o.Id })
-                    .ToListAsync(ct))
-                .GroupBy(x => x.TxHash)
-                .ToDictionary(g => g.Key!, g => g.First().Id);
-
-            foreach (var log in logs)
-            {
-                if (existing.Contains((log.TxHash, log.LogIndex)))
-                {
-                    continue;
-                }
-
-                var isOut = string.Equals(log.From, walletAddress, StringComparison.OrdinalIgnoreCase);
-                var scaled = DepositScanManager.TryScaleRaw(log.RawAmount, token.Decimals, out var overflow);
-                ColHotWalletTxn row;
-                if (!isOut)
-                {
-                    row = BuildRow(network, token, log, HotWalletDirection.In, scaled,
-                        HotWalletTxnStatus.ExternalIn, matchedWithdrawId: null, now);
-                }
-                else if (matchedWithdraws.TryGetValue(log.TxHash, out var withdrawId))
-                {
-                    row = BuildRow(network, token, log, HotWalletDirection.Out, scaled,
-                        HotWalletTxnStatus.Matched, withdrawId, now);
-                }
-                else
-                {
-                    row = BuildRow(network, token, log, HotWalletDirection.Out, scaled,
-                        HotWalletTxnStatus.Anomaly, matchedWithdrawId: null, now);
-                    newAnomalies.Add(row);
-                }
-
-                dbContext.HotWalletTxns.Add(row);
-            }
-
-            await WriteStateAsync(dbContext, network, token, safeHead, lastError: null, now,
-                () => _guidGenerator.Create());
-            await dbContext.SaveChangesAsync(ct);
-            await uow.CompleteAsync();
+            return newAnomalies; // 空窗无需开事务（游标由轮末统一推进）
         }
 
-        // ④ 告警（每币每轮聚合一条防刷屏）+ SignalR 推送（失败不挡轮次）
-        if (newAnomalies.Count > 0)
+        using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var now = _clock.Now;
+
+        var hashes = logs.Select(l => l.TxHash).Distinct().ToList();
+        var existing = (await dbContext.HotWalletTxns.AsNoTracking()
+                .Where(t => hashes.Contains(t.TxHash))
+                .Select(t => new { t.TxHash, t.LogIndex })
+                .ToListAsync(ct))
+            .Select(x => (x.TxHash, x.LogIndex))
+            .ToHashSet();
+        // 一哈希多单（理论上广播 CAS 保证唯一；数据异常时取最小 Id——匹配到哪单可追溯）
+        var matchedWithdraws = (await dbContext.WithdrawOrders.AsNoTracking()
+                .Where(o => o.TxHash != null && hashes.Contains(o.TxHash))
+                .Select(o => new { o.TxHash, o.Id })
+                .ToListAsync(ct))
+            .GroupBy(x => x.TxHash)
+            .ToDictionary(g => g.Key!, g => g.OrderBy(x => x.Id).First().Id);
+
+        foreach (var log in logs)
         {
-            var first = newAnomalies[0];
-            var firstAmount = first.Amount == null
-                ? first.RawAmount
-                : CollectionAmounts.Format(first.Amount.Value);
-            await _alerts.RaiseAsync(CollectionConsts.AlertPrefixWithdrawHotWallet,
-                $"热钱包监控：{token.Symbol} 新增未匹配出账 {newAnomalies.Count} 笔",
-                $"首笔 TxHash {first.TxHash}，金额 {firstAmount} → {first.To}。" +
-                "出站流水匹配不到任何提现单——请立即在管理端核实（私钥泄漏/误操作都可能）");
-            if (_pushNotifier != null)
+            if (existing.Contains((log.TxHash, log.LogIndex)))
             {
-                foreach (var anomaly in newAnomalies)
+                continue;
+            }
+
+            var isOut = string.Equals(log.From, walletAddress, StringComparison.OrdinalIgnoreCase);
+            var scaled = DepositScanManager.TryScaleRaw(log.RawAmount, token.Decimals, out var overflow);
+            ColHotWalletTxn row;
+            if (!isOut)
+            {
+                row = BuildRow(network, token, log, HotWalletDirection.In, scaled,
+                    HotWalletTxnStatus.ExternalIn, matchedWithdrawId: null, now);
+            }
+            else if (matchedWithdraws.TryGetValue(log.TxHash, out var withdrawId))
+            {
+                row = BuildRow(network, token, log, HotWalletDirection.Out, scaled,
+                    HotWalletTxnStatus.Matched, withdrawId, now);
+            }
+            else
+            {
+                row = BuildRow(network, token, log, HotWalletDirection.Out, scaled,
+                    HotWalletTxnStatus.Anomaly, matchedWithdrawId: null, now);
+                newAnomalies.Add(row);
+            }
+
+            dbContext.HotWalletTxns.Add(row);
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+        await uow.CompleteAsync();
+        return newAnomalies;
+    }
+
+    /// <summary>告警（每币每轮聚合一条防刷屏）+ SignalR 推送（失败不挡轮次）。</summary>
+    private async Task AlertAndPushAsync(ColToken token, List<ColHotWalletTxn> newAnomalies)
+    {
+        if (newAnomalies.Count == 0)
+        {
+            return;
+        }
+
+        var first = newAnomalies[0];
+        var firstAmount = first.Amount == null
+            ? first.RawAmount
+            : CollectionAmounts.Format(first.Amount.Value);
+        await _alerts.RaiseAsync(CollectionConsts.AlertPrefixWithdrawHotWallet,
+            $"热钱包监控：{token.Symbol} 新增未匹配出账 {newAnomalies.Count} 笔",
+            $"首笔 TxHash {first.TxHash}，金额 {firstAmount} → {first.To}。" +
+            "出站流水匹配不到任何提现单——请立即在管理端核实（私钥泄漏/误操作都可能）");
+        if (_pushNotifier == null)
+        {
+            return;
+        }
+
+        foreach (var anomaly in newAnomalies)
+        {
+            try
+            {
+                await _pushNotifier.PushHotWalletChangedAsync(new ChainHotWalletChangedEto
                 {
-                    try
-                    {
-                        await _pushNotifier.PushHotWalletChangedAsync(new ChainHotWalletChangedEto
-                        {
-                            TxnId = anomaly.Id,
-                            Symbol = anomaly.Symbol,
-                            Status = anomaly.Status.ToString(),
-                            Direction = anomaly.Direction.ToString(),
-                            TxHash = anomaly.TxHash,
-                            Amount = anomaly.Amount == null ? anomaly.RawAmount : CollectionAmounts.Format(anomaly.Amount.Value),
-                            To = anomaly.To,
-                            BlockNumber = anomaly.BlockNumber,
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogWarning(ex, "热钱包异常 SignalR 推送失败（不影响监控）");
-                    }
-                }
+                    TxnId = anomaly.Id,
+                    Symbol = anomaly.Symbol,
+                    Status = anomaly.Status.ToString(),
+                    Direction = anomaly.Direction.ToString(),
+                    TxHash = anomaly.TxHash,
+                    Amount = anomaly.Amount == null ? anomaly.RawAmount : CollectionAmounts.Format(anomaly.Amount.Value),
+                    To = anomaly.To,
+                    BlockNumber = anomaly.BlockNumber,
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "热钱包异常 SignalR 推送失败（不影响监控）");
             }
         }
     }
@@ -262,25 +324,24 @@ public class HotWalletWatchManager : DomainService
     }
 
     private async Task SaveStateAsync(
-        ColNetwork network, ColToken token, long? lastScannedBlock, string? lastError, bool baseline)
+        ColNetwork network, ColToken token, long? lastScannedBlock, string? lastError)
     {
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        await WriteStateAsync(dbContext, network, token, lastScannedBlock, lastError, _clock.Now,
-            () => _guidGenerator.Create());
+        await WriteStateAsync(dbContext, network, token, lastScannedBlock, lastError, _clock.Now);
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();
     }
 
     private async Task WriteStateAsync(
         CollectionDbContext dbContext, ColNetwork network, ColToken token,
-        long? lastScannedBlock, string? lastError, DateTime now, Func<Guid> newId)
+        long? lastScannedBlock, string? lastError, DateTime now)
     {
         var state = await dbContext.HotWalletWatchStates
             .FirstOrDefaultAsync(s => s.TokenId == token.Id);
         if (state == null)
         {
-            dbContext.HotWalletWatchStates.Add(new ColHotWalletWatchState(newId())
+            dbContext.HotWalletWatchStates.Add(new ColHotWalletWatchState(_guidGenerator.Create())
             {
                 NetworkId = network.Id,
                 TokenId = token.Id,

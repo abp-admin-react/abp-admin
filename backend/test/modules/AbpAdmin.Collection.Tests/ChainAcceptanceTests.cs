@@ -976,6 +976,11 @@ public class FakeChainGateway : IBscChainGateway
         string contractAddress, string address, long fromBlock, long toBlock, int page, int pageSize,
         CancellationToken ct = default)
     {
+        if (contractAddress == ThrowOnContract)
+        {
+            throw new ChainRpcException("simulated channel failure");
+        }
+
         var logs = Logs.TryGetValue(contractAddress, out var list)
             ? list.Where(l => l.BlockNumber >= fromBlock && l.BlockNumber <= toBlock).ToList()
             : new List<TokenTransferLog>();

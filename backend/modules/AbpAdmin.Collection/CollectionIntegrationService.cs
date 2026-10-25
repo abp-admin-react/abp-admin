@@ -60,7 +60,7 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         _distributedEventBus = distributedEventBus;
         _balanceManager = balanceManager;
         _depositAddressManager = depositAddressManager;
-        _chainMasterKey = configuration["Collection:MasterKey"];
+        _chainMasterKey = configuration[CollectionSettings.Host.MasterKey];
         _clock = clock;
         _logger = logger;
     }

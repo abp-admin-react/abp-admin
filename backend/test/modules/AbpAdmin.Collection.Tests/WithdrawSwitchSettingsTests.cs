@@ -1,9 +1,12 @@
+using System;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Services;
 using AbpAdmin.Collection.Settings;
 using AbpAdmin.Collection.Withdrawals;
 using Shouldly;
 using Volo.Abp.Settings;
 using Volo.Abp.SettingManagement;
+using Volo.Abp.Uow;
 using Xunit;
 
 namespace AbpAdmin.Collection;
@@ -56,5 +59,75 @@ public class WithdrawSwitchSettingsTests : CollectionTestBase
         {
             await settings.SetGlobalAsync(CollectionSettings.Withdraw.Enabled, "true");
         }
+    }
+
+    [Fact]
+    public async Task Withdraw_Admin_Endpoint_Flips_Switch_Hotly()
+    {
+        // 资金面开关的写入口在 WithdrawAdmin 端点（非 SettingUi 通用权限）——锁：写入即热生效
+        var admin = GetRequiredService<CollectionWithdrawAdminAppService>();
+        var manager = GetRequiredService<WithdrawManager>();
+        try
+        {
+            await admin.SetWithdrawEnabledAsync(false);
+            (await manager.IsEnabledAsync()).ShouldBeFalse();
+            await admin.SetWithdrawEnabledAsync(true);
+            (await manager.IsEnabledAsync()).ShouldBeTrue();
+        }
+        finally
+        {
+            await GetRequiredService<ISettingManager>()
+                .SetGlobalAsync(CollectionSettings.Withdraw.Enabled, "true");
+        }
+    }
+
+    [Fact]
+    public async Task Chain_Admin_Endpoint_Flips_Switches_And_Status_Reflects()
+    {
+        var admin = GetRequiredService<Services.CollectionNetworkAdminAppService>();
+        var networkAdmin = GetRequiredService<Services.CollectionNetworkAdminAppService>();
+        var (network, _) = await SeedNetworkOnlyAsync();
+        try
+        {
+            await admin.SetChainSwitchesAsync(scanEnabled: true, hotWalletWatchEnabled: true);
+            var status = await networkAdmin.GetStatusAsync(network.Id);
+            status.ScanEnabled.ShouldBeTrue();
+            status.SweepEnabled.ShouldBeFalse(); // 未提供的参数不动
+            status.HotWalletWatchEnabled.ShouldBeTrue();
+        }
+        finally
+        {
+            await admin.SetChainSwitchesAsync(scanEnabled: false, hotWalletWatchEnabled: false);
+        }
+    }
+
+    private async Task<(AbpAdmin.Collection.Entities.ColNetwork Network, Guid UsdtId)> SeedNetworkOnlyAsync()
+    {
+        using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
+        var dbContext = await GetRequiredService<
+            Volo.Abp.EntityFrameworkCore.IDbContextProvider<AbpAdmin.Collection.Data.CollectionDbContext>>()
+            .GetDbContextAsync();
+        var network = new AbpAdmin.Collection.Entities.ColNetwork(Guid.NewGuid())
+        {
+            Name = "BSC-SW-" + Guid.NewGuid().ToString("N")[..8],
+            ChainId = 97,
+            NodeLogResultCap = 100,
+            CreationTime = DateTime.UtcNow,
+        };
+        await dbContext.Networks.AddAsync(network);
+        var usdt = new AbpAdmin.Collection.Entities.ColToken(Guid.NewGuid())
+        {
+            NetworkId = network.Id,
+            Symbol = "USDT",
+            ContractAddress = "0xusdt",
+            Decimals = 18,
+            MinDeposit = "10",
+            IsEnabled = true,
+            CreationTime = DateTime.UtcNow,
+        };
+        await dbContext.Tokens.AddAsync(usdt);
+        await dbContext.SaveChangesAsync();
+        await uow.CompleteAsync();
+        return (network, usdt.Id);
     }
 }

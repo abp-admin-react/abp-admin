@@ -27,20 +27,23 @@ public class CollectionChainWorkerOptions
 
     public static CollectionChainWorkerOptions FromConfiguration(IConfiguration configuration)
     {
-        var s = configuration.GetSection("Collection:Chain");
-        var w = configuration.GetSection("Collection:Withdraw");
+        // 宿主键单源 = CollectionSettings.Host（完整冒号键从根配置直读；回退 = 本类默认值）
         var options = new CollectionChainWorkerOptions
         {
-            MasterKey = configuration["Collection:MasterKey"],
-            EtherscanV2Endpoint = s["EtherscanV2Endpoint"] ?? "https://api.etherscan.io/v2/api",
-            AlertRecipientUserIds = (s["AlertRecipientUserIds"] ?? "")
+            MasterKey = configuration[Settings.CollectionSettings.Host.MasterKey],
+            AlertRecipientUserIds = (configuration[Settings.CollectionSettings.Host.AlertRecipientUserIds] ?? "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(x => Guid.TryParse(x, out var g) ? g : Guid.Empty)
                 .Where(g => g != Guid.Empty)
                 .ToArray(),
-            ChainRoundBudgetSeconds = s.GetValue("RoundBudgetSeconds", 240),
-            WithdrawRoundBudgetSeconds = w.GetValue("RoundBudgetSeconds", 120),
+            ChainRoundBudgetSeconds = configuration.GetValue(
+                Settings.CollectionSettings.Host.ChainRoundBudgetSeconds, 240),
+            WithdrawRoundBudgetSeconds = configuration.GetValue(
+                Settings.CollectionSettings.Host.WithdrawRoundBudgetSeconds, 120),
         };
+        // 回退 = 本类默认值（初始化器里不能自引用属性，构造后回填）
+        options.EtherscanV2Endpoint =
+            configuration[Settings.CollectionSettings.Host.EtherscanV2Endpoint] ?? options.EtherscanV2Endpoint;
         return options;
     }
 }

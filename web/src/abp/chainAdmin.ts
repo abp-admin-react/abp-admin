@@ -31,6 +31,8 @@ export interface NetworkStatusDto {
   gasLowAlertedAt?: string;
   scanEnabled: boolean;
   sweepEnabled: boolean;
+  /** 热钱包监控开关（三开关写入在 setChainSwitches 端点，Network.Admin 权限） */
+  hotWalletWatchEnabled: boolean;
   /** 充值手续费率（网络级 [0,1]；建单快照，改只影响新单） */
   depositFeeRate: number;
   /** 大额放行门（毛额超过它停在 Confirmed 等放行；0 = 全部等放行；十进制字符串） */
@@ -211,9 +213,21 @@ export interface TreasuryDashboardDto {
   vaultChecks: VaultCheckLatestDto[];
 }
 
-/** 资金看板聚合（今日 = UTC 日界，与当日笔数限额同口径） */
+/** 资金看板聚合（收款查看权限位——端点在 collection-balance-admin 服务；今日 = UTC 日界） */
 export async function getTreasuryDashboard(): Promise<TreasuryDashboardDto> {
-  return request(`${BASE}/dashboard`);
+  return request('/api/app/collection-balance-admin/dashboard');
+}
+
+/**
+ * 链上总开关（高危：误开扫链/归集烧 Gas）。写设置库，worker 下一轮热生效；
+ * 只传要改的参数（未传的不动）。
+ */
+export async function setChainSwitches(params: {
+  scanEnabled?: boolean;
+  sweepEnabled?: boolean;
+  hotWalletWatchEnabled?: boolean;
+}): Promise<void> {
+  await request(`${BASE}/set-chain-switches`, { method: 'POST', params });
 }
 
 export async function setRpcUrl(rpcUrl: string): Promise<void> {

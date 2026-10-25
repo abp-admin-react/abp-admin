@@ -35,6 +35,7 @@ public abstract class CollectionTestBase : AbpAdminTestBase<CollectionTestModule
         // 静态假件跨应用重建存活：每用例复位，避免上一个用例的预配泄漏
         Fakes.FakeChannelGateway.Wechat.Reset();
         Fakes.FakeChannelGateway.Alipay.Reset();
+        Fakes.FakeChainPushNotifier.Reset();
     }
 
     /// <summary>

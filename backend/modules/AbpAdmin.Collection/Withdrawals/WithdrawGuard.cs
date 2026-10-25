@@ -166,7 +166,7 @@ public class WithdrawGuard : DomainService
     /// <summary>加密热钱包私钥入密文（管理端 Set 用；与 HdKeyService 同一版本前缀协议）。</summary>
     public virtual string ProtectKey(string privateKey)
     {
-        var masterKey = _configuration["Collection:MasterKey"]
+        var masterKey = _configuration[CollectionSettings.Host.MasterKey]
                         ?? throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
         return HdKeyService.Protect(privateKey.Trim(), masterKey, _encryptor); // Protect 即通用敏感明文加密（原 ProtectPlain 与其逐字重复，已删）
     }

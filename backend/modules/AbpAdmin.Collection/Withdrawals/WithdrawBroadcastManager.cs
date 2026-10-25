@@ -134,8 +134,8 @@ public class WithdrawBroadcastManager : DomainService
     private async Task RecoverStuckCoreAsync(
         ColNetwork network, IBscChainGateway gateway, CancellationToken ct)
     {
-        var timeoutMinutes = await GetIntAsync(CollectionSettings.Withdraw.BroadcastTimeoutMinutes, WithdrawDefaults.BroadcastTimeoutMinutes);
-        var maxRetries = await GetIntAsync(CollectionSettings.Withdraw.MaxRetries, WithdrawDefaults.MaxRetries);
+        var timeoutMinutes = await _settings.GetIntAsync(CollectionSettings.Withdraw.BroadcastTimeoutMinutes, WithdrawDefaults.BroadcastTimeoutMinutes);
+        var maxRetries = await _settings.GetIntAsync(CollectionSettings.Withdraw.MaxRetries, WithdrawDefaults.MaxRetries);
         var cutoff = _clock.Now.AddMinutes(-timeoutMinutes);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
@@ -412,7 +412,6 @@ public class WithdrawBroadcastManager : DomainService
     }
 
     /// <summary>
-    /// 自动退款终态    /// <summary>
     /// 自动退款终态：链上可证未出款（revert / nonce 未占用）→ BroadcastFailed → Rejected，
     /// 净额+手续费自动退回用户可用，告警留痕（可见但不阻塞——不需要人解除状态）。
     /// </summary>
@@ -503,7 +502,7 @@ public class WithdrawBroadcastManager : DomainService
     private async Task AutoApproveCoreAsync(
         ColNetwork network, IBscChainGateway gateway, int batchSize, CancellationToken ct)
     {
-        var threshold = await GetDecimalAsync(CollectionSettings.Withdraw.AutoApproveMaxAmount, WithdrawDefaults.AutoApproveMaxAmount);
+        var threshold = await _settings.GetDecimalAsync(CollectionSettings.Withdraw.AutoApproveMaxAmount, WithdrawDefaults.AutoApproveMaxAmount);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
         var pending = await dbContext.WithdrawOrders.AsNoTracking()
@@ -666,7 +665,7 @@ public class WithdrawBroadcastManager : DomainService
                 throw new BusinessException(CollectionErrorCodes.WithdrawHalted);
             }
 
-            var masterKey = _configuration["Collection:MasterKey"];
+            var masterKey = _configuration[CollectionSettings.Host.MasterKey];
             if (string.IsNullOrEmpty(masterKey))
             {
                 throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
@@ -721,7 +720,7 @@ public class WithdrawBroadcastManager : DomainService
                 .WithData("From", order.Status.ToString()).WithData("To", "Processing");
         }
 
-        var maxRetries = await GetIntAsync(CollectionSettings.Withdraw.MaxRetries, WithdrawDefaults.MaxRetries);
+        var maxRetries = await _settings.GetIntAsync(CollectionSettings.Withdraw.MaxRetries, WithdrawDefaults.MaxRetries);
         if (order.RetryCount >= maxRetries)
         {
             throw new BusinessException(CollectionErrorCodes.WithdrawRetryLimitReached)
@@ -793,18 +792,4 @@ public class WithdrawBroadcastManager : DomainService
         return await _settings.IsTrueAsync(CollectionSettings.Withdraw.Halt);
     }
 
-    private async Task<int> GetIntAsync(string key, int fallback)
-    {
-        var raw = await _settings.GetOrNullAsync(key);
-        return int.TryParse(raw, out var v) && v > 0 ? v : fallback;
-    }
-
-    private async Task<decimal> GetDecimalAsync(string key, decimal fallback)
-    {
-        var raw = await _settings.GetOrNullAsync(key);
-        return decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
-                   System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0
-            ? v
-            : fallback;
-    }
 }
