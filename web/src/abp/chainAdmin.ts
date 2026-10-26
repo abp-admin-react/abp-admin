@@ -146,10 +146,12 @@ export async function approveLargeDeposit(id: string): Promise<void> {
 /**
  * 手动重试归集任务（对齐线上 retrySweepTask）：仅 Failed 可重试，跳过冷却立即拉回 Queued；
  * 仅人工失败（打油超限/链上 revert 等）同样允许——管理员显式决策。
- * 单 Guid 参数走路径段（同 approveLargeDeposit 的 302 实测教训）。
+ * 单 Guid 参数走路径段（同 approveLargeDeposit 的 302 实测教训）；
+ * 段名以 api-definition 实测为准是 /retry-sweep-task（RetrySweepTaskAsync 去 Async 缀），
+ * 不是想当然的 /retry——E2E 客户视角点击实测踩中（前端形状锁曾锁了自嗨形状）。
  */
 export async function retrySweepTask(id: string): Promise<void> {
-  await request(`${BASE}/${id}/retry`, { method: 'POST' });
+  await request(`${BASE}/${id}/retry-sweep-task`, { method: 'POST' });
 }
 
 /** 设置充值政策：费率 [0,1]（建单快照，改只影响新单）+ 大额放行门（≥0，0 = 全部等放行）。 */

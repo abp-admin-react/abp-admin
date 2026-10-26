@@ -25,10 +25,10 @@ describe('chainAdmin write endpoint URL shapes', () => {
     expect(request.mock.calls[0][1]).toMatchObject({ method: 'POST' });
   });
 
-  it('retrySweepTask 使用路径段（同 302 教训）', async () => {
+  it('retrySweepTask 路径段且段名与 api-definition 一致（/retry-sweep-task；E2E 实测 /retry 是 SPA 兜底 HTML）', async () => {
     await retrySweepTask('t1');
     expect(request.mock.calls[0][0]).toBe(
-      '/api/app/collection-network-admin/t1/retry',
+      '/api/app/collection-network-admin/t1/retry-sweep-task',
     );
     expect(request.mock.calls[0][1]).toMatchObject({ method: 'POST' });
   });

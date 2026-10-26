@@ -250,9 +250,11 @@ export async function backfillOpening(): Promise<WithdrawOpeningBackfillResultDt
 }
 
 /** 确认已知（Anomaly → Acked 终态；note 为核实备注） */
-// 单 Guid 参数端点为路径段形态（?id= 会 302——E2E 实测，同 retryWithdraw）
+// 单 Guid 参数端点为路径段形态（?id= 会 302——E2E 实测，同 retryWithdraw）；
+// 段名以 api-definition 实测为准是 /ack-hot-wallet-txn（AckHotWalletTxnAsync 去 Async 缀），
+// 不是 /ack——与归集重试同款「前端形状自嗨」类别（E2E 全量路由比对实锤）。
 export async function ackHotWalletTxn(id: string, note?: string): Promise<void> {
-  await request(`${BASE}/${id}/ack`, {
+  await request(`${BASE}/${id}/ack-hot-wallet-txn`, {
     method: 'POST',
     params: note ? { note } : undefined,
     ...WD_REQ,

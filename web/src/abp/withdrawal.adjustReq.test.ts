@@ -60,12 +60,13 @@ describe('withdrawal write requests skip global error handler', () => {
     );
   });
 
-  // 热钱包监控：ack 路径段 + note 查询参数；流水查询是 GET query 形态
+  // 热钱包监控：ack 路径段（api-definition 实测段名 /ack-hot-wallet-txn，
+  // E2E 全量路由比对实锤 /ack 是 SPA 兜底 HTML）+ note 查询参数；流水查询 GET query 形态
   it('ackHotWalletTxn 路径段 / getHotWalletTxns query 形态', async () => {
     request.mockClear();
     await ackHotWalletTxn('t1', '运营手动转出').catch(() => {});
     expect(request.mock.calls[0][0]).toBe(
-      '/api/app/collection-withdraw-admin/t1/ack',
+      '/api/app/collection-withdraw-admin/t1/ack-hot-wallet-txn',
     );
     expect(request.mock.calls[0][1]).toMatchObject({
       method: 'POST',
