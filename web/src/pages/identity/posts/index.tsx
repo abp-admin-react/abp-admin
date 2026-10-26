@@ -20,6 +20,7 @@ import {
   Tag,
 } from 'antd';
 import React, { useRef, useState } from 'react';
+import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import { getUsers } from '@/abp/identity';
 import {
   addPostMembers,
@@ -115,7 +116,7 @@ const PostsPage: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer{...identityOrgHelpHeader('posts', '岗位')}>
       <AutoHeightProTable<PostDto>
         rowKey="id"
         actionRef={actionRef}

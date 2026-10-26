@@ -16,6 +16,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Volo.Abp.Roles;
 using Volo.Abp.TenantManagement;
 using Volo.Abp.Identity;
+using AbpAdmin.Posts;
+using Volo.Abp.Uow;
 
 namespace AbpAdmin.Identity;
 
@@ -50,6 +52,11 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
     private readonly IGuidGenerator _guids;
     private readonly IConfiguration _configuration;
     private readonly IAbpHostEnvironment _environment;
+    private readonly IOrganizationUnitRepository _organizationUnitRepository;
+    private readonly OrganizationUnitManager _organizationUnitManager;
+    private readonly IPostRepository _postRepository;
+    private readonly IRepository<IdentityUserPost> _userPostRepository;
+    private readonly Volo.Abp.Uow.IUnitOfWorkManager _unitOfWorkManager;
 
     public DemoIdentitySeedContributor(
         ITenantRepository tenants,
@@ -63,7 +70,12 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
         ICurrentTenant currentTenant,
         IGuidGenerator guids,
         IConfiguration configuration,
-        IAbpHostEnvironment environment)
+        IAbpHostEnvironment environment,
+        IOrganizationUnitRepository organizationUnitRepository,
+        OrganizationUnitManager organizationUnitManager,
+        IPostRepository postRepository,
+        IRepository<IdentityUserPost> userPostRepository,
+        Volo.Abp.Uow.IUnitOfWorkManager unitOfWorkManager)
     {
         _tenants = tenants;
         _tenantManager = tenantManager;
@@ -77,6 +89,11 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
         _guids = guids;
         _configuration = configuration;
         _environment = environment;
+        _organizationUnitRepository = organizationUnitRepository;
+        _organizationUnitManager = organizationUnitManager;
+        _postRepository = postRepository;
+        _userPostRepository = userPostRepository;
+        _unitOfWorkManager = unitOfWorkManager;
     }
 
     public async Task SeedAsync(DataSeedContext context)
@@ -118,6 +135,9 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
         await SeedHostFinanceRolesAsync();
         await EnsureUserAsync(null, "fin-viewer", "fin-viewer@demo.local", "财务查看（只读）",
             new[] { "Finance.Ledger.View", "Finance.Voucher.View", "Finance.BizDoc.View", "Finance.Balance.View" });
+
+        // 组织×岗位×角色×用户组合演示（部门树 + 职务 + 权限来源对照，见方法头注释）
+        await SeedOrgComboDemoAsync();
 
         // demo 租户 + 租户内 admin + 财务角色/账号
         // FindByNameAsync 按 NormalizedName 匹配（默认大写），传原始名会漏判已存在 → CreateAsync 里
@@ -164,6 +184,163 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
             await EnsureUserAsync(
                 tenant.Id, "fin-boss", "fin-boss@demo.local", "演示：财务审批人",
                 new[] { "Finance.Ledger.View", "Finance.Voucher.View", "Finance.Adjust.Approve", "Finance.Adjust.Reject" });
+        }
+    }
+
+    /// <summary>
+    /// 组织×岗位×角色×用户组合演示（四个页面各自看着抽象，组合才是用法——净库给一套有故事线的样例）：
+    /// 部门树（组织单元）管「人在哪」，岗位管「什么职务」（不携带权限），角色管「能干什么」（权限集合），
+    /// 用户把三者组合起来；权限来源两条路——直接给角色，或把角色绑到部门（进部门即得）。
+    /// <para>演示人物（口令同 DemoPassword，display 即页面展示名）：</para>
+    /// <list type="bullet">
+    /// <item>张智 zhang.cto：技术中心+研发部（一人多部门），岗位 CTO，直接角色「部门经理」</item>
+    /// <item>李工 li.dev：研发部，岗位 开发工程师+运维工程师（一人兼岗），<b>无直接角色——
+    /// 权限来自「研发部」绑定的「普通员工」角色</b>（组织绑角色演示）</item>
+    /// <item>王财 wang.fm：财务中心，岗位 财务经理，直接角色 fin-accountant（复用财务域角色库）</item>
+    /// <item>赵营销 zhao.mkt：市场部，岗位 市场专员，直接角色「普通员工」（与李工同权限、来源不同的对照组）</item>
+    /// </list>
+    /// 全部幂等：OU 按 DisplayName、岗位按 Code、角色/用户按归一化名、OU 角色与用户岗位绑定按存在性判重。
+    /// </summary>
+    internal async Task SeedOrgComboDemoAsync()
+    {
+        // 自带环境 UoW：migrator 侧外层已有大 UoW 时嵌套加入；测试/裸调时兜底供 DbContext。
+        // OU 创建逐个 requiresNew 单独提交——OU 父子校验按 parentId 从库里 FindAsync，
+        // 同批未提交的插入对它不可见（实测 010010），逐个落库让父节点在子节点创建前可查。
+        using (var ambient = _unitOfWorkManager.Begin())
+        {
+            var ouList = await _organizationUnitRepository.GetListAsync();
+
+            // 自洽：王财复用 fin-accountant，先确保财务角色库在位（幂等；migrator 主流程
+            // 已先种过一遍，这里双调无害——也让本方法可独立调用/测试）
+            await SeedHostFinanceRolesAsync();
+
+            async Task<OrganizationUnit> EnsureOu(string displayName, string? parentDisplayName)
+            {
+                var existing = ouList.FirstOrDefault(x => x.DisplayName == displayName);
+                if (existing is { } ou)
+                {
+                    return ou;
+                }
+
+                var parent = parentDisplayName == null
+                    ? null
+                    : ouList.FirstOrDefault(x => x.DisplayName == parentDisplayName)
+                      ?? throw new InvalidOperationException($"演示 OU 父节点缺失：{parentDisplayName}");
+                // Code（层级编码，非空列）由 OrganizationUnitManager 生成——裸 InsertAsync 会 23502
+                var created = new OrganizationUnit(_guids.Create(), displayName, parent?.Id, _currentTenant.Id);
+                using (var ouUow = _unitOfWorkManager.Begin(requiresNew: true))
+                {
+                    await _organizationUnitManager.CreateAsync(created);
+                    await ouUow.CompleteAsync();
+                }
+                ouList.Add(created);
+                return created;
+            }
+
+            var group = await EnsureOu("演示集团", null);
+            var board = await EnsureOu("董事会", "演示集团");
+            var techCenter = await EnsureOu("技术中心", "演示集团");
+            var rd = await EnsureOu("研发部", "技术中心");
+            await EnsureOu("运维部", "技术中心");
+            var financeCenter = await EnsureOu("财务中心", "演示集团");
+            var marketing = await EnsureOu("市场部", "演示集团");
+            _ = board;
+
+            // —— 岗位（职务维度，不带权限）：QA 故意停用，演示状态列 ——
+            async Task<Post> EnsurePostAsync(string code, string name, int sort, string remark, bool enabled = true)
+            {
+                var post = await _postRepository.FindByCodeAsync(code);
+                if (post is { })
+                {
+                    return post;
+                }
+
+                post = new Post(_guids.Create(), name, code, sort,
+                    enabled ? PostStatusEnum.Enabled : PostStatusEnum.Disabled, remark, _currentTenant.Id);
+                return await _postRepository.InsertAsync(post, autoSave: true);
+            }
+
+            var postCto = await EnsurePostAsync("CTO", "技术负责人", 1, "演示：技术中心负责人");
+            var postDev = await EnsurePostAsync("DEV", "开发工程师", 2, "演示：研发部");
+            var postSre = await EnsurePostAsync("SRE", "运维工程师", 3, "演示：运维部");
+            var postFm = await EnsurePostAsync("FM", "财务经理", 4, "演示：财务中心");
+            var postMkt = await EnsurePostAsync("MKT", "市场专员", 5, "演示：市场部");
+            await EnsurePostAsync("QA", "测试工程师", 6, "演示：停用态——不出现在用户表单的岗位下拉", enabled: false);
+
+            // —— 演示角色（权限集合）：部门经理（组织+用户查看+财务只读）/ 普通员工（财务只读）——
+            await EnsureRoleWithPermissionsAsync("dept-manager", new[]
+            {
+                "AbpAdmin.OrganizationUnits", "AbpIdentity.Users", "Finance.Ledger.View",
+            });
+            await EnsureRoleWithPermissionsAsync("employee", new[] { "Finance.Ledger.View" });
+            var employeeRole = await _roles.FindByNormalizedNameAsync("EMPLOYEE");
+
+            // —— 组织绑角色：研发部 → 普通员工（该部门成员自动获得，李工的权限来源）——
+            // OrganizationUnitRole 是复合键实体，判重走仓储的「该 OU 已绑角色」查询
+            if (employeeRole is { })
+            {
+                var rdRoles = await _organizationUnitRepository.GetRolesAsync(rd);
+                if (rdRoles.All(x => x.Id != employeeRole.Id))
+                {
+                    await _organizationUnitManager.AddRoleToOrganizationUnitAsync(employeeRole.Id, rd.Id);
+                }
+            }
+
+            // —— 演示人物（组合对照）——
+            async Task<IdentityUser> DemoUserAsync(string userName, string email, string display)
+                => await EnsureUserAsync(null, userName, email, display, null);
+
+            async Task PutInOuAsync(IdentityUser user, OrganizationUnit ou)
+            {
+                if (!await _userManager.IsInOrganizationUnitAsync(user.Id, ou.Id))
+                {
+                    await _userManager.AddToOrganizationUnitAsync(user.Id, ou.Id);
+                }
+            }
+
+            async Task PutOnPostAsync(IdentityUser user, Post post)
+            {
+                if (!await _userPostRepository.AnyAsync(x => x.UserId == user.Id && x.PostId == post.Id))
+                {
+                    await _userPostRepository.InsertAsync(
+                        new IdentityUserPost(user.Id, post.Id, _currentTenant.Id), autoSave: true);
+                }
+            }
+
+            var zhang = await DemoUserAsync("zhang.cto", "zhang.cto@demo.local", "张智（演示：CTO·跨部门）");
+            await PutInOuAsync(zhang, techCenter);
+            await PutInOuAsync(zhang, rd); // 一人多部门
+            await PutOnPostAsync(zhang, postCto);
+            if (!await _userManager.IsInRoleAsync(zhang, "dept-manager"))
+            {
+                (await _userManager.AddToRoleAsync(zhang, "dept-manager")).CheckErrors();
+            }
+
+            // 李工：无直接角色（权限来自研发部 OU 的角色绑定）+ 一人双岗位（兼运维）
+            var li = await DemoUserAsync("li.dev", "li.dev@demo.local", "李工（演示：兼岗·权限来自部门）");
+            await PutInOuAsync(li, rd);
+            await PutOnPostAsync(li, postDev);
+            await PutOnPostAsync(li, postSre);
+
+            var wang = await DemoUserAsync("wang.fm", "wang.fm@demo.local", "王财（演示：财务经理·复用财务角色）");
+            await PutInOuAsync(wang, financeCenter);
+            await PutOnPostAsync(wang, postFm);
+            if (!await _userManager.IsInRoleAsync(wang, "fin-accountant"))
+            {
+                (await _userManager.AddToRoleAsync(wang, "fin-accountant")).CheckErrors();
+            }
+
+            var zhao = await DemoUserAsync("zhao.mkt", "zhao.mkt@demo.local", "赵营销（演示：直接给角色对照）");
+            await PutInOuAsync(zhao, marketing);
+            await PutOnPostAsync(zhao, postMkt);
+            if (!await _userManager.IsInRoleAsync(zhao, "employee"))
+            {
+                (await _userManager.AddToRoleAsync(zhao, "employee")).CheckErrors();
+            }
+
+            _ = group;
+
+            await ambient.CompleteAsync();
         }
     }
 

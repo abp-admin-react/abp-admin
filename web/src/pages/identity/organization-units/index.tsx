@@ -11,6 +11,7 @@ import {
 } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Splitter, Tree } from 'antd';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import { getAllRoles, getUsers } from '@/abp/identity';
 import {
   addOrganizationUnitMembers,
@@ -72,7 +73,7 @@ const OrganizationUnitsPage: React.FC = () => {
   }, [selected, units]);
 
   return (
-    <PageContainer>
+    <PageContainer{...identityOrgHelpHeader('org', '组织单元')}>
       <Splitter>
         <Splitter.Panel defaultSize={320} min={240}>
           <ProCard

@@ -16,6 +16,7 @@ import {
   type IdentityRoleDto,
   updateRole,
 } from '@/abp/identity';
+import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import { sorterToAbpSorting } from '@/abp/sorting';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import ClaimModal from '@/components/ClaimModal';
@@ -137,7 +138,7 @@ const RolesPage: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer{...identityOrgHelpHeader('roles', '角色')}>
       <AutoHeightProTable<IdentityRoleDto>
         rowKey="id"
         actionRef={actionRef}

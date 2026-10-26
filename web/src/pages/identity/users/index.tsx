@@ -7,6 +7,7 @@ import {
 import { useAccess, useModel } from '@umijs/max';
 import { App, Button, Modal, Popconfirm, Tag, Upload } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
+import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import { impersonateUser } from '@/abp/account';
 import {
   deleteUser,
@@ -300,7 +301,7 @@ const UsersPage: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer{...identityOrgHelpHeader('users', '用户')}>
       <AutoHeightProTable<IdentityUserDto>
         rowKey="id"
         actionRef={actionRef}
