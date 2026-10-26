@@ -1,274 +1,228 @@
-import { PageContainer } from '@ant-design/pro-components';
-import XMarkdown from '@ant-design/x-markdown';
-import '@ant-design/x-markdown/es/XMarkdown/index.css';
-import enUS from '@root/docs/cheatsheet.en-US.md';
-import zhCN from '@root/docs/cheatsheet.zh-CN.md';
-import { getLocale, useAccess, useIntl, useModel } from '@umijs/max';
-import { Card, Col, Progress, Row, Statistic } from 'antd';
-import hljs from 'highlight.js';
-import React, { useEffect, useState } from 'react';
 import {
-  getAuditLogAverageDuration,
-  getAuditLogErrorRate,
-} from '@/abp/proModules';
+  AuditOutlined,
+  BankOutlined,
+  DashboardOutlined,
+  MoneyCollectOutlined,
+  SettingOutlined,
+  TeamOutlined,
+  ThunderboltOutlined,
+  WalletOutlined,
+} from '@ant-design/icons';
+import { PageContainer, ProCard } from '@ant-design/pro-components';
+import { getAuditLogAverageDuration, getAuditLogErrorRate } from '@/abp/proModules';
+import { history, useAccess, useModel } from '@umijs/max';
+import { Card, Col, Empty, Progress, Row, Statistic, Typography } from 'antd';
+import React, { useEffect, useState } from 'react';
 
-import 'highlight.js/styles/github.css';
-import './Welcome.css';
-import './Welcome-dark.css';
+/* 框架工作台（/welcome，菜单「首页」的落地页）。
+ * 脚手架时代的 Cheatsheet 演示页已移除——基础框架的首页应是权限感知的运营入口：
+ * 按新菜单序给高频入口（无权限的自动隐藏，全部无权时给空态引导），右侧是框架级
+ * 健康面（审计耗时/错误率，复用既有 API，零新依赖）。入口组序与 MenuTemplateDefinition
+ * 的顶层组序保持同构（收付款 → 财务会计 → 管理 → SaaS）。 */
 
-interface InfoCardProps {
+const { Text } = Typography;
+
+interface WorkbenchEntry {
   title: string;
-  index: number;
   desc: string;
-  href: string;
+  path: string;
+  icon: React.ReactNode;
+  access?: boolean;
 }
 
-const InfoCard: React.FC<InfoCardProps> = ({ title, index, desc, href }) => (
-  <a href={href} target="_blank" rel="noopener noreferrer" aria-label={title}>
-    <Card hoverable size="small">
-      <div className="flex items-start gap-3">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#1677ff] text-base font-bold text-white">
-          {index}
-        </div>
-        <div className="min-w-0 flex-1">
-          <h4 className="mb-1 mt-0 text-sm font-semibold">{title}</h4>
-          <p className="mb-0 line-clamp-2 text-xs text-zinc-500">{desc}</p>
-        </div>
-      </div>
-    </Card>
-  </a>
-);
-
-const mdContent: Record<string, string> = {
-  'zh-CN': zhCN,
-  'en-US': enUS,
-};
-
-// XMarkdown Renderer passes class names via non-standard props
-interface HeadingProps extends React.HTMLAttributes<HTMLHeadingElement> {
-  tag?: string;
-  domNode?: unknown;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  classname?: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  class?: any;
-}
-
-const Heading: React.FC<HeadingProps> = ({
-  tag: Tag = 'h1',
-  children,
-  className,
-  classname,
-  class: htmlClass,
-}) => {
-  // Merge all possible class sources from XMarkdown Renderer
-  const allClasses = [className, classname, htmlClass]
-    .filter(Boolean)
-    .join(' ');
-  // Extract text content from children for id generation
-  const textContent = React.Children.toArray(children)
-    .map((child) => (typeof child === 'string' ? child : ''))
-    .join('');
-  const id = textContent
-    .replace(/[^\w\s一-鿿-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .toLowerCase();
-  const mergedClass = `heading-anchor ${allClasses}`.trim();
-  return (
-    // @ts-expect-error dynamic tag
-    <Tag id={id} className={mergedClass}>
-      <a href={`#${id}`} className="anchor-link">
-        #
-      </a>
-      {children}
-    </Tag>
-  );
-};
-
-const mdComponents = {
-  h1: (props: HeadingProps) => <Heading tag="h1" {...props} />,
-  h2: (props: HeadingProps) => <Heading tag="h2" {...props} />,
-  h3: (props: HeadingProps) => <Heading tag="h3" {...props} />,
-  h4: (props: HeadingProps) => <Heading tag="h4" {...props} />,
-};
-
-const mdConfig = {
-  renderer: {
-    code({ text, lang }: { text: string; lang?: string }) {
-      const langString = (lang || '').trim();
-      let highlighted: string;
-      if (langString && hljs.getLanguage(langString)) {
-        highlighted = hljs.highlight(text.replace(/\n$/, ''), {
-          language: langString,
-        }).value;
-      } else {
-        highlighted = hljs.highlightAuto(text.replace(/\n$/, '')).value;
-      }
-      const classAttr = langString
-        ? ` class="hljs language-${langString}"`
-        : ' class="hljs"';
-      return `<pre><code${classAttr}>${highlighted}\n</code></pre>\n`;
-    },
-  },
-};
-
-const infoCards = [
-  {
-    index: 1,
-    href: 'https://umijs.org/docs/introduce/introduce',
-    titleId: 'pages.welcome.infoCard.umi.title',
-    titleDefault: 'Learn umi',
-    descId: 'pages.welcome.infoCard.umi.desc',
-    descDefault:
-      'umi is an extensible enterprise-level frontend framework based on routing, supporting both config-based and convention-based routes.',
-  },
-  {
-    index: 2,
-    href: 'https://ant.design',
-    titleId: 'pages.welcome.infoCard.antd.title',
-    titleDefault: 'Learn Ant Design',
-    descId: 'pages.welcome.infoCard.antd.desc',
-    descDefault:
-      'antd is a React UI component library based on the Ant Design system, mainly for enterprise-level mid-end products.',
-  },
-  {
-    index: 3,
-    href: 'https://procomponents.ant.design',
-    titleId: 'pages.welcome.infoCard.procomponents.title',
-    titleDefault: 'Learn Pro Components',
-    descId: 'pages.welcome.infoCard.procomponents.desc',
-    descDefault:
-      'ProComponents provides higher-abstraction template components on top of Ant Design, with one-component-one-page philosophy.',
-  },
-] as const;
-
-const Welcome: React.FC = () => {
-  const intl = useIntl();
-  const locale = getLocale();
-  const normalizedLocale = locale.toLowerCase();
-  const content =
-    mdContent[locale] ??
-    (normalizedLocale.startsWith('zh')
-      ? mdContent['zh-CN']
-      : mdContent['en-US']);
-  const { initialState } = useModel('@@initialState');
-  const isDark = initialState?.settings?.navTheme === 'realDark';
+const WorkbenchPage: React.FC = () => {
   const access = useAccess();
-
-  // 审计日志统计卡片。简化版：用 antd Statistic + Progress，不引入 @ant-design/plots。
-  // 选择原因：避免新增依赖，满足「展示平均执行时长与错误率」的验收标准即可。
-  const [avgDuration, setAvgDuration] = useState<number | null>(null);
-  const [errorRate, setErrorRate] = useState<number | null>(null);
+  const { initialState } = useModel('@@initialState');
+  const user = initialState?.currentUser;
+  const tenant = initialState?.currentTenant;
+  const [avgDuration, setAvgDuration] = useState<number>();
+  const [errorRate, setErrorRate] = useState<number>();
+  const [healthLoading, setHealthLoading] = useState(true);
 
   useEffect(() => {
-    if (!access.canManageAuditLogs) return;
-    getAuditLogAverageDuration()
-      .then((data) => {
-        if (data && data.length > 0) {
-          const avg =
-            data.reduce(
-              (sum: number, d: any) => sum + d.avgExecutionDuration,
-              0,
-            ) / data.length;
-          setAvgDuration(Math.round(avg));
-        }
-      })
-      .catch(() => {});
-    getAuditLogErrorRate()
-      .then((data) => {
-        if (data) {
-          setErrorRate(data.errorRate);
-        }
-      })
-      .catch(() => {});
+    // 审计统计接口需要审计权限；无权账号直接隐藏健康卡，不发起注定 403 的请求
+    if (!access.canManageAuditLogs) {
+      setHealthLoading(false);
+      return;
+    }
+    let alive = true;
+    setHealthLoading(true);
+    Promise.all([
+      getAuditLogAverageDuration().catch(() => undefined),
+      getAuditLogErrorRate().catch(() => undefined),
+    ]).then(([duration, rate]) => {
+      if (!alive) return;
+      if (Array.isArray(duration) && duration.length > 0) {
+        const avg =
+          duration.reduce(
+            (sum: number, d: { avgExecutionDuration?: number }) =>
+              sum + (d.avgExecutionDuration ?? 0),
+            0,
+          ) / duration.length;
+        setAvgDuration(Math.round(avg));
+      }
+      setErrorRate((rate as { errorRate?: number } | undefined)?.errorRate);
+      setHealthLoading(false);
+    });
+    return () => {
+      alive = false;
+    };
   }, [access.canManageAuditLogs]);
 
+  const groups: Array<{ group: string; entries: WorkbenchEntry[] }> = [
+    {
+      group: '收付款',
+      entries: [
+        {
+          title: '资金看板',
+          desc: '充值/提现/负债/金库总览',
+          path: '/collection/dashboard',
+          icon: <DashboardOutlined />,
+          access: access.canViewCollections,
+        },
+        {
+          title: '充值单',
+          desc: '入金流水与大额放行',
+          path: '/collection/deposits',
+          icon: <WalletOutlined />,
+          access: access.canViewCollections,
+        },
+        {
+          title: '提现管理',
+          desc: '出金审核与广播',
+          path: '/collection/withdrawals',
+          icon: <MoneyCollectOutlined />,
+          access: access.canAdminWithdrawals,
+        },
+      ],
+    },
+    {
+      group: '财务会计',
+      entries: [
+        {
+          title: '资金总览',
+          desc: '科目、凭证与余额投影',
+          path: '/finance/overview',
+          icon: <BankOutlined />,
+          access: access.canViewFinance,
+        },
+      ],
+    },
+    {
+      group: '管理',
+      entries: [
+        {
+          title: '用户',
+          desc: '账号、角色与组织',
+          path: '/administration/identity/users',
+          icon: <TeamOutlined />,
+          access: access.canManageUsers,
+        },
+        {
+          title: '审计日志',
+          desc: '操作留痕与错误处置',
+          path: '/administration/audit-logs',
+          icon: <AuditOutlined />,
+          access: access.canManageAuditLogs,
+        },
+        {
+          title: '设置管理',
+          desc: '参数与功能配置',
+          path: '/administration/settings',
+          icon: <SettingOutlined />,
+          access: access.canManageSettings,
+        },
+      ],
+    },
+    {
+      group: 'SaaS',
+      entries: [
+        {
+          title: '租户',
+          desc: '多租户与套餐',
+          path: '/administration/saas/tenants',
+          icon: <ThunderboltOutlined />,
+          access: access.canManageTenants,
+        },
+      ],
+    },
+  ];
+
+  const visibleGroups = groups
+    .map((g) => ({ ...g, entries: g.entries.filter((e) => e.access !== false) }))
+    .filter((g) => g.entries.length > 0);
+
   return (
-    <PageContainer
-      title={
-        <>
-          {intl.formatMessage(
-            {
-              id: 'pages.welcome.celebrationTitle',
-              defaultMessage: '欢迎使用 Ant Design Pro {v6}',
-            },
-            {
-              v6: (
-                <span key="v6" className="welcome-gradient-title">
-                  V6
-                </span>
-              ),
-            },
-          )}
-          🎉
-        </>
-      }
-    >
-      <div
-        data-theme={isDark ? 'dark' : 'light'}
-        className="flex flex-col gap-6 md:flex-row"
-      >
-        <div className="min-w-0 md:flex-[2] welcome-markdown">
+    <PageContainer title={false} subTitle={false}>
+      <ProCard gutter={[16, 16]} ghost style={{ minHeight: '60vh' }}>
+        <ProCard colSpan={{ xs: 24, lg: 16 }} direction="column" gutter={[16, 16]}>
           <Card>
-            <XMarkdown components={mdComponents} config={mdConfig}>
-              {content}
-            </XMarkdown>
+            <div className="flex flex-col gap-1">
+              <Text strong style={{ fontSize: 18 }}>
+                你好，{user?.name || user?.userName || '管理员'}
+              </Text>
+              <Text type="secondary">
+                欢迎使用 AbpAdmin 基础框架 · {new Date().toLocaleDateString()} · 当前环境：
+                {tenant?.isAvailable ? `租户 ${tenant.name ?? ''}` : 'Host'}
+              </Text>
+            </div>
           </Card>
-        </div>
-        <div className="flex flex-1 flex-col gap-4">
-          {access.canManageAuditLogs && (
-            <Row gutter={[16, 16]}>
-              <Col span={12}>
-                <Card size="small">
-                  <Statistic
-                    title="平均执行时长"
-                    value={avgDuration ?? '-'}
-                    suffix="ms"
-                  />
-                </Card>
-              </Col>
-              <Col span={12}>
-                <Card size="small">
-                  <div
-                    style={{
-                      marginBottom: 8,
-                      fontSize: 14,
-                      color: 'rgba(0,0,0,0.45)',
-                    }}
-                  >
-                    错误率
-                  </div>
-                  <Progress
-                    percent={errorRate ?? 0}
-                    size="small"
-                    status={
-                      errorRate && errorRate > 10 ? 'exception' : 'normal'
-                    }
-                  />
-                </Card>
-              </Col>
-            </Row>
+          {visibleGroups.length === 0 ? (
+            <Card>
+              <Empty description="当前账号暂无可用的功能入口，请联系管理员分配角色权限" />
+            </Card>
+          ) : (
+            visibleGroups.map((g) => (
+              <Card key={g.group} title={g.group} size="small">
+                <Row gutter={[12, 12]}>
+                  {g.entries.map((e) => (
+                    <Col key={e.path} xs={24} sm={12} md={8}>
+                      <Card hoverable size="small" onClick={() => history.push(e.path)}>
+                        <div className="flex items-start gap-3">
+                          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#1677ff]/10 text-lg text-[#1677ff]">
+                            {e.icon}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h4 className="mb-1 mt-0 text-sm font-semibold">{e.title}</h4>
+                            <p className="mb-0 truncate text-xs text-zinc-500">{e.desc}</p>
+                          </div>
+                        </div>
+                      </Card>
+                    </Col>
+                  ))}
+                </Row>
+              </Card>
+            ))
           )}
-          {infoCards.map((card) => (
-            <InfoCard
-              key={card.href}
-              index={card.index}
-              href={card.href}
-              title={intl.formatMessage({
-                id: card.titleId,
-                defaultMessage: card.titleDefault,
-              })}
-              desc={intl.formatMessage({
-                id: card.descId,
-                defaultMessage: card.descDefault,
-              })}
-            />
-          ))}
-        </div>
-      </div>
+        </ProCard>
+        <ProCard colSpan={{ xs: 24, lg: 8 }} direction="column" gutter={[16, 16]}>
+          {access.canManageAuditLogs && (
+            <Card title="框架健康" size="small" loading={healthLoading}>
+              <Row gutter={[12, 24]}>
+                <Col span={12}>
+                  <Statistic title="接口平均耗时" value={avgDuration ?? 0} suffix="ms" />
+                </Col>
+                <Col span={12}>
+                  <Statistic
+                    title="近期错误率"
+                    value={errorRate ?? 0}
+                    precision={errorRate != null && errorRate < 10 ? 2 : 0}
+                    suffix="%"
+                  />
+                </Col>
+              </Row>
+            </Card>
+          )}
+          <Card size="small">
+            <Progress type="circle" percent={100} size={72} format={() => '运行中'} />
+            <div className="mt-3 text-xs text-zinc-500">
+              后台作业、链上 worker 与通知中心在「系统」菜单下监控。
+            </div>
+          </Card>
+        </ProCard>
+      </ProCard>
     </PageContainer>
   );
 };
 
-export default Welcome;
+export default WorkbenchPage;
