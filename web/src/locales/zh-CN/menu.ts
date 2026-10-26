@@ -1,5 +1,5 @@
 export default {
-  'menu.welcome': '欢迎',
+  'menu.welcome': '首页',
   'menu.more-blocks': '更多区块',
   'menu.home': '首页',
   'menu.admin': '管理页',
@@ -64,12 +64,24 @@ export default {
   'menu.collection-withdrawals': '提现管理',
   // 运行时侧边栏由 my-menu 下发，app.tsx toMenuData 沿树拼 locale 键（menu.collection.<子页名>）；
   // 上方扁平键供 my-menu 请求返回前的静态路由兜底菜单使用，两套都要有
+  'menu.collection.collection-dashboard': '资金看板',
   'menu.collection.collection-orders': '订单',
   'menu.collection.collection-deposits': '充值单',
+  'menu.collection.collection-withdrawals': '提现管理',
   'menu.collection.collection-sweeps': '归集任务',
   'menu.collection.collection-vault': '金库核对',
-  'menu.collection.collection-withdrawals': '提现管理',
+  'menu.collection.collection-member-funds': '会员资金',
+  'menu.collection.collection-hot-wallet': '热钱包监控',
   'menu.collection.collection-network': '链网配置',
+  // SaaS 拆独立顶层组（ABP Pro 形态；路由仍驻 /administration/saas/*）
+  'menu.saas': 'SaaS',
+  'menu.saas.tenants': '租户',
+  'menu.saas.editions': '版本',
+  'menu.saas.tenant-packages': '租户套餐',
+  // 示例演示置底组
+  'menu.demos': '示例演示',
+  'menu.demos.data-scope-demo': '数据权限演示',
+  'menu.demos.biz-template-data-scope': '业务模块·数据权限示例',
   // 菜单层级参照 ABP 官方模板：Administration（Saas → 身份管理 → … → 设置）与 系统
   'menu.administration': '管理',
   'menu.administration.saas': 'SaaS',

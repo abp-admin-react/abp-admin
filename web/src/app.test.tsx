@@ -79,6 +79,24 @@ vi.mock('@ant-design/icons', () => {
     'DatabaseOutlined',
     'UserOutlined',
     'MenuOutlined',
+    // 菜单重排新增（menuIcons.ts 注册表扩充，测试 mock 同步名单）
+    'DashboardOutlined',
+    'ShoppingCartOutlined',
+    'WalletOutlined',
+    'MoneyCollectOutlined',
+    'SendOutlined',
+    'AuditOutlined',
+    'SearchOutlined',
+    'MonitorOutlined',
+    'CloudOutlined',
+    'ExperimentOutlined',
+    'CalculatorOutlined',
+    'FundOutlined',
+    'BankOutlined',
+    'ProfileOutlined',
+    'CalendarOutlined',
+    'SwapOutlined',
+    'HddOutlined',
   ];
   return Object.fromEntries(icons.map((name) => [name, () => null]));
 });

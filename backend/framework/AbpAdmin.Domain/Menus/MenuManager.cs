@@ -83,9 +83,13 @@ public class MenuManager : DomainService, ITransientDependency
     }
 
     /// <summary>
-    /// 播种 Host 全局模板（幂等：按 Path 跳过已存在节点，DbMigrator 重复运行安全）。
-    /// 模板后续增删节点不会被本方法同步到已有环境之外的数据（租户侧由 EnsureTenantMenusAsync 拷贝时的快照决定），
-    /// 需要重新对齐时由管理员在菜单管理页手工调整或删表重种。
+    /// 播种 Host 全局模板（幂等且同步：先按模板顺序补缺节点，再把已有节点的
+    /// 父/序/题/图标/权限对齐到模板——模板重排后重跑 DbMigrator 即可让存量环境跟进，
+    /// 不再需要「删表重种」或菜单管理页手工对齐）。
+    /// 故意不同步的字段：Name/Path/Type（前端 i18n 键与 URL 的稳定面，模板侧也不改它们）；
+    /// 故意不删除：模板中已移除的节点保留在库中（管理员经菜单管理页添加的自定义项
+    /// 不会被框架升级吞掉，需要下线时在菜单管理页停用/删除）。租户侧菜单是首次访问时的
+    /// Host 快照拷贝，存量租户不自动跟随模板重排（租户菜单属租户资产）。
     /// </summary>
     public virtual async Task SeedHostTemplateAsync()
     {
@@ -100,14 +104,15 @@ public class MenuManager : DomainService, ITransientDependency
 
             var definitions = MenuTemplateDefinition.All;
             var keyToId = new Dictionary<string, Guid>();
+            var existingByTemplateKey = new List<(MenuDefinition Def, Guid Id)>();
 
-            // 先建父再建子：按定义顺序（模板列表保证父在子前）
+            // 阶段一（按定义顺序，模板列表保证父在子前）：缺的插入、存在的记账待对齐
             foreach (var def in definitions)
             {
                 if (def.Path != null && hostMenusByPath.TryGetValue(def.Path, out var existing))
                 {
-                    // 已存在：记录 id 供子节点挂接
                     keyToId[def.Key] = existing.Id;
+                    existingByTemplateKey.Add((def, existing.Id));
                     continue;
                 }
 
@@ -128,6 +133,24 @@ public class MenuManager : DomainService, ITransientDependency
                     def.PermissionName);
                 await _menuRepository.InsertAsync(menu, autoSave: true);
                 keyToId[def.Key] = menu.Id;
+            }
+
+            // 阶段二：存量节点对齐模板（父/序/题/图标/权限）。全部 keyToId 已就绪，
+            // 新插组（如模板新增顶层组）也能作为旧节点的挂接目标。
+            foreach (var (def, id) in existingByTemplateKey)
+            {
+                var menu = await _menuRepository.GetAsync(id);
+                var parentId = def.ParentKey != null && keyToId.TryGetValue(def.ParentKey, out var pid) ? pid : (Guid?)null;
+                var changed = false;
+                if (menu.ParentId != parentId) { menu.SetParent(parentId); changed = true; }
+                if (menu.OrderNo != def.OrderNo) { menu.SetOrderNo(def.OrderNo); changed = true; }
+                if (menu.Title != def.Title) { menu.SetTitle(def.Title); changed = true; }
+                if (menu.Icon != def.Icon) { menu.SetIcon(def.Icon); changed = true; }
+                if (menu.PermissionName != def.PermissionName) { menu.SetPermissionName(def.PermissionName); changed = true; }
+                if (changed)
+                {
+                    await _menuRepository.UpdateAsync(menu, autoSave: true);
+                }
             }
         }
     }

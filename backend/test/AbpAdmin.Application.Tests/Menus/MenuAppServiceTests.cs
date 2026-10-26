@@ -87,6 +87,78 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         }
     }
 
+    /* 模板同步语义（菜单重排引入）：SeedHostTemplateAsync 不只补缺——已有节点会被对齐到
+     * 模板的父/序/题/图标/权限，模板重排后重跑迁移即生效；模板外的自定义节点不被删除。 */
+    [Fact]
+    public async Task Seed_Should_Sync_Existing_Nodes_To_Template()
+    {
+        await CleanMenusAsync();
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+
+        // 制造「存量旧布局」：saas 组挂回 administration + 旧序旧题、welcome 旧题旧序、
+        // data-scope-demo 顶层漂着（模板已收进 demos 组）
+        using (_dataFilter.Disable<IMultiTenant>())
+        {
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var all = await _menuRepository.GetListAsync();
+                var byPath = all.Where(x => x.Path != null).ToDictionary(x => x.Path!);
+                var administration = byPath["/administration"];
+                var saas = byPath["/administration/saas"];
+                saas.SetParent(administration.Id);
+                saas.SetOrderNo(5);
+                saas.SetTitle("SaaS旧名");
+                await _menuRepository.UpdateAsync(saas);
+
+                var welcome = byPath["/welcome"];
+                welcome.SetTitle("欢迎");
+                welcome.SetOrderNo(1);
+                await _menuRepository.UpdateAsync(welcome);
+
+                var demo = byPath["/data-scope-demo"];
+                demo.SetParent(null);
+                demo.SetOrderNo(40);
+                await _menuRepository.UpdateAsync(demo);
+
+                // 模板外自定义节点：同步不得误删
+                await _menuRepository.InsertAsync(new Menu(
+                    _guidGenerator.Create(), null, null, MenuTypeEnum.Menu,
+                    "自定义节点", "custom", "/custom-page", null, 999, false, isEnabled: true));
+            });
+        }
+
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+
+        using (_dataFilter.Disable<IMultiTenant>())
+        {
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var all = await _menuRepository.GetListAsync();
+                var byPath = all.Where(x => x.Path != null).ToDictionary(x => x.Path!);
+
+                // saas：回到顶层组、模板序、模板题
+                var saas = byPath["/administration/saas"];
+                saas.ParentId.ShouldBeNull();
+                saas.OrderNo.ShouldBe(
+                    MenuTemplateDefinition.All.Single(d => d.Key == "saas").OrderNo);
+                saas.Title.ShouldBe("SaaS");
+
+                // welcome：题/序回到模板
+                var welcome = byPath["/welcome"];
+                welcome.Title.ShouldBe("首页");
+                welcome.OrderNo.ShouldBe(
+                    MenuTemplateDefinition.All.Single(d => d.Key == "welcome").OrderNo);
+
+                // data-scope-demo：重挂回 demos 组
+                var demos = byPath["/demos"];
+                byPath["/data-scope-demo"].ParentId.ShouldBe(demos.Id);
+
+                // 模板外自定义节点保留
+                byPath.ContainsKey("/custom-page").ShouldBeTrue();
+            });
+        }
+    }
+
     [Fact]
     public async Task Create_Menu_Requires_Path()
     {

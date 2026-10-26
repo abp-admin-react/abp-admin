@@ -377,7 +377,8 @@ export default [
     icon: 'payCircle',
     access: 'canViewTrade',
     routes: [
-      { path: '/collection', redirect: '/collection/orders' },
+      // 菜单重排：资金看板为收付款域默认落地页（总览先行，与菜单序一致）
+      { path: '/collection', redirect: '/collection/dashboard' },
       {
         path: '/collection/dashboard',
         name: 'collection-dashboard',
