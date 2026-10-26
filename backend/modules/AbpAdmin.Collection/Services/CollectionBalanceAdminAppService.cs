@@ -120,15 +120,19 @@ public class CollectionBalanceAdminAppService : ApplicationService
                         || o.Status == WithdrawStatus.Broadcasting)
             .SumAsync(o => (decimal?)o.ActualAmount);
 
-        var userBalances = await dbContext.Balances.AsNoTracking()
+        // 聚合在 DB 侧、枚举转字符串在客户端——投影里的 g.Key.ToString() 会被 EF 翻译成
+        // int::text（枚举列存 int），负债卡显示「用户 0 合计」（E2E 客户视角实测）；
+        // 状态桶能出枚举名是另一条求值路径，统一收客户端转换防同坑
+        var balanceRows = await dbContext.Balances.AsNoTracking()
             .GroupBy(b => b.Currency)
-            .Select(g => new UserBalanceBucketDto
-            {
-                Currency = g.Key.ToString(),
-                Balance = CollectionAmounts.Format(g.Sum(b => b.Balance)),
-                Frozen = CollectionAmounts.Format(g.Sum(b => b.Frozen)),
-            })
+            .Select(g => new { Currency = g.Key, Balance = g.Sum(b => b.Balance), Frozen = g.Sum(b => b.Frozen) })
             .ToListAsync();
+        var userBalances = balanceRows.Select(g => new UserBalanceBucketDto
+        {
+            Currency = g.Currency.ToString(),
+            Balance = CollectionAmounts.Format(g.Balance),
+            Frozen = CollectionAmounts.Format(g.Frozen),
+        }).ToList();
 
         // 金库最新留痕按币取最近一条（DB 侧组内取最新，不整表物化——留痕表只增不减）
         var vaultChecks = await dbContext.VaultChecks.AsNoTracking()
