@@ -72,8 +72,9 @@ public static class EfCoreLegacySchemaBaseliner
             await CreateHistoryTableIfAbsentAsync(npgsqlConnection, historyTableName, constraintName);
 
             await using var stamp = new NpgsqlCommand(
-                "INSERT INTO \"«H»\" (\"MigrationId\", \"ProductVersion\") " +
-                "VALUES ($1, $2) ON CONFLICT (\"MigrationId\") DO NOTHING;"
+                // 整体括号必须保留：.Replace 若只挂最后一个字面量，占位符不替换，会 INSERT 进字面名 «H» 的表
+                ("INSERT INTO \"«H»\" (\"MigrationId\", \"ProductVersion\") " +
+                "VALUES ($1, $2) ON CONFLICT (\"MigrationId\") DO NOTHING;")
                     .Replace("«H»", historyTableName),
                 npgsqlConnection);
             stamp.Parameters.AddWithValue(initialMigrationId);
@@ -127,10 +128,11 @@ public static class EfCoreLegacySchemaBaseliner
         try
         {
             await using var createHistory = new NpgsqlCommand(
-                "CREATE TABLE IF NOT EXISTS \"«H»\" (" +
+                // 整体括号必须保留：.Replace 若只挂最后一个字面量，占位符不替换，会建出字面名 «H» 的表
+                ("CREATE TABLE IF NOT EXISTS \"«H»\" (" +
                 "\"MigrationId\" character varying(150) NOT NULL, " +
                 "\"ProductVersion\" character varying(32) NOT NULL, " +
-                "CONSTRAINT \"«PK»\" PRIMARY KEY (\"MigrationId\"));"
+                "CONSTRAINT \"«PK»\" PRIMARY KEY (\"MigrationId\"));")
                     .Replace("«H»", historyTableName)
                     .Replace("«PK»", constraintName),
                 connection);
