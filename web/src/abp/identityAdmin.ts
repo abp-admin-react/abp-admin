@@ -242,6 +242,8 @@ export type IdentitySessionDto = {
   deviceInfo?: string;
   clientId?: string;
   ipAddresses?: string;
+  /** 最近 IP 的归属地（后端读时批量解析；内网/回环为「内网IP」，无法解析为空） */
+  ipRegion?: string | null;
   signedIn: string;
   lastAccessed?: string | null;
 };

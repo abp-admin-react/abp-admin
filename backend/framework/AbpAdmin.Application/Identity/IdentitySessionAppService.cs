@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.IpRegions;
 using AbpAdmin.OperationLogs;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
@@ -15,13 +16,16 @@ public class IdentitySessionAppService : AbpAdminAppService, IIdentitySessionApp
 {
     private readonly IIdentitySessionRepository _sessionRepository;
     private readonly IdentitySessionManager _sessionManager;
+    private readonly IIpLocationResolver _ipLocationResolver;
 
     public IdentitySessionAppService(
         IIdentitySessionRepository sessionRepository,
-        IdentitySessionManager sessionManager)
+        IdentitySessionManager sessionManager,
+        IIpLocationResolver ipLocationResolver)
     {
         _sessionRepository = sessionRepository;
         _sessionManager = sessionManager;
+        _ipLocationResolver = ipLocationResolver;
     }
 
     public virtual async Task<PagedResultDto<IdentitySessionDto>> GetListAsync(GetIdentitySessionListInput input)
@@ -34,21 +38,46 @@ public class IdentitySessionAppService : AbpAdminAppService, IIdentitySessionApp
             input.UserId,
             input.Device,
             input.ClientId);
-        return new PagedResultDto<IdentitySessionDto>(
-            count,
-            items.Select(x => new IdentitySessionDto
+
+        var dtos = items.Select(x => new IdentitySessionDto
+        {
+            Id = x.Id,
+            SessionId = x.SessionId,
+            UserId = x.UserId,
+            Device = x.Device,
+            DeviceInfo = x.DeviceInfo,
+            ClientId = x.ClientId,
+            IpAddresses = x.IpAddresses,
+            SignedIn = x.SignedIn,
+            LastAccessed = x.LastAccessed
+        }).ToList();
+
+        // 会话表 IP 是逗号拼接的近期列表；归属地按「最近一个 IP」解析（语义即当前接入位置）。
+        // 当页去重后批量解析（审计日志列表同款：一次缓存往返 + 离线库内存查询；xdb 缺失降级为空列）。
+        var lastIps = dtos
+            .Select(x => LastIpOf(x.IpAddresses))
+            .Where(ip => ip != null)
+            .Distinct()
+            .ToList();
+        if (lastIps.Count > 0)
+        {
+            var regionMap = await _ipLocationResolver.ResolveManyAsync(lastIps!);
+            foreach (var dto in dtos)
             {
-                Id = x.Id,
-                SessionId = x.SessionId,
-                UserId = x.UserId,
-                Device = x.Device,
-                DeviceInfo = x.DeviceInfo,
-                ClientId = x.ClientId,
-                IpAddresses = x.IpAddresses,
-                SignedIn = x.SignedIn,
-                LastAccessed = x.LastAccessed
-            }).ToList());
+                var lastIp = LastIpOf(dto.IpAddresses);
+                if (lastIp != null && regionMap.TryGetValue(lastIp, out var region))
+                {
+                    dto.IpRegion = region;
+                }
+            }
+        }
+
+        return new PagedResultDto<IdentitySessionDto>(count, dtos);
     }
+
+    private static string? LastIpOf(string? ipAddresses) => ipAddresses?
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .LastOrDefault();
 
     [Authorize(AbpAdminPermissions.Sessions.Revoke)]
     public virtual async Task RevokeAsync(Guid id)

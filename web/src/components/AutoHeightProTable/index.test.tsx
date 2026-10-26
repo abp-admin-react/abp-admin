@@ -1,5 +1,6 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { estimateColumnWidth } from './useResizableColumns';
 
 /**
  * AutoHeightProTable 可测纯逻辑：scroll.x 求和（含选择/展开隐形列宽）、
@@ -43,7 +44,7 @@ function renderTable(props: Record<string, any>) {
 }
 
 describe('AutoHeightProTable', () => {
-  it('scroll.x 按列宽数字求和，字符串宽度不计入', () => {
+  it('scroll.x 按列宽数字求和，字符串宽度按内容估宽计入', () => {
     const { props } = renderTable({
       columns: [
         { title: 'A', dataIndex: 'a', width: 100 },
@@ -51,14 +52,15 @@ describe('AutoHeightProTable', () => {
         { title: 'C', dataIndex: 'c', width: 200 },
       ],
     });
-    expect(props().scroll).toMatchObject({ x: 300 });
+    // B 无数字宽 → 估宽 max(120, 标题1字符8px+48)=120
+    expect(props().scroll).toMatchObject({ x: 420 });
   });
 
-  it('全列无数字宽度时不注入 scroll.x', () => {
+  it('全列无数字宽度时注入估算 scroll.x（列多不压扁的统一横向滚动）', () => {
     const { props } = renderTable({
       columns: [{ title: 'A', dataIndex: 'a' }],
     });
-    expect(props().scroll?.x).toBeUndefined();
+    expect(props().scroll?.x).toBe(120);
   });
 
   it('隐形列宽计入：rowSelection 默认 32、expandable 默认 48，可被 columnWidth 覆盖', () => {
@@ -340,5 +342,21 @@ describe('AutoHeightProTable', () => {
     expect(wrap.style.height).toBe('636px');
     expect(warnSpy.mock.calls.length).toBe(callsBefore);
     rectSpy.mockRestore();
+  });
+});
+
+/* 估宽纯函数锁：全站表格横向滚动的单点实现（AutoHeightProTable 与裸 Table 共用）。
+ * 锚定三条规则：CJK/西文标题宽度、dateTime 下限、copyable 加成、总下限 120。 */
+describe('estimateColumnWidth', () => {
+  it('西文短标题落 120 下限，CJK 标题按 14px/字加宽', () => {
+    expect(estimateColumnWidth({ title: 'IP' })).toBe(120);
+    // 6 个 CJK = 84 + 留白 48 = 132 > 120
+    expect(estimateColumnWidth({ title: '最近访问时间' })).toBe(132);
+  });
+
+  it('dateTime 列下限 170，copyable 列加 56 图标位', () => {
+    expect(estimateColumnWidth({ title: '时间', valueType: 'dateTime' })).toBe(170);
+    const base = estimateColumnWidth({ title: '交易哈希' });
+    expect(estimateColumnWidth({ title: '交易哈希', copyable: true })).toBe(base + 56);
   });
 });

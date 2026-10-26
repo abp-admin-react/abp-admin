@@ -135,12 +135,35 @@ type ResizableColumn = {
   onHeaderCell?: (...args: any[]) => any;
 };
 
+/** 估宽所需的展示属性（ProColumns/antd ColumnType 结构上都带，按需窄化读取） */
+type DisplayColumn = ResizableColumn & {
+  title?: unknown;
+  valueType?: unknown;
+  copyable?: unknown;
+};
+
+/** 无数字 width 列的最小内容宽估算：标题文字宽（CJK 14px/西文 8px）+ 单元格留白，
+ * dateTime/copyable 按内容形态加宽。目的不是精确排版，而是让「列多而全无 width」
+ * 的页面（如会话列表）在 scroll.x 求和时不被记 0——列总宽超出容器时出横向
+ * 滚动条而不是全体压扁（全站表格统一横向滚动的单点实现，两类表格共用）。 */
+export function estimateColumnWidth(col: DisplayColumn): number {
+  const title = typeof col.title === 'string' ? col.title : '';
+  let textWidth = 0;
+  for (const ch of title) {
+    textWidth += /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(ch) ? 14 : 8;
+  }
+  let width = Math.max(120, textWidth + 48);
+  if (col.copyable === true) width += 56;
+  if (col.valueType === 'dateTime') width = Math.max(width, 170);
+  return width;
+}
+
 export type UseResizableColumnsReturn<C> = {
   /** 注入 onHeaderCell 后的列（拖拽后的宽度覆盖原始 width） */
   columns: C[];
   /** 传给 Table 的 components（header.cell 换成可伸缩单元格） */
   components: { header: { cell: typeof ResizableHeaderCell } } | undefined;
-  /** 各列宽度求和（含拖拽后），供 scroll.x 使用；无数字宽度列时 undefined */
+  /** 各列宽度求和（含拖拽后；无 width 列按 estimateColumnWidth 估宽计入），供 scroll.x 使用 */
   scrollX: number | undefined;
   /** 当前拖拽宽度表（AutoHeightProTable 的 scroll.x 计算含隐形列补贴时需要） */
   columnWidths: Record<string, number>;
@@ -194,11 +217,13 @@ export function useResizableColumns<C extends ResizableColumn>(
     [resizable],
   );
 
+  /** 各列宽度求和（含拖拽后）；无数字 width 的列按内容估宽计入——全无 width
+   * 的列组合不再是 undefined，而是「估算总宽」，列多时表格出横向滚动条而非压扁 */
   const scrollX = useMemo(() => {
     let total = 0;
     columns?.forEach((col, index) => {
       const width = columnWidths[columnKeyOf(col, index)] ?? col.width;
-      if (typeof width === 'number') total += width;
+      total += typeof width === 'number' ? width : estimateColumnWidth(col as DisplayColumn);
     });
     return total > 0 ? total : undefined;
   }, [columns, columnWidths]);

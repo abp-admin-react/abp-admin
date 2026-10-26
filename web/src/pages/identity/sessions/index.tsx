@@ -44,6 +44,13 @@ const SessionsPage: React.FC = () => {
     },
     { title: 'IP', dataIndex: 'ipAddresses', search: false },
     {
+      // 归属地按最近 IP 读时解析（后端批量+缓存）；内网/回环显示「内网IP」，解析不了留空
+      title: '归属地',
+      dataIndex: 'ipRegion',
+      search: false,
+      render: (_, record) => record.ipRegion ?? '—',
+    },
+    {
       title: '登录时间',
       dataIndex: 'signedIn',
       valueType: 'dateTime',

@@ -38,6 +38,9 @@ public abstract class IdentitySessionAppServiceTests<TStartupModule> : AbpAdminA
 
         list.TotalCount.ShouldBeGreaterThan(0);
         list.Items.ShouldContain(x => x.UserId == AdminUserId);
+        // 归属地展示增强（读时批量解析）：回环 IP 走内网短路恒为「内网IP」，
+        // 与 xdb 离线库是否加载无关——这是本断言不依赖库文件的原因
+        list.Items.ShouldContain(x => x.UserId == AdminUserId && x.IpRegion == "内网IP");
     }
 
     [Fact]

@@ -13,6 +13,7 @@ import React, {
 } from 'react';
 import {
   columnKeyOf,
+  estimateColumnWidth,
   ResizableHeaderCell,
   useResizableColumns,
 } from './useResizableColumns';
@@ -347,14 +348,15 @@ const AutoHeightProTable = <
     };
   }, [fillViewport, measure]);
 
-  /** scroll.x = 各列宽度求和（含拖拽后的宽度），列总宽超出容器时只出横向滚动条。
-   * 官网 rowSelection 默认选择列 32px、expandable 展开列默认 48px，
-   * 这些"隐形列"不在 columns 里，需按官网默认宽度假补进总宽。 */
+  /** scroll.x = 各列宽度求和（含拖拽后的宽度；无 width 列按内容估宽计入——
+   * 全无 width 的页面不再塌成 100% 压扁，列多时出横向滚动条），
+   * 列总宽超出容器时只出横向滚动条。官网 rowSelection 默认选择列 32px、
+   * expandable 展开列默认 48px，这些"隐形列"不在 columns 里，按官网默认宽度假补进总宽。 */
   const scrollX = useMemo(() => {
     let total = 0;
     columns?.forEach((col, index) => {
       const width = columnWidths[columnKeyOf(col, index)] ?? col.width;
-      if (typeof width === 'number') total += width;
+      total += typeof width === 'number' ? width : estimateColumnWidth(col);
     });
     if (total === 0) return undefined;
     if (props.rowSelection) {
