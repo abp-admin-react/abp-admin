@@ -161,6 +161,12 @@ services:
   web:
     build:
       context: ./web
+    # nginx 配置热挂载：X-Forwarded-Proto 透传修复（吸收姊妹仓 092cb310）经仓库文件即时
+    # 生效，免 image 重建（pnpm 全量构建分钟级起步，改 nginx 配置不值得陪跑）。
+    # 挂载内容与镜像内烘焙的同源文件一致，下次 web 重建后可删（留着也无害）。
+    volumes:
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web/nginx-proxy-params.conf:/etc/nginx/proxy_params_backend.conf:ro
     ports:
       # 默认只绑宿主机回环：栈内置开发默认口令（postgres/postgres、dev-only-change-me），
       # 不应默认暴露给局域网。要 LAN/外部访问：.env 里 WEB_BIND=0.0.0.0（并自行改掉
