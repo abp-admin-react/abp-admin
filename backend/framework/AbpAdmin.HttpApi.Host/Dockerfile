@@ -3,10 +3,15 @@
 #   cd backend && docker build -f framework/AbpAdmin.HttpApi.Host/Dockerfile -t abp-admin-host . ）
 
 # ---- 构建：restore 单独成层（csproj 不变则命中缓存，不重下包） ----
-# 基础镜像按 digest 钉版：tag 浮动（aspnet:10.0 曾长期停在带 2 CRITICAL + 11 HIGH 的
-# 10.0.11 构建），digest 不变。刷新方式：docker pull 同 tag 的新构建 → 取新 digest →
-# 改这里并跑 scripts/security-scan.sh 复扫；不要只改 tag（tag 会变，digest 不会）。
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
+# 基础镜像走浮动 tag（10.0 只在 .NET 10 LTS 补丁线内浮动，不用 latest 防跨大版本）。
+# 自动跟进最新补丁的前提是构建必须带 --pull（docker compose build --pull）：docker build
+# 默认复用本地已有 tag 的缓存镜像，不 pull 就永远停在旧补丁——历史上"aspnet:10.0 长期
+# 停在带 2 CRITICAL + 11 HIGH 的 10.0.11"实为这个假象，当年因此改成 digest 钉版 +
+# 手动刷新；现改为每周 scripts/auto-update-stack.ps1 计划任务自动 --pull 重建。
+# 两道 trivy 门禁职责不互替：自动更新流程内置 trivy image 单镜像扫（CRITICAL/HIGH 阈值，
+# 未装 trivy 自动跳过）；scripts/security-scan.sh 仍是发布前的三路全面门禁
+# （.NET 依赖 / 前端生产树 / 镜像层）。
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG CERT_PASSPHRASE=dev-only-change-me
 WORKDIR /src
 
@@ -75,8 +80,8 @@ RUN dotnet dev-certs https -ep /app/openiddict.pfx -p "$CERT_PASSPHRASE" \
     && chmod 644 /app/openiddict.pfx
 
 # ---- 运行时：仅携带 publish 产物 + 证书 + IP 归属地库 ----
-# digest 同 = ASP.NET Core 10.0.13（trivy 复扫该基础镜像 CRITICAL/HIGH 均为 0）。
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:d5633778c754e89a386882eddf8dbee6942447a8a4b8267c19cf1e1158d0b0ac AS final
+# 浮动 tag 策略同顶部 sdk 段说明：补丁自动跟进靠构建 --pull，不靠手改 digest。
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 COPY --from=build /app/openiddict.pfx .

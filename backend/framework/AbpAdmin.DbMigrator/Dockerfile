@@ -5,8 +5,9 @@
 # ---- 构建：与 Host Dockerfile 同款分层，restore 挂在 csproj 层上 ----
 # ⚠ restore 层 COPY 链必须覆盖引用闭包的全部 csproj——framework/ 与 modules/ 两区都要 COPY，
 #   漏拷一条 dotnet restore 在容器内直接断（工程挪区/新增业务模块时同步补链）。
-# 基础镜像按 digest 钉版；刷新方式见 HttpApi.Host/Dockerfile 顶部说明。
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
+# 基础镜像浮动 tag + 构建 --pull 自动跟进最新补丁，策略说明见 HttpApi.Host/Dockerfile 顶部
+# （每周 scripts/auto-update-stack.ps1 计划任务承接，digest 钉版 + 手动刷新已废弃）。
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY NuGet.Config common.props Directory.Packages.props ./
@@ -36,8 +37,8 @@ RUN dotnet publish framework/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj \
     -c Release -o /app/publish --no-restore
 
 # ---- 运行时 ----
-# digest 同 = ASP.NET Core 10.0.13（trivy 复扫 CRITICAL/HIGH 均为 0）
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:d5633778c754e89a386882eddf8dbee6942447a8a4b8267c19cf1e1158d0b0ac AS final
+# 浮动 tag 策略见顶部与 HttpApi.Host/Dockerfile 说明。
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 
