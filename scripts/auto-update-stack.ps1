@@ -1,31 +1,8 @@
-﻿# 基础镜像自动更新：每周计划任务（Windows 任务 AbpAdminStackAutoUpdate，周日 07:00）调用，
-# 也可手工执行。既然 Dockerfile 已改浮动 tag，本脚本是"自动跟进最新补丁"的另一半：
-# 拉最新底座 → 底座有变化才重建 → up -d 滚动应用 → 健康不过自动回滚。
-#
-# 流程：
-#   1) 回滚保险：构建前把当前 :latest 打成 :prev 底片（部署失败时靠它回滚）。
-#   2) 底座变化检测：docker pull 四个基础镜像 tag（digest 不变时零层传输），与上次快照
-#      （logs/base-digests.json）按 digest 对比。⚠ 变化信号必须用底座 digest 而不是
-#      构建产物 ID：BuildKit 重建即使全部层缓存命中，镜像配置里的 created 时间戳也会
-#      更新 → 产物 ID 每次必变 → 拿它当信号会每周误报一次"有更新"整栈重建（首版实测）。
-#      宿主 Docker Desktop daemon.json 已配 registry-mirrors=https://docker.1ms.run
-#      （2026-10-27 实测 3s 级拉齐、digest 与官方一致）——node/nginx 等 docker.io ref
-#      正常周直接走加速，pull 名不变、本脚本零感知。
-#      ⚠ 单 ref 拉取失败按"本地现有版本判定"降级而非中止：docker.io 的 auth 端点在
-#      部分网络下被间歇重置（TLS bad record MAC 实测），MCR 一般可达——不能让 node/nginx
-#      的网络故障拖挂 MCR 补丁的部署；被降级的 ref 下周自动重试远端。mirror 本身故障时
-#      pull 同样失败，走同一降级路径，语义不变。
-#   3) 底座有变化才 docker compose build（不带 --pull：步骤 2 已把可达的底座刷进本地
-#      tag，构建吃本地即可——否则 docker.io 故障会让整个构建挂掉）；无变化跳过构建。
-#   4) trivy 门禁（装了 trivy 才跑，未装自动跳过）：新镜像出现 CRITICAL/HIGH 则不切换。
-#      （基础镜像更新正是为了消 CVE，门禁卡的是"新底座反而带来新漏洞"的小概率换血；
-#       全量三路门禁仍是发布前的 scripts/security-scan.sh，两者职责不互替。）
-#   5) docker compose up -d 滚动应用：migrator 镜像变了会随 host 的
-#      depends_on(service_completed_successfully) 自动重跑迁移种子（幂等）。
-#   6) host 健康观察：healthy 才算成功，超时回滚 :prev；底座确实更新时顺带记录运行时版本。
-# 底座无新版本的普通一周：跳过构建、跳过 up -d，运行中的栈一个容器都不动（有变化才打扰）。
-# 全程追加日志到 logs/auto-update.log，出问题先看这里。
-#
+﻿# 基础镜像自动更新：Windows 计划任务 AbpAdminStackAutoUpdate（周日 07:00）调用，也可手工
+# 执行。Dockerfile 已是浮动 tag，本脚本补上"自动跟进"的另一半：显式 pull 底座 → digest
+# 快照对比 → 有变化才构建 + up -d 滚动应用 → 健康不过自动回滚；无变化的周栈零动作。
+# 机制要点（产物 ID 不可作信号、docker.io 故障降级、PS 5.1 坑）见各步骤行内注释。
+# 日志：logs/auto-update.log。
 # 手工回滚：docker tag abp-admin-host:prev abp-admin-host:latest && docker compose up -d
 # 删除自动更新：schtasks /Delete /TN AbpAdminStackAutoUpdate /F
 
@@ -81,10 +58,13 @@ try {
         if ($LASTEXITCODE -ne 0) { Log "（$s 无现存镜像，跳过 :prev 标记）" }
     }
 
-    # 2) 底座变化检测：pull 到本地最新（digest 不变时零层传输），按 RepoDigest 对比快照。
-    #    每个 ref 重试 3 次（间隔递增）——网络抖动一次拉不上不该整周空转；3 次后仍失败：
-    #    本地有该镜像 → 降级（沿用本地版本参与对比，记入 pullFailedRefs 告知），
-    #    本地也没有 → 致命失败（没它构建必挂，无可降级）。
+    # 2) 底座变化检测：pull 到本地最新（宿主已配 1ms.run 镜像源加速；digest 不变时零层
+    #    传输），按 RepoDigest 对比快照。⚠ 变化信号必须用底座 digest、不能用构建产物 ID：
+    #    BuildKit 全缓存命中也会刷新 created 时间戳，产物 ID 每次必变，当信号每周必误报
+    #    整栈重建（首版实测）。每个 ref 重试 3 次（间隔递增）；仍失败时本地有镜像 → 降级
+    #    （沿用本地版本，记入 pullFailedRefs，下周重试远端），本地也没有 → 致命失败
+    #    （没它构建必挂）。背景：docker.io auth 端点在本网络被间歇重置（TLS bad record
+    #    MAC 实测）、MCR 可达——降级保证 node/nginx 故障不拖挂 MCR 补丁部署。
     $snapshot = @{}
     $pullFailedRefs = @()
     foreach ($ref in $baseRefs) {
@@ -132,7 +112,8 @@ try {
         $rc = Run-Docker (@('compose', 'build') + $services)
         if ($rc -ne 0) { throw "compose build 失败（exit $rc）" }
 
-        # 4) trivy 门禁（未安装则跳过；装了之后无需改本脚本）
+        # 4) trivy 门禁（未安装则跳过；装了之后无需改本脚本）。卡的是"新底座反而带来
+        #    新漏洞"的小概率换血；与发布前 security-scan.sh 三路全量门禁职责不互替
         if (Get-Command trivy -ErrorAction SilentlyContinue) {
             foreach ($s in @('web', 'host')) {
                 Log "==> trivy 扫描 $($images[$s]):latest"
