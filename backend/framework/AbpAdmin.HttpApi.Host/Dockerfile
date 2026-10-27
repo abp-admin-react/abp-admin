@@ -4,10 +4,13 @@
 
 # ---- 构建：restore 单独成层（csproj 不变则命中缓存，不重下包） ----
 # 基础镜像走浮动 tag（10.0 只在 .NET 10 LTS 补丁线内浮动，不用 latest 防跨大版本）。
-# 自动跟进最新补丁的前提是构建必须带 --pull（docker compose build --pull）：docker build
-# 默认复用本地已有 tag 的缓存镜像，不 pull 就永远停在旧补丁——历史上"aspnet:10.0 长期
-# 停在带 2 CRITICAL + 11 HIGH 的 10.0.11"实为这个假象，当年因此改成 digest 钉版 +
-# 手动刷新；现改为每周 scripts/auto-update-stack.ps1 计划任务自动 --pull 重建。
+# 底座新鲜度由每周 scripts/auto-update-stack.ps1 计划任务保证：先显式 docker pull 各底座
+# tag（宿主 daemon.json 已配 registry-mirrors=https://docker.1ms.run 加速，digest 不变时
+# 零层传输），与上轮快照按 digest 对比、有变化才 compose build——构建本身不带 --pull、
+# 吃步骤 2 刷好的本地 tag，单个底座源故障（docker.io 的 auth 端点被间歇重置）不会拖挂
+# 整个构建。docker build 默认复用本地已有 tag 的缓存、不 pull 就永远停在旧补丁——历史上
+# "aspnet:10.0 长期停在带 2 CRITICAL + 11 HIGH 的 10.0.11"实为这个假象，当年因此改成
+# digest 钉版 + 手动刷新，现已废弃。
 # 两道 trivy 门禁职责不互替：自动更新流程内置 trivy image 单镜像扫（CRITICAL/HIGH 阈值，
 # 未装 trivy 自动跳过）；scripts/security-scan.sh 仍是发布前的三路全面门禁
 # （.NET 依赖 / 前端生产树 / 镜像层）。

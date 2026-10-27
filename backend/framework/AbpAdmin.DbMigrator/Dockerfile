@@ -5,8 +5,9 @@
 # ---- 构建：与 Host Dockerfile 同款分层，restore 挂在 csproj 层上 ----
 # ⚠ restore 层 COPY 链必须覆盖引用闭包的全部 csproj——framework/ 与 modules/ 两区都要 COPY，
 #   漏拷一条 dotnet restore 在容器内直接断（工程挪区/新增业务模块时同步补链）。
-# 基础镜像浮动 tag + 构建 --pull 自动跟进最新补丁，策略说明见 HttpApi.Host/Dockerfile 顶部
-# （每周 scripts/auto-update-stack.ps1 计划任务承接，digest 钉版 + 手动刷新已废弃）。
+# 基础镜像浮动 tag；底座新鲜度由 scripts/auto-update-stack.ps1 保证（步骤 2 显式 docker
+# pull + digest 快照对比，有变化才构建），机制与宿主镜像源说明见 HttpApi.Host/Dockerfile
+# 顶部（digest 钉版 + 手动刷新已废弃）。
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 

@@ -8,9 +8,13 @@
 #      （logs/base-digests.json）按 digest 对比。⚠ 变化信号必须用底座 digest 而不是
 #      构建产物 ID：BuildKit 重建即使全部层缓存命中，镜像配置里的 created 时间戳也会
 #      更新 → 产物 ID 每次必变 → 拿它当信号会每周误报一次"有更新"整栈重建（首版实测）。
+#      宿主 Docker Desktop daemon.json 已配 registry-mirrors=https://docker.1ms.run
+#      （2026-10-27 实测 3s 级拉齐、digest 与官方一致）——node/nginx 等 docker.io ref
+#      正常周直接走加速，pull 名不变、本脚本零感知。
 #      ⚠ 单 ref 拉取失败按"本地现有版本判定"降级而非中止：docker.io 的 auth 端点在
 #      部分网络下被间歇重置（TLS bad record MAC 实测），MCR 一般可达——不能让 node/nginx
-#      的网络故障拖挂 MCR 补丁的部署；被降级的 ref 下周自动重试远端。
+#      的网络故障拖挂 MCR 补丁的部署；被降级的 ref 下周自动重试远端。mirror 本身故障时
+#      pull 同样失败，走同一降级路径，语义不变。
 #   3) 底座有变化才 docker compose build（不带 --pull：步骤 2 已把可达的底座刷进本地
 #      tag，构建吃本地即可——否则 docker.io 故障会让整个构建挂掉）；无变化跳过构建。
 #   4) trivy 门禁（装了 trivy 才跑，未装自动跳过）：新镜像出现 CRITICAL/HIGH 则不切换。
