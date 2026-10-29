@@ -28,10 +28,10 @@ describe('withdrawal write requests skip global error handler', () => {
     ['rejectWithdraw', () => rejectWithdraw('w1', '风险拒绝')],
     ['refundWithdraw', () => refundWithdraw('w1', '链上未付出')],
     ['retryWithdraw', () => retryWithdraw('w1')],
-    ['completeWithdraw', () => completeWithdraw('w1', '0x' + 'ab'.repeat(32))],
+    ['completeWithdraw', () => completeWithdraw('w1', `0x${'ab'.repeat(32)}`)],
     [
       'setWithdrawVault',
-      () => setWithdrawVault('0x' + '1'.repeat(40), '0x' + '2'.repeat(32)),
+      () => setWithdrawVault(`0x${'1'.repeat(40)}`, `0x${'2'.repeat(32)}`),
     ],
     ['backfillOpening', () => backfillOpening()],
     ['ackHotWalletTxn', () => ackHotWalletTxn('t1', '运营手动转出')],
@@ -53,10 +53,10 @@ describe('withdrawal write requests skip global error handler', () => {
     );
 
     request.mockClear();
-    await completeWithdraw('w1', '0x' + 'ab'.repeat(32)).catch(() => {});
+    await completeWithdraw('w1', `0x${'ab'.repeat(32)}`).catch(() => {});
     expect(request.mock.calls[0][0]).toBe(
       '/api/app/collection-withdraw-admin/w1/complete?txHash=' +
-        encodeURIComponent('0x' + 'ab'.repeat(32)),
+        encodeURIComponent(`0x${'ab'.repeat(32)}`),
     );
   });
 
@@ -90,14 +90,14 @@ describe('setWithdrawVault sends credentials in body only', () => {
   beforeEach(() => request.mockReset().mockResolvedValue(undefined));
 
   it('私钥出现在 data 而非 params/url', async () => {
-    await setWithdrawVault('0x' + '1'.repeat(40), '0x' + '2'.repeat(32));
+    await setWithdrawVault(`0x${'1'.repeat(40)}`, `0x${'2'.repeat(32)}`);
     const [url, options] = request.mock.calls[0] as [
       string,
       { data?: unknown; params?: unknown },
     ];
     expect(url).not.toContain('privateKey');
     expect(JSON.stringify(options.params ?? {})).not.toContain('privateKey');
-    expect(options.data).toMatchObject({ privateKey: '0x' + '2'.repeat(32) });
+    expect(options.data).toMatchObject({ privateKey: `0x${'2'.repeat(32)}` });
   });
 });
 

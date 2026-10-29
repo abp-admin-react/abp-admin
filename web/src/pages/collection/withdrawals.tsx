@@ -173,8 +173,6 @@ export default function WithdrawalsPage() {
     const d = new Date(v);
     return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
   };
-  const shortId = (v: string) => `${v.slice(0, 8)}...`;
-
   const columns = [
     {
       title: '时间',
@@ -547,14 +545,15 @@ export default function WithdrawalsPage() {
         okButtonProps={{ danger: true }}
         cancelText="取消"
         onCancel={() => setRejectTarget(undefined)}
-        onOk={() =>
+        onOk={() => {
+          if (!rejectTarget) return; // 模态打开必然已选行；收窄供闭包内直接用
           remark.trim()
             ? guard(
-                () => rejectWithdraw(rejectTarget!.id, remark.trim()),
+                () => rejectWithdraw(rejectTarget.id, remark.trim()),
                 '已拒绝并解冻',
               )
-            : message.warning('拒绝原因必填')
-        }
+            : message.warning('拒绝原因必填');
+        }}
       >
         <Input.TextArea
           value={remark}
@@ -606,14 +605,15 @@ export default function WithdrawalsPage() {
         okButtonProps={{ danger: true }}
         cancelText="取消"
         onCancel={() => setRefundTarget(undefined)}
-        onOk={() =>
+        onOk={() => {
+          if (!refundTarget) return; // 同上：收窄代除断言
           remark.trim()
             ? guard(
-                () => refundWithdraw(refundTarget!.id, remark.trim()),
+                () => refundWithdraw(refundTarget.id, remark.trim()),
                 '已退款拒绝',
               )
-            : message.warning('退款原因必填')
-        }
+            : message.warning('退款原因必填');
+        }}
       >
         <Input.TextArea
           value={remark}
@@ -634,18 +634,19 @@ export default function WithdrawalsPage() {
         okText="完结"
         cancelText="取消"
         onCancel={() => setCompleteTarget(undefined)}
-        onOk={() =>
+        onOk={() => {
+          if (!completeTarget) return; // 同上：收窄代除断言
           /^0x[0-9a-fA-F]{64}$/.test(txHashInput.trim())
             ? guard(
                 () =>
                   completeWithdraw(
-                    completeTarget!.id,
+                    completeTarget.id,
                     txHashInput.trim().toLowerCase(),
                   ),
                 '已完结',
               )
-            : message.warning('请输入合法的交易哈希（0x + 64 位十六进制）')
-        }
+            : message.warning('请输入合法的交易哈希（0x + 64 位十六进制）');
+        }}
       >
         <Input
           value={txHashInput}
