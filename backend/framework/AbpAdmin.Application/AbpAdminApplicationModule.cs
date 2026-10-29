@@ -72,7 +72,14 @@ public class AbpAdminApplicationModule : AbpModule
         // （AddHttpClient 内部是 TryAdd，重复调用安全）。
         // "Turnstile" 命名客户端唯一注册点在 Domain 的 CachingAndTenancyConfigurator
         // （消费方 TurnstileCaptchaValidator 在 Domain，注册跟随消费方，round4 收敛重复注册）。
-        context.Services.AddHttpClient();
+        // NV-30：无名（默认）客户端统一关闭自动重定向。腾讯云 SMS 的 ITencentCloudApiRequester
+        // （EasyAbp 包）与 SettingBasedAliyunApiRequester 都走 CreateClient()——前者的 EndPoint
+        // 是管理员可编辑设置，SafeHttpUrl 只校验入口 URL，跟 3xx 会把签名请求原样重放到内网
+        // 目标（SSRF 防线整体失效）；包自身不配置重定向策略，仓库侧在默认客户端上统一收口。
+        // API 客户端无重定向依赖；需要跟随重定向的出站一律走显式命名客户端（如探活/webhook
+        // 反而也关了）。等价于审计建议的全局 ConfigureHttpClientDefaults 主处理器覆盖。
+        context.Services.AddHttpClient("")
+            .ConfigurePrimaryHttpMessageHandler(() => SafeHttpUrl.CreateNoRedirectPrimaryHandler());
 
         // HTTP 探活作业（Monitoring/HttpProbeJobHandler）的命名客户端（注册跟随消费方）：
         // 目标 URL 来自作业 Payload，无 BaseAddress/超时可配（超时走 SetTimeout 按次设置）；
