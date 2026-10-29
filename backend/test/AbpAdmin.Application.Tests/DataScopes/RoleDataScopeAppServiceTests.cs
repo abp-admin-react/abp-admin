@@ -140,6 +140,31 @@ public abstract class RoleDataScopeAppServiceTests<TStartupModule> : AbpAdminApp
         }
     }
 
+    /// <summary>
+    /// 安全审计 run-1（TV-03b/c04）：CurrentOu/CurrentOuAndChildren 在解析期从「目标用户自己的
+    /// OU + 子树」展开（CurrentDataScopeProvider.ResolveAsync），与授权人快照无关——挂到树根附近
+    /// 的成员即解析出整棵树，等于变相 All。与 All 同口径：非 IsAll 操作者一律拒绝。
+    /// </summary>
+    [Theory]
+    [InlineData(DataScopeTypeEnum.CurrentOu)]
+    [InlineData(DataScopeTypeEnum.CurrentOuAndChildren)]
+    public async Task CreateAsync_Should_Reject_OuDerived_Scopes_When_Operator_NotAll(DataScopeTypeEnum scopeType)
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var roleName = await EnsureRoleAsync($"ds-esc-ou-{suffix}");
+
+        using (AsOperator($"ds-esc-ou-op-{suffix}"))
+        {
+            var ex = await Should.ThrowAsync<BusinessException>(() => _appService.CreateAsync(
+                new CreateUpdateRoleDataScopeDto
+                {
+                    RoleName = roleName,
+                    ScopeType = scopeType
+                }));
+            ex.Code.ShouldBe(AbpAdminDomainErrorCodes.DataScopes.RoleDataScopeEscalation);
+        }
+    }
+
     [Fact]
     public async Task CreateAsync_Should_Allow_All_When_Operator_IsAdmin()
     {

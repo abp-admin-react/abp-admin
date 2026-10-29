@@ -194,6 +194,18 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
                 .WithData("ScopeType", input.ScopeType);
         }
 
+        // 安全审计 run-1（TV-03b/c04）：CurrentOu/CurrentOuAndChildren 在解析期从「目标用户自己的
+        // OU + 子树」展开（CurrentDataScopeProvider.ResolveAsync），与授权人快照无关——原守卫只限
+        // All/Custom，漏掉这两个 OU 派生值：受限快照的操作者可给任意角色授 CurrentOuAndChildren，
+        // 挂到树根附近的成员即解析出整棵树，等于变相 All。与 All 同口径：除非快照本身 IsAll，
+        // 否则拒绝（受信操作者想授 OU 范围应走 Custom 并落在自己快照内）。
+        if ((input.ScopeType is DataScopeTypeEnum.CurrentOu or DataScopeTypeEnum.CurrentOuAndChildren)
+            && !snapshot.IsAll)
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.DataScopes.RoleDataScopeEscalation)
+                .WithData("ScopeType", input.ScopeType);
+        }
+
         if (input.ScopeType == DataScopeTypeEnum.Custom && !snapshot.IsAll)
         {
             var outsideCount = input.CustomOrganizationUnitIds
