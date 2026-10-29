@@ -1,12 +1,15 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Notifications;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.BackgroundJobs;
+using Volo.Abp.Data;
 using Volo.Abp.Domain.Repositories;
+using Volo.Abp.MultiTenancy;
 
 namespace AbpAdmin.BackgroundJobs;
 
@@ -60,6 +63,39 @@ public class BackgroundJobAppService : AbpAdminAppService, IBackgroundJobAppServ
         var job = await _jobRepository.GetAsync(id);
         job.IsAbandoned = true;
         await _jobRepository.UpdateAsync(job);
+
+        // NV-17：IsAbandoned 只作用于单条队列记录；看门狗重入队的是一条全新记录（非 abandoned），
+        // 弃掉的广播链会被它按「停滞」复活。把停止意图持久化到广播实体（Cancelled）：
+        // 看门狗只挑 Running 天然跳过，广播作业与 Completed/Failed 一并短路。解析不出广播参数
+        // （非广播作业 / 历史格式）则只弃队列记录，保持原语义。
+        if (job.JobName == BackgroundJobNameAttribute.GetName(typeof(BroadcastNotificationJobArgs)) &&
+            TryParseBroadcastArgs(job.JobArgs) is { } parsed)
+        {
+            var broadcastRepository = LazyServiceProvider.LazyGetRequiredService<IRepository<Notifications.NotificationBroadcast, Guid>>();
+            var dataFilter = LazyServiceProvider.LazyGetRequiredService<IDataFilter>();
+            using (dataFilter.Disable<IMultiTenant>())
+            {
+                var broadcast = await broadcastRepository.FindAsync(parsed.BroadcastId);
+                if (broadcast is { State: Notifications.NotificationBroadcastStates.Pending or Notifications.NotificationBroadcastStates.Running })
+                {
+                    broadcast.Cancel();
+                    await broadcastRepository.UpdateAsync(broadcast, autoSave: true);
+                }
+            }
+        }
+    }
+
+    private static BroadcastNotificationJobArgs? TryParseBroadcastArgs(string args)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<BroadcastNotificationJobArgs>(
+                args, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     [Authorize(AbpAdminPermissions.BackgroundJobs.Retry)]

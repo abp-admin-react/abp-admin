@@ -90,7 +90,10 @@ public class BroadcastNotificationJob : IAsyncBackgroundJob<BroadcastNotificatio
             {
                 var broadcast = await _broadcastRepository.GetAsync(args.BroadcastId);
 
-                if (broadcast.State is NotificationBroadcastStates.Completed or NotificationBroadcastStates.Failed)
+                // NV-17：Cancelled = 运营弃单（Abandon 回写），与终态一并短路——
+                // 看门狗重入队的全新队列记录不再复活被叫停的扇出链。
+                if (broadcast.State is NotificationBroadcastStates.Completed or NotificationBroadcastStates.Failed
+                    or NotificationBroadcastStates.Cancelled)
                 {
                     return;
                 }

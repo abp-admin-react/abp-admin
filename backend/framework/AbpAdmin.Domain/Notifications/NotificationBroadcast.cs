@@ -106,6 +106,13 @@ public class NotificationBroadcast : AuditedAggregateRoot<Guid>, IMultiTenant
         State = NotificationBroadcastStates.Failed;
         CompletionTime = clock.Now;
     }
+
+    /// <summary>运营弃单（NV-17）：Abandon 队列记录时回写的持久化停止意图——看门狗只挑
+    /// Running 天然跳过，广播作业与终态一并短路，被叫停的扇出链不再被看门狗复活。</summary>
+    public void Cancel()
+    {
+        State = NotificationBroadcastStates.Cancelled;
+    }
 }
 
 public static class NotificationBroadcastConsts
@@ -137,4 +144,12 @@ public static class NotificationBroadcastStates
     public const string Completed = "Completed";
 
     public const string Failed = "Failed";
+
+    /// <summary>
+    /// 运营弃单（NV-17）：管理端 Abandon 掉队列记录时回写本状态，作为持久化的停止意图。
+    /// 看门狗只挑 Running（天然跳过），广播作业与 Completed/Failed 一并短路——否则弃单后
+    /// 看门狗 1 小时内按停滞重入队一条全新（非 abandoned）记录，扇出链复活，被叫停的
+    /// 通知继续发给余下收件人。
+    /// </summary>
+    public const string Cancelled = "Cancelled";
 }
