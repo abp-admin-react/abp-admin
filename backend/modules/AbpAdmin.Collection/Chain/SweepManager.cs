@@ -206,10 +206,18 @@ public class SweepManager : DomainService
         // 僵尸任务」的激活打成 23505——是「地址被占」的正常语义而非故障：捕获后本轮跳过该
         // 任务（卡死告警段会盯住僵尸），此前未捕获会炸掉整轮归集（E2E 实测：Sweeping 僵尸
         // 占位 + 8433 进款单堆积，激活每轮必撞、归集全线停摆）
+        // NV-18：claim/翻状态/解链三条语句合并进一个内层事务。此前是三条独立自动提交，
+        // 中断窗口（CollectionChainWorkerBase 的轮预算取消是真中断源）会留下「任务已 Fueling
+        // 且 Amount 已按选中子集聚合、尾巴单仍链接+Confirmed」的部分激活态；下一轮自愈无条件
+        // 升级全部链接 Confirmed 单并在确认时全额入账，而链上只广播了选中子集金额 ⇒ 超限入账。
+        // 原子化后要么三句全落、要么任务留 Queued 下轮重来。三条语句在绑定内层事务的
+        // DbContext 上执行（外层轮 UoW 有意非事务，见 RunTokenRoundAsync 注释）。
+        using var activateUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var txDb = await _dbContextProvider.GetDbContextAsync();
         int claimed;
         try
         {
-            claimed = await dbContext.SweepTasks
+            claimed = await txDb.SweepTasks
                 .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Queued)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(t => t.Amount, sum)
@@ -219,7 +227,7 @@ public class SweepManager : DomainService
         catch (Npgsql.PostgresException ex) when (ex.SqlState == "23505")
         {
             // ExecuteUpdateAsync 把约束冲突的 PostgresException 直接抛出（不包 DbUpdateException——
-            // E2E 实测穿透了只捕 DbUpdateException 的第一版谓词）
+            // E2E 实测穿透了只捕 DbUpdateException 的第一版谓词）；内层事务随 dispose 回滚
             Logger.LogWarning(
                 "任务 {TaskId} 激活被地址互斥拦下（同地址存在 Fueling/Sweeping 任务），本轮跳过；僵尸由卡死告警段处置",
                 task.Id);
@@ -231,7 +239,7 @@ public class SweepManager : DomainService
         }
 
         // 选中单标记 Sweeping（只认 Confirmed/Sweeping，原子条件防串）
-        await dbContext.DepositOrders
+        await txDb.DepositOrders
             .Where(o => pickedIds.Contains(o.Id)
                         && (o.Status == DepositOrderStatus.Confirmed || o.Status == DepositOrderStatus.Sweeping))
             .ExecuteUpdateAsync(s => s
@@ -240,10 +248,12 @@ public class SweepManager : DomainService
         // 超上限的尾巴单解链（SweepTaskId=null）：广播自愈只翻「本任务已链接的 Confirmed 单」，
         // 不解链它们会被自愈误升级为 Sweeping 并在确认时入账——但链上只转了选中子集的金额
         //（评审 C 级：RoundLimit 被自愈击穿）。解链后由扫链轮确认推进重新链接到下一个任务
-        await dbContext.DepositOrders
+        await txDb.DepositOrders
             .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Confirmed
                         && !pickedIds.Contains(o.Id))
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.SweepTaskId, (Guid?)null), ct);
+
+        await activateUow.CompleteAsync(ct);
     }
 
     private async Task DriveFuelingAsync(
@@ -338,10 +348,38 @@ public class SweepManager : DomainService
         // 超上限尾巴单已在激活时解链，不会被这里误升级（评审 C 级）
         if (task.TxHash == null)
         {
-            await dbContext.DepositOrders
-                .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Confirmed)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(o => o.Status, DepositOrderStatus.Sweeping), ct);
+            // NV-18 第二道：自愈升级加金额上限——只升到 task.Amount（= 链上将广播的金额）装得下
+            // 为止。激活原子化后新数据不会再出现「尾巴单仍链接」的中间态，但存量库的历史部分
+            // 激活行/人工补链仍可能让链接 Confirmed 合计超过广播金额；无条件升级会在确认时
+            // 全额入账（金库缺口）。超额者留在 Confirmed 由对账/人工路径处置。
+            var sweepingGross = await dbContext.DepositOrders.AsNoTracking()
+                .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Sweeping)
+                .SumAsync(o => (decimal?)o.Amount ?? 0m, ct);
+            var promotableBudget = task.Amount - sweepingGross;
+            if (promotableBudget > 0m)
+            {
+                var candidates = await dbContext.DepositOrders.AsNoTracking()
+                    .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Confirmed)
+                    .OrderBy(o => o.CreationTime)
+                    .Select(o => new { o.Id, Amount = (decimal?)o.Amount ?? 0m })
+                    .ToListAsync(ct);
+                var promotable = new List<Guid>();
+                decimal acc = 0m;
+                foreach (var c in candidates)
+                {
+                    if (acc + c.Amount > promotableBudget) break;
+                    promotable.Add(c.Id);
+                    acc += c.Amount;
+                }
+
+                if (promotable.Count > 0)
+                {
+                    await dbContext.DepositOrders
+                        .Where(o => promotable.Contains(o.Id) && o.Status == DepositOrderStatus.Confirmed)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(o => o.Status, DepositOrderStatus.Sweeping), ct);
+                }
+            }
 
             var linkable = await dbContext.DepositOrders.AsNoTracking()
                 .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Sweeping)
@@ -422,6 +460,24 @@ public class SweepManager : DomainService
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.TxBlockNumber, receipt.BlockNumber), ct);
         if (head - receipt.BlockNumber!.Value < confirmations)
         {
+            return;
+        }
+
+        // NV-18 第三道（资金时刻的对账门）：入账前先核对链接单毛额合计 == task.Amount（= 链上
+        // 广播金额）。不等 ⇒ 说明链接集合与广播子集漂移（历史部分激活/人工补链），此时逐笔
+        // 入账就是把没上链的钱记给用户（金库缺口）。fail-closed：任务置失败仅人工，单保持
+        // Sweeping 不入账，交卡单告警 + 对账处置。
+        var pendingCredit = await dbContext.DepositOrders.AsNoTracking()
+            .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Sweeping)
+            .Select(o => new { o.Id, Amount = (decimal?)o.Amount ?? 0m })
+            .ToListAsync(ct);
+        var pendingGross = pendingCredit.Sum(x => x.Amount);
+        if (pendingGross != task.Amount)
+        {
+            await _alerts.RaiseAsync(null, "归集卡住",
+                $"任务 {task.Id} 链上确认但链接单毛额合计 {pendingGross} ≠ 广播金额 {task.Amount}，拒绝自动入账");
+            await FailAsync(dbContext, task.Id, SweepTaskStatus.Sweeping, retryable: false,
+                reason: $"链接单毛额合计 {pendingGross} 与广播金额 {task.Amount} 不一致，拒绝入账待人工核对", now);
             return;
         }
 

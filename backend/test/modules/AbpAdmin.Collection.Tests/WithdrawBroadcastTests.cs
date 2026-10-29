@@ -104,7 +104,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
         var afterFirst = await GetOrderAsync(order.Id);
         afterFirst.Status.ShouldBe(WithdrawStatus.Broadcasting);
         afterFirst.TxHash.ShouldNotBeNull();
-        afterFirst.AuditRemark.ShouldContain("小额");
+        afterFirst.AuditRemark!.ShouldContain("小额");
         gateway.Broadcasts.Count.ShouldBe(1);
 
         // 第二轮：回执成功 → 完结 + payout 过账
@@ -139,7 +139,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
         var after = await GetOrderAsync(order.Id);
         after.Status.ShouldBe(WithdrawStatus.Processing);
         after.RetryCount.ShouldBe(1);
-        after.FailReason.ShouldContain("可证未出款");
+        after.FailReason!.ShouldContain("可证未出款");
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
         after.Status.ShouldBe(WithdrawStatus.Rejected);
-        after.FailReason.ShouldContain("自动退款");
+        after.FailReason!.ShouldContain("自动退款");
 
         var balances = GetRequiredService<CollectionBalanceManager>();
         (await BucketAsync(order.UserId)).balance.ShouldBe(1000m); // 提交冻结的 100 全额回可用
@@ -206,7 +206,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
         after.Status.ShouldBe(WithdrawStatus.Rejected);
-        after.FailReason.ShouldContain("自动退款");
+        after.FailReason!.ShouldContain("自动退款");
         (await BucketAsync(order.UserId)).balance.ShouldBe(1000m);
     }
 
@@ -315,6 +315,45 @@ public class WithdrawBroadcastTests : CollectionTestBase
     }
 
     [Fact]
+    public async Task Retry_NoHash_Nonce_Overrun_Refuses_And_Keeps_Nonce_Evidence()
+    {
+        // NV-04 回归锁：BroadcastFailed 无哈希 + NonceUsed=7 + 链上 pending=8 —— 原交易可能
+        // 已进 mempool/已挖。修复前：重试直接 RequeueToProcessingAsync 清掉 NonceUsed 证据，
+        // 下一轮以新 nonce 二次转账 ActualAmount = 双付；RefundAsync 对同一单状态有仲裁而
+        // RetryCoreAsync 没有。修复后与 RefundAsync 同裁决：pending > NonceUsed ⇒ 拒绝，
+        // 且 NonceUsed 证据保留（RequeueToProcessingAsync 不执行）。
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, nonceUsed: 7);
+        gateway.TxCountSeed = 8; // pending nonce 已越过 NonceUsed
+
+        var ex = await Should.ThrowAsync<BusinessException>(
+            () => Broadcast.RetryAsync(order.Id, network, gateway));
+        ex.Code.ShouldBe(CollectionErrorCodes.WithdrawPendingOutbound);
+
+        var after = await GetOrderAsync(order.Id);
+        after.Status.ShouldBe(WithdrawStatus.BroadcastFailed);
+        after.NonceUsed.ShouldBe(7, "nonce 证据不得在仲裁前被回队清除");
+    }
+
+    [Fact]
+    public async Task Retry_NoHash_Provable_Unsent_Still_Requeues()
+    {
+        // 对照半区：pending nonce 未越过 NonceUsed（原交易可证未进 mempool）⇒ 重试照常回队。
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, nonceUsed: 7);
+        gateway.TxCountSeed = 7; // pending == NonceUsed ⇒ 本单从未进 mempool
+
+        await Broadcast.RetryAsync(order.Id, network, gateway);
+        (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Processing);
+    }
+
+    [Fact]
     public async Task Adoption_Rejects_Transfer_With_Mismatched_Nonce()
     {
         var gateway = await ArrangeWalletAsync();
@@ -372,7 +411,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
         after.Status.ShouldBe(WithdrawStatus.Rejected);
-        after.FailReason.ShouldContain("后继提现占用");
+        after.FailReason!.ShouldContain("后继提现占用");
         (await BucketAsync(order.UserId)).balance.ShouldBe(1000m);
     }
 
