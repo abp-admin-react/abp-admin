@@ -184,6 +184,17 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
                 continue;
             }
 
+            // 安全审计 run-1（TV-04）：重置面必须与设置页写入面同口径——只处理 UI 注册的设置
+            // （WithUi 挂了 Group1 元数据的定义）。原实现按名字盲解析任意定义，host 上下文还会
+            // 写 G 层默认值：域设置若故意 omit WithUi 移出设置页（如 Collection.Withdraw.Halt，
+            // 唯一写门是 Withdraw.Admin 域端点），这条盲路径就成了绕开域权限的改写通道。
+            // 收紧后：非 UI 设置提交到重置只会被静默跳过（与「未知设置名跳过」同语义），不再
+            // 产生任何层写入。
+            if (!definition.Properties.ContainsKey(SettingUiConst.Group1))
+            {
+                continue;
+            }
+
             processed.Add(definition.Name);
 
             // SetAsync(name, null, provider, key) 在 SettingManager 内部走 ClearAsync 分支：
