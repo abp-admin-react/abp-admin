@@ -85,9 +85,12 @@ services:
       App__RedirectAllowedUrls: ${WEB_PUBLIC_URL:-http://localhost:8000}
       # 本地体验栈按开发姿态种子（栈只绑 127.0.0.1，凭据均为本地默认值）：
       # 种入 appsettings.Development.json 里的开发专属通道（AbpAdmin_TestCli、demo/多端口
-      # 回调）并允许 admin 默认口令。生产部署绝不设置此变量——生产迁移器必须注入
-      # Identity__AdminPassword，否则 AbpAdminDbMigrationService 对默认口令直接 fail-fast。
-      DOTNET_ENVIRONMENT: Development
+      # 回调）并允许 admin 默认口令。生产部署绝不运行 Development 迁移器——改为插值：
+      # .env 里 MIGRATOR_DOTNET_ENVIRONMENT=Production（并注入 Identity__AdminPassword），
+      # 否则维持 Development 字面量时种子走公开默认口令（AbpAdminConsts 1q2w3E*，TV-01 实测
+      # 端到端可登）。生产迁移器必须注入 Identity__AdminPassword，否则
+      # AbpAdminDbMigrationService 对默认口令直接 fail-fast。
+      DOTNET_ENVIRONMENT: ${MIGRATOR_DOTNET_ENVIRONMENT:-Development}
     depends_on:
       db:
         condition: service_healthy

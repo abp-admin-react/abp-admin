@@ -43,6 +43,7 @@ $baseRefs = @(
     'mcr.microsoft.com/dotnet/sdk:10.0',     # host/migrator 构建段
     'mcr.microsoft.com/dotnet/aspnet:10.0',  # host/migrator 运行段
     'node:22-alpine',                        # web 构建段（pnpm build + 取 node 二进制）
+    'node:22-bookworm-slim',                 # host 构建段 COPY --from 取 node 二进制/npm（NV-12：此前不在监控内，build 不带 --pull 时长期吃本地旧 tag）
     'nginx:1.29-alpine'                      # web 运行段
 )
 $services = @('web', 'host', 'migrator')
@@ -120,8 +121,14 @@ try {
                 trivy image --severity CRITICAL,HIGH --exit-code 1 --quiet "$($images[$s]):latest"
                 if ($LASTEXITCODE -ne 0) { throw "trivy 发现 $($images[$s]):latest 有 CRITICAL/HIGH 漏洞，保留旧栈不动" }
             }
+        } elseif ($env:SKIP_TRIVY_GATE -eq '1') {
+            # NV-13：门禁 fail-open（缺席即跳过）= 未扫描镜像无人工知晓地滚进生产。
+            # 现默认 fail-closed；显式设 SKIP_TRIVY_GATE=1 才允许带跳过继续（风险自担，留痕）。
+            Log "⚠ SKIP_TRIVY_GATE=1：本次跳过镜像漏洞门禁（trivy 未安装），带风险继续发布"
         } else {
-            Log "（未安装 trivy，跳过镜像漏洞门禁；安装后本脚本自动启用）"
+            throw ("trivy 未安装，镜像漏洞门禁无法执行——按 NV-13 fail-closed 阻断发布。" +
+                "安装 trivy（winget install Aquasecurity.Trivy）后自动恢复；" +
+                "确要跳过请设 SKIP_TRIVY_GATE=1（风险自担）。")
         }
     } else {
         # 底座无新版：构建与 up -d 都不执行，彻底不动运行中的栈。
