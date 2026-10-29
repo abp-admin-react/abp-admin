@@ -53,9 +53,9 @@ public class SweepRetryAdminTests : CollectionTestBase
 
         var admin = GetRequiredService<CollectionNetworkAdminAppService>();
         (await Should.ThrowAsync<BusinessException>(() => admin.RetrySweepTaskAsync(sweepingId)))
-            .Code.ShouldContain("SweepTaskNotRetryable");
+            .Code!.ShouldContain("SweepTaskNotRetryable");
         (await Should.ThrowAsync<BusinessException>(() => admin.RetrySweepTaskAsync(Guid.NewGuid())))
-            .Code.ShouldContain("SweepTaskNotFound");
+            .Code!.ShouldContain("SweepTaskNotFound");
     }
 
     [Fact]

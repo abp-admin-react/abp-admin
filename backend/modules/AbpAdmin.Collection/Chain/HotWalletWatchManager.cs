@@ -126,7 +126,7 @@ public class HotWalletWatchManager : DomainService
             // ② 分页拉全（RPC 在事务外；读不全缩半区间重试——对齐 DepositScanManager 的缩半纪律，
             //    单块仍读不全按计数跳过推进：监控卡死比漏一段更危险，跳块轮末统一告警留痕）
             var windowEnd = safeHead;
-            List<TokenTransferLog> logs;
+            List<TokenTransferLog>? logs;
             while (true)
             {
                 ct.ThrowIfCancellationRequested();

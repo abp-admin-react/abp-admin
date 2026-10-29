@@ -234,11 +234,11 @@ public class HotWalletWatchTests : CollectionTestBase
 
         // 状态门：非 Anomaly 拒绝、不存在拒绝
         (await Should.ThrowAsync<BusinessException>(() => admin.AckHotWalletTxnAsync(anomalyId)))
-            .Code.ShouldContain("HotWalletTxnNotAckable");
+            .Code!.ShouldContain("HotWalletTxnNotAckable");
         (await Should.ThrowAsync<BusinessException>(() => admin.AckHotWalletTxnAsync(inId)))
-            .Code.ShouldContain("HotWalletTxnNotAckable");
+            .Code!.ShouldContain("HotWalletTxnNotAckable");
         (await Should.ThrowAsync<BusinessException>(() => admin.AckHotWalletTxnAsync(Guid.NewGuid())))
-            .Code.ShouldContain("HotWalletTxnNotFound");
+            .Code!.ShouldContain("HotWalletTxnNotFound");
     }
 
     [Fact]
@@ -299,7 +299,7 @@ public class HotWalletWatchTests : CollectionTestBase
         var admin = GetRequiredService<CollectionWithdrawAdminAppService>();
         var ex = await Should.ThrowAsync<BusinessException>(() =>
             admin.AckHotWalletTxnAsync(anomalyId, new string('长', 600)));
-        ex.Code.ShouldContain("HotWalletTxnNotAckable");
+        ex.Code!.ShouldContain("HotWalletTxnNotAckable");
     }
 
     // ── 造数 ─────────────────────────────────────────────────────────────────────────────

@@ -47,13 +47,13 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
         string type,
         string consentType,
         string displayName,
-        string secret,
+        string? secret,
         List<string> grantTypes,
         List<string> scopes,
-        List<string> redirectUris = null,
-        List<string> postLogoutRedirectUris = null,
-        string clientUri = null,
-        string logoUri = null)
+        List<string>? redirectUris = null,
+        List<string>? postLogoutRedirectUris = null,
+        string? clientUri = null,
+        string? logoUri = null)
     {
         var application = await _applicationManager.FindByClientIdAsync(name);
         if (application is null)
@@ -71,8 +71,8 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
             && (await _applicationManager.GetLogoUriAsync(application)) == logoUri
             && SameSet((await _applicationManager.GetPermissionsAsync(application)).Where(p => p.StartsWith("gt:", StringComparison.Ordinal)), grantTypes.Select(g => "gt:" + g))
             && SameSet((await _applicationManager.GetPermissionsAsync(application)).Where(p => p.StartsWith(OpenIddictConstants.Permissions.Prefixes.Scope, StringComparison.Ordinal)), scopes.Select(s2 => OpenIddictConstants.Permissions.Prefixes.Scope + s2))
-            && SameUriSet(await _applicationManager.GetRedirectUrisAsync(application), redirectUris)
-            && SameUriSet(await _applicationManager.GetPostLogoutRedirectUrisAsync(application), postLogoutRedirectUris);
+            && SameUriSet(await _applicationManager.GetRedirectUrisAsync(application), redirectUris ?? [])
+            && SameUriSet(await _applicationManager.GetPostLogoutRedirectUrisAsync(application), postLogoutRedirectUris ?? []);
         if (same)
         {
             return;
@@ -85,13 +85,13 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     private static bool SameSet(IEnumerable<string> current, IEnumerable<string> target) =>
         new HashSet<string>(current).SetEquals(target);
 
-    private static bool SameUriSet(IEnumerable<string> current, IEnumerable<string> target) =>
-        new HashSet<Uri>(current.Select(ParseUri)).SetEquals(target.Select(ParseUri));
+    private static bool SameUriSet(IEnumerable<string> current, IEnumerable<string?> target) =>
+        new HashSet<Uri?>(current.Select(u => ParseUri(u))).SetEquals(target.Select(u => ParseUri(u!)));
 
     /// <summary>宽容解析配置里的 URI：非法/相对返回 null（调用方跳过该条并留日志）。
     /// IsFile 且原串未显式写 file: 视为非法——Unix 上 Uri.TryCreate("/x", Absolute) 会按
     /// 绝对路径解析成 file:///x 返回 true（Linux 容器实测），不拦会把相对 RootUrl 种进库。</summary>
-    private static Uri ParseUri(string raw) =>
+    private static Uri? ParseUri(string raw) =>
         Uri.TryCreate((raw ?? "").Trim(), UriKind.Absolute, out var uri)
         && (!uri.IsFile || (raw ?? "").Trim().StartsWith("file:", StringComparison.OrdinalIgnoreCase))
             ? uri
