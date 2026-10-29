@@ -162,6 +162,7 @@
         "AbpAdmin:CannotMoveTenantsToSameEdition": "The target edition cannot be the edition being deleted.",
         "TenantConnectionStringCheckFailed": "Could not establish the database connection. Please check the host, port, account and password.",
         "AbpAdmin:HostSideOnly": "This operation is only available on the host side.",
+        "AbpAdmin:IdentityClaimsCannotCarryRole": "User claims cannot carry the 'role' claim type: role identity can only be changed through role management.",
         "AbpAdmin:LanguageAlreadyExists": "The language already exists: {Name}",
         "AbpAdmin:CannotDeleteDefaultLanguage": "The default language cannot be deleted.",
         "AbpAdmin:CannotDisableDefaultLanguage": "The default language cannot be disabled.",

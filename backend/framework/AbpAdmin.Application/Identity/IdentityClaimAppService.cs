@@ -4,7 +4,9 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Volo.Abp;
 using Volo.Abp.Identity;
+using Volo.Abp.Security.Claims;
 
 namespace AbpAdmin.Identity;
 
@@ -35,6 +37,20 @@ public class IdentityClaimAppService : AbpAdminAppService, IIdentityClaimAppServ
     [Authorize(IdentityPermissions.Users.Update)]
     public virtual async Task UpdateUserClaimsAsync(Guid userId, List<ClaimValueDto> claims)
     {
+        // 安全审计 run-1（TV-03）：声明写入不得携带权威类型。ABP 动态声明默认清单含 role，
+        // 写入 {role:'admin'} 会让 CurrentUser.Roles 命中数据范围的 admin 豁免（IsAll 行可见 +
+        // RoleDataScope 反提权守卫豁免）——等价于绕开角色管理权限的自我提权。Users.Update 授的
+        // 是「维护用户资料」，不该包含「铸造角色身份」；角色归属只能走 AbpIdentity.Users.Update.
+        // ManageRoles 门后的 SetRolesAsync（那里还限非 admin 只能授自己已有的角色）。
+        var forbidden = claims
+            .Where(x => !string.IsNullOrWhiteSpace(x.ClaimType))
+            .Where(x => x.ClaimType.Equals(AbpClaimTypes.Role, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (forbidden.Count > 0)
+        {
+            throw new BusinessException(AbpAdminIdentityClaimsErrorCodes.CannotCarryRole);
+        }
+
         var user = await _userManager.GetByIdAsync(userId);
         var current = await _userManager.GetClaimsAsync(user);
         await _userManager.RemoveClaimsAsync(user, current);

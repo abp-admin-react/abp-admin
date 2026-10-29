@@ -4,10 +4,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Settings;
+using Volo.Abp.Data;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Domain.Services;
 using Volo.Abp.Identity;
 using Volo.Abp.Linq;
+using Volo.Abp.MultiTenancy;
 using Volo.Abp.Settings;
 using Volo.Abp.Uow;
 
@@ -243,20 +245,28 @@ public class IdentitySessionManager : DomainService
         const int batchSize = 500;
         while (true)
         {
-            var queryable = await _sessionQueryable.GetQueryableAsync();
-            var batch = await _asyncExecuter.ToListAsync(
-                queryable
-                    .Where(x => (x.LastAccessed ?? x.SignedIn) < threshold)
-                    .OrderBy(x => x.Id)
-                    .Take(batchSize));
-
-            if (batch.Count == 0)
+            // 本方法只由宿主后台 worker 调用（IdentitySessionCleanupBackgroundWorker，无环境租户）；
+            // 不关多租户过滤器时宿主上下文只能命中 TenantId IS NULL 行，租户会话永远不会过期回收，
+            // 被盗 refresh token + session_id 可无限续期。RevokeManyCoreAsync 本就按行内 TenantId
+            // 逐租户清缓存（跨租户能力是它既有契约），这里补上与 LogRetentionCleaner 一致的
+            // 宿主侧全租户清扫约定。
+            using (LazyServiceProvider.LazyGetRequiredService<IDataFilter>().Disable<IMultiTenant>())
             {
-                break;
-            }
+                var queryable = await _sessionQueryable.GetQueryableAsync();
+                var batch = await _asyncExecuter.ToListAsync(
+                    queryable
+                        .Where(x => (x.LastAccessed ?? x.SignedIn) < threshold)
+                        .OrderBy(x => x.Id)
+                        .Take(batchSize));
 
-            // 批量删除；同一用户多设备过期只清一次动态声明缓存（按 userId 去重）
-            await RevokeManyCoreAsync(batch);
+                if (batch.Count == 0)
+                {
+                    break;
+                }
+
+                // 批量删除；同一用户多设备过期只清一次动态声明缓存（按 userId 去重）
+                await RevokeManyCoreAsync(batch);
+            }
 
             // 刷新删除到数据库，否则下一批查询仍会命中已删除的行（同 UoW 内待提交的删除对查询不可见）
             var currentUnitOfWork = LazyServiceProvider.LazyGetRequiredService<IUnitOfWorkManager>().Current;

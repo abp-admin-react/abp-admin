@@ -15,6 +15,7 @@ using Volo.Abp.MultiTenancy;
 using Volo.Abp.Roles;
 using Volo.Abp.Security.Claims;
 using Volo.Abp.TenantManagement;
+using Volo.Abp.Timing;
 using Volo.Abp.Users;
 
 namespace AbpAdmin.Account;
@@ -153,6 +154,14 @@ public class ImpersonationManager : DomainService
             throw new BusinessException(AbpAdminDomainErrorCodes.Account.ImpersonationTargetUserNotFound);
         }
 
+        // 账户状态复查：委托进入是直接模拟之外的第二条铸造路径，源账户若已停用/锁定，
+        // 不得经 delegation_id 换出新令牌（与直接模拟路径的 IsActive fail-closed、关联账号
+        // 授权的「锁定不可被关联关系绕过」不变式对齐）。统一抛 NotFound，不暴露状态差异。
+        if (!IsAccountUsable(sourceUser))
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.Account.ImpersonationTargetUserNotFound);
+        }
+
         // 租户边界：委托行属于当前租户，但 SourceUserId 理论上可指向宿主/他租户用户——防御性同校验
         if (CurrentTenant.Id != null && sourceUser.TenantId != CurrentTenant.Id)
         {
@@ -184,8 +193,30 @@ public class ImpersonationManager : DomainService
                 throw new BusinessException(AbpAdminDomainErrorCodes.Account.ImpersonatorUserNotFound);
             }
 
+            // 账户状态复查：换壳回切会给原始身份签发新会话/新令牌——原始账户停用/锁定后
+            // 不得再经回切通道复活（同上，与直接模拟/委托路径的 fail-closed 对齐）。
+            if (!IsAccountUsable(originalUser))
+            {
+                throw new BusinessException(AbpAdminDomainErrorCodes.Account.ImpersonatorUserNotFound);
+            }
+
             return originalUser;
         }
+    }
+
+    /// <summary>
+    /// 模拟链路上的账户可用性判定：停用即不可用；锁定未到期同样不可用
+    /// （与 LinkedAccountExtensionGrant 消费侧的失效+锁定复查同一不变式）。
+    /// </summary>
+    protected virtual bool IsAccountUsable(IdentityUser user)
+    {
+        if (!user.IsActive)
+        {
+            return false;
+        }
+
+        var lockoutEnd = user.LockoutEnd;
+        return !(lockoutEnd.HasValue && lockoutEnd.Value > LazyServiceProvider.LazyGetRequiredService<IClock>().Now);
     }
 
     /// <summary>

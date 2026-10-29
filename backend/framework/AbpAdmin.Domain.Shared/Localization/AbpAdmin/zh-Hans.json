@@ -175,6 +175,7 @@
         "AbpAdmin:CannotMoveTenantsToSameEdition": "迁移目标版本不能是被删除的版本自身。",
         "TenantConnectionStringCheckFailed": "无法建立数据库连接，请检查主机、端口、账号与密码是否正确。",
         "AbpAdmin:HostSideOnly": "该操作仅宿主侧可用。",
+        "AbpAdmin:IdentityClaimsCannotCarryRole": "用户声明不能携带 role 类型：角色身份只能通过角色管理变更。",
         "AbpAdmin:LanguageAlreadyExists": "语言已存在：{Name}",
         "AbpAdmin:CannotDeleteDefaultLanguage": "不能删除默认语言。",
         "AbpAdmin:CannotDisableDefaultLanguage": "不能停用默认语言。",
