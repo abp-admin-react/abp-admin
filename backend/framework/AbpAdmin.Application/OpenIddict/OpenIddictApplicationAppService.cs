@@ -45,7 +45,13 @@ public class OpenIddictApplicationAppService : AbpAdminAppService, IOpenIddictAp
         return Map(await _applicationRepository.GetAsync(id));
     }
 
+    // NV-23：Create/Update 经 DescriptorBuilder 全量重建客户端权限面（Permissions/Requirements
+    // 清空重填：scopes / grant types / flows / PKCE 要求）——等价于改写该客户端的授权能力，
+    // 仅持 Applications.Update/Create 不足以驾驭。ManagePermissions 是权限树里早已定义却从未
+    // 接线的授权位，此处接线（只建 Update 不建 Create 会被「新建强客户端」整段绕过，两处同门）。
+    // 多个 [Authorize] 在 ABP 中按 AND 组合；admin 角色种子持全量权限，运营面不受影响。
     [Authorize(AbpAdminPermissions.OpenIddict.Applications.Create)]
+    [Authorize(AbpAdminPermissions.OpenIddict.Applications.ManagePermissions)]
     public virtual async Task<OpenIddictApplicationDto> CreateAsync(CreateOpenIddictApplicationDto input)
     {
         var descriptor = OpenIddictApplicationDescriptorBuilder.Build(input);
@@ -55,7 +61,9 @@ public class OpenIddictApplicationAppService : AbpAdminAppService, IOpenIddictAp
         return Map(entity);
     }
 
+    // NV-23：同 Create——全量重写客户端权限面需要 ManagePermissions（见上）。
     [Authorize(AbpAdminPermissions.OpenIddict.Applications.Update)]
+    [Authorize(AbpAdminPermissions.OpenIddict.Applications.ManagePermissions)]
     public virtual async Task<OpenIddictApplicationDto> UpdateAsync(Guid id, UpdateOpenIddictApplicationDto input)
     {
         var application = await FindApplicationModelAsync(id);
