@@ -78,11 +78,12 @@ public class AnonymousEndpointSweepTests
                  or "connect/endsession"),
 
         new(
-            "健康检查探针与面板（k8s/lb 探活不带凭据；NoExceptionDetails 已防异常回显；"
-            + "webhooks/ui-settings 是面板自身的数据面，绑定本机收集端点）",
-            e => e.Template.StartsWith("health-", StringComparison.OrdinalIgnoreCase)
-                 || e.Template is "healthchecks-webhooks"
-                 || e.Template.StartsWith("ui/resources/", StringComparison.OrdinalIgnoreCase)),
+            // 安全审计 run-1（TV-07）：匿名只保留 /health-status 探针端点（k8s/lb 探活不带凭据，
+            // NoExceptionDetails 已防异常回显）。UI 面板整组（/health-ui、/health-api 执行历史、
+            // /healthchecks-webhooks 通知注册管理面）改回 FallbackPolicy 要求登录——原匿名清单
+            // 把可写 webhooks 管理面与执行历史一并暴露给未认证调用方。
+            "健康检查探针（k8s/lb 探活不带凭据；NoExceptionDetails 已防异常回显）",
+            e => e.Template is "health-status"),
 
         new(
             "ABP application-configuration / application-localization（前端登录页渲染需要，"

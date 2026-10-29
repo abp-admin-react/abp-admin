@@ -91,10 +91,13 @@ public static class HealthChecksBuilderExtensions
         {
             routerOptions.EndpointConfigureActions.Add(endpointContext =>
             {
-                endpointContext.Endpoints.MapHealthChecksUI(setupOption)
-                    // 同 /health-status：UI 面板（/health-ui、/health-api）无认证集成，
-                    // FallbackPolicy 下不豁免即 401（NoExceptionDetails 已防异常回显，维持既有匿名语义）。
-                    .AllowAnonymous();
+                // 安全审计 run-1（TV-07）：AllowAnonymous 只保留给 /health-status 探针端点
+                // （k8s/lb 探活语义，见 ConfigureHealthCheckEndpoint）；UI 面板整组
+                // （/health-ui 面板、/health-api 执行历史 API、/healthchecks-webhooks
+                // 通知注册管理面）不再匿名——FallbackPolicy 恢复为要求登录（健康面板本就
+                // 应由已认证操作者查看；webhooks 注册是可触发宿主外呼的可写面）。
+                // 匿名可达范围由 nginx 转发清单与宿主绑定为部署侧兜底。
+                endpointContext.Endpoints.MapHealthChecksUI(setupOption);
             });
         });
 

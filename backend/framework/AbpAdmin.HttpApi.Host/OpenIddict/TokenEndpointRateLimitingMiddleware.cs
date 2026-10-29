@@ -35,6 +35,26 @@ public class TokenEndpointRateLimitingMiddleware
 
     private readonly RequestDelegate _next;
 
+    /// <summary>与 OpenIddict InferEndpointType 同口径的端点匹配：OrdinalIgnoreCase + 容忍一个尾斜杠。
+    /// 双尾斜杠不被 OpenIddict 受理（请求到不了端点），门必须同样不认——否则匿名主体可用
+    /// 「//connect/token//」空耗每 IP 共享桶（NV-16，单测钉死）。TrimEnd 会裁掉全部尾斜杠，
+    /// 必须只裁一个。</summary>
+    internal static bool IsTokenEndpointPath(PathString path)
+    {
+        var value = path.Value;
+        if (value is null)
+        {
+            return false;
+        }
+
+        if (value.Length > 1 && value[^1] == '/')
+        {
+            value = value[..^1];
+        }
+
+        return value.Equals(TokenEndpointPath, StringComparison.OrdinalIgnoreCase);
+    }
+
     public TokenEndpointRateLimitingMiddleware(RequestDelegate next)
     {
         _next = next;
@@ -42,8 +62,11 @@ public class TokenEndpointRateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        // 安全审计 run-1（TV-06b）：门限与受理端匹配口径对齐。OpenIddict 7.7 InferEndpointType
+        // 按 OrdinalIgnoreCase 比对且容忍恰好一个尾斜杠——原门限用 Path 精确等值，/connect/token/
+        // 会绕过限流计数直达端点（实验证实）。归一化后与受理端同口径。
         if (HttpMethods.IsPost(context.Request.Method) &&
-            context.Request.Path.Equals(TokenEndpointPath, StringComparison.OrdinalIgnoreCase) &&
+            IsTokenEndpointPath(context.Request.Path) &&
             context.Request.HasFormContentType)
         {
             var form = await context.Request.ReadFormAsync();

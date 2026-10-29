@@ -57,15 +57,21 @@ public class FileUploadContentGuardMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var path = context.Request.Path.Value ?? string.Empty;
+        // 安全审计 run-1（TV-06b）：受理端是 MVC 路由（默认容忍尾斜杠），门限原用精确等值——
+        // /api/file-management/file/ 会绕过魔数/脚本扫描直达模型绑定。归一化后与路由受理同口径。
+        var path = (context.Request.Path.Value ?? string.Empty).TrimEnd('/');
         var isFileUpload = HttpMethods.IsPost(context.Request.Method) &&
                            (path.Equals("/api/file-management/file", StringComparison.OrdinalIgnoreCase) ||
                             path.Equals("/api/file-management/file/many", StringComparison.OrdinalIgnoreCase));
 
+        // NV-05：ContentLength 有值且 >0 之外，chunked（ContentLength=null）同样要扫——
+        // 此前 chunked 请求整体跳过守卫，匿名主体可用分块传输把改名文件直送模型绑定。
+        // （无体请求 ContentLength==0 依旧跳过；解析本身受 Kestrel/FormOptions 上限约束不变。）
+        var hasBody = context.Request.ContentLength is null || context.Request.ContentLength.Value > 0;
         if (isFileUpload &&
             context.Request.ContentType != null &&
             context.Request.ContentType.Contains("multipart/form-data", StringComparison.OrdinalIgnoreCase) &&
-            context.Request.ContentLength > 0)
+            hasBody)
         {
             context.Request.EnableBuffering();
             IFormCollection form;
@@ -126,11 +132,23 @@ public class FileUploadContentGuardMiddleware
             return null;
         }
 
-        using var stream = new MemoryStream();
-        await file.CopyToAsync(stream);
-        var head = stream.ToArray();
+        // NV-05：只读判定所需的有界前缀（文本样窗 8KB / 魔数 ≤4 字节），不再整文件
+        // CopyToAsync(MemoryStream)+ToArray——那会对每个文件段制造 2 倍文件大小的瞬时托管
+        // 内存，且本守卫位于认证之前，匿名并发放大（每请求上限 201MiB × N 并发）。
+        const int ProbeLength = 8192;
+        var head = new byte[ProbeLength];
+        var total = 0;
+        await using (var stream = file.OpenReadStream())
+        {
+            int read;
+            while (total < ProbeLength &&
+                   (read = await stream.ReadAsync(head.AsMemory(total, ProbeLength - total))) > 0)
+            {
+                total += read;
+            }
+        }
 
-        if (head.Length == 0)
+        if (file.Length == 0)
         {
             return "零字节文件";
         }

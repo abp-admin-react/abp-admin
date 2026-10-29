@@ -318,9 +318,30 @@ public class AbpAdminHttpApiHostModule : AbpModule
             
             Configure<ForwardedHeadersOptions>(options =>
             {
+                // 安全审计 run-1（TV-06）：缺省只转发 Proto——X-Forwarded-For 一旦被处理而
+                // KnownProxies 未钉准，攻击者可自带 XFF 头伪造客户端 IP（限流绕过/审计污染）。
+                // 部署在确知受信代理链时通过配置显式钉 KnownProxies（IP 数组）：同时启用
+                // XForwardedFor——限流/审计的 ClientIp 恢复为真实客户端（修复经 nginx 后全部
+                // 客户端共享代理 IP 单桶导致的整站限流坍缩，实测复现于 sectest 栈）。
                 options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
                 options.KnownIPNetworks.Clear();
                 options.KnownProxies.Clear();
+
+                var knownProxies = configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>()
+                    ?? Array.Empty<string>();
+                if (knownProxies.Length == 0)
+                {
+                    return;
+                }
+
+                options.ForwardedHeaders |= ForwardedHeaders.XForwardedFor;
+                foreach (var proxy in knownProxies)
+                {
+                    if (System.Net.IPAddress.TryParse(proxy, out var ip))
+                    {
+                        options.KnownProxies.Add(ip);
+                    }
+                }
             });
         }
 
@@ -1455,21 +1476,25 @@ public class AbpAdminHttpApiHostModule : AbpModule
             // 租户失配守卫（安全审计 Finding 7 修正）：ConfigureMultiTenancy 为 SPA 子域登录把
             // __tenant（Query/Header 解析器）挪到了 CurrentUser 之前，副作用是已认证用户的令牌
             // 租户声明可被请求携带的 __tenant 覆盖——ABP 官方安全口径是 CurrentUser 解析器必须
-            // 第一（多租户文档 Tenant Resolvers 节），令牌声明优先。本守卫对 Bearer 认证的请求
-            // 恢复该口径：令牌带租户声明的用户，当前解析出的租户必须与声明一致，否则 403——
-            // 封死「租户 A 用户带 __tenant=租户 B」横向读别的租户数据的通道。刻意只拦 Bearer：
-            // 宿主令牌无租户声明、不在判定内，行为与加守卫前一致（实机观察：切到目标租户后
-            // 下游会话校验在目标租户查不到会话，401）；cookie 认证的 /Account、
-            // /connect/authorize（SPA 登录链路）依赖 header-wins 语义，不在此列。
-            // SignalR 的 query token 已由上方 T3.2 中间件搬进 Authorization 头，同样被覆盖。
+            // 第一（多租户文档 Tenant Resolvers 节），令牌声明优先。本守卫对机器面的已认证请求
+            // （/api/ 与 /signalr-hubs/）恢复该口径：带租户声明的用户，当前解析出的租户必须与
+            // 声明一致，否则 403——封死「租户 A 用户带 __tenant=租户 B」横向读别的租户数据的通道。
+            // （安全审计 run-1 TV-02 实测：守卫原只拦 Bearer，Identity.Application cookie 认证的
+            // /api 请求携带 __tenant=B 即可读到 B 租户数据——cookie principal 同样带租户声明，
+            // 一并纳入判定。）宿主令牌无租户声明、不在判定内，行为与加守卫前一致（实机观察：
+            // 切到目标租户后下游会话校验在目标租户查不到会话，401）。
+            // 刻意只拦机器面两条前缀：cookie 认证的 /Account、/connect/authorize（SPA 登录链路）
+            // 依赖 header-wins 语义，不在此列；SignalR 的 query token 已由上方 T3.2 中间件搬进
+            // Authorization 头，天然落入 /signalr-hubs/ 判定。
             // 不存在的租户名到不了本守卫——ABP 租户中间件对未知租户先行拒绝（实测 404
             // "Tenant not found!"），本守卫只处理「解析成功但与令牌声明不符」的失配。
             // 位置必须在 UseMultiTenancy 之后（租户已解析）、UseDynamicClaims 之前——动态
             // 声明中间件会按当前租户重写 principal，放到它后面比对就失真了。
             app.Use(async (httpContext, next) =>
             {
-                var authorization = httpContext.Request.Headers.Authorization.ToString();
-                if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                var path = httpContext.Request.Path;
+                var isMachineSurface = path.StartsWithSegments("/api") || path.StartsWithSegments("/signalr-hubs");
+                if (isMachineSurface
                     && httpContext.User.Identity?.IsAuthenticated == true)
                 {
                     var currentUser = httpContext.RequestServices.GetRequiredService<Volo.Abp.Users.ICurrentUser>();
