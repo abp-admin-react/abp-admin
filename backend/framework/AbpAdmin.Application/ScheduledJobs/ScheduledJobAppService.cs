@@ -133,6 +133,12 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     [Authorize(AbpAdminPermissions.ScheduledJobs.Delete)]
     public virtual async Task DeleteAsync(Guid id)
     {
+        var job = await _jobRepository.GetAsync(id);
+        // 安全审计 run-1（TV-09）：与 Create/Update/SetEnabled/Trigger 同口径的侧界守卫。
+        // 迁移器会把 host-only 作业行种到每个租户（默认停用）——不设防则租户管理员可删掉
+        // host 在该租户层启用的跨租户巡检驱动（BroadcastNotificationWatchdog 关 IMultiTenant
+        // 扫全租户），静默拆掉 Host 级作业且无任何错误 surfaced。
+        EnsureJobTypeAllowedForCurrentSide(job.JobType);
         await _jobRepository.DeleteAsync(id);
 
         UnscheduleOnUowCompleted(id);

@@ -3,7 +3,9 @@ using System.Threading.Tasks;
 using AbpAdmin.ScheduledJobs;
 using Microsoft.Extensions.Options;
 using Volo.Abp.DependencyInjection;
+using Volo.Abp.Data;
 using Volo.Abp.Domain.Repositories;
+using Volo.Abp.MultiTenancy;
 using Volo.Abp.Timing;
 
 namespace AbpAdmin.Gdpr;
@@ -28,29 +30,38 @@ public class GdprRequestCleanupJobHandler : IScheduledJobHandler, ITransientDepe
     private readonly IRepository<GdprInfo, Guid> _infoRepository;
     private readonly IClock _clock;
     private readonly AbpAdminGdprOptions _gdprOptions;
+    private readonly IDataFilter _dataFilter;
 
     public GdprRequestCleanupJobHandler(
         IRepository<GdprRequest, Guid> requestRepository,
         IRepository<GdprInfo, Guid> infoRepository,
         IClock clock,
-        IOptions<AbpAdminGdprOptions> gdprOptions)
+        IOptions<AbpAdminGdprOptions> gdprOptions,
+        IDataFilter dataFilter)
     {
         _requestRepository = requestRepository;
         _infoRepository = infoRepository;
         _clock = clock;
         _gdprOptions = gdprOptions.Value;
+        _dataFilter = dataFilter;
     }
 
     public virtual async Task ExecuteAsync(ScheduledJobContext context)
     {
         var cutoff = _clock.Now.AddDays(-_gdprOptions.RetentionDays);
 
-        var expiredRequests = await _requestRepository.GetListAsync(x => x.CreationTime < cutoff);
-
-        foreach (var request in expiredRequests)
+        // NV-27：host 级副本宿主上下文执行，过滤器不过关就只删 TenantId IS NULL 行——租户用户
+        // 的 GDPR 请求/个人数据行永不过期，保留期承诺（RetentionDays）对租户层失效。
+        // 关过滤器全租户清扫（纯 DB 删除）。
+        using (_dataFilter.Disable<IMultiTenant>())
         {
-            await _infoRepository.DeleteAsync(x => x.RequestId == request.Id);
-            await _requestRepository.DeleteAsync(request);
+            var expiredRequests = await _requestRepository.GetListAsync(x => x.CreationTime < cutoff);
+
+            foreach (var request in expiredRequests)
+            {
+                await _infoRepository.DeleteAsync(x => x.RequestId == request.Id);
+                await _requestRepository.DeleteAsync(request);
+            }
         }
     }
 }

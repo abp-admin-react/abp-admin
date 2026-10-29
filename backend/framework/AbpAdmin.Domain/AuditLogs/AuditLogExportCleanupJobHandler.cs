@@ -6,7 +6,9 @@ using AbpAdmin.ScheduledJobs;
 using Volo.Abp.AuditLogging;
 using Volo.Abp.BlobStoring;
 using Volo.Abp.DependencyInjection;
+using Volo.Abp.Data;
 using Volo.Abp.Domain.Repositories;
+using Volo.Abp.MultiTenancy;
 using Volo.Abp.Timing;
 
 namespace AbpAdmin.AuditLogs;
@@ -34,31 +36,46 @@ public class AuditLogExportCleanupJobHandler : IScheduledJobHandler, ITransientD
     private readonly IRepository<AuditLogExcelFile, Guid> _excelFileRepository;
     private readonly IBlobContainer<AuditLogExportBlobContainer> _blobContainer;
     private readonly IClock _clock;
+    private readonly IDataFilter _dataFilter;
+    private readonly ICurrentTenant _currentTenant;
 
     public AuditLogExportCleanupJobHandler(
         IRepository<AuditLogExcelFile, Guid> excelFileRepository,
         IBlobContainer<AuditLogExportBlobContainer> blobContainer,
-        IClock clock)
+        IClock clock,
+        IDataFilter dataFilter,
+        ICurrentTenant currentTenant)
     {
         _excelFileRepository = excelFileRepository;
         _blobContainer = blobContainer;
         _clock = clock;
+        _dataFilter = dataFilter;
+        _currentTenant = currentTenant;
     }
 
     public virtual async Task ExecuteAsync(ScheduledJobContext context)
     {
         var cutoff = _clock.Now.AddDays(-RetentionDays);
 
-        var expiredFiles = (await _excelFileRepository.GetListAsync(
-                x => x.CreationTime < cutoff && x.FileName.StartsWith(AuditExportFileNamePrefix),
-                cancellationToken: context.CancellationToken))
-            .ToList();
-
-        foreach (var file in expiredFiles)
+        // NV-27：查询关过滤器全租户清扫（宿主上下文默认只见 TenantId IS NULL 行，租户用户的
+        // 审计导出文件永不过期）。blob 删除另需按行切租户：容器 IsMultiTenant=true 时 blob
+        // 路径跟 CurrentTenant 走，过滤器禁用不影响它——不切就删到 host 路径上，租户 blob 残留。
+        using (_dataFilter.Disable<IMultiTenant>())
         {
-            // blob 名就是记录 Id（AuditLogExportJob 的写入约定）
-            await _blobContainer.DeleteAsync(file.Id.ToString(), cancellationToken: context.CancellationToken);
-            await _excelFileRepository.DeleteAsync(file, cancellationToken: context.CancellationToken);
+            var expiredFiles = (await _excelFileRepository.GetListAsync(
+                    x => x.CreationTime < cutoff && x.FileName.StartsWith(AuditExportFileNamePrefix),
+                    cancellationToken: context.CancellationToken))
+                .ToList();
+
+            foreach (var file in expiredFiles)
+            {
+                using (_currentTenant.Change(file.TenantId))
+                {
+                    // blob 名就是记录 Id（AuditLogExportJob 的写入约定）
+                    await _blobContainer.DeleteAsync(file.Id.ToString(), cancellationToken: context.CancellationToken);
+                }
+                await _excelFileRepository.DeleteAsync(file, cancellationToken: context.CancellationToken);
+            }
         }
     }
 }
