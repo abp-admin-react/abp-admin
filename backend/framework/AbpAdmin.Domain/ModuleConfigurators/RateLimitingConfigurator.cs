@@ -44,18 +44,26 @@ internal static class RateLimitingConfigurator
                     .WithFixedWindow(TimeSpan.FromMinutes(settings.TokenEndpoint.IpDurationMinutes), settings.TokenEndpoint.IpMaxCount)
                     .WithName("TokenEndpointByIp")));
 
-            // 短信验证码策略：按手机号 1 小时 3 次（租户隔离）
+            // 短信验证码策略：按手机号 1 小时 3 次（租户隔离）。
+            // 安全审计 run-1（TV-08）补 IP 并联规则：与邮件侧 round3 修法同构——原只按手机号分区，
+            // 单源可换号喷发付费 SMS / 换 IP 锁死受害者收码路径（匿名接口，IP 是唯一免费维度）。
             options.AddPolicy(OperationRateLimitingPolicyNames.SmsVerificationCode, policy => policy
                 .AddRule(r => r.PartitionByPhoneNumber()
                     .WithFixedWindow(TimeSpan.FromHours(settings.SmsVerificationCode.DurationHours), settings.SmsVerificationCode.MaxCount)
-                    .WithMultiTenancy()));
+                    .WithMultiTenancy())
+                .AddRule(r => r.PartitionByClientIp()
+                    .WithFixedWindow(TimeSpan.FromHours(settings.SmsVerificationCode.DurationHours), settings.SmsVerificationCode.IpMaxCount)
+                    .WithName("SmsVerificationCodeByIp")));
 
             // 短信通知策略（NotificationService fan-out 等运营短信）：与验证码分开限流，
             // 未打 Purpose=VerificationCode 标记的消息都走这里（见 SmsSenderResolver / SmsRateLimitingPolicies）
             options.AddPolicy(OperationRateLimitingPolicyNames.SmsNotification, policy => policy
                 .AddRule(r => r.PartitionByPhoneNumber()
                     .WithFixedWindow(TimeSpan.FromHours(settings.SmsNotification.DurationHours), settings.SmsNotification.MaxCount)
-                    .WithMultiTenancy()));
+                    .WithMultiTenancy())
+                .AddRule(r => r.PartitionByClientIp()
+                    .WithFixedWindow(TimeSpan.FromHours(settings.SmsNotification.DurationHours), settings.SmsNotification.IpMaxCount)
+                    .WithName("SmsNotificationByIp")));
 
             // T2.7 邮件验证码（邮箱确认/无密码登录）发码侧：按邮箱 1 小时 5 次（租户隔离）。
             // round3 补 IP 并联规则：原先只按邮箱分区，攻击者换 IP 即可定向烧光受害者发码配额、

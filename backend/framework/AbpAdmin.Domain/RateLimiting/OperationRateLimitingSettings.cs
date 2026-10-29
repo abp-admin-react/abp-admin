@@ -74,12 +74,22 @@ public class SmsVerificationCodePolicySettings
 {
     public int MaxCount { get; set; } = 3;
     public int DurationHours { get; set; } = 1;
+
+    /// <summary>
+    /// 安全审计 run-1（TV-08）补的 IP 并联规则阈值（同窗口）：与邮件侧 round3 修法同构——
+    /// 原先只按手机号分区，单源可换号喷发付费 SMS / 锁死受害者收码路径。默认 3 次/小时，
+    /// 与手机号阈值同量级（发码本身 3/小时，IP 维度给共享出口 NAT 留同量级余量即可）。
+    /// </summary>
+    public int IpMaxCount { get; set; } = 3;
 }
 
 public class SmsNotificationPolicySettings
 {
     public int MaxCount { get; set; } = 20;
     public int DurationHours { get; set; } = 1;
+
+    /// <summary>安全审计 run-1（TV-08）补的 IP 并联规则阈值（同窗口），动机同 SmsVerificationCode。</summary>
+    public int IpMaxCount { get; set; } = 20;
 }
 
 public class EmailVerificationCodePolicySettings
