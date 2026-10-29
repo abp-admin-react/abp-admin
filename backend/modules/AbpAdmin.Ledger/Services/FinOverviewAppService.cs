@@ -7,6 +7,7 @@ using AbpAdmin.Ledger.Permissions;
 using AbpAdmin.Ledger.Services.Dtos;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Volo.Abp.Authorization;
 using Volo.Abp.EntityFrameworkCore;
 
 namespace AbpAdmin.Ledger.Services;
@@ -26,6 +27,14 @@ public class FinOverviewAppService : FinanceAppServiceBase
 
     public virtual async Task<FinOverviewDto> GetAsync()
     {
+        // 代理切片（NV-02）：本端点是平台级资金总览（全平台借贷合计/试算不变量/收入合计），
+        // 不存在有意义的「代理切片」形态——对切片化切片求和会破坏 IsBalanced 全历史不变量。
+        // 持 Scope.Agent 且无 Scope.All 的调用方整体拒绝（fail-closed），不泄露平台级财务面。
+        if (await ResolveAgentScopeAsync() != null)
+        {
+            throw new AbpAuthorizationException(code: AbpAuthorizationErrorCodes.GivenPolicyHasNotGranted);
+        }
+
         var db = await _db.GetDbContextAsync();
         var today = Clock.Now.Date;
         var tomorrow = today.AddDays(1);

@@ -83,6 +83,70 @@ public class PermissionAndAgentScopeTests : LedgerScenarioTestBase
         }
     }
 
+    /// <summary>
+    /// NV-02 回归锁：Ledger.View + Scope.Agent（无 Scope.All）的组合此前只在子户列表路径
+    /// 被切片，GetBalanceAsync / GetTrialBalanceAsync / FinOverview 三个读面绕过了
+    /// ResolveAgentScopeAsync——切片代理可携带任意 OwnerId 读他人余额 / 全平台试算合计 /
+    /// 平台资金总览。修复后：余额与试算强制按自己的 AgentId；平台总览整体拒绝。
+    /// </summary>
+    [Fact]
+    public async Task Agent_Slice_Forced_On_GetBalance_Other_Owner_Returns_Own_Balance()
+    {
+        await Ledger.PostAsync(new FinanceBizEvent(FinanceBizTypes.DemoCommission, "CA", FinanceBizTypes.Phases.Accrue, Cny, 9m, AgentId: TestUsers.AgentWithLedgerView));
+        await Ledger.PostAsync(new FinanceBizEvent(FinanceBizTypes.DemoCommission, "CB", FinanceBizTypes.Phases.Accrue, Cny, 4m, AgentId: _otherAgent));
+
+        using (As(TestUsers.AgentWithLedgerView))
+        {
+            var svc = GetRequiredService<FinLedgerAppService>();
+            var forced = await svc.GetBalanceAsync(new GetBalanceInput
+            {
+                AccountCode = FinanceAccountCodes.AgentPayable,
+                OwnerType = FinOwnerType.Agent,
+                OwnerId = _otherAgent.ToString(),
+                Currency = Cny,
+            });
+            // 切片键 = 当前登录用户 Id：传他人 OwnerId 必须被强制回自己（d200），拿到自己的 9m 而非他人的 4m
+            forced.OwnerId.ShouldBe(TestUsers.AgentWithLedgerView.ToString());
+            forced.OwnerType.ShouldBe(FinOwnerType.Agent);
+            forced.Balance.ShouldBe(9m, "切片调用方读他人 OwnerId 必须被强制回自己的余额，而非他人余额");
+        }
+
+        using (As(TestUsers.AccountantA))
+        {
+            // 对照：无 Scope.Agent 的会计（也非 Scope.All 的收窄语义）仍按传参读
+            var unscoped = await GetRequiredService<FinLedgerAppService>().GetBalanceAsync(new GetBalanceInput
+            {
+                AccountCode = FinanceAccountCodes.AgentPayable,
+                OwnerType = FinOwnerType.Agent,
+                OwnerId = _otherAgent.ToString(),
+                Currency = Cny,
+            });
+            unscoped.Balance.ShouldBe(4m);
+        }
+    }
+
+    [Fact]
+    public async Task Agent_Slice_Filters_TrialBalance_And_Refuses_Platform_Overview()
+    {
+        await Ledger.PostAsync(new FinanceBizEvent(FinanceBizTypes.DemoCommission, "CA", FinanceBizTypes.Phases.Accrue, Cny, 9m, AgentId: TestUsers.AgentWithLedgerView));
+        await Ledger.PostAsync(new FinanceBizEvent(FinanceBizTypes.DemoCommission, "CB", FinanceBizTypes.Phases.Accrue, Cny, 4m, AgentId: _otherAgent));
+
+        using (As(TestUsers.AgentWithLedgerView))
+        {
+            var svc = GetRequiredService<FinLedgerAppService>();
+            var trial = await svc.GetTrialBalanceAsync(new FinTrialBalanceInput { IncludeDemo = true });
+            // 佣金计提 = 借 6601（平台属主）+ 贷 2203（代理属主）。切片只保留代理属主行：
+            // 自己的贷方 9m 在，借方（平台行）与他人 4m 贷方都不在。
+            trial.Lines.ShouldNotBeNull();
+            trial.TotalCredit.ShouldBe(9m, "切片后试算只含自己名下子户的分录");
+            trial.TotalDebit.ShouldBe(0m, "6601 借方行是平台属主，不在代理切片内");
+
+            await Should.ThrowAsync<AbpAuthorizationException>(() =>
+                GetRequiredService<FinOverviewAppService>().GetAsync(),
+                "平台资金总览对切片操作员整体拒绝");
+        }
+    }
+
     [Fact]
     public async Task Rules_And_Trial_Balance_Require_View_Permissions()
     {

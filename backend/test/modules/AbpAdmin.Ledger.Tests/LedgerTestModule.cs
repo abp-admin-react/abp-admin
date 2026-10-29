@@ -95,6 +95,14 @@ public static class TestUsers
     public static readonly Guid AccountantSelfApprover = Guid.Parse("f0000000-0000-0000-0000-00000000000f");
     /// <summary>老板权限 + Finance.Adjust.Create（老板给自己勾上建单）。</summary>
     public static readonly Guid BossWithCreate = Guid.Parse("c1000000-0000-0000-0000-0000000000c1");
+    /// <summary>NV-02 边界组合：Ledger.View + Scope.Agent（无 Scope.All）——读路径切片的受测主体。</summary>
+    public static readonly Guid AgentWithLedgerView = Guid.Parse("d2000000-0000-0000-0000-0000000000d2");
+
+    /// <summary>NV-02：读路径切片受测权限组 = 会计的 Ledger.View + 代理的 Scope.Agent。</summary>
+    public static readonly string[] AgentWithLedgerViewPerms =
+    {
+        FinancePermissions.Ledger.View, FinancePermissions.Scope.Agent,
+    };
 
     public static readonly string[] Accountant =
     {
@@ -134,6 +142,7 @@ public class TestPermissionChecker : IPermissionChecker
         [TestUsers.Nobody] = new HashSet<string>(),
         [TestUsers.AccountantSelfApprover] = TestUsers.Accountant.Append(FinancePermissions.Adjust.ApproveOwn).ToHashSet(),
         [TestUsers.BossWithCreate] = TestUsers.BossPerms.Append(FinancePermissions.Adjust.Create).ToHashSet(),
+        [TestUsers.AgentWithLedgerView] = TestUsers.AgentWithLedgerViewPerms.ToHashSet(),
     };
 
     private readonly ICurrentPrincipalAccessor _principalAccessor;

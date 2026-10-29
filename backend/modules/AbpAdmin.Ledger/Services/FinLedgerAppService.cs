@@ -35,14 +35,21 @@ public class FinLedgerAppService : FinanceAppServiceBase
     [Authorize(FinancePermissions.Ledger.View)]
     public virtual async Task<FinBalanceDto> GetBalanceAsync(GetBalanceInput input)
     {
+        // 代理切片（NV-02）：与 GetSubAccountBalancesAsync 同口径——持 Scope.Agent（且无 Scope.All）
+        // 的调用方无视客户端传参，强制按自己的 AgentId 查 Agent 归属余额。此前本路径未调
+        // ResolveAgentScopeAsync，任意 OwnerId 的余额可被切片代理原样读出（跨代理财务披露）。
+        var agentScope = await ResolveAgentScopeAsync();
+        var ownerType = agentScope != null ? FinOwnerType.Agent : input.OwnerType;
+        var ownerId = agentScope?.ToString() ?? input.OwnerId ?? "";
+
         var balance = await _engine.GetBalanceAsync(
-            new AccountRef(input.AccountCode, input.OwnerType, input.OwnerId ?? "", input.Bucket ?? ""),
+            new AccountRef(input.AccountCode, ownerType, ownerId, input.Bucket ?? ""),
             input.Currency);
         return new FinBalanceDto
         {
             AccountCode = input.AccountCode,
-            OwnerType = input.OwnerType,
-            OwnerId = input.OwnerId ?? "",
+            OwnerType = ownerType,
+            OwnerId = ownerId,
             Currency = input.Currency,
             Balance = balance,
         };
@@ -96,15 +103,22 @@ public class FinLedgerAppService : FinanceAppServiceBase
         }).ToList());
     }
 
-    /// <summary>试算平衡：按科目×币种汇总分录借贷。</summary>
+    /// <summary>试算平衡：按科目×币种汇总分录借贷。Scope.Agent 调用方只汇总自己名下子户
+    /// 的分录（NV-02，与余额路径同边界）。</summary>
     [Authorize(FinancePermissions.Ledger.View)]
     public virtual async Task<FinTrialBalanceDto> GetTrialBalanceAsync(FinTrialBalanceInput input)
     {
+        var agentScope = await ResolveAgentScopeAsync();
         var db = await _dbContextProvider.GetDbContextAsync();
         var q = from e in db.Entries.AsNoTracking()
                 join v in db.Vouchers.AsNoTracking() on e.VoucherId equals v.Id
                 join s in db.SubAccounts.AsNoTracking() on e.SubAccountId equals s.Id
                 select new { e, v, s };
+        if (agentScope != null)
+        {
+            var own = agentScope.Value.ToString();
+            q = q.Where(x => x.s.OwnerType == FinOwnerType.Agent && x.s.OwnerId == own);
+        }
         if (!input.IncludeDemo)
         {
             q = q.Where(x => !x.v.IsDemo);
