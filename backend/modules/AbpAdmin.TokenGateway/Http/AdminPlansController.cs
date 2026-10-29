@@ -1,6 +1,8 @@
 using AbpAdmin.TokenGateway.Core;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Volo.Abp;
+using Volo.Abp.MultiTenancy;
 
 namespace AbpAdmin.TokenGateway.Http;
 
@@ -11,14 +13,33 @@ namespace AbpAdmin.TokenGateway.Http;
 [Authorize(TokenGatewayPermissions.Plans.Manage)]
 [Route("api/token-gateway/admin/plans")]
 [ApiExplorerSettings(GroupName = "token-gateway")]
-public class AdminPlansController(PlanCatalog plans) : ControllerBase
+public class AdminPlansController(PlanCatalog plans, ICurrentTenant currentTenant) : ControllerBase
 {
+    /// <summary>
+    /// Host 专属资源的侧界守卫（对齐 AbpAdminAppService.EnsureHostSide 双保险口径）。TgPlans 是
+    /// 无租户列的全局表，权限位本修复起锁 MultiTenancySides.Host（安全审计 run-1 TV-05：原先
+    /// 两侧可授，建租户种子会把缺省侧权限授给租户 admin——已由反编译 Volo.Abp.PermissionManagement
+    /// 10.7.0 实证）——但存量库的租户授权行不会因定义收窄而消失，控制器侧显式拒绝兜底存量误授。
+    /// </summary>
+    private void EnsureHostSide()
+    {
+        if (currentTenant.Id != null)
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.HostSideOnly);
+        }
+    }
+
     [HttpGet]
-    public async Task<IActionResult> List() => Ok(new { items = await plans.AllAsync(includeInactive: true) });
+    public async Task<IActionResult> List()
+    {
+        EnsureHostSide();
+        return Ok(new { items = await plans.AllAsync(includeInactive: true) });
+    }
 
     [HttpPut("{id}")]
     public async Task<IActionResult> Update(string id, [FromBody] PlanPatch patch)
     {
+        EnsureHostSide();
         try
         {
             return Ok(await plans.UpdateAsync(id, patch));

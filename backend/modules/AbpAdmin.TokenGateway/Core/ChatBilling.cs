@@ -99,18 +99,40 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
         await usage.AddAsync(t.User, t.Alias.Alias, t.Bot, 0, 0, 0, false);
     }
 
+    /// <summary>
+    /// 流式中断结算（NV-10）：客户端中途断开时，已 flush 到线上的帧真实消耗了上游计费，
+    /// 全额解冻 = 白嫖已交付内容。按「输入粗估 + 已见输出字符折算」结算（clamp 到预占额），
+    /// 用量行仍记 success=false（流未正常完成，对账口径区分于成功单）。并发额度照常释放。
+    /// </summary>
+    public async Task<long> SettleAbortedAsync(ChatTicket t, long promptTokens, long completionTokens)
+    {
+        var charged = await wallet.SettleAsync(t.User, t.Reservation, Cost(t.Alias, promptTokens, completionTokens));
+        await usage.AddAsync(t.User, t.Alias.Alias, t.Bot, promptTokens, completionTokens, charged, false);
+        Done(t.User);
+        return charged;
+    }
+
     private void Done(Guid user) => _inflight.AddOrUpdate(user, 0, (_, n) => Math.Max(0, n - 1));
 
     internal static long Cost(AliasOption a, long prompt, long completion) =>
         (long)Math.Ceiling(prompt * a.PromptRate + completion * a.CompletionRate);
 
-    /// <summary>粗估输入 token：字符数/2 向上取整（中文偏保守），宁多冻不少冻。</summary>
+    /// <summary>粗估输入 token：字符数/2 向上取整（中文偏保守），宁多冻不少冻。
+    /// 除 messages[].content 外，其余顶层字段（tools/tool_choice/response_format 等）的序列化
+    /// 质量同样计入：上游按整个请求体计费（BeginAsync 原样转发），只数消息内容会结构性低估，
+    /// 结算被 clamp 到预占额 ⇒ 差额平台倒贴（NV-09）。</summary>
     internal static long EstimatePromptTokens(JsonObject request)
     {
         long chars = 0;
         if (request["messages"] is JsonArray msgs)
             foreach (var m in msgs)
                 chars += m?["content"]?.ToJsonString().Length ?? 0;
-        return (chars + 1) / 2 + 16;
+        long otherChars = 0;
+        foreach (var kv in request)
+        {
+            if (kv.Key == "messages") continue;
+            otherChars += kv.Value?.ToJsonString().Length ?? 0;
+        }
+        return (chars + otherChars + 1) / 2 + 16;
     }
 }

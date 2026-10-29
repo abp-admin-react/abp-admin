@@ -194,6 +194,66 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     }
 
     [Fact]
+    public async Task Estimate_counts_non_message_fields_so_tools_heavy_body_reserves_more()
+    {
+        // NV-09 回归锁：上游按整个请求体计费（tools 等非消息字段原样转发），预估只数
+        // messages[].content 会结构性低估 → 结算 clamp 到预占额 = 平台倒贴上游差额。
+        // 修复后非消息字段的序列化质量计入估算（宁多冻不少冻）。
+        var tiny = JsonNode.Parse("""{"messages":[{"role":"user","content":"hi"}]}""")!.AsObject();
+        var toolsHeavy = JsonNode.Parse("""
+            {
+              "messages": [{"role":"user","content":"hi"}],
+              "tools": [{"type":"function","function":{"name":"f","parameters":{"type":"object","properties":{"a":{"type":"string","description":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}}]
+            }
+            """)!.AsObject();
+
+        var baseEst = ChatBilling.EstimatePromptTokens(tiny);
+        var toolsEst = ChatBilling.EstimatePromptTokens(toolsHeavy);
+        (toolsEst - baseEst).ShouldBeGreaterThan(20, "tools 字段质量必须计入估算");
+
+        var w = NewWallet();
+        await w.CreditAsync(U, 1_000_000, "t-" + Guid.NewGuid());
+        var billing = new ChatBilling(w, NewUsage(), Opt);
+        var ticket = await billing.BeginAsync(U, toolsHeavy, null);
+        var reserved = (await w.ViewAsync(U)).Frozen;
+        reserved.ShouldBeGreaterThan(
+            Math.Max(1, ChatBilling.Cost(ticket.Alias, baseEst, ticket.UpstreamBody["max_tokens"]!.GetValue<long>())),
+            "预占额必须高于仅按消息内容估算的口径");
+        await billing.FailAsync(ticket);
+    }
+
+    [Fact]
+    public async Task Stream_abort_after_delivered_frames_charges_estimate_instead_of_full_release()
+    {
+        // NV-10 回归锁：流式中客户端断开——已 flush 的帧真实消耗上游计费，修复前走 FailAsync
+        // 全额解冻 = 已交付内容零计费。修复后 SettleAbortedAsync 按粗估收费（clamp 到预占额），
+        // 用量行 success=false 区分正常完成；零交付（首帧前断开）仍走 FailAsync 全额解冻。
+        var w = NewWallet();
+        await w.CreditAsync(U, 100_000, "t-" + Guid.NewGuid());
+        var billing = new ChatBilling(w, NewUsage(), Opt);
+        var req = JsonNode.Parse("""{"messages":[{"role":"user","content":"hi"}]}""")!.AsObject();
+        var ticket = await billing.BeginAsync(U, req, null);
+        var reserved = (await w.ViewAsync(U)).Frozen;
+        reserved.ShouldBeGreaterThan(0);
+
+        // 有已交付内容的中断：按粗估结算而非全额解冻
+        await billing.SettleAbortedAsync(ticket, promptTokens: 20, completionTokens: 40);
+        var afterAbort = await w.ViewAsync(U);
+        afterAbort.Frozen.ShouldBe(0, "断开后预占必须关单");
+        afterAbort.Balance.ShouldBe(100_000 - 60);
+        var usage = await NewUsage().RecentAsync(U, 10);
+        var row = usage.Single();
+        row.Success.ShouldBeFalse("中断单与正常完成单在对账口径上可区分");
+        row.PromptTokens.ShouldBe(20);
+        row.CompletionTokens.ShouldBe(40);
+
+        // 对照：零交付（首帧前断开）仍全额解冻
+        var t2 = await billing.BeginAsync(U, req, null);
+        await billing.FailAsync(t2);
+        (await w.ViewAsync(U)).Balance.ShouldBe(100_000 - 60);
+    }
+
+    [Fact]
     public async Task Failed_call_fully_unfreezes()
     {
         var w = NewWallet();
@@ -225,6 +285,28 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
         await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(session, true));
         await keys.RevokeKeyAsync(U);
         await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(key, false));
+    }
+
+    [Fact]
+    public async Task Deactivated_identity_rejects_existing_key_and_session_at_use_time()
+    {
+        // NV-08 回归锁：凭证签发时刻查过 IsActive 不代表此刻有效——hb- 无到期、hbs- 最长一周，
+        // 停用/锁定账户的存量凭证必须在使用时刻过身份状态门（与未知 Key 同错 401，不泄露状态差异）。
+        var keys = NewKeys();
+        var key = await keys.IssueOrReuseKeyAsync(U);
+        var (session, _) = await keys.IssueSessionAsync(U);
+        (await keys.ResolveAsync(key, true)).ShouldBe(U);
+
+        UserGate.Usable = false; // 模拟停用/锁定/已删
+
+        var hb = await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(key, true));
+        hb.Status.ShouldBe(401);
+        hb.Code.ShouldBe("INVALID_KEY");
+        (await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(session, true))).Status.ShouldBe(401);
+        UserGate.Calls.ShouldBeGreaterThanOrEqualTo(2, "hb- 与 hbs- 命中后都必须过身份状态门");
+
+        UserGate.Usable = true; // 恢复（如管理员重新启用）
+        (await keys.ResolveAsync(key, true)).ShouldBe(U);
     }
 
     [Fact]

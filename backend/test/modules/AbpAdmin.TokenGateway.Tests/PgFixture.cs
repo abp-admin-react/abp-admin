@@ -52,16 +52,30 @@ public sealed class PgCollection : ICollectionFixture<PgFixture>
     public const string Name = "tg-pg";
 }
 
+/// <summary>NV-08：身份状态门测试桩。默认放行，置 Usable=false 模拟停用/锁定/已删。</summary>
+public sealed class TestUserGate : ITgUserGate
+{
+    public bool Usable { get; set; } = true;
+    public int Calls { get; private set; }
+
+    public Task<bool> IsUsableAsync(Guid userId)
+    {
+        Calls++;
+        return Task.FromResult(Usable);
+    }
+}
+
 public abstract class GatewayTestBase(PgFixture pg)
 {
     protected readonly FakeClock Clock = new(new DateTimeOffset(2026, 10, 14, 10, 0, 0, TimeSpan.Zero));
     protected readonly IOptions<TokenGatewayOptions> Opt = Options.Create(new TokenGatewayOptions());
     protected readonly Guid U = Guid.NewGuid();
     protected IDbContextFactory<TokenGatewayDbContext> Db => pg.Db;
+    protected readonly TestUserGate UserGate = new();
 
     protected Wallet NewWallet() => new(Db, Clock);
     protected PlanCatalog NewPlans() => new(Db, Clock);
-    protected KeyStore NewKeys() => new(Db, Clock, new PlainProtector(), Opt);
+    protected KeyStore NewKeys() => new(Db, Clock, new PlainProtector(), Opt, UserGate);
     protected UsageLog NewUsage() => new(Db, Clock);
 
     protected (OrderBook Orders, Wallet Wallet) NewOrders()

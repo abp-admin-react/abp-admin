@@ -42,6 +42,9 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
     {
         ChatTicket? ticket = null;
         var started = false;
+        // 流式进度账（NV-10）：提到 try 外，catch 的中断结算要读已交付字符
+        long prompt = 0, completion = 0, seenChars = 0;
+        var gotUsage = false;
         try
         {
             var user = await keys.ResolveAsync(Bearer(), allowSession: false);
@@ -80,8 +83,6 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             Response.ContentType = "text/event-stream";
             Response.Headers.CacheControl = "no-cache";
             started = true;
-            long prompt = 0, completion = 0, seenChars = 0;
-            var gotUsage = false;
             // 流空闲超时：client.Timeout 只覆盖到响应头，上游 mid-stream 停发时逐行读会无限挂起
             //（唯一解挂是客户端断开，期间预占一直冻结）。每帧读之前重置空闲计时，帧处理/写出不受影响；
             // 空闲阈值与上游超时同一口径（最小 30s）。
@@ -131,7 +132,20 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             {
                 try
                 {
-                    await billing.FailAsync(ticket);
+                    // NV-10：流式中客户端断开——已 flush 到线上的帧真实消耗了上游计费，此前
+                    // 无条件全额解冻 = 已交付内容零计费。有交付时按「输入粗估 + 已见输出字符
+                    // 折算」结算（clamp 到预占额），用量行记 success=false 区分正常完成；
+                    // 未开始流式或零交付（首帧前断开）仍走全额解冻。
+                    if (started && seenChars > 0)
+                    {
+                        var promptEst = gotUsage ? prompt : ChatBilling.EstimatePromptTokens(ticket.UpstreamBody);
+                        var completionEst = gotUsage ? completion : (seenChars + 1) / 2;
+                        await billing.SettleAbortedAsync(ticket, promptEst, completionEst);
+                    }
+                    else
+                    {
+                        await billing.FailAsync(ticket);
+                    }
                 }
                 catch (Exception failEx)
                 {

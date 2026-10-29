@@ -20,7 +20,7 @@ public sealed class AbpKeyProtector(IStringEncryptionService enc) : IKeyProtecto
 }
 
 /// <summary>每用户一把长期 hb-（登录复用，库里存哈希 + 密文），外加有时限会话 hbs-（只存哈希）。</summary>
-public class KeyStore(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider clock, IKeyProtector protector, IOptions<TokenGatewayOptions> options)
+public class KeyStore(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider clock, IKeyProtector protector, IOptions<TokenGatewayOptions> options, ITgUserGate userGate)
 {
     /// <summary>已有则解密返回原 Key（登录复用，不轮换）；没有则新建。明文 Key 只在返回值里，不落日志。</summary>
     public async Task<string> IssueOrReuseKeyAsync(Guid userId)
@@ -75,15 +75,30 @@ public class KeyStore(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider
         if (bearer.StartsWith("hb-", StringComparison.Ordinal))
         {
             var k = await db.ApiKeys.AsNoTracking().Where(x => x.KeyHash == h).Select(x => (Guid?)x.UserId).FirstOrDefaultAsync();
-            if (k is { } u) return u;
+            if (k is { } u) return await CheckedAsync(u);
         }
         else if (allowSession && bearer.StartsWith("hbs-", StringComparison.Ordinal))
         {
             var now = Now();
             var s = await db.Sessions.AsNoTracking().Where(x => x.TokenHash == h && x.ExpiresAt > now).Select(x => (Guid?)x.UserId).FirstOrDefaultAsync();
-            if (s is { } u) return u;
+            if (s is { } u) return await CheckedAsync(u);
         }
         throw GatewayException.InvalidKey();
+    }
+
+    /// <summary>
+    /// 哈希命中只是「凭证存在于库」，不等于「身份此刻可用」（NV-08）：签发时刻的
+    /// IsActive/锁定检查不会随身份状态联动，停用/锁定/已删账户的存量 hb-（无到期）
+    /// 与 hbs- 凭证必须在使用时刻过身份状态门。拒绝与未知 Key 同错（不泄露状态差异）。
+    /// </summary>
+    private async Task<Guid> CheckedAsync(Guid userId)
+    {
+        if (!await userGate.IsUsableAsync(userId))
+        {
+            throw GatewayException.InvalidKey();
+        }
+
+        return userId;
     }
 
     private DateTime Now() => clock.GetUtcNow().UtcDateTime;

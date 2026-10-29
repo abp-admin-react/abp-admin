@@ -34,6 +34,7 @@ public class AbpAdminTokenGatewayModule : AbpModule
 
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IKeyProtector>(sp => new AbpKeyProtector(sp.GetRequiredService<IStringEncryptionService>()));
+        services.AddSingleton<ITgUserGate, IdentityUserGate>();
         services.AddSingleton<KeyStore>();
         services.AddSingleton<Wallet>();
         services.AddSingleton<UsageLog>();
@@ -62,12 +63,15 @@ public class AbpAdminTokenGatewayModule : AbpModule
         {
             var pass = context.GetConfiguration()["StringEncryption:DefaultPassPhrase"];
             var abpDefault = new AbpStringEncryptionOptions().DefaultPassPhrase;
-            if (string.IsNullOrWhiteSpace(pass) || pass == abpDefault)
+            // NV-19：compose 提交的字面量回退（docker-compose.yml 的 dev-only-change-me）同样视为
+            // 未显式配置——代码级 fail-fast 此前只认 ABP 框架常量，仓库清单自带的默认值直接放行。
+            const string composeDevDefault = "dev-only-change-me";
+            if (string.IsNullOrWhiteSpace(pass) || pass == abpDefault || pass == composeDevDefault)
             {
                 throw new AbpInitializationException(
                     "TokenGateway：非 Development 环境必须显式配置 StringEncryption:DefaultPassPhrase" +
                     "（Configuration/Security.json 或环境变量 StringEncryption__DefaultPassPhrase），" +
-                    "否则 hb- Key 以 ABP 公开默认口令加密，库泄漏即 Key 全泄。");
+                    "否则 hb- Key 以公开默认口令（ABP 常量或仓库 compose 回退值）加密，库泄漏即 Key 全泄。");
             }
         }
         base.OnApplicationInitialization(context);
