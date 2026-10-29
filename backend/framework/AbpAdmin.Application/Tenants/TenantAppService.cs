@@ -15,6 +15,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
+using Volo.Abp.Auditing;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.EventBus.Distributed;
@@ -165,6 +166,10 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
     /// 触发独立租户库的运行期建库+schema 迁移——幂等，重复保存可作迁移失败的重试手段。
     /// 设置项禁用该功能时返回业务异常（不是静默忽略）。
     /// </summary>
+    // 明文连接串是方法参数，ABP 审计拦截器会把它序列化进 AbpAuditLogActions.Parameters
+    // （实体列已加密但参数副本不受保护）。对齐 CollectionWithdrawAdminAppService.SetWithdrawVaultAsync
+    // 的 [DisableAuditing] 模式：机密参数方法整体退出审计参数通道，而非逐字段打码。
+    [DisableAuditing]
     [Authorize(TenantManagementPermissions.Tenants.ManageConnectionStrings)]
     public override async Task UpdateDefaultConnectionStringAsync(Guid id, string defaultConnectionString)
     {
@@ -246,6 +251,9 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
     /// 前端连接串抽屉把 Default 作为 Items 一项走本端点，这里是生产主路径。
     /// PUT /api/app/tenant/{id}/connection-strings
     /// </summary>
+    // 同上：Items[].Value 是明文连接串，不入审计参数通道。[DisableAuditing] 只关审计，
+    // OperationLog（操作留痕）不受影响，业务日志仍记「值不入日志」占位。
+    [DisableAuditing]
     [Authorize(TenantManagementPermissions.Tenants.ManageConnectionStrings)]
     [OperationLog("租户管理", "更新连接串", BizNo = "{{id}}", Success = "更新了租户 {{tenant(id)}} 的数据库连接串（值不入日志）")]
     public virtual async Task UpdateConnectionStringsAsync(Guid id, UpdateTenantConnectionStringsInput input)
@@ -329,6 +337,8 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
     /// 校验连接串：尝试建立一次数据库连接并立即关闭。纯校验，不写库。
     /// POST /api/app/tenant/{id}/check-connection-string
     /// </summary>
+    // 同上：待校验连接串是明文入参，退出审计参数通道。
+    [DisableAuditing]
     [Authorize(TenantManagementPermissions.Tenants.ManageConnectionStrings)]
     public virtual async Task<CheckTenantConnectionStringResultDto> CheckConnectionStringAsync(
         Guid id,

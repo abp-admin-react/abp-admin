@@ -1,10 +1,12 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Settings;
 using AbpAdmin.Tenants;
 using Shouldly;
 using Microsoft.Extensions.Configuration;
 using Volo.Abp;
+using Volo.Abp.Auditing;
 using Volo.Abp.Data;
 using Volo.Abp.Modularity;
 using Volo.Abp.MultiTenancy;
@@ -31,6 +33,7 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
     private readonly IConnectionStringResolver _connectionStringResolver;
     private readonly ICurrentTenant _currentTenant;
     private readonly ISettingManager _settingManager;
+    private readonly IAuditingManager _auditingManager;
 
     protected TenantConnectionStringTests()
     {
@@ -42,6 +45,7 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
         _connectionStringResolver = GetRequiredService<IConnectionStringResolver>();
         _currentTenant = GetRequiredService<ICurrentTenant>();
         _settingManager = GetRequiredService<ISettingManager>();
+        _auditingManager = GetRequiredService<IAuditingManager>();
     }
 
     private async Task<Guid> CreateTenantAsync()
@@ -252,5 +256,60 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
                 Items = { new TenantConnectionStringItemInput { Name = "Default", Value = PlainConnectionString } }
             }));
         exception.Code.ShouldBe(AbpAdminDomainErrorCodes.Tenants.TenantConnectionStringManagementDisabled);
+    }
+
+    [Fact]
+    public async Task UpdateConnectionStrings_Plaintext_Should_Not_Enter_Audit_Action_Parameters()
+    {
+        // NV-03 回归锁：Items[].Value 是明文连接串，实体列走 protector 加密，但方法参数副本
+        // 会被审计拦截器序列化进 AbpAuditLogActions.Parameters（90 天保留 = 凭据明文随审计
+        // 裸奔）。修复与 SetWithdrawVaultAsync 同款：方法级 [DisableAuditing] 整体退出审计
+        // 参数通道；操作留痕走 OperationLog 不受影响。断言审计作用域内任何动作参数都不含明文
+        // （方法级关闭下该动作根本不落，未来若改成参数级打码此断言仍成立）。
+        const string secret = "Host=db;Password=Audit!Leak#42";
+        var tenantId = await CreateTenantAsync();
+
+        await _settingManager.SetGlobalAsync(
+            AbpAdminSettings.Saas.EnableTenantBasedConnectionStringManagement, "true");
+
+        using (_auditingManager.BeginScope())
+        {
+            await _tenantAppService.UpdateConnectionStringsAsync(tenantId, new UpdateTenantConnectionStringsInput
+            {
+                Items = { new TenantConnectionStringItemInput { Name = "Default", Value = secret } }
+            });
+
+            var scope = _auditingManager.Current;
+            scope.ShouldNotBeNull();
+            scope.Log.Actions.Any(a => a.Parameters != null && a.Parameters.Contains(secret))
+                .ShouldBeFalse("[DisableAuditing] 应挡住明文连接串进审计动作参数");
+        }
+
+        // 加密存储语义不受影响（既有 Should_Store_Encrypted_And_Return_Mask 的最小复核）
+        var tenant = await WithUnitOfWorkAsync(() => _tenantRepository.GetAsync(tenantId));
+        _protector.DecryptOrPlain(tenant.FindDefaultConnectionString()!).ShouldBe(secret);
+    }
+
+    [Fact]
+    public async Task CheckConnectionString_Plaintext_Should_Not_Enter_Audit_Action_Parameters()
+    {
+        // NV-03 回归锁（校验端点）：探测目标串同样是明文入参，失败探测（不可达地址）也要留痕，
+        // 但探测串本身不得进审计动作参数。
+        const string secret = "Host=10.255.255.1;Port=5432;Password=Audit!Probe#42;Timeout=1";
+        var tenantId = await CreateTenantAsync();
+
+        await _settingManager.SetGlobalAsync(
+            AbpAdminSettings.Saas.EnableTenantBasedConnectionStringManagement, "true");
+
+        using (_auditingManager.BeginScope())
+        {
+            await Should.NotThrowAsync(() => _tenantAppService.CheckConnectionStringAsync(
+                tenantId, new CheckTenantConnectionStringInput { ConnectionString = secret }));
+
+            var scope = _auditingManager.Current;
+            scope.ShouldNotBeNull();
+            scope.Log.Actions.Any(a => a.Parameters != null && a.Parameters.Contains(secret))
+                .ShouldBeFalse();
+        }
     }
 }
