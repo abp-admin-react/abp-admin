@@ -119,7 +119,7 @@ namespace AbpAdmin;
     typeof(AbpSwashbuckleModule),
     typeof(AbpAspNetCoreSerilogModule),
     typeof(AbpAspNetCoreSignalRModule),
-    // T3.3：只替换 worker 调度器为 Quartz（cron 能力），一次性队列作业（IBackgroundJobManager）
+    // 只替换 worker 调度器为 Quartz（cron 能力），一次性队列作业（IBackgroundJobManager）
     // 继续走 EF 存储，BackgroundJobAppService 与 AbpBackgroundJobs 表不受影响。
     // 放 Host 而不是 Domain：worker 调度器是宿主级基础设施，DbMigrator 不应起调度器。
     typeof(AbpBackgroundWorkersQuartzModule),
@@ -151,7 +151,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
         // Reference token(官方机制):access/refresh token 变为不透明串,以 OpenIddictTokens
         // 表为真源逐请求校验——用户被删、换库、主动吊销后旧 token 立即 401,
-        // 不再有自包含 JWT"幽灵身份续命到过期"的问题(MCP 实测:换库后旧 token 仍被接受)。
+        // 不再有自包含 JWT"幽灵身份续命到过期"的问题(换库后旧 token 仍被接受)。
         // 代价:每次请求多一次库内 token 查询;OpenIddict 过期清理任务负责瘦身。
         // 注意:token 格式属于签发(服务)侧配置,必须配在 OpenIddictServerBuilder,
         // 配到 AddValidation 里只影响校验侧、不改变签发格式。
@@ -168,7 +168,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.SelectAccountPage = "/Account/SelectAccount";
         });
 
-        // M-1（安全审计）：租户子域名通配回调（*.localhost:8000）默认只在开发环境启用；
+        // 租户子域名通配回调（*.localhost:8000）默认只在开发环境启用；
         // 通配域会把 redirect_uri 的接受面扩大到任意子域，生产回调白名单必须精确匹配。
         // 本地 compose 体验栈需要租户子域名登录，经 App:EnableWildcardDomainSupport=true 显式打开。
         if (hostingEnvironment.IsDevelopment() ||
@@ -184,7 +184,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             });
         }
 
-        // T2.7: 注册无密码登录与模拟登录扩展授权类型；LinkAccounts: 关联账号切换
+        // 注册无密码登录与模拟登录扩展授权类型；LinkAccounts: 关联账号切换
         PreConfigure<OpenIddictServerBuilder>(serverBuilder =>
         {
             serverBuilder.Configure(options =>
@@ -194,13 +194,13 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 options.GrantTypes.Add(LinkedAccountExtensionGrant.ExtensionGrantName);
             });
 
-            // T2.8: 登录时校验租户激活状态（Passive/已到期拒绝签发令牌）
+            // 登录时校验租户激活状态（Passive/已到期拒绝签发令牌）
             serverBuilder.AddEventHandler(TenantActivationOpenIddictServerHandler.Descriptor);
             serverBuilder.AddEventHandler(IdentitySessionOpenIddictServerHandler.Descriptor);
-            // H-2: end-session 时吊销 IdentitySession（登出后旧 refresh token 立即死亡，
+            // end-session 时吊销 IdentitySession（登出后旧 refresh token 立即死亡，
             // 配合 IdentitySessionOpenIddictServerHandler 对已吊销会话的拒绝）
             serverBuilder.AddEventHandler(IdentitySessionEndSignOutHandler.Descriptor);
-            // H-1 补强（极端轮实测）：authorize 默认放行 code_challenge_method=plain，
+            // authorize 默认放行 code_challenge_method=plain，
             // 该处理器在验证阶段强制 S256
             serverBuilder.AddEventHandler(OpenIddict.RequireS256CodeChallengeHandler.Descriptor);
         });
@@ -219,7 +219,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             });
         }
 
-        // T3.3 第 2 步：Quartz 持久化与 clustering。
+        // Quartz 持久化与 clustering。
         // 必须 PreConfigure 而不是 Configure：AbpQuartzModule.ConfigureServices 通过
         // ExecutePreConfiguredActions<AbpQuartzOptions>() 读取 Configurator，
         // Configure 注册的委托执行太晚，会静默失效（05-reference-facts 9.2，已核实）。
@@ -318,11 +318,10 @@ public class AbpAdminHttpApiHostModule : AbpModule
             
             Configure<ForwardedHeadersOptions>(options =>
             {
-                // 安全审计 run-1（TV-06）：缺省只转发 Proto——X-Forwarded-For 一旦被处理而
-                // KnownProxies 未钉准，攻击者可自带 XFF 头伪造客户端 IP（限流绕过/审计污染）。
-                // 部署在确知受信代理链时通过配置显式钉 KnownProxies（IP 数组）：同时启用
-                // XForwardedFor——限流/审计的 ClientIp 恢复为真实客户端（修复经 nginx 后全部
-                // 客户端共享代理 IP 单桶导致的整站限流坍缩，实测复现于 sectest 栈）。
+                // 缺省只转发 Proto：X-Forwarded-For 一旦被处理而 KnownProxies 未钉准，
+                // 攻击者可自带 XFF 头伪造客户端 IP（限流绕过/审计污染）。部署在确知受信代理链时
+                // 通过配置显式钉 KnownProxies（IP 数组）并同时启用 XForwardedFor——限流/审计的
+                // ClientIp 恢复为真实客户端；不钉而启用则经反代后全部客户端共享代理 IP 单桶（限流坍缩）。
                 options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
                 options.KnownIPNetworks.Clear();
                 options.KnownProxies.Clear();
@@ -356,7 +355,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 .AddRazorRuntimeCompilation();
         }
 
-        // T2.7: 注册扩展授权处理器
+        // 注册扩展授权处理器
         Configure<AbpOpenIddictExtensionGrantsOptions>(options =>
         {
             options.Grants.Add(PasswordlessTokenExtensionGrant.ExtensionGrantName, new PasswordlessTokenExtensionGrant());
@@ -364,7 +363,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.Grants.Add(LinkedAccountExtensionGrant.ExtensionGrantName, new LinkedAccountExtensionGrant());
         });
 
-        // T2.7: Razor Pages 的 PageModel 由 ABP 的 ServiceBasedPageModelActivatorProvider 从容器激活，
+        // Razor Pages 的 PageModel 由 ABP 的 ServiceBasedPageModelActivatorProvider 从容器激活，
         // 替换的登录页模型与双因素验码页模型必须显式注册
         context.Services.AddTransient<Pages.Account.AbpAdminLoginModel>();
         context.Services.AddTransient<Pages.Account.TwoFactorVerificationModel>();
@@ -392,12 +391,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.CheckLibs = false;
         });
 
-        // T2.4: 绑定 Cookie Consent 选项并下发到 application-configuration 端点
+        // 绑定 Cookie Consent 选项并下发到 application-configuration 端点
         Configure<AbpAdminCookieConsentOptions>(configuration.GetSection(AbpAdminCookieConsentOptions.SectionName));
         Configure<AbpApplicationConfigurationOptions>(options =>
         {
             options.Contributors.Add(new CookieConsentApplicationConfigurationContributor());
-            // T3.2: 下发 SignalR:Enabled，前端读到 false 直接不尝试连接（降级轮询）
+            // 下发 SignalR:Enabled，前端读到 false 直接不尝试连接（降级轮询）
             options.Contributors.Add(new SignalRApplicationConfigurationContributor());
             // 审计 F-E3/#4 的匿名 setting.values 裁剪贡献者不在此注册：它无宿主依赖，
             // 按分层惯例（DataDictionary 同款）注册在 AbpAdminHttpApiModule——HttpApi 层
@@ -426,7 +425,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.Limits.MaxRequestBodySize = maxRequestBodyBytes;
         });
 
-        // T2.1 审计日志：打开实体变更记录。
+        // 审计日志：打开实体变更记录。
         // AddAllEntities + 落库前脱敏：全实体变更喂给实体历史 UI，但口令哈希/令牌等
         // 敏感属性值由 SensitiveEntityChangeScrubbingContributor 在保存前抹掉
         // （PostContributors 在 IAuditingStore.SaveAsync 之前执行）。
@@ -497,13 +496,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     private void ConfigureRedis(ServiceConfigurationContext context, IConfiguration configuration)
     {
-        // Redis:IsEnabled 语义必须与 ABP 缓存模块（AbpCachingStackExchangeRedisModule）及
+        // Redis:IsEnabled 语义与 ABP 缓存模块（AbpCachingStackExchangeRedisModule）及
         // CacheMonitorRedisConnection 对齐：键缺失/为空=启用（由 Redis:Configuration 是否配置决定），
-        // 仅显式 false 才关闭。此前 GetValue 默认 false 的写法与缓存模块「缺省=开」相矛盾——
-        // 只配 Redis:Configuration 不写 IsEnabled 的部署会得到「缓存走 Redis、分布式锁退化为
-        // 进程内」的静默不一致，多实例下锁形同虚设。
-        // 值非法（如 "yes"）直接启动失败而不是静默当作关闭——多实例部署里那等于把分布式锁
-        // 静默关掉（安全层审查指出的陷阱）。
+        // 仅显式 false 才关闭——否则只配 Redis:Configuration 不写 IsEnabled 的部署会得到
+        // 「缓存走 Redis、分布式锁退化为进程内」的静默不一致，多实例下锁形同虚设。
+        // 值非法（如 "yes"）直接启动失败而不是静默当作关闭——多实例部署里那等于把分布式锁静默关掉。
         var redisEnabledRaw = configuration["Redis:IsEnabled"];
         var redisEnabled = true;
         if (!string.IsNullOrEmpty(redisEnabledRaw))
@@ -724,7 +721,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
     }
 
     /// <summary>
-    /// T3.2：SignalR Redis backplane（多实例推送正确送达）。
+    /// SignalR Redis backplane（多实例推送正确送达）。
     /// 开关与 Redis:IsEnabled 完全正交——唯一有效判据是 SignalR:UseRedisBackplane；
     /// Redis:Configuration 为空时本方法直接退出，退化行为是"进程内广播"
     /// （DefaultHubLifetimeManager），不是启动失败：功能正常，只是广播范围只有本进程。
@@ -765,17 +762,17 @@ public class AbpAdminHttpApiHostModule : AbpModule
     }
 
     /// <summary>
-    /// T3.2：SPA 的 WebSocket/SSE 不允许设自定义请求头（浏览器规范硬限制），token 只能走
+    /// SPA 的 WebSocket/SSE 不允许设自定义请求头（浏览器规范硬限制），token 只能走
     /// query string 的 access_token。本中间件在认证前把它搬进 Authorization 头，
     /// 并随即从 QueryString 里剥除——保护管道下游（审计 URL、后续日志）。
     /// 只对 Hub 路径前缀生效是安全要求（不给整个 API 开"token 走 query string"的口子），
     /// 不是优化。
-    /// 【渗透测试修复】OpenIddict 校验默认还会从任意请求的 query 提取 access_token（实测
-    /// GET /api/app/audit-log?access_token=... 返回 200）——令牌会泄漏进代理/访问日志与
+    /// OpenIddict 校验默认还会从任意请求的 query 提取 access_token（GET
+    /// /api/app/audit-log?access_token=... 即可认证）——令牌会泄漏进代理/访问日志与
     /// Referer。因此对【非 Hub】路径在认证前强制剥除 access_token：hub 之外 query 带 token
     /// 一律不认证（fail-closed），hub 仍走上面的搬运通道。
-    /// 已验证（T3.2 e2e）：改写 Request.QueryString 后 SignalR negotiate 与 WebSocket
-    /// 握手不受影响——QueryFeature 在 QueryString 变化后会重新解析，传输握手读的 id 参数保留。
+    /// 改写 Request.QueryString 后 SignalR negotiate 与 WebSocket 握手不受影响——
+    /// QueryFeature 在 QueryString 变化后会重新解析，传输握手读的 id 参数保留。
     /// 注意：Hosting 层的 "Request starting" 在任何中间件之前就用原始 QueryString 记录，
     /// 这里的剥离盖不住它——那一层由 Program.cs 里挂的
     /// SignalRQueryStringSanitizingEnricher 在日志出口脱敏。
@@ -806,7 +803,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             }
             else if (context.Request.Query.ContainsKey("access_token"))
             {
-                // OpenIddict 校验默认从 query 提取 access_token（渗透测试实测可认证任意 API）。
+                // OpenIddict 校验默认从 query 提取 access_token（可认证任意 API）。
                 // 非 Hub 路径没有携带它的合法理由：认证前剥除，让这类请求只能走 Authorization 头。
                 var query = QueryHelpers.ParseQuery(context.Request.QueryString.Value);
                 query.Remove("access_token");
@@ -849,13 +846,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
             options.DisableAccessTokenExtractionFromBodyForm = true;
         });
 
-        // 渗透测试修复：/api 路径匿名或 Cookie 过期时，Identity Cookie 的默认挑战是 302 跳
-        // 登录页——API 语义应为 401/403（此前实测匿名 GET /api/app/audit-log 返回 302）。
-        // 非 /api 路径（MVC 账户页等）保持原有重定向行为。
+        // /api 路径匿名或 Cookie 过期时，Identity Cookie 的默认挑战是 302 跳登录页——
+        // API 语义应为 401/403。非 /api 路径（MVC 账户页等）保持重定向行为。
         context.Services.ConfigureApplicationCookie(options =>
         {
-            // 安全审计 L-8：Cookie 属性显式加固（此前完全依赖框架默认值；实测登录 POST 的
-            // Set-Cookie 已带全三项）。HttpOnly=True / SameSite=Lax 明确声明；Secure 跟随
+            // Cookie 属性显式加固（登录 POST 的 Set-Cookie 需带全三项）。
+            // HttpOnly=True / SameSite=Lax 明确声明；Secure 跟随
             // RequireHttpsMetadata 姿态——默认 true（HTTPS 部署，含 dev 的 https:44300）一律
             // 仅安全通道下发，显式 HTTP 内网部署（RequireHttpsMetadata=false，如本地 compose 栈）
             // 退回 SameAsRequest。SameSite 选 Lax 而非 Strict：Lax 保持"同站导航带 Cookie、
@@ -897,7 +893,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             };
         });
 
-        // T2.7: 外部登录 + 每租户动态配置
+        // 外部登录 + 每租户动态配置
         // 注册 GitHub OAuth（占位 ClientId/ClientSecret，实际值由 DynamicExternalLoginOptionsManager 从 Setting 读取）
         context.Services.AddAuthentication()
             .AddGitHub(options =>
@@ -1017,10 +1013,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
     }
 
     /// <summary>
-    /// 后端渲染页（/Account 登录/注册等 Razor 页）的 CSP。对齐 ABP 官方渗透测试报告的
-    /// "CSP Header Not Set [Risk: Medium]" 告警与官方修法（Security Headers 文档）：
-    /// UseContentSecurityPolicyHeader 默认 false——官方口径是 CSP 属应用特异决策，模板不预开。
-    /// 此前本应用从未配置，后端渲染页（SPA 之外的登录链路面）一直没有 CSP；SPA 侧 CSP
+    /// 后端渲染页（/Account 登录/注册等 Razor 页）的 CSP。UseContentSecurityPolicyHeader
+    /// 默认 false（官方口径：CSP 属应用特异决策，模板不预开），本宿主显式开启；SPA 侧 CSP
     /// 由 web/nginx.conf + security-headers.conf 负责，与本处互不覆盖（反代路径 nginx 不加头，
     /// 后端 HTML 响应 nginx 不剥头）。
     /// 值显式钉住官方默认值（middleware 的 DefaultValue 常量），不随包版本漂移：
@@ -1089,7 +1083,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
     {
         Configure<AbpAspNetCoreMvcOptions>(options =>
         {
-            // T3.1：UploadAvatarInput 内嵌 IRemoteStreamContent。ABP 默认只把 IFormFile/IRemoteStreamContent
+            // UploadAvatarInput 内嵌 IRemoteStreamContent。ABP 默认只把 IFormFile/IRemoteStreamContent
             // 本体列入 FormBodyBindingIgnoredTypes（按 action 参数类型判定），嵌套 DTO 会被推成 [FromBody]
             // JSON 绑定，浏览器传的 multipart/form-data 在输入格式化阶段就被 415 短路。
             // 按 ABP 官方口径（support #9202）把该 DTO 加进忽略表，让参数回落到表单绑定，
@@ -1101,7 +1095,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 typeof(AbpAdminApplicationModule).Assembly,
                 settings =>
                 {
-                    // T2.9：GetAllAsync 按 ABP 约定会被剥掉整个 "GetAll" 前缀而落到控制器根路径，
+                    // GetAllAsync 按 ABP 约定会被剥掉整个 "GetAll" 前缀而落到控制器根路径，
                     // 与 GetListAsync 冲突（Swagger 报 Conflicting method/path）。
                     // 规格要求路由为 GET .../open-iddict-scope/all，这里只把这一个动作的 URL 名规范成 "all"
                     // （ActionModel.ActionName 已被 ABP 剥掉 Async 后缀，是 "GetAll"），
@@ -1191,10 +1185,10 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     /// <summary>
     /// 默认拒绝（default-deny）：任何没有授权元数据的请求一律要求已认证。
-    /// 背景是 SettingUi 裸奔事件的病根——上游模块控制器忘了加 [Authorize] 而宿主默认放行，
-    /// 这类问题靠逐端点补丁永远追不完（宿主挂了 13+ 个第三方模块的 HttpApi 包）。
-    /// FallbackPolicy 把它反转为系统属性：未来任何模块升级引入的裸端点最多退化到"登录即可访问"。
-    /// 注意（AuthorizationMiddleware 源码核实，2026-09）：fallback 对"无端点请求"同样生效
+    /// 宿主挂了 13+ 个第三方模块的 HttpApi 包，上游控制器漏加 [Authorize] 靠逐端点补丁
+    /// 追不完——FallbackPolicy 把它反转为系统属性：任何模块升级引入的裸端点最多退化到
+    /// "登录即可访问"。
+    /// 注意（AuthorizationMiddleware 源码核实）：fallback 对"无端点请求"同样生效
     /// （CombineAsync 拿不到 IAuthorizeData 就取 fallback），所以中间件式的匿名出口也必须排在其前面。
     /// 显式豁免清单（都体现为端点元数据，由 AnonymousEndpointSweepTests 双向审计兜住——
     /// 正向"已匿名必登记"、反向"登录链路端点必匿名"）：
@@ -1204,8 +1198,9 @@ public class AbpAdminHttpApiHostModule : AbpModule
     /// - /Account/Login 等登录链路 Razor Pages：PreLoginRazorPagesConvention
     ///   （10.6.1 页面模型无授权标注，不豁免则匿名访客打不开登录页；/Account/Manage 不在豁免列）
     /// - /api/abp/application-configuration(+localization)：PreLoginApiEndpointsConvention
-    ///   （前端登录页拉取基础配置/本地化必需，10.6.1 控制器无授权标注——Chrome 实测抓到过 401）
-    /// - /health-status、/health-ui、/health-api：探针面板，匿名是既有语义（NoExceptionDetails 已防回显）
+    ///   （前端登录页拉取基础配置/本地化必需，10.6.1 控制器无授权标注——否则 401）
+    /// - /health-status：探针端点匿名是既有语义（NoExceptionDetails 已防回显；UI 面板
+    ///   /health-ui、/health-api 已回归要求登录，见 HealthChecksBuilderExtensions）
     /// - wwwroot 静态资源：不含运行时数据，业界默认公开
     /// - ABP 自带 [AllowAnonymous] 端点（登录/注册前置流程等）不受影响
     /// </summary>
@@ -1323,8 +1318,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     /// <summary>
     /// 出厂基线 Redis 连接串（Configuration/Cache.json 随库值）——「生产忘改连接串」姿态告警的比对基准。
-    /// 单一真源：Cache.json 改基线时同步改这里与 RedisStartupPostureTests（OCR refactor 修复：
-    /// 拆分基线后告警常量停在旧串，非生产忘覆盖时告警永久静默）。
+    /// 单一真源：Cache.json 改基线时同步改这里与 RedisStartupPostureTests（否则告警比对串
+    /// 停在旧值，非生产忘覆盖时告警永久静默）。
     /// </summary>
     internal const string ShippedTemplateRedisConfiguration = "127.0.0.1:6379,defaultDatabase=0,abortConnect=false";
 
@@ -1333,7 +1328,6 @@ public class AbpAdminHttpApiHostModule : AbpModule
     /// 默认端口是常态，不该被启动日志刷屏。键位口径与 <see cref="ConfigureRedis"/> /
     /// <see cref="ShouldWarnOnIncoherentRedisPosture"/> 一致：缺省/空 = 启用，仅显式 false 才关
     /// （TryParse 失败到达此处只剩缺省/空一种形态——非法值在 ConfigureServices 已抛）。
-    /// 此前写成「TryParse 失败按未启用」恰好放过要抓的姿态：缺省启用 + 模板串不告警。
     /// </summary>
     internal static bool ShouldWarnOnTemplateRedisConfiguration(
         IConfiguration configuration, string environmentName)
@@ -1426,8 +1420,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
         // CorrelationId：官方启动模板的管线第一环（Volo.Abp.AspNetCore.Tracing 的
         // AbpCorrelationIdMiddleware——读/生成 X-Correlation-Id，经 ICorrelationIdProvider
         // 异步流动，官方文档说明它会自动传播到审计日志、安全日志与 Serilog）。
-        // 此前缺失：ICorrelationIdProvider.Get() 恒 null，三类日志的关联 ID 全空，
-        // 操作日志与审计日志无法互相关联（Chrome 实测确认过）。
+        // 缺少它则 ICorrelationIdProvider.Get() 恒 null，三类日志的关联 ID 全空，
+        // 操作日志与审计日志无法互相关联。
         app.UseCorrelationId();
 
         app.UseAbpRequestLocalization();
@@ -1446,7 +1440,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
         // 仅接管带错误码的业务异常（403/429 + ABP 错误格式），其余原样放行。
         app.UseFriendlyBusinessException();
 
-        // T-FM-02 文件上传内容防线（magic-bytes/脚本扫描），必须在路由与模型绑定之前
+        // 文件上传内容防线（magic-bytes/脚本扫描），必须在路由与模型绑定之前
         app.UseFileUploadContentGuard();
 
         app.UseRouting();
@@ -1459,11 +1453,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
         app.UseAbpSecurityHeaders();
         app.UseCors();
 
-        // T3.2：Hub 路径的 query string token 搬进 Authorization 头（必须在认证之前、Cors 之后）
+        // Hub 路径的 query string token 搬进 Authorization 头（必须在认证之前、Cors 之后）
         UseSignalRQueryStringAuthentication(app);
 
-        // round4 security F1：/connect/token 的 password grant 端点级限流（防绕过页面限流+验证码的
-        // 直接爆破/spraying），必须在 UseAuthentication 之前（OpenIddict 管内没有可挂的早于租户解析的钩子）。
+        // /connect/token 端点级限流（防绕过页面限流+验证码的直接爆破/spraying），
+        // 必须在 UseAuthentication 之前（OpenIddict 管内没有可挂的早于租户解析的钩子）。
         app.UseMiddleware<AbpAdmin.OpenIddict.TokenEndpointRateLimitingMiddleware>();
 
         app.UseAuthentication();
@@ -1473,20 +1467,18 @@ public class AbpAdminHttpApiHostModule : AbpModule
         {
             app.UseMultiTenancy();
 
-            // 租户失配守卫（安全审计 Finding 7 修正）：ConfigureMultiTenancy 为 SPA 子域登录把
+            // 租户失配守卫：ConfigureMultiTenancy 为 SPA 子域登录把
             // __tenant（Query/Header 解析器）挪到了 CurrentUser 之前，副作用是已认证用户的令牌
             // 租户声明可被请求携带的 __tenant 覆盖——ABP 官方安全口径是 CurrentUser 解析器必须
             // 第一（多租户文档 Tenant Resolvers 节），令牌声明优先。本守卫对机器面的已认证请求
             // （/api/ 与 /signalr-hubs/）恢复该口径：带租户声明的用户，当前解析出的租户必须与
             // 声明一致，否则 403——封死「租户 A 用户带 __tenant=租户 B」横向读别的租户数据的通道。
-            // （安全审计 run-1 TV-02 实测：守卫原只拦 Bearer，Identity.Application cookie 认证的
-            // /api 请求携带 __tenant=B 即可读到 B 租户数据——cookie principal 同样带租户声明，
-            // 一并纳入判定。）宿主令牌无租户声明、不在判定内，行为与加守卫前一致（实机观察：
-            // 切到目标租户后下游会话校验在目标租户查不到会话，401）。
+            // cookie principal 同样带租户声明，判定不区分 Bearer 与 cookie。宿主令牌无租户声明、
+            // 不在判定内（宿主切换租户上下文后，下游会话校验在目标租户查不到会话，401）。
             // 刻意只拦机器面两条前缀：cookie 认证的 /Account、/connect/authorize（SPA 登录链路）
-            // 依赖 header-wins 语义，不在此列；SignalR 的 query token 已由上方 T3.2 中间件搬进
+            // 依赖 header-wins 语义，不在此列；SignalR 的 query token 已由上方中间件搬进
             // Authorization 头，天然落入 /signalr-hubs/ 判定。
-            // 不存在的租户名到不了本守卫——ABP 租户中间件对未知租户先行拒绝（实测 404
+            // 不存在的租户名到不了本守卫——ABP 租户中间件对未知租户先行拒绝（404
             // "Tenant not found!"），本守卫只处理「解析成功但与令牌声明不符」的失配。
             // 位置必须在 UseMultiTenancy 之后（租户已解析）、UseDynamicClaims 之前——动态
             // 声明中间件会按当前租户重写 principal，放到它后面比对就失真了。
@@ -1554,14 +1546,14 @@ public class AbpAdminHttpApiHostModule : AbpModule
         // ReservationJanitor；只在宿主注册，DbMigrator 是一次性短进程）。
         await context.AddBackgroundWorkerAsync<AbpAdmin.TokenGateway.Core.ReservationJanitor>();
 
-        // T2.3: 启动时同步静态模板到数据库
+        // 启动时同步静态模板到数据库
         using (var scope = context.ServiceProvider.CreateScope())
         {
             var worker = scope.ServiceProvider.GetRequiredService<StaticTemplateSaveWorker>();
             await worker.SaveStaticTemplatesToDatabaseAsync();
         }
 
-        // T3.2: 打印 HubLifetimeManager 实际实现类型（告警项，不阻断）。
+        // 打印 HubLifetimeManager 实际实现类型（告警项，不阻断）。
         // backplane 关闭时静默退化为进程内广播（DefaultHubLifetimeManager），单实例怎么测都对，
         // 只有多实例才暴露——部署多实例前确认这里不是 Default。
         var hubLifetimeManagerType = context.ServiceProvider
@@ -1592,7 +1584,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
     }
 
     /// <summary>
-    /// T3.3 第 7 步：分布式锁启动探针 + 定时作业全量重注册。
+    /// 分布式锁启动探针 + 定时作业全量重注册。
     /// 用 OnPostApplicationInitializationAsync 而不是 OnApplicationInitialization：
     /// 需要 Quartz 的 IScheduler 已经启动（AbpBackgroundWorkersQuartzModule 在
     /// OnApplicationInitialization 阶段启动 scheduler，我们要排在它之后）。

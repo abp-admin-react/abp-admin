@@ -29,7 +29,7 @@ using SignInResult = Microsoft.AspNetCore.Mvc.SignInResult;
 namespace AbpAdmin.ExtensionGrants;
 
 /// <summary>
-/// T2.7 模拟登录扩展授权：支持租户模拟与用户模拟。
+/// 模拟登录扩展授权：支持租户模拟与用户模拟。
 /// grant_type = "impersonation"，参数：
 ///   - 租户模拟：tenant_id（以目标租户 admin 用户身份进入，需 AbpAdmin.Impersonation.Tenant 权限）
 ///   - 用户模拟：user_id（需 AbpAdmin.Impersonation.User 权限）

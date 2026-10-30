@@ -9,7 +9,7 @@ using Volo.Abp.Account.Web.Pages.Account;
 namespace AbpAdmin.Pages.Account;
 
 /// <summary>
-/// T4.2：已登录用户绑定外部登录。需要 Host 域上的 Identity cookie（OIDC 登录后通常仍在）。
+/// 已登录用户绑定外部登录。需要 Host 域上的 Identity cookie（OIDC 登录后通常仍在）。
 /// 只接受 POST Challenge：Identity cookie 为 SameSite=Lax，跨站 GET 会带 cookie，跨站 POST 不会。
 /// 回调与失败跳转一律 <see cref="AccountPageModel.RedirectSafelyAsync"/>，ReturnUrl 必须在 App:RedirectAllowedUrls 内。
 /// Provider 只允许已接入的方案名，拒绝客户端任意 scheme 以免开放重定向到未注册的中间人。

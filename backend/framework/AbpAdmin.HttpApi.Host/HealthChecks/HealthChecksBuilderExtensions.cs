@@ -91,7 +91,7 @@ public static class HealthChecksBuilderExtensions
         {
             routerOptions.EndpointConfigureActions.Add(endpointContext =>
             {
-                // 安全审计 run-1（TV-07）：AllowAnonymous 只保留给 /health-status 探针端点
+                // AllowAnonymous 只保留给 /health-status 探针端点
                 // （k8s/lb 探活语义，见 ConfigureHealthCheckEndpoint）；UI 面板整组
                 // （/health-ui 面板、/health-api 执行历史 API、/healthchecks-webhooks
                 // 通知注册管理面）不再匿名——FallbackPolicy 恢复为要求登录（健康面板本就

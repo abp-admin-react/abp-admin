@@ -20,7 +20,7 @@ using Volo.Abp.Settings;
 namespace AbpAdmin.Pages.Account;
 
 /// <summary>
-/// 替换开源包登录页。T2.7 双因素跳转与外部登录过滤；T4.3 Passkey；T4.4 验证码（Turnstile / 自托管图形，见 LoginCaptchaManager）。
+/// 替换开源包登录页：双因素跳转、外部登录过滤、Passkey、验证码（Turnstile / 自托管图形，见 LoginCaptchaManager）。
 /// </summary>
 public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptchaPageModel
 {
@@ -77,7 +77,7 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
         await LoadCaptchaAsync();
         if (action == "Login")
         {
-            // round3 接线 Login 限流策略（此前注册后全库零消费者，密码登录无应用层防爆破）：
+            // Login 限流策略（密码登录的应用层防爆破）：
             // 策略含 IP + 邮箱双规则，Checker 会全查——IP 规则防跨账户 password spraying
             // （Identity 只按账户锁定防不了），邮箱规则防单账户换 IP 打点。
             // 参数传用户输入的 userNameOrEmail（邮箱规则按参数分区、大小写归一化）。
@@ -110,8 +110,8 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
 
         // prompt=login 一次性生效（认证完成后从回跳 URL 摘除）：SPA 在租户上下文发起授权
         // 时带 prompt=login（防 IdP 残留会话把宿主/其它租户身份静默带进本租户）。基类登录成功后
-        // 原样回跳 authorize、prompt 仍在 → OpenIddict 再强制出登录页 → 无限回环（全量实测：
-        // fin-ops 已 LoginSucceeded 仍被打回登录表单）。OpenIddict 不替宿主管理 prompt——登录
+        // 原样回跳 authorize、prompt 仍在 → OpenIddict 再强制出登录页 → 无限回环。
+        // OpenIddict 不替宿主管理 prompt——登录
         // 页逻辑本就归宿主（openiddict-core #29 关闭结论），同族问题（select_account 在 authorize
         // 请求中残留致循环）在 openiddict-core #2287 有官方确认；宿主必须自己保证 prompt 只影响
         // 首次交互。摘除时不做解码重编码，state 等其余 query 原样保留。

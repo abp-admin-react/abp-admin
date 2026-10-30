@@ -7,7 +7,7 @@ using Volo.Abp.AspNetCore.SignalR;
 namespace AbpAdmin.SignalR;
 
 /// <summary>
-/// 站内通知/作业进度/导出完成的实时推送 Hub（T3.2）。
+/// 站内通知/作业进度/导出完成的实时推送 Hub。
 /// 只做服务端 → 客户端单向推送，不写业务方法：客户端调业务走 HTTP API，
 /// 走 Hub 会绕开 ABP 的 UoW、审计、权限拦截器（Hub filter 只做认证）。
 /// 路由显式声明（前端硬编码该路径），不依赖"类名去 Hub 后缀转 kebab-case"的约定。

@@ -8,12 +8,12 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// 安全审计极端轮（H-1 补强）：授权码端点强制 PKCE 用 S256，拒绝 plain。
-/// 实测 OpenIddict 7.5 默认放行 code_challenge_method=plain（未知 method 才 400）——
+/// 授权码端点强制 PKCE 用 S256，拒绝 plain。
+/// OpenIddict 7.x 默认放行 code_challenge_method=plain（未知 method 才 400）——
 /// plain 把 verifier 明文放进 authorize 请求，能观察到授权请求（代理日志/Referer）并截获
 /// 授权码的攻击者即可完成兑换，PKCE 对该向量的防护失效。SPA（oidc-client-ts）恒用 S256，
 /// 本守卫只影响攻击者与误配置客户端。RFC 7636 §4.4/OAuth 2.1 草案：公共客户端应使用 S256。
-/// 校验点在 ValidateAuthorizationRequest（登录跳转之前——实测 plain 会在该阶段通过并 302
+/// 校验点在 ValidateAuthorizationRequest（登录跳转之前——plain 会在该阶段通过并 302
 /// 登录页，必须在进入登录流程前拒绝）。
 /// </summary>
 public class RequireS256CodeChallengeHandler : IOpenIddictServerHandler<ValidateAuthorizationRequestContext>

@@ -12,9 +12,9 @@ using Microsoft.Extensions.Primitives;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// 文件管理上传内容防线（GUI 全链路测试 T-FM-02 发现的缺口）：
-/// EasyAbp FileManagement 的通用上传端点不做内容校验，「exe 改名 .png / SVG 含脚本改 .png /
-/// 0 字节文件」均可入库；magic-bytes 校验此前只覆盖头像（ProfileAvatarAppService）。
+/// 文件管理上传内容防线：EasyAbp FileManagement 的通用上传端点不做内容校验，
+/// 「exe 改名 .png / SVG 含脚本改 .png / 0 字节文件」均可入库（magic-bytes 校验仅覆盖
+/// 头像 ProfileAvatarAppService）。
 ///
 /// 在 MVC 模型绑定之前用 FormFeature 解析 multipart，校验每个文件段：
 /// 图片扩展名必须匹配文件签名（magic bytes），.svg/.html 文本段禁止内嵌脚本；
@@ -57,16 +57,15 @@ public class FileUploadContentGuardMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // 安全审计 run-1（TV-06b）：受理端是 MVC 路由（默认容忍尾斜杠），门限原用精确等值——
-        // /api/file-management/file/ 会绕过魔数/脚本扫描直达模型绑定。归一化后与路由受理同口径。
+        // 受理端是 MVC 路由（默认容忍尾斜杠）——门限须与受理同口径，否则
+        // /api/file-management/file/ 绕过魔数/脚本扫描直达模型绑定。
         var path = (context.Request.Path.Value ?? string.Empty).TrimEnd('/');
         var isFileUpload = HttpMethods.IsPost(context.Request.Method) &&
                            (path.Equals("/api/file-management/file", StringComparison.OrdinalIgnoreCase) ||
                             path.Equals("/api/file-management/file/many", StringComparison.OrdinalIgnoreCase));
 
-        // NV-05：ContentLength 有值且 >0 之外，chunked（ContentLength=null）同样要扫——
-        // 此前 chunked 请求整体跳过守卫，匿名主体可用分块传输把改名文件直送模型绑定。
-        // （无体请求 ContentLength==0 依旧跳过；解析本身受 Kestrel/FormOptions 上限约束不变。）
+        // chunked（ContentLength=null）同样要扫，否则分块传输可把改名文件直送模型绑定
+        // （无体请求 ContentLength==0 跳过；解析本身受 Kestrel/FormOptions 上限约束不变）。
         var hasBody = context.Request.ContentLength is null || context.Request.ContentLength.Value > 0;
         if (isFileUpload &&
             context.Request.ContentType != null &&
@@ -132,8 +131,8 @@ public class FileUploadContentGuardMiddleware
             return null;
         }
 
-        // NV-05：只读判定所需的有界前缀（文本样窗 8KB / 魔数 ≤4 字节），不再整文件
-        // CopyToAsync(MemoryStream)+ToArray——那会对每个文件段制造 2 倍文件大小的瞬时托管
+        // 只读判定所需的有界前缀（文本样窗 8KB / 魔数 ≤4 字节），不整文件
+        // CopyToAsync(MemoryStream)+ToArray——整拷会对每个文件段制造 2 倍文件大小的瞬时托管
         // 内存，且本守卫位于认证之前，匿名并发放大（每请求上限 201MiB × N 并发）。
         const int ProbeLength = 8192;
         var head = new byte[ProbeLength];

@@ -13,9 +13,9 @@ using Volo.Abp.Localization;
 namespace AbpAdmin;
 
 /// <summary>
-/// 带错误码 BusinessException 的兜底转译（GUI 全链路测试 R3-D12）。
+/// 带错误码 BusinessException 的兜底转译。
 ///
-/// 【根因（已对照官方源码与文档查明）】ABP 的 AbpExceptionFilter 与
+/// 【根因】（对照 ABP 官方源码与文档）AbpExceptionFilter 与
 /// AbpExceptionHandlingMiddleware 只转译满足以下任一条件的异常：
 /// ① Action 返回 ObjectResult；② 请求为 AJAX（X-Requested-With: XMLHttpRequest）；
 /// ③ Accept 头显式包含 application/json（见 abp.io docs「Exception Handling」与
@@ -26,7 +26,7 @@ namespace AbpAdmin;
 ///
 /// 【管道位置】必须注册在 UseDeveloperExceptionPage/UseErrorPage **之后**（管道上更内层）：
 /// 异常沿管道由内向外 unwind，谁在更内层谁先拿到；同时需在 UseRouting 之前以包住端点。
-/// 放在外层永远轮不到（本轮排障实测踩坑，见 docs/TEST_EVIDENCE_2026-09-21.md §6.5/§7.2）。
+/// 放在外层永远轮不到。
 ///
 /// 【转译规则】与官方默认状态码映射保持一致（IHttpExceptionStatusCodeFinder 语义）：
 /// - IHasHttpStatusCode（操作限流 429）：按接口给出的状态码返回；

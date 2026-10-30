@@ -13,7 +13,7 @@ using Volo.Abp.DependencyInjection;
 namespace AbpAdmin.SignalR;
 
 /// <summary>
-/// <see cref="IRealTimeNotifier"/> 的 SignalR 实现（T3.2），覆盖 Domain.Shared 里的
+/// <see cref="IRealTimeNotifier"/> 的 SignalR 实现，覆盖 Domain.Shared 里的
 /// <see cref="NullRealTimeNotifier"/>（与 ABP 的 NullEmailSender 同替换模式）。
 /// 推送失败只记日志不抛出：SignalR 是加速通道，通知本体已落库，前端下次拉取或轮询会拿到。
 /// SignalR:Enabled = false 时全部 no-op（等价于 Null 实现），用于"出问题一键关掉"

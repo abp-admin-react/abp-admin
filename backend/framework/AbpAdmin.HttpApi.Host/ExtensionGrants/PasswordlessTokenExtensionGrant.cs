@@ -21,7 +21,7 @@ using SignInResult = Microsoft.AspNetCore.Mvc.SignInResult;
 namespace AbpAdmin.ExtensionGrants;
 
 /// <summary>
-/// T2.7 无密码登录扩展授权：支持邮箱验证码与 Magic Link 两种方式。
+/// 无密码登录扩展授权：支持邮箱验证码与 Magic Link 两种方式。
 /// grant_type = "passwordless"，参数：email + code 或 email + magic_link_token。
 /// 凭据的一次性语义：任一路径成功后整条缓存记录删除，另一路径立即失效。
 /// </summary>

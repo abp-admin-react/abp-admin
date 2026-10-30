@@ -13,17 +13,15 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// 安全审计 H-2：end-session（/connect/endsession）时吊销 <see cref="IdentitySession"/>。
-/// 此前登出只销毁认证 Cookie，会话行原样留在库里——被盗的 refresh token 在用户"已登出"
-/// 之后仍可通过 <see cref="IdentitySessionManager.RenewAsync"/> 续期换新令牌（会话行在
-/// = 续期合法）。配合 IdentitySessionOpenIddictServerHandler 对"会话已删"的拒绝，
-/// 登出后旧 refresh token 立即死亡，构成完整的登出吊销链。
-/// 2026-10-10 浏览器实测：SPA 登出（oidc signoutRedirect 携 id_token_hint）后，
-/// 登出前保存的 refresh token 兑换 → 400 invalid_grant，会话表对应行已删。
+/// end-session（/connect/endsession）时吊销 <see cref="IdentitySession"/>。
+/// 只销毁认证 Cookie 不够：会话行还在库里，被盗的 refresh token 在用户"已登出"之后仍可
+/// 通过 <see cref="IdentitySessionManager.RenewAsync"/> 续期换新令牌（会话行在 = 续期合法）。
+/// 配合 IdentitySessionOpenIddictServerHandler 对"会话已删"的拒绝，登出后旧 refresh token
+/// 立即死亡，构成完整的登出吊销链。
 ///
 /// 会话定位：end-session 请求的 id_token_hint（oidc-client-ts signoutRedirect 必带）——
 /// session_id claim 在签发时写入了 id_token destination。这里只解 payload 不验签：
-/// 实测（2026-10-10 极端轮）OpenIddict 对无效 hint 采取宽松语义（垃圾 JWT 也能走完
+/// OpenIddict 对无效 hint 采取宽松语义（垃圾 JWT 也能走完
 /// end-session 流程，302 而非报错），签名校验不能作为本处理器的前提；安全性由另一侧
 /// 保证——"凭 hint 吊销"在最坏情况下（伪造 hint）需要先知道不可猜测的 session_id 值
 ///（Guid N 形式 122 bit 随机），等于只能吊销自己已持有令牌的会话，与合法登出同边界。

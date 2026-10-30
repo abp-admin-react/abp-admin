@@ -50,7 +50,7 @@ public class Program
                     loggerConfiguration
                         .ReadFrom.Configuration(context.Configuration)
                         .ReadFrom.Services(services)
-                        // T3.2: Hub 的 query string 携带 access_token（浏览器 WebSocket 无法设请求头）。
+                        // Hub 的 query string 携带 access_token（浏览器 WebSocket 无法设请求头）。
                         // "Request starting" 在任何中间件之前就用原始 QueryString 记录，
                         // 管道内的剥离盖不住它，必须在日志出口对 /signalr-hubs 路径脱敏。
                         .Enrich.With<SignalR.SignalRQueryStringSanitizingEnricher>()

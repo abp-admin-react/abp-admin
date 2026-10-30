@@ -15,10 +15,10 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// T2.8 SaaS Pro 缺口：登录时校验租户激活状态。
+/// 登录时校验租户激活状态。
 /// Passive 拒绝（提示租户已停用）；ActiveWithLimitedTime 且 ActivationEndDate 已过期拒绝（提示租户已到期）。
 ///
-/// 接入点验证结论（对本仓库 10.6 依赖反编译核实，不要相信直觉）：
+/// 接入点结论（10.6 依赖反编译核实）：
 /// 1. 登录页在开源包 Volo.Abp.Account.Web(.OpenIddict) 里（OpenIddictSupportedLoginModel），
 ///    授权码登录的令牌发放全部汇聚到 OpenIddict 服务器的 ProcessSignIn 事件
 ///    （授权端点签发 code 与 /connect/token 各 grant 签发令牌都会派发该事件）。

@@ -10,7 +10,7 @@ using Volo.Abp.Options;
 namespace AbpAdmin.ExternalLogins;
 
 /// <summary>
-/// T2.7 / T4.5 外部登录每租户动态配置：按当前租户从 Setting 读取 ClientId / ClientSecret。
+/// 外部登录每租户动态配置：按当前租户从 Setting 读取 ClientId / ClientSecret。
 /// </summary>
 public class DynamicExternalLoginOptionsManager<TOptions> : AbpDynamicOptionsManager<TOptions>
     where TOptions : OAuthOptions, new()

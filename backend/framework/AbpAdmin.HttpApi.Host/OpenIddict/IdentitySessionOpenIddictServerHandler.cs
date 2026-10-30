@@ -13,7 +13,7 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// T4.1：在 OpenIddict ProcessSignIn 写入 <see cref="IdentitySession"/>，并把 session_id 放进 principal。
+/// 在 OpenIddict ProcessSignIn 写入 <see cref="IdentitySession"/>，并把 session_id 放进 principal。
 /// 与 <see cref="TenantActivationOpenIddictServerHandler"/> 同一事件、略晚执行：租户已解析、授权码尚未核销。
 /// </summary>
 public class IdentitySessionOpenIddictServerHandler : IOpenIddictServerHandler<ProcessSignInContext>
@@ -86,21 +86,19 @@ public class IdentitySessionOpenIddictServerHandler : IOpenIddictServerHandler<P
         {
             // 刷新类授权（refresh token 等）重放的是旧 sessionId：走续期语义——
             // 行还在则刷新，行已没了（被吊销/互踢）绝不能重建。否则持有 refresh token
-            // 的客户端被踢后靠静默续期原地复活，吊销与防并发登录全部失效（六透镜审查 H1）。
+            // 的客户端被踢后靠静默续期原地复活，吊销与防并发登录全部失效（H1）。
             session = await _sessionManager.RenewAsync(
                 userId,
                 existingSessionId,
                 ip);
             if (session == null)
             {
-                // 安全审计 H-2：会话行已删（登出吊销/管理端吊销/互踢）→ 直接拒绝本次签发
-                // （invalid_grant），而不是"继续签发携带已死 session_id 的令牌、留给 API 侧
-                // 会话校验中间件 401"。旧行为下被盗的 refresh token 在用户登出后仍能无限次
-                // 换取新令牌——换出的 access token 虽过不了中间件，但"令牌铸造机不关机"就是
-                // 持续放大的攻击面。拒绝 = 把会话吊销语义贯彻到令牌端点，持有者只能重新登录。
-                // 2026-10-10 实测：管理端吊销会话后旧 refresh → 400 invalid_grant（本文案）；
-                // SPA 登出（end-session 吊销会话行）后旧 refresh 同样 400；存量 access token
-                // 由 IdentitySessionValidationMiddleware 401 session_revoked 即时失效。
+                // 会话行已删（登出吊销/管理端吊销/互踢）→ 直接拒绝本次签发（invalid_grant），
+                // 而不是"继续签发携带已死 session_id 的令牌、留给 API 侧会话校验中间件 401"——
+                // 否则被盗的 refresh token 在用户登出后仍能无限次换取新令牌（换出的 access
+                // token 虽过不了中间件，但"令牌铸造机不关机"是持续放大的攻击面）。拒绝把会话
+                // 吊销语义贯彻到令牌端点，持有者只能重新登录；存量 access token 由
+                // IdentitySessionValidationMiddleware 401 session_revoked 即时失效。
                 await uow.CompleteAsync();
                 context.Reject(
                     OpenIddictConstants.Errors.InvalidGrant,
@@ -113,8 +111,8 @@ public class IdentitySessionOpenIddictServerHandler : IOpenIddictServerHandler<P
         if (identity != null && !identity.HasClaim(AbpClaimTypes.SessionId, session.SessionId))
         {
             // destinations 必须显式声明：OpenIddict PrepareAccessTokenPrincipal 会剔除
-            // 无 access-token destination 的 claim（六透镜/E2E 轮 High1——缺失时
-            // password-grant 票不含 session_id，会话吊销/互踢对该类票全部失效）
+            // 无 access-token destination 的 claim（缺失时 password-grant 票不含
+            // session_id，会话吊销/互踢对该类票全部失效）
             identity.AddClaim(new Claim(AbpClaimTypes.SessionId, session.SessionId)
                 .SetDestinations(OpenIddictConstants.Destinations.AccessToken,
                                  OpenIddictConstants.Destinations.IdentityToken));

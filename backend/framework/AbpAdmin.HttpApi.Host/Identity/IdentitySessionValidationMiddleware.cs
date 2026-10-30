@@ -8,7 +8,7 @@ using Volo.Abp.Users;
 namespace AbpAdmin.Identity;
 
 /// <summary>
-/// T4.1：令牌带 session_id 但库里已被撤销时返回 401，配合动态声明踢下线。
+/// 令牌带 session_id 但库里已被撤销时返回 401，配合动态声明踢下线。
 /// 没有 session_id 的令牌（客户端凭证、旧票、非用户授权）不拦——那不是本会话模型的票。
 /// 命中后 TouchIfStaleAsync：清理 worker 看 LastAccessed，不续期会把活跃用户踢掉。
 ///
