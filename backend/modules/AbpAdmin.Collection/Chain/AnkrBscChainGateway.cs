@@ -36,8 +36,8 @@ public class AnkrBscChainGateway : IBscChainGateway
     /// 组装 Etherscan V2 请求 URL。两条来源的端点形态不同：
     /// key 池路径 = 基座以 "?apikey=KEY" 结尾（BuildEtherscanBase 截出）；回退路径 = 宿主配置裸端点
     /// （可能没有任何查询参数，也可能自带）。query 以 "&" 开头，因此必须先保证端点已带 "?"，
-    /// 并统一补 V2 多链端点必需的 chainid=56——此前回退路径拼出 "v2/api&contractaddress=…"
-    ///（连 ? 都没有，E2E 真链实测抓出），key 池路径则缺 chainid 被 V2 拒绝。
+        /// 并统一补 V2 多链端点必需的 chainid=56——回退路径不带 "?" 会拼出
+        /// "v2/api&contractaddress=…"，key 池路径缺 chainid 则被 V2 拒绝。
     /// </summary>
     internal static string BuildEtherscanUrl(string endpoint, string query)
     {
@@ -102,7 +102,7 @@ public class AnkrBscChainGateway : IBscChainGateway
         }
         catch (Exception ex) when (ex is ChainRpcException || ex is InvalidOperationException)
         {
-            // 节点报错 / 响应体超限（宿主 5MB 报文透视上限，真链 E2E 抓到）都按「没读完」处理：
+                        // 节点报错 / 响应体超限（宿主 5MB 报文透视上限）都按「没读完」处理：
             // 缩小区间重试是调用方的游标纪律（计划第 5.6 节）
             _logger.LogWarning(ex, "getLogs 未读完（{From}..{To}）", fromBlock, toBlock);
             return (Array.Empty<TokenTransferLog>(), false);
@@ -210,7 +210,7 @@ public class AnkrBscChainGateway : IBscChainGateway
             // LogIndex 优先（Etherscan tokentx 提供 logIndex）：进款单唯一键是 (TxHash, LogIndex)，
             // transactionIndex 在「一笔交易多笔同代币 Transfer」时重复（拆分/批量合约给两个用户地址
             // 打款），会把第二笔塌缩掉——链上到了钱、归集扫走了、却没有进款单，静默少记用户账
-            // （OCR security 抓出）。旧端点无 logIndex 字段时回退 transactionIndex（原行为）
+                        // 。旧端点无 logIndex 字段时回退 transactionIndex
             var logIndex = t.TryGetProperty("logIndex", out var li) && li.GetString() is { } liRaw
                 ? int.Parse(liRaw)
                 : int.Parse(t.GetProperty("transactionIndex").GetString()!);
@@ -328,7 +328,7 @@ public class AnkrBscChainGateway : IBscChainGateway
     private async Task<JsonElement?> RpcOnceAsync(string endpoint, string method, object[] parameters, CancellationToken ct)
     {
         // JSON-RPC 2.0 参数字段名是 params（匿名类型不能叫 params，用字典）——
-        // 写成 parameters 时无参方法侥幸能通、带参方法全部 "No more params"（真链 E2E 抓到）
+                // 写成 parameters 时无参方法侥幸能通、带参方法全部报 "No more params"
         using var content = new StringContent(
             JsonSerializer.Serialize(new Dictionary<string, object>
             {
@@ -359,8 +359,8 @@ public class AnkrBscChainGateway : IBscChainGateway
             throw new ChainRpcException(method + ": " + message);
         }
 
-        // Clone 脱离已释放的 JsonDocument（using 退出后 pooled buffer 失效，实测 E2E 抓到
-        // ObjectDisposedException）——克隆是独立拷贝
+                // Clone 脱离已释放的 JsonDocument（using 退出后 pooled buffer 失效，会抛
+            // ObjectDisposedException）——克隆是独立拷贝
         return root.TryGetProperty("result", out var result) ? result.Clone() : null;
     }
 

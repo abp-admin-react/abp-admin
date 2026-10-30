@@ -17,7 +17,7 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
     /// 选别名（未知/缺省 → DefaultAlias）→ 限并发 → 按「输入粗估 + max_tokens」预占（至少 1）→ 生成上游请求体：
     /// model 换成内部模型、去掉 user、流式强制 include_usage。返回的 ResponseId 是本次固定的 hb- id。
     /// 上游体构造与入参解析全部放在预占之前（不会留下「已预占未释放」的孤儿单）。
-    /// 入参类型从严：max_tokens/stream 键存在但类型非法时直接 400（OCR R2 修复：此前 TryGetValue
+    /// 入参类型从严：max_tokens/stream 键存在但类型非法时直接 400（TryGetValue
     /// 失败静默回落默认值/按非流式处理，客户端误用无感且注释与行为不符）。
     /// </summary>
     public async Task<ChatTicket> BeginAsync(Guid user, JsonObject request, string? bot)
@@ -100,7 +100,7 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
     }
 
     /// <summary>
-    /// 流式中断结算（NV-10）：客户端中途断开时，已 flush 到线上的帧真实消耗了上游计费，
+    /// 流式中断结算：客户端中途断开时，已 flush 到线上的帧真实消耗了上游计费，
     /// 全额解冻 = 白嫖已交付内容。按「输入粗估 + 已见输出字符折算」结算（clamp 到预占额），
     /// 用量行仍记 success=false（流未正常完成，对账口径区分于成功单）。并发额度照常释放。
     /// </summary>
@@ -120,7 +120,7 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
     /// <summary>粗估输入 token：字符数/2 向上取整（中文偏保守），宁多冻不少冻。
     /// 除 messages[].content 外，其余顶层字段（tools/tool_choice/response_format 等）的序列化
     /// 质量同样计入：上游按整个请求体计费（BeginAsync 原样转发），只数消息内容会结构性低估，
-    /// 结算被 clamp 到预占额 ⇒ 差额平台倒贴（NV-09）。</summary>
+    /// 结算被 clamp 到预占额 ⇒ 差额平台倒贴。</summary>
     internal static long EstimatePromptTokens(JsonObject request)
     {
         long chars = 0;

@@ -62,7 +62,7 @@ public abstract class FinanceAppServiceBase : ApplicationService
     /// <summary>
     /// 代理数据边界：持 Scope.Agent 的调用方返回强制归属（当前登录用户 Id），否则 null（不限）。
     /// 持 Scope.All（admin/运营管理面）一律视为不限——ABP 种子把全部权限授给 admin 角色，
-    /// 若只看 Scope.Agent，admin 会被误切成只能看自己的空集（OCR E2E 实测）。
+    /// 若只看 Scope.Agent，admin 会被误切成只能看自己的空集。
     /// 列表/详情用它过滤 AgentId——客户端传参与真实边界无关（与 A6/A7 同口径）；
     /// 未命中时用 404 业务码，不泄露跨属主存在性。
     /// </summary>

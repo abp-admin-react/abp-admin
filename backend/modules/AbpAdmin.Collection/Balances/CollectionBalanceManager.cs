@@ -61,7 +61,7 @@ public class CollectionBalanceManager : DomainService
     {
         // 生产调用方（订单 PayWithBalanceAsync）持有事务性环境 UoW：加入它，不新开。
         // 环境事务必须真的是事务：非事务环境下两条语句各自自动提交，余额不足的失败路径会留下
-        // 已提交的孤儿扣款行——补状态作业会把它当成已付款证据把订单标 Paid（评审 H 级）。
+        // 已提交的孤儿扣款行——补状态作业会把它当成已付款证据把订单标 Paid。
         // 没有环境事务时（直连场景/测试）自开事务性 UoW，保持「要么都在要么都不在」。
         AssertAmbientTransactionIfAny();
         if (_unitOfWorkManager.Current != null)

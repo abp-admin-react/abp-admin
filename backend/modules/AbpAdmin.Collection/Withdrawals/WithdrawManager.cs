@@ -128,7 +128,7 @@ public class WithdrawManager : DomainService
 
         // ①′ 先按固定币种序（USDT→USDC）把该用户两行余额都锁住，再冻结、再计数：
         // 笔数按用户跨币种合并，锁序不统一时 USDT 单（锁序 USDT→USDC）与 USDC 单（USDC→USDT）
-        // 交叉加锁 → PG 死锁检测杀一侧（实测抓出）。对齐线上「先锁资金账户再数笔数」且锁序恒定。
+                // 交叉加锁 → PG 死锁检测杀一侧。对齐线上「先锁资金账户再数笔数」且锁序恒定。
         // 无副作用的条件 UPDATE 拿行锁；行不存在时 0 行更新（退化为单币种行为）。
         foreach (var lockCurrency in new[] { CollectionCurrency.Usdt, CollectionCurrency.Usdc })
         {

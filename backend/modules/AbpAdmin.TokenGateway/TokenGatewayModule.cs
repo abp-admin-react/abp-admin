@@ -58,13 +58,13 @@ public class AbpAdminTokenGatewayModule : AbpModule
         // 解出全部用户的长期付费网关 Key。与宿主对 admin 默认密码同一姿态：非 Development
         // 且未显式配置（或仍为框架默认值）直接拒绝启动。Security.json（不入库）或环境变量注入。
         // 环境判定用 ABP 的 IAbpHostEnvironment（KernelModule 注册，控制台 DbMigrator 与 Web 宿主都有；
-        // OCR E2E 修复：IWebHostEnvironment/IHostEnvironment 在迁移器控制台宿主均未注册，启动即炸）
+        // （IWebHostEnvironment/IHostEnvironment 在迁移器控制台宿主均未注册，启动即炸）
         if (!context.ServiceProvider.GetRequiredService<Volo.Abp.IAbpHostEnvironment>().IsDevelopment())
         {
             var pass = context.GetConfiguration()["StringEncryption:DefaultPassPhrase"];
             var abpDefault = new AbpStringEncryptionOptions().DefaultPassPhrase;
-            // NV-19：compose 提交的字面量回退（docker-compose.yml 的 dev-only-change-me）同样视为
-            // 未显式配置——代码级 fail-fast 此前只认 ABP 框架常量，仓库清单自带的默认值直接放行。
+            // compose 提交的字面量回退（docker-compose.yml 的 dev-only-change-me）同样视为
+            // 未显式配置（ABP 框架常量与仓库清单默认值同样视为未配置）。
             const string composeDevDefault = "dev-only-change-me";
             if (string.IsNullOrWhiteSpace(pass) || pass == abpDefault || pass == composeDevDefault)
             {

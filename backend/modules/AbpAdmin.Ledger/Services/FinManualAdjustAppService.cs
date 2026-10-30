@@ -310,7 +310,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
             throw new BusinessException(FinanceErrorCodes.InvalidEvent).WithData("Field", "same sub-account on both sides");
         }
 
-        // 校验与存储同一字符串：Trim + 大写归一后再入库（OCR R2 修复：此前校验 Trim、存储原值，
+        // 校验与存储同一字符串：Trim + 大写归一后再入库（校验 Trim、存储原值会分叉，
         // 「CNY 」能建草稿、审批过账才被引擎形状校验打回，错误暴露点后移且存量脏数据语义不明）
         var normalizedCurrency = input.Currency!.Trim().ToUpperInvariant();
         return new FinManualAdjustLines(input.Amount!.Value, normalizedCurrency, debit.Id, input.DebitOwnerType, debitOwner,

@@ -31,7 +31,7 @@ public enum FinVoucherStatus
 
 /// <summary>
 /// 调账五态（定稿 §5.1）：Draft→Pending→Rejected/Posted；Rejected→Draft；Posted→Reversed。
-/// 数值随 F1 重排（F0 无 Pending、表内无存量）。
+/// 数值已定型不重排（存量库按数值持久化）。
 /// </summary>
 public enum FinManualAdjustStatus
 {

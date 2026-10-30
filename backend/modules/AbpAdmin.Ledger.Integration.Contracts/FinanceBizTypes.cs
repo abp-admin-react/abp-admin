@@ -49,7 +49,7 @@ public static class FinanceBizTypes
     }
 
     /// <summary>
-    /// A1 资金总览的方向词表（资金口径，OCR E2E 复核修正）：只计真实资金流动——
+    /// A1 资金总览的方向词表（资金口径）：只计真实资金流动——
     /// 流入 = 收款及其完成（pay/settled）；流出 = 退款（refund）与提现打款（payout）。
     /// recognize（预收转收入）/accrue/settle（代币核销）/freeze/post/unfreeze/approve/fee-take
     /// 是内部转移，不产生资金流，计入会把同一笔钱重复计入「今日收款」（pay 贷预收 + recognize 贷收入 双计）。

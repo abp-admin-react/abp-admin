@@ -11,7 +11,7 @@ namespace AbpAdmin.TokenGateway.Http;
 
 public record LoginInput(string? Username, string? UserNameOrEmail, string? Password);
 
-// Route 必须显式声明（OCR E2E 修复：R2 重写时丢失——无 attribute 路由的动作不生成可路由端点，
+// Route 必须显式声明（无 attribute 路由的动作不生成可路由端点，
 // 请求撞上宿主 FallbackPolicy 的匿名拒绝变成裸 401）
 [Route("api/auth")]
 public class AuthController(IdentityUserManager users, KeyStore keys, Wallet wallet,
@@ -27,8 +27,8 @@ public class AuthController(IdentityUserManager users, KeyStore keys, Wallet wal
 
     /// <summary>
     /// abp_admin 账号密码登录 → 会话令牌 + 用户 Key（同一用户复用同一把 hb-）。
-    /// 本端点是匿名凭据校验面，不走宿主登录页/Turnstile/令牌端点限流——此前唯一的防线是
-    /// 按账号的 Identity 锁定计数，防不住跨账号 password spraying。现复用宿主
+    /// 本端点是匿名凭据校验面，不走宿主登录页/Turnstile/令牌端点限流——仅按账号的 Identity
+    /// 锁定计数防不住跨账号 password spraying。复用宿主
     /// OperationRateLimiting 基建：先 TokenEndpoint（按 IP 宽闸兜底），再 Login
     /// （IP+用户名双规则，与页面登录同一策略，阈值可在 OperationRateLimiting 配置调）。
     /// </summary>
@@ -46,8 +46,8 @@ public class AuthController(IdentityUserManager users, KeyStore keys, Wallet wal
         }
         catch (AbpAdminOperationRateLimitingException ex)
         {
-            // 与宿主令牌端点同语义：429 + Retry-After（宿主安全审计 L-5 专门修过头必须下发，
-            // 这里不能丢——爆破客户端拿到退避时间才不会按固定节奏撞限，OCR R2 修复）
+            // 与宿主令牌端点同语义：429 + Retry-After（必须下发——
+            // 爆破客户端拿到退避时间才不会按固定节奏撞限）
             if (ex.Data.Contains("RetryAfterSeconds") &&
                 double.TryParse(ex.Data["RetryAfterSeconds"]?.ToString(), out var retryAfterSeconds))
             {

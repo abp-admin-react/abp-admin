@@ -22,7 +22,7 @@ namespace AbpAdmin.Biz.Template.Settings;
 ///
 /// 【必须 WithProviders("G")】不声明 Providers 时，EasyAbp SettingUi 的 host 侧保存会路由到
 /// T 层且 ProviderKey 为空，而 host 读链对该层的命中在缓存/DB/重启间表现不一致（值被搁浅，
-/// 保存"成功"却不生效）——实测复现过。显式声明 G 后：host 写/读/重置全程钉在 G 层自洽；
+/// 保存"成功"却不生效）。显式声明 G 后：host 写/读/重置全程钉在 G 层自洽；
 /// 租户侧由框架 AbpAdminSettingUiAppService 的钳制写 T(own)、重置清 U+T(own)，G 层不受租户重置影响。
 /// </summary>
 public class BizTemplateSettingDefinitionProvider : SettingDefinitionProvider

@@ -259,8 +259,8 @@ public class CollectionNetworkAdminAppService : ApplicationService
     /// 下一轮生效免重启）。三个链上 worker 开关统一由 Network.Admin 把守（含只读的
     /// 热钱包监控——按 worker 家族而非数据消费者归属治理，监控页的 WithdrawAdmin
     /// 操作员只读消费产物，开关权在链网运维）。
-    /// 下一轮生效免重启）。只写显式提供的参数。此前经 SettingUi 通用设置页可改——评审定为
-    /// 权限错位（资金面开关须由 Network.Admin 把守，而非通用 AbpAdmin.SettingUi.Update）。
+        /// 下一轮生效免重启）。只写显式提供的参数。资金面开关须由 Network.Admin 把守，
+        /// 不交给通用 AbpAdmin.SettingUi.Update（权限错位）。
     /// </summary>
     public virtual async Task SetChainSwitchesAsync(
         bool? scanEnabled = null, bool? sweepEnabled = null, bool? hotWalletWatchEnabled = null)
@@ -294,7 +294,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
     /// 大额进款放行（只入队，不直接入账——入账仍走归集确认的净额路径，对齐线上 confirmDeposit）。
     /// 目标单：Confirmed 且未挂归集任务（大额门停下的单；普通漏挂单同样可放，幂等）。
     /// 链接写入用 CAS（WHERE SweepTaskId IS NULL）：并发双击/与扫链轮竞争时输家 0 行即返回，
-    /// 不再各自建任务留下永孤 Queued（OCR：竞态窗口实存，靠地址互斥索引兜底只是不双扫）。
+        /// 不再各自建任务留下永孤 Queued（竞态窗口实存，地址互斥索引兜底只是不双扫）。
     /// </summary>
     public virtual async Task ApproveLargeDepositAsync(Guid id)
     {
@@ -375,7 +375,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
         }
 
         // 重试清除 FailReason 前先在操作日志留痕原始失败原因（资金动作的取证链：
-        // 实体无历史表，重试成功后该原因将不可再得——OCR 二轮）
+                // 实体无历史表，重试成功后该原因将不可再得）
         Logger.LogWarning("归集任务 {SweepTaskId} 手动重试：历史失败原因「{FailReason}」将被清除",
             id, task.FailReason);
 
@@ -613,8 +613,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
     /// <summary>
     /// 设置充值策略：手续费率 DepositFeeRate（钳制 [0,1]）与自动归集额度 AutoCreditMaxAmount
     /// （钳制 ≥0，0=全部等放行）。建单时快照——改费率只影响新单，符合快照纪律。
-    /// （OCR design：此前只有种子能写这两列，事故时无法经管理面降门/抬门。）
-    /// </summary>
+        /// </summary>
     public virtual async Task SetDepositPolicyAsync(decimal feeRate, decimal autoCreditMaxAmount)
     {
         AssertHost();

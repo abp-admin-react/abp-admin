@@ -13,7 +13,7 @@ public class TokenGatewayPermissionDefinitionProvider : PermissionDefinitionProv
     public override void Define(IPermissionDefinitionContext context)
     {
         var group = context.AddGroup(TokenGatewayPermissions.GroupName);
-        // 安全审计 run-1（TV-05）：TgPlans 无租户列、是宿主全局表——缺省侧（两侧可授）会被
+        // TgPlans 无租户列、是宿主全局表——缺省侧（两侧可授）会被
         // 建租户种子的框架 PermissionDataSeedContributor 授给租户 admin（反编译 10.7.0 实证），
         // 租户 admin 即可改写全平台价目。与 Collection.Network.Admin/Withdraw.Admin 同口径锁 Host。
         var plans = group.AddPermission(TokenGatewayPermissions.Plans.Default,

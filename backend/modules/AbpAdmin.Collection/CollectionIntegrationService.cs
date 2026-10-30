@@ -244,7 +244,7 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
                     }
 
                     // 拿不到渠道金额或金额对不上：保持 Closed，但把行标记为结果未知并留痕——
-                    // 不能只留一条日志（无处可查），M3 的补单作业按商户单号查询时会接手（评审 L 级）
+                    // 不能只留一条日志（无处可查），M3 的补单作业按商户单号查询时会接手
                     await UpdateChannelFieldsAsync(snapshot.Id, tradeNo: closeResult.TradeNo,
                         payload: null, unknown: true,
                         note: "Channel reported paid while closing, but the paid amount is unknown or mismatched; awaiting reconciliation.");

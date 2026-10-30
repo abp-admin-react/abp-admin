@@ -144,7 +144,7 @@ public class WithdrawGuard : DomainService
             UsdtFloor = CollectionAmounts.Format(floor),
             MinBnb = CollectionAmounts.Format(minBnb),
             Bnb = CollectionAmounts.Format(await gateway.GetBnbBalanceAsync(wallet.Address, ct)),
-            // 熔断口径与 EnsureCanPayAsync 统一：任一启用币种余额低于地板即熔断（原先只看 USDT 一行，
+            // 熔断口径与 EnsureCanPayAsync 统一：任一启用币种余额低于地板即熔断（只看 USDT 一行会漏判，
             // USDT 被禁用时状态卡静默显示健康——与审批侧实际判定分裂）；无任何启用币种也视为熔断
             BreakerOpen = tokens.Count == 0,
         };

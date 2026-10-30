@@ -74,7 +74,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
             // 按业务单号列全部收款的查询索引（ListByBusinessAsync 无 Status 谓词，用不了上面的
             // 部分索引——PostgreSQL 只在查询谓词蕴含索引谓词时才选部分索引；补状态作业每轮
-            // 按订单逐个调用，没有它就是顺序扫描，评审 H 级）。
+            // 按订单逐个调用，没有它就是顺序扫描）。
             // 显式命名让 EF 把它与同列组的部分唯一索引当成两个索引实体（不命名会被合并吞掉）
             b.HasIndex(x => new { x.BusinessType, x.BusinessId }, "IX_ColCollections_BusinessType_BusinessId_Query");
         });
@@ -112,7 +112,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.UserId, x.Currency });
 
             // 用户流水分页（GetMyTxnsAsync 按 Seq 倒序 Skip/Take）：没有它每次请求
-            // 都读全量再排序，活跃用户几个月就到万级行（评审 M 级）
+            // 都读全量再排序，活跃用户几个月就到万级行
             b.HasIndex(x => new { x.UserId, x.Seq }, "IX_ColBalanceTxns_UserId_Seq");
 
             // 「是否已有未回冲扣款」由部分唯一索引判断（计划第 5.5 节），不把业务单号本身
@@ -191,7 +191,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => x.TxHash);
 
             // 跳过比例窗口聚合（TokenId + 时间）与用户进款分页（UserId + 时间）——
-            // 表单调增长，无索引则每轮/每请求全扫（评审 M 级）
+            // 表单调增长，无索引则每轮/每请求全扫
             b.HasIndex(x => new { x.TokenId, x.CreationTime });
             b.HasIndex(x => new { x.UserId, x.CreationTime });
         });

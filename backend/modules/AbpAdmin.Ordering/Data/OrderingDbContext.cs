@@ -51,7 +51,7 @@ public class OrderingDbContext : AbpDbContext<OrderingDbContext>
             b.HasIndex(x => x.UserId);
 
             // 用户/管理端列表的默认排序（CreationTime 倒序分页）：订单只增不删，
-            // 没有它每次列表都是全表 top-N 排序（评审遗留核实为真问题）
+            // 没有它每次列表都是全表 top-N 排序
             b.HasIndex(x => x.CreationTime);
 
             // 补状态作业的扫描形状（OrderStatusSyncJobHandler）：Status 单列索引基数太低

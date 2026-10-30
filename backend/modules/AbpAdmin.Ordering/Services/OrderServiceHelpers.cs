@@ -13,7 +13,7 @@ namespace AbpAdmin.Ordering.Services;
 
 /// <summary>
 /// 订单服务共享助手：用户端与管理端两个应用服务跑同一张表，列表过滤、明细映射、
-/// Host 守卫、单号生成各自只有一份（评审 M 级：双份漂移会让用户视图与 Host 视图分叉）。
+/// Host 守卫、单号生成各自只有一份（双份漂移会让用户视图与 Host 视图分叉）。
 /// </summary>
 internal static class OrderServiceHelpers
 {
@@ -73,7 +73,7 @@ internal static class OrderServiceHelpers
         return (skip, take);
     }
 
-    /// <summary>订单异常明细读取（用户端与管理端共用，单一出处——两类视图不分叉，评审 M 级）：
+    /// <summary>订单异常明细读取（用户端与管理端共用，单一出处——两类视图不分叉）：
     /// 批量版是唯一实现，单订单调用方传单元素序列。</summary>
     public static async Task<System.Collections.Generic.Dictionary<Guid, System.Collections.Generic.List<Dtos.OrderAnomalyLineDto>>>
         LoadAnomalyLinesBatchedAsync(OrderingDbContext dbContext, System.Collections.Generic.IEnumerable<Guid> orderIds)

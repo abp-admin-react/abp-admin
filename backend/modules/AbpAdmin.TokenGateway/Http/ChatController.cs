@@ -18,7 +18,7 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
     /// <summary>
     /// 对话请求体上限（2MB，正常对话 KB 量级、长上下文也足够）：宿主为文件上传把 Kestrel 全局
     /// 上限放到 200MB，本端点若继承该上限，持 Key 主体可用巨体 JSON + JsonNode 全量物化
-    /// 钉住数倍内存——这里显式收紧（OCR security 修复）。
+    /// 钉住数倍内存——这里显式收紧。
     /// </summary>
     public const int MaxChatBodyBytes = 2_000_000;
 
@@ -42,7 +42,7 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
     {
         ChatTicket? ticket = null;
         var started = false;
-        // 流式进度账（NV-10）：提到 try 外，catch 的中断结算要读已交付字符
+        // 流式进度账：提到 try 外，catch 的中断结算要读已交付字符
         long prompt = 0, completion = 0, seenChars = 0;
         var gotUsage = false;
         try
@@ -127,12 +127,12 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
         catch (Exception e)
         {
             // ticket 非空 = 已预占未结算：先全额解冻，保证每单只关一次（Wallet 内条件 UPDATE 兜底）。
-            // 解冻自身失败不顶掉对客错误输出——预占单留 Open 由 ReservationJanitor 兜底解冻（OCR R2 修复）
+            // 解冻自身失败不顶掉对客错误输出——预占单留 Open 由 ReservationJanitor 兜底解冻
             if (ticket is not null)
             {
                 try
                 {
-                    // NV-10：流式中客户端断开——已 flush 到线上的帧真实消耗了上游计费，此前
+                    // 流式中客户端断开——已 flush 到线上的帧真实消耗了上游计费，无条件
                     // 无条件全额解冻 = 已交付内容零计费。有交付时按「输入粗估 + 已见输出字符
                     // 折算」结算（clamp 到预占额），用量行记 success=false 区分正常完成；
                     // 未开始流式或零交付（首帧前断开）仍走全额解冻。

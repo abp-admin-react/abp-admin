@@ -23,8 +23,8 @@ namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
 /// 归集一轮（计划第 5.6 节）。写入纪律：列表全部 AsNoTracking，全部写入走带状态守卫的
-/// ExecuteUpdate——跟踪实体与原子更新混用会让轮末 SaveChanges 用陈旧值覆盖回列（实测抓到：
-/// 冷却拉回的任务停在 Queued、TxHash 丢失）。跨 worker 的互斥由部分唯一索引兜底。
+/// ExecuteUpdate——跟踪实体与原子更新混用会让轮末 SaveChanges 用陈旧值覆盖回列
+        /// （冷却拉回的任务停在 Queued、TxHash 丢失）。跨 worker 的互斥由部分唯一索引兜底。
 /// 同址同币合并、每轮取出上限、同址两币不同时广播；冷却看 StatusChangedAt。
 /// 金库地址取自 ColToken；金库私钥系统不保存；用户地址私钥按助记词现推、不落日志。
 /// </summary>
@@ -204,10 +204,10 @@ public class SweepManager : DomainService
         // 重签宽限以 BroadcastAt 计，激活重置 StatusChangedAt 不影响它。
         // 地址级互斥索引（AddressId 上 Status IN (1,2)）会把「同地址已有 Fueling/Sweeping
         // 僵尸任务」的激活打成 23505——是「地址被占」的正常语义而非故障：捕获后本轮跳过该
-        // 任务（卡死告警段会盯住僵尸），此前未捕获会炸掉整轮归集（E2E 实测：Sweeping 僵尸
-        // 占位 + 8433 进款单堆积，激活每轮必撞、归集全线停摆）
-        // NV-18：claim/翻状态/解链三条语句合并进一个内层事务。此前是三条独立自动提交，
-        // 中断窗口（CollectionChainWorkerBase 的轮预算取消是真中断源）会留下「任务已 Fueling
+                // 任务（卡死告警段会盯住僵尸）——不捕获会炸掉整轮归集（Sweeping 僵尸占位 +
+        // 进款单堆积时激活每轮必撞、归集全线停摆）
+                // claim/翻状态/解链三条语句合并进一个内层事务——三条独立自动提交的中断窗口
+        // （CollectionChainWorkerBase 的轮预算取消是真中断源）会留下「任务已 Fueling
         // 且 Amount 已按选中子集聚合、尾巴单仍链接+Confirmed」的部分激活态；下一轮自愈无条件
         // 升级全部链接 Confirmed 单并在确认时全额入账，而链上只广播了选中子集金额 ⇒ 超限入账。
         // 原子化后要么三句全落、要么任务留 Queued 下轮重来。三条语句在绑定内层事务的
@@ -227,7 +227,7 @@ public class SweepManager : DomainService
         catch (Npgsql.PostgresException ex) when (ex.SqlState == "23505")
         {
             // ExecuteUpdateAsync 把约束冲突的 PostgresException 直接抛出（不包 DbUpdateException——
-            // E2E 实测穿透了只捕 DbUpdateException 的第一版谓词）；内层事务随 dispose 回滚
+                        // 不包 DbUpdateException）；内层事务随 dispose 回滚
             Logger.LogWarning(
                 "任务 {TaskId} 激活被地址互斥拦下（同地址存在 Fueling/Sweeping 任务），本轮跳过；僵尸由卡死告警段处置",
                 task.Id);
@@ -247,7 +247,7 @@ public class SweepManager : DomainService
 
         // 超上限的尾巴单解链（SweepTaskId=null）：广播自愈只翻「本任务已链接的 Confirmed 单」，
         // 不解链它们会被自愈误升级为 Sweeping 并在确认时入账——但链上只转了选中子集的金额
-        //（评审 C 级：RoundLimit 被自愈击穿）。解链后由扫链轮确认推进重新链接到下一个任务
+                //（否则 RoundLimit 被自愈击穿）。解链后由扫链轮确认推进重新链接到下一个任务
         await txDb.DepositOrders
             .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Confirmed
                         && !pickedIds.Contains(o.Id))
@@ -262,7 +262,7 @@ public class SweepManager : DomainService
     {
         var now = _clock.Now;
 
-        // 已有打油在途：等回执，不重复广播（否则每轮 60s 连环打油烧 BNB，评审 M 级）
+                // 已有打油在途：等回执，不重复广播（否则每轮 60s 连环打油烧 BNB）
         if (task.GasTxHash != null)
         {
             var gasReceipt = await gateway.GetTransactionReceiptAsync(task.GasTxHash, ct);
@@ -345,10 +345,10 @@ public class SweepManager : DomainService
 
         // 未广播：先自愈（激活的 claim 与选中单翻状态是两条自动提交语句，崩溃窗口会留下
         // 已选中但仍是 Confirmed 的链接单），再签名广播（用户地址私钥现推）。
-        // 超上限尾巴单已在激活时解链，不会被这里误升级（评审 C 级）
+        // 超上限尾巴单已在激活时解链，不会被这里误升级
         if (task.TxHash == null)
         {
-            // NV-18 第二道：自愈升级加金额上限——只升到 task.Amount（= 链上将广播的金额）装得下
+                        // 自愈升级加金额上限——只升到 task.Amount（= 链上将广播的金额）装得下
             // 为止。激活原子化后新数据不会再出现「尾巴单仍链接」的中间态，但存量库的历史部分
             // 激活行/人工补链仍可能让链接 Confirmed 合计超过广播金额；无条件升级会在确认时
             // 全额入账（金库缺口）。超额者留在 Confirmed 由对账/人工路径处置。
@@ -463,7 +463,7 @@ public class SweepManager : DomainService
             return;
         }
 
-        // NV-18 第三道（资金时刻的对账门）：入账前先核对链接单毛额合计 == task.Amount（= 链上
+                // 资金时刻的对账门：入账前先核对链接单毛额合计 == task.Amount（= 链上
         // 广播金额）。不等 ⇒ 说明链接集合与广播子集漂移（历史部分激活/人工补链），此时逐笔
         // 入账就是把没上链的钱记给用户（金库缺口）。fail-closed：任务置失败仅人工，单保持
         // Sweeping 不入账，交卡单告警 + 对账处置。
@@ -494,7 +494,7 @@ public class SweepManager : DomainService
                 // BalanceCreditedEto 在 CreditAsync 内携带同一净额，只发一次。
                 // 两本一致收敛到净额：余额行直接入净额（BalanceCreditedEto 同净额，只发一次）；
                 // 账本按线上口径过毛额（借 1001 / 贷 2201）再扣手续费（借 2201 / 贷 6003），
-                // 2201 净额 = 毛额 − fee = 余额行。若两侧都用净额+fee 再扣会把用户扣两遍（实测抓出）。
+                                // 2201 净额 = 毛额 − fee = 余额行。若两侧都用净额+fee 再扣会把用户扣两遍。
                 var gross = order.Amount ?? 0m;
                 var credit = CollectionLedgerPoster.ResolveCreditAmount(
                     order.Amount, order.ActualAmount, order.Fee);

@@ -65,7 +65,7 @@ public class CollectionLedgerPoster : DomainService
 
     /// <summary>
     /// 充值手续费快照（建单时调用，与 <see cref="ResolveCreditAmount"/> 是费率策略的两半——
-    /// 同文件共置：费数学分裂两处是双扣费险些发生的原因，OCR design 抓出）。
+    /// 同文件共置：费数学分裂两处曾险些造成双扣费）。
     /// fee = truncate8(毛额 × 费率)，actual = 毛额 − fee。费率 0 = 不收费。
     /// 费率钳制 [0,1]：≤0 不收费；≥1 视作全额费（actual≤0 由建单路径转终态）。
     /// 不钳制时 DB 直改的荒谬费率（如 1e19）会让 value×rate×1e8 溢出抛 OverflowException，
@@ -93,7 +93,7 @@ public class CollectionLedgerPoster : DomainService
 
         // 「有 Fee 无快照净额」（仅手工改库可达）：重建 amount−fee 而非返回 0——0 会让
         // CreditAsync 抛 InvalidAmount 回滚整个归集确认 UoW，任务永久卡 Sweeping 并
-        // 阻塞同任务其它进款单（OCR function：管道不可达，但原 0 值已被纯函数测试锁成契约）
+        // 阻塞同任务其它进款单（管道不可达，但 0 值已被纯函数测试锁成契约）
         if (amount is not { } gross)
         {
             return 0m;
@@ -177,7 +177,7 @@ public class CollectionLedgerPoster : DomainService
 
     /// <summary>存量余额开账回填（BizRefId = opening:{userId}:{currency}，幂等防重跑）。
     /// 币种收枚举：调用方曾传 Currency.ToString()（"Usdt"）与提现侧 "USDT" 错位成两个子户，
-    /// E2E 实测抓出——币种码唯一入口是 <see cref="CurrencyCode"/>。</summary>
+    ///——币种码唯一入口是 <see cref="CurrencyCode"/>。</summary>
     public virtual Task<Guid> PostOpeningAsync(Guid userId, Contracts.CollectionCurrency currency, decimal amount)
     {
         var code = CurrencyCode(currency);

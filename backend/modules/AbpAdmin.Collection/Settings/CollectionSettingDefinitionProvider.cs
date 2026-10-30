@@ -68,9 +68,9 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             // 链上 worker 参数热改（宿主配置迁移）：数值/阈值参数在设置页管理（热改免重启）；
             // 资金面开关族（扫链/归集/热钱包监控/提现总开关/提现总闸 Halt）不进设置页——
             // 高危杠杆改由域权限端点把守（Halt 与 Enabled 同拦一条付币管线，同权限位治理；
-            // 评审：布尔闸门渲染成自由文本框还有敲 "True" 静默不拉闸的 fail-open 面）
+            // 布尔闸门渲染成自由文本框还有敲 "True" 静默不拉闸的 fail-open 面）
             //（SetChainSwitchesAsync=Network.Admin / SetWithdrawEnabledAsync=WithdrawAdmin，
-            // 评审：通用 AbpAdmin.SettingUi.Update 挡不住烧 Gas/付币开关），worker 照旧每轮热读。
+            // （通用 AbpAdmin.SettingUi.Update 挡不住烧 Gas/付币开关），worker 照旧每轮热读。
             W(CollectionSettings.Withdraw.BroadcastIntervalSeconds, DefBroadcastIntervalSeconds),
             W(CollectionSettings.Withdraw.BroadcastBatchSize, DefBroadcastBatchSize),
             W(CollectionSettings.Withdraw.AutoApproveBatchSize, DefAutoApproveBatchSize),

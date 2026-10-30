@@ -15,7 +15,7 @@ namespace AbpAdmin.Ledger.Services;
 
 /// <summary>账本查询（余额 / 试算 / 子户余额）。演示过账统一走 FinDemoEventAppService
 /// （POST /api/app/fin-demo-event）——此处曾有一份逐行同构的 post-demo-event 副本，为避免
-/// 双契约漂移已删（OCR design 修复），文档口径见 docs/ledger-f1-decisions.md。</summary>
+/// 双契约漂移已删，文档口径见 docs/ledger-f1-decisions.md。</summary>
 public class FinLedgerAppService : FinanceAppServiceBase
 {
     private readonly IDbContextProvider<LedgerDbContext> _dbContextProvider;
@@ -35,8 +35,8 @@ public class FinLedgerAppService : FinanceAppServiceBase
     [Authorize(FinancePermissions.Ledger.View)]
     public virtual async Task<FinBalanceDto> GetBalanceAsync(GetBalanceInput input)
     {
-        // 代理切片（NV-02）：与 GetSubAccountBalancesAsync 同口径——持 Scope.Agent（且无 Scope.All）
-        // 的调用方无视客户端传参，强制按自己的 AgentId 查 Agent 归属余额。此前本路径未调
+        // 代理切片：与 GetSubAccountBalancesAsync 同口径——持 Scope.Agent（且无 Scope.All）
+        // 的调用方无视客户端传参，强制按自己的 AgentId 查 Agent 归属余额。本路径若不调
         // ResolveAgentScopeAsync，任意 OwnerId 的余额可被切片代理原样读出（跨代理财务披露）。
         var agentScope = await ResolveAgentScopeAsync();
         var ownerType = agentScope != null ? FinOwnerType.Agent : input.OwnerType;
@@ -104,7 +104,7 @@ public class FinLedgerAppService : FinanceAppServiceBase
     }
 
     /// <summary>试算平衡：按科目×币种汇总分录借贷。Scope.Agent 调用方只汇总自己名下子户
-    /// 的分录（NV-02，与余额路径同边界）。</summary>
+    /// 的分录（，与余额路径同边界）。</summary>
     [Authorize(FinancePermissions.Ledger.View)]
     public virtual async Task<FinTrialBalanceDto> GetTrialBalanceAsync(FinTrialBalanceInput input)
     {

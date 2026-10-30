@@ -125,10 +125,10 @@ public class LedgerDataSeedContributor : IDataSeedContributor, ITransientDepende
 
     private async Task SeedDemoVouchersAsync()
     {
-        // 演示账（OCR 需求：净库开箱可测）：走引擎幂等过账，重复种子返回原凭证。
+        // 演示账（净库开箱可测）：走引擎幂等过账，重复种子返回原凭证。
         // 门控三态（优先级从高到低）：Finance:SeedDemoData 显式 true 强制开（生产演示库）、
         // 显式 false 强制关（测试库注入它——Ledger 测试的余额断言按用例自建分录精确计账，
-        // 演示凭证同科目过账会把断言全部抬高（CI 首次全量实测：期望 100 实测 1350=100+1250））、
+        // 演示凭证同科目过账会把断言全部抬高（期望 100 会变 1350=100+1250））、
         // 缺省随 IsDevelopment()（本地净库 dotnet run 自动带演示账）。
         var configured = _configuration["Finance:SeedDemoData"];
         if (string.Equals(configured, "false", StringComparison.OrdinalIgnoreCase))

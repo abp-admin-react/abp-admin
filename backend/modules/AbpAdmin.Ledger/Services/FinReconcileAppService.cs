@@ -17,7 +17,7 @@ namespace AbpAdmin.Ledger.Services;
 
 /// <summary>
 /// A5 对账：默认排除 IsDemo；includeDemo=true 才纳入演示。需 Finance.Ledger.View（列表）/ Finance.Reconcile.Run（跑对账）。
-/// F1：账本内试算（分录重算 Σ借=Σ贷 + 投影 vs 分录）。
+/// 账本内试算（分录重算 Σ借=Σ贷 + 投影 vs 分录）。
 /// 区间按凭证 PostedTime 半开 [rangeStart, rangeEnd)；入参必须带 Z/偏移，否则 ReconcileInvalidRange。
 /// Clock.Kind=Utc，ScopeJson 回写亦带 Z。
 /// </summary>
@@ -57,7 +57,7 @@ public class FinReconcileAppService : FinanceAppServiceBase
         // 三段聚合必须取自同一快照（READ COMMITTED 逐语句快照会让对账期间发生的过账产出假
         // HasDiff 假阳性，进 A1 的 UnreconciledCount）。requiresNew 开独立 UoW 作用域并指定
         // REPEATABLE READ——不能直接挂显式 BeginTransaction：环境事务型 UoW 的连接已在事务里
-        // （OCR E2E 实测 InvalidOperationException）。PG 的 RR=快照隔离：纯 SELECT 不阻塞并发过账。
+        // （会抛 InvalidOperationException）。PG 的 RR=快照隔离：纯 SELECT 不阻塞并发过账。
         using var rrUow = _unitOfWorkManager.Begin(
             new Volo.Abp.Uow.AbpUnitOfWorkOptions
             {

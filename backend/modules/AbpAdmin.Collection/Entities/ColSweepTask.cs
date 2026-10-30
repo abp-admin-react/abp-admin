@@ -61,7 +61,7 @@ public class ColSweepTask : BasicAggregateRoot<Guid>
 
     /// <summary>
     /// 当前在途归集交易的广播时刻（重签宽限的计时起点；清哈希重签时更新）。
-    /// 不与 StatusChangedAt 复用——冷却与宽限是两个时钟，复用会让激活/冷却重置宽限（实测抓到）。
+    /// 不与 StatusChangedAt 复用——冷却与宽限是两个时钟，复用会让激活/冷却重置宽限。
     /// </summary>
     public DateTime? BroadcastAt { get; set; }
 

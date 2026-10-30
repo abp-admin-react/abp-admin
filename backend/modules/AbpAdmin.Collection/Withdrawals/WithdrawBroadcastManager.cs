@@ -139,7 +139,7 @@ public class WithdrawBroadcastManager : DomainService
         var cutoff = _clock.Now.AddMinutes(-timeoutMinutes);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
-        // 轮次级缓存：热钱包 / pending nonce / 币种→代币，整段只查一次（原先逐单重复 RPC/SELECT）
+        // 轮次级缓存：热钱包 / pending nonce / 币种→代币，整段只查一次（避免逐单重复 RPC/SELECT）
         var wallet = await _guard.LoadAsync(ct);
         long? pendingNonce = null;
         if (wallet != null)
@@ -389,7 +389,7 @@ public class WithdrawBroadcastManager : DomainService
     }
 
     /// <summary>
-    /// 统一的「清哈希/nonce 回 Processing 重播」CAS 迁移（原先三处逐份拷贝）：
+    /// 统一的「清哈希/nonce 回 Processing 重播」CAS 迁移（收拢三处拷贝）：
     /// 守卫含 from 状态 + 原哈希 + 原 nonce（无哈希单即 null 守卫），RetryCount+1。
     /// </summary>
     private async Task RequeueToProcessingAsync(ColWithdrawOrder order, WithdrawStatus from, string reason, CancellationToken ct)
@@ -472,7 +472,7 @@ public class WithdrawBroadcastManager : DomainService
                 .SetProperty(o => o.FailReason, (string?)null));
         if (rows == 0)
         {
-            // 区分「已完结幂等」与「状态/哈希不符」：静默成功会让管理端补录假成功（OCR 实测路径）
+            // 区分「已完结幂等」与「状态/哈希不符」：静默成功会让管理端补录假成功
             var current = await dbContext.WithdrawOrders.AsNoTracking()
                 .FirstAsync(o => o.Id == orderId);
             if (current.Status == WithdrawStatus.Completed && current.TxHash == txHash)
@@ -520,7 +520,7 @@ public class WithdrawBroadcastManager : DomainService
             return; // 总闸：整批等下一轮
         }
 
-        // 轮次级缓存：热钱包/代币/偿付检查只做一次（原先逐单重复 2 RPC + 2 SELECT）。
+        // 轮次级缓存：热钱包/代币/偿付检查只做一次（避免逐单重复 2 RPC + 2 SELECT）。
         // 审批不搬链上资金（打款在广播段，那里保留逐单检查），偿付语义按整批净额对照——
         // 整批过不了就整批不动，比逐单放行更保守。
         var wallet = await _guard.LoadAsync(ct);
@@ -747,7 +747,7 @@ public class WithdrawBroadcastManager : DomainService
             return;
         }
 
-        // 无哈希：nonce 仲裁（NV-04）——与 RefundAsync 对同一「BroadcastFailed 无哈希」状态
+                // 无哈希：nonce 仲裁——与 RefundAsync 对同一「BroadcastFailed 无哈希」状态
         // 的裁决口径对齐：账面记录的 NonceUsed 仍在途（pending nonce 已越过它）说明原交易
         // 可能已进 mempool/已挖，此时回队重播会以新 nonce 二次转账 ActualAmount = 双付。
         // 必须在 RequeueToProcessingAsync 清掉 NonceUsed 证据之前裁决。

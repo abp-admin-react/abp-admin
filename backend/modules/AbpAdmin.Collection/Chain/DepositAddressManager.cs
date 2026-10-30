@@ -113,7 +113,7 @@ public class DepositAddressManager : DomainService
         }
 
         // Redis 锁内派生：等待 5 秒，拿不到抛「请重试」；锁内再查一次；撞索引重读
-        // 全局锁而非 per-user：要与「助记词重置」的 check-then-write 互斥（评审 H 级）。
+                // 全局锁而非 per-user：要与「助记词重置」的 check-then-write 互斥。
         // 派生每用户仅一次，全局串行可接受
         var lockKey = CollectionConsts.MnemonicLockKey;
         await using var handle = await _distributedLock.TryAcquireAsync(lockKey, timeout: TimeSpan.FromSeconds(5));
@@ -153,7 +153,7 @@ public class DepositAddressManager : DomainService
                     var nextIndex = Math.Max(HdKeyService.FirstUserAddressIndex, (maxIndex ?? 1) + 1);
 
                     // 锁内列投影重读密文：外层的 network 是锁前快照——重置竞态下密文可能已
-                    // 轮换，用快照派生的首地址在重置后永远不可签名（评审 H 级 TOCTOU）
+                                        // 轮换，用快照派生的首地址在重置后永远不可签名（TOCTOU）
                     var cipherNow = await dbContext.Networks
                         .Where(n => n.Id == networkId)
                         .Select(n => n.MnemonicCipher)

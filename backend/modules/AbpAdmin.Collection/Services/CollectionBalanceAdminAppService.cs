@@ -121,7 +121,7 @@ public class CollectionBalanceAdminAppService : ApplicationService
             .SumAsync(o => (decimal?)o.ActualAmount);
 
         // 聚合在 DB 侧、枚举转字符串在客户端——投影里的 g.Key.ToString() 会被 EF 翻译成
-        // int::text（枚举列存 int），负债卡显示「用户 0 合计」（E2E 客户视角实测）；
+                // int::text（枚举列存 int），负债卡会显示「用户 0 合计」；
         // 状态桶能出枚举名是另一条求值路径，统一收客户端转换防同坑
         var balanceRows = await dbContext.Balances.AsNoTracking()
             .GroupBy(b => b.Currency)

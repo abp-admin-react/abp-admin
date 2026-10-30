@@ -102,7 +102,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                 {
                     // 有一笔 Completed 但金额或币种不一致：只追加一次异常明细（PaymentAnomaly
                     ///标志位在首次追加时置位，本轮询不重复写行），不关单，关单留到订单自己的
-                    ///ExpiresAt（计划第 3.3 节；评审 M 级：无去重时 5 分钟一轮会刷出上百重复行）
+                    ///ExpiresAt（无去重时 5 分钟一轮会刷出上百重复行）
                     var mismatch = completed[0];
                     await _orderPaymentManager.AppendAnomalyAsync(
                         order.Id,
@@ -137,7 +137,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
 
                 // 订单已是 Paid，业务单下另有一笔 Completed 且不是致付来源：无论金额是否一致，
                 // 都追加异常明细并告警（计划第 3.3 节）。余额支付的单（BalanceTxnId 非空）残留的
-                // CollectionId 是换渠道前的旧归因，任何完成的收款都算第二笔（评审 H 级）；
+                // CollectionId 是换渠道前的旧归因，任何完成的收款都算第二笔；
                 // 渠道支付的单只有收款号不等于致付归因才算
                 var second = completed.FirstOrDefault(c =>
                     order.BalanceTxnId != null || c.Id != order.CollectionId);
@@ -247,7 +247,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                     continue;
                 }
 
-                // 状态转移统一走状态机（评审 M 级：作业只编排扫描，不自己拼 Paid 的列集）
+                // 状态转移统一走状态机（作业只编排扫描，不自己拼 Paid 的列集）
                 if (await _orderPaymentManager.MarkPaidFromDebitAsync(order.Id, debit.BalanceTxnId, debit.Currency))
                 {
                     _logger.LogWarning("订单 {OrderId} 由补状态作业按未回冲扣款补标 Paid（BalanceTxnId={TxnId}）",
@@ -296,7 +296,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                     }
 
                     // 过期关闭 + 扣款金额币种对不上：不能复活也不能静默跳过——扣着的钱必须有去处，
-                    // 追加异常明细进人工队列（评审 M 级：原先既不告警也不留痕，出了 7 天窗口就永久失联）
+                    // 追加异常明细进人工队列（否则既不告警也不留痕，出了 7 天窗口就永久失联）
                     await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
                         null, debit.BalanceTxnId.ToString(),
                         "Expired order has an unreversed debit with mismatched amount or currency; needs manual resolution.");
@@ -347,7 +347,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
         var result = await _integrationService.ListCreditedTxnsAsync(state.CreditCursor, BatchSize);
 
         // 批量去重：7 天重扫每轮都会带回已处理行，逐笔 AnyAsync 是每轮 O(批大小) 的点查；
-        // 一次 IN 查出已存在的充值订单，剩下的才走插入（评审 M 级性能）
+        // 一次 IN 查出已存在的充值订单，剩下的才走插入
         var candidateIds = result.Items.Select(t => t.BalanceTxnId).ToList();
         var existingIds = candidateIds.Count == 0
             ? new HashSet<Guid>()

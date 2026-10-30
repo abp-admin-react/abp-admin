@@ -14,7 +14,7 @@ namespace AbpAdmin.Collection.Services;
 /// 余额查询内核（用户侧 my-\* 与管理端 member-\* 的单一实现）：
 /// 两币补零、流水 Seq 倒序分页、充值行链上凭证回填（贷记幂等键 = 进款单 Id）。
 /// 这是资金对账路径——回填口径只允许此一处定义，两个应用服务各自保留
-/// 授权/AssertHost/userId 解析薄壳后委托（OCR 评审：150 行逐行复制会分叉用户侧与管理端对账）。
+/// 授权/AssertHost/userId 解析薄壳后委托（逐行复制会分叉用户侧与管理端对账）。
 /// </summary>
 internal static class BalanceQueries
 {

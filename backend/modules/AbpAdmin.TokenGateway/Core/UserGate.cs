@@ -6,7 +6,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.TokenGateway.Core;
 
 /// <summary>
-/// 凭证消费时的身份账户状态门（NV-08）：hb-/hbs- 凭证一经签发不随身份状态联动
+/// 凭证消费时的身份账户状态门：hb-/hbs- 凭证一经签发不随身份状态联动
 /// （签发时刻查过 IsActive 不代表此刻仍有效），停用/锁定/已删账户的存量凭证
 /// 可继续调用 /v1/* 与钱包面。KeyStore 在解析出 userId 后必须过这道门，
 /// 让「身份被停用」即刻等于「凭证失效」，不再依赖运营手工删 TgApiKeys 行。

@@ -87,7 +87,7 @@ public class KeyStore(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider
     }
 
     /// <summary>
-    /// 哈希命中只是「凭证存在于库」，不等于「身份此刻可用」（NV-08）：签发时刻的
+    /// 哈希命中只是「凭证存在于库」，不等于「身份此刻可用」（）：签发时刻的
     /// IsActive/锁定检查不会随身份状态联动，停用/锁定/已删账户的存量 hb-（无到期）
     /// 与 hbs- 凭证必须在使用时刻过身份状态门。拒绝与未知 Key 同错（不泄露状态差异）。
     /// </summary>

@@ -53,8 +53,8 @@ public class BalanceAuditJobHandler : IScheduledJobHandler, ITransientDependency
     /// 账本不平行（FULL JOIN 三向：流水侧对不上 / 余额侧对不上 / 只有一边有记录）。
     /// 提现 M1 两桶口径：可用桶 = 流水合计剔除 WithdrawSettle（出账行动可用，只动冻结）；
     /// 冻结桶 = Freeze 记 +、Unfreeze 记 −、Settle 记 +Amount（Amount 为 −出账额）。
-    /// 提取成可查询单元：作业只负责告警，检测谓词由测试直接钉住（原先只测「不抛」，
-    /// 检测逻辑退化成恒空也照样绿——评审测试债）
+    /// 提取成可查询单元：作业只负责告警，检测谓词由测试直接钉住（只测「不抛」的话，
+    /// 检测逻辑退化成恒空也照样绿）
     /// </summary>
     [UnitOfWork(isTransactional: false)]
     public virtual async Task<System.Collections.Generic.List<AuditRow>> QueryMismatchesAsync()

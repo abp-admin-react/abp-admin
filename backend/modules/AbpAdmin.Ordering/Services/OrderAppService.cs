@@ -120,7 +120,7 @@ public class OrderAppService : ApplicationService
         query = OrderServiceHelpers.ApplyFilter(query, filter);
 
         var total = await query.CountAsync();
-        // 真分页（评审遗留核实为真问题：原先硬顶 50 无 Skip，第 51 笔起永远取不到）
+        // 真分页（硬顶 50 无 Skip 会让第 51 笔起永远取不到）
         var (skip, take) = OrderServiceHelpers.NormalizePaging(filter, def: 20, cap: 100);
         var items = await query
             .OrderByDescending(o => o.CreationTime)
@@ -183,7 +183,7 @@ public class OrderAppService : ApplicationService
     ///（计划第 3.1、6 节）。渠道调用在 requiresNew 提交之后、扣款工作单元打开之前完成。
     /// 事务边界显式控制：方法内开 requiresNew 非事务工作单元——Auto API 的 UnitOfWork 中间件
     /// 按 HTTP 动词（POST=事务）建环境 UoW，方法级 [UnitOfWork] 特性不改变已建 UoW 的选项，
-    /// 报价写库会被请求后段抛出的渠道异常连带回滚（E2E 实测）。显式 requiresNew 之后行为不再
+    /// 报价写库会被请求后段抛出的渠道异常连带回滚。显式 requiresNew 之后行为不再
     /// 依赖特性传导：报价与支付字段各条语句即时提交，渠道 HTTP 不坐在数据库事务里；
     /// 余额路径仍由 OrderPaymentManager 自带 requiresNew 事务保证扣款+标支付原子。
     /// </summary>
@@ -201,7 +201,7 @@ public class OrderAppService : ApplicationService
         ///Stripe 另有一条：剩余时间不足 30 分钟时 CreateAsync 会拒绝且不插行（计划第 3.1 节），
         ///而 GetOrCreateActiveQuoteAsync 只按「未过期」返回旧 Active 报价，不主动刷新——
         ///不在这里强制换新报价的话，报价会在「已过 30 分钟线但未到 ExpiresAt」的窗口里
-        ///每笔支付都失败且无新报价可拿（评审 M 级）
+        ///每笔支付都失败且无新报价可拿
         if (method == OrderingPayChannel.StripeCheckout
             && quote.ExpiresAt - _clock.Now < Quotes.QuoteManager.StripeMinimumValidity)
         {
@@ -268,7 +268,7 @@ public class OrderAppService : ApplicationService
 
     private static OrderingPayChannel ParsePayMethod(string payMethod)
     {
-        // IsDefined 挡住未定义数值（Enum.TryParse 对 "99" 这类数字串返回 true，评审 M 级）
+        // IsDefined 挡住未定义数值（Enum.TryParse 对 "99" 这类数字串返回 true）
         if (!Enum.TryParse<OrderingPayChannel>(payMethod, ignoreCase: true, out var method)
             || !Enum.IsDefined(typeof(OrderingPayChannel), method))
         {

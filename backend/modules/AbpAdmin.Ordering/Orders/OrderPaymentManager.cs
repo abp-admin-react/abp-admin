@@ -100,7 +100,7 @@ public class OrderPaymentManager : DomainService
 
         // PayAmount/PayCurrency/PayChannel/QuoteId/CollectionId 一起写入（每次发起支付时按当前报价）；
         // 条件更新保证只在 PendingPayment 时生效。0 行 = 发起过程中订单被并发关闭/支付：
-        // 收款单留给过期作业取消，按当前状态如实回报，不谎报 ChannelCreated（评审 L 级）
+        // 收款单留给过期作业取消，按当前状态如实回报，不谎报 ChannelCreated
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var rows = await dbContext.Orders
             .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment)
@@ -159,7 +159,7 @@ public class OrderPaymentManager : DomainService
 
         var now = _clock.Now;
         var rolledBack = false;
-        // using 确保任何路径都释放（评审 M 级：无 dispose 会泄漏 DbContext 作用域与连接）；
+        // using 确保任何路径都释放（无 dispose 会泄漏 DbContext 作用域与连接）；
         // 0 行路径在 using 内回滚、在 using 外（另开的上下文）读状态——计划第 3.2 节
         ///「另开工作单元读当前状态」，不能在已回滚的工作单元里继续读和写
         using (var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
@@ -295,7 +295,7 @@ public class OrderPaymentManager : DomainService
                 // 同一来源再投递，不改状态：仅当订单由渠道收款支付且致付归因正是这一笔。
                 // 余额支付的单（BalanceTxnId 非空）即使残留旧的 CollectionId（换渠道前的
                 ///渠道尝试），其后的任何渠道完成都是「来源不同且已支付」——按计划第 3.2 节
-                ///必须追加异常并告警，不能吞掉（评审 H 级：渠道实际付款后无人记账）
+                ///必须追加异常并告警，不能吞掉（否则渠道实际付款后无人记账）
                 if (order.BalanceTxnId == null && order.CollectionId == collectionId)
                 {
                     return;
@@ -375,7 +375,7 @@ public class OrderPaymentManager : DomainService
                   && pg.ConstraintName.Contains("BalanceTxnId"))
         {
             // 充值订单 BalanceTxnId 部分唯一索引兜底：事件重投/与补插作业并发的赢家已插入。
-            // 只认这一个约束：同毫秒 OrderNo 撞号也是 23505，吞掉会把插入静默延迟一整轮（评审 M 级）
+            // 只认这一个约束：同毫秒 OrderNo 撞号也是 23505，吞掉会把插入静默延迟一整轮
             dbContext.Entry(order).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
         }
     }
@@ -648,7 +648,7 @@ public class OrderPaymentManager : DomainService
     /// <summary>
     /// 过期关闭订单的余额版复活（计划第 3.3 节）：与 <see cref="ReviveFromExpiredCloseAsync"/> 同一守卫
     ///（Closed + Expired + 无异常），写余额归因而不是收款归因。两个复活必须保持同族条件，
-    /// 所以都住在这里——作业不自己拼状态转移（评审 M 级：状态机泄漏）。
+    /// 所以都住在这里——作业不自己拼状态转移（防状态机泄漏）。
     /// </summary>
     public virtual async Task<bool> ReviveFromDebitAsync(
         Guid orderId, decimal amount, AbpAdmin.Collection.Contracts.CollectionCurrency currency, Guid balanceTxnId)

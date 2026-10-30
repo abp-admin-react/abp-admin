@@ -26,7 +26,7 @@ public class CreateWithdrawInput
     public string Amount { get; set; } = default!;
 }
 
-/// <summary>提现单视图（金额一律十进制字符串）。用户/管理两个服务共用一份映射（原先两处 15 字段手抄会漂移）。</summary>
+/// <summary>提现单视图（金额一律十进制字符串）。用户/管理两个服务共用一份映射（避免两处 15 字段手抄漂移）。</summary>
 public class WithdrawOrderDto
 {
     public Guid Id { get; set; }

@@ -36,7 +36,7 @@ public class TokenGatewayDbContext(DbContextOptions<TokenGatewayDbContext> optio
             e.HasIndex(x => new { x.Kind, x.Ref }).IsUnique();
             // (UserId, Kind, CreatedAt) + INCLUDE(Amount)：ViewAsync 的当月 PeriodUsed 聚合走
             // index-only 扫描——旧 (UserId, CreatedAt) 要回表过滤 Kind，重度用户当月流水上万行时
-            // 每次余额查询都重扫（OCR performance 修复）
+            // 每次余额查询都重扫
             e.HasIndex(x => new { x.UserId, x.Kind, x.CreatedAt }).IncludeProperties(x => x.Amount);
         });
         b.Entity<TgReservation>(e =>

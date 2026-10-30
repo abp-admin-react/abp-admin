@@ -218,7 +218,7 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
 /// <summary>
 /// 网关工厂：组装扫链网关，RPC/Etherscan 双通道都支持「key 池优先、旧配置回退」——
 /// 池 = ColChainApiKeys（同服务商多把，管理页增删启停），网关内遇限流/认证错误自动换下一把；
-/// 池空回退网络行 RpcCipher（完整 URL 含 key）/ 宿主配置的 Etherscan 端点（行为与旧版一致）。
+/// 池空回退网络行 RpcCipher（完整 URL 含 key）/ 宿主配置的 Etherscan 端点。
 /// 跨轮轮换：进程内递增偏移，每轮从不同 key 起步（Ankr/Etherscan 免费档限流按 key 计）。
 /// HttpClient 由宿主 IHttpClientFactory 提供。
 /// </summary>
@@ -260,7 +260,7 @@ public class ChainGatewayFactory
             .OrderBy(k => k.CreationTime).ToListAsync();
         foreach (var k in rpcKeys)
         {
-            // 先解密再拼接（OCR R2 修复）：此前 base + Decrypt() 把 null 当空串拼出裸基座 URL，
+                        // 先解密再拼接：base + Decrypt() 会把 null 当空串拼出裸基座 URL，
             // 坏 key 静默混进池、下方「全部解密失败」分支永不可达
             var key = Decrypt(k.KeyCipher, masterKey);
             if (key != null)

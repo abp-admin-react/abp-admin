@@ -40,7 +40,7 @@ public class ReservationJanitor : AsyncPeriodicBackgroundWorkerBase
         ILogger<ReservationJanitor> log)
         : base(timer, scopeFactory)
     {
-        // 下界 fail-fast（OCR R2 修复）：0/负数会把在途对话的预占单当残留解冻（资损/可用性面）
+        // 下界 fail-fast：0/负数会把在途对话的预占单当残留解冻（资损/可用性面）
         if (options.Value.ReservationStaleHours < 1)
         {
             throw new Volo.Abp.AbpInitializationException(
@@ -67,7 +67,7 @@ public class ReservationJanitor : AsyncPeriodicBackgroundWorkerBase
 
         foreach (var r in stale)
         {
-            // 逐条隔离（OCR R2 修复）：单条失败不让本轮剩余条目全部放弃，避免毒行顶队堵死积压
+            // 逐条隔离：单条失败不让本轮剩余条目全部放弃，避免毒行顶队堵死积压
             try
             {
                 // ReleaseAsync 内部条件翻转保证幂等：与真实 Settle 并发时只有一方生效

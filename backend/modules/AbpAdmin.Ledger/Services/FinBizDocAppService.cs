@@ -26,7 +26,7 @@ public class FinBizDocAppService : FinanceAppServiceBase
 
     public virtual async Task<PagedResultDto<FinVoucherDto>> GetListAsync(FinBizDocListInput input)
     {
-        // 代理数据边界统一走基类助手（OCR R2 修复：此前与助手逐字等价的手写内联）
+        // 代理数据边界统一走基类助手（替代与助手逐字等价的手写内联）
         var agentId = (await ResolveAgentScopeAsync()) ?? input.AgentId;
 
         var db = await _db.GetDbContextAsync();
