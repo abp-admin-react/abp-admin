@@ -6,7 +6,7 @@ using Volo.Abp.MultiTenancy;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// T4.6：文件分享链接。匿名端点凭 token 下载。
+/// 文件分享链接。匿名端点凭 token 下载。
 /// 有效条件是 token 命中 + <see cref="IsPublic"/> + <see cref="IsUsable"/>（未过期且未用尽次数）。
 /// 次数消耗必须走 <see cref="TryConsumeDownload"/>：先判定再自增，配合乐观并发避免并发超次。
 /// </summary>

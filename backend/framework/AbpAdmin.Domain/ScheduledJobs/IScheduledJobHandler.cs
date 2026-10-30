@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace AbpAdmin.ScheduledJobs;
 
 /// <summary>
-/// 定时作业处理器抽象（T3.3 第 6 步）。实现一律 ITransientDependency，
+/// 定时作业处理器抽象。实现一律 ITransientDependency，
 /// 放在各自的功能目录下（跟着业务代码走，不集中放 ScheduledJobs/Handlers/）。
 /// 每次触发都会在本次执行的 scope 里解析一个新实例——实例字段不得跨调用携带状态。
 ///

@@ -4,7 +4,7 @@ using Volo.Abp.Security.Encryption;
 namespace AbpAdmin.Tenants;
 
 /// <summary>
-/// 租户连接字符串的加密/解密与掩码（T2.8 SaaS Pro 缺口第 6 项）。
+/// 租户连接字符串的加密/解密与掩码。
 ///
 /// 这是一处有意偏离 ABP Pro 行为的地方：Pro 的文档明确写着租户连接字符串按原样持久化、
 /// 按原样返回，不加密。连接字符串包含数据库密码，明文存储与明文返回是不可接受的风险，

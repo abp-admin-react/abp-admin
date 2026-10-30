@@ -6,7 +6,7 @@ using Volo.Abp.Sms;
 namespace AbpAdmin.Sms;
 
 /// <summary>
-/// 短信厂商未配置时的兜底 sender（T3.5）：不抛异常，打一条 Warning 让"短信没发"在日志里可见。
+/// 短信厂商未配置时的兜底 sender：不抛异常，打一条 Warning 让"短信没发"在日志里可见。
 /// 与 NullEmailSender 同哲学；不用框架自带的 NullSmsSender 是因为它的日志没有指出
 /// "厂商未配置"这个真正原因（且我们希望日志里手机号打码）。
 /// </summary>

@@ -12,9 +12,9 @@ using FileType = EasyAbp.FileManagement.Files.FileType;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// 文件上传完成 → 创建缩略图映射行并入队生成作业（T3.1）。
+/// 文件上传完成 → 创建缩略图映射行并入队生成作业。
 ///
-/// 接法说明（规格第 7 步的二选一）：T1.1 没有产出我们自己的上传 AppService 包装
+/// 接法说明（规格第 7 步的二选一）：没有产出我们自己的上传 AppService 包装
 /// （前端直接调模块的 multipart 端点），所以走 EntityCreatedEventData&lt;File&gt; 本地事件。
 /// 这是 ABP 框架对聚合根插入的标准事件（EasyAbp 模块自己的 FileCreatedEventHandler
 /// 也依赖同一个事件），不是对模块实现细节的隐式依赖；且任何上传路径（含将来其他入口）

@@ -22,7 +22,7 @@ public static class MenuConsts
 
     /// <summary>
     /// 授权提供者键（ProviderName=R 时存角色名）。必须 ≥ ABP IdentityRole.Name 上限 256——
-    /// 此前 64，角色名 65+ 的授权在插入时撞列宽 500（宽度校验在 ABP 侧，本服务无法前置拦截）。
+    /// 宽度须容 65+ 字符的角色名（插入时撞列宽 500（宽度校验在 ABP 侧，本服务无法前置拦截）。
     /// </summary>
     public const int MaxProviderKeyLength = 256;
 

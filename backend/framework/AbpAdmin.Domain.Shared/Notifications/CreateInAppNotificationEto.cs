@@ -7,7 +7,7 @@ using Volo.Abp.MultiTenancy;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 站内信通知创建 ETO（T3.5），形状对齐模块自带的邮件创建 ETO。
+/// 站内信通知创建 ETO，形状对齐模块自带的邮件创建 ETO。
 /// 业务代码不要直接构造它——走 INotificationDispatcher（ETO 构造函数签名随模块版本漂移）。
 /// </summary>
 [Serializable]

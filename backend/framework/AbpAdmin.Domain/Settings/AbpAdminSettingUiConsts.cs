@@ -10,7 +10,7 @@ namespace AbpAdmin.Settings;
 public static class AbpAdminSettingUiConsts
 {
     /// <summary>
-    /// 密码控件类型。EasyAbp SettingUi 2.10 的 SettingUiConst.Components 没有该类型（T3.5 前端扩展）。
+    /// 密码控件类型。EasyAbp SettingUi 2.10 的 SettingUiConst.Components 没有该类型。
     /// </summary>
     public const string PasswordType = "password";
 

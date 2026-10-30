@@ -10,7 +10,7 @@ public static class AbpAdminConsts
     public const string AdminPasswordDefaultValue = "1q2w3E*";
 
     /// <summary>
-    /// T3.1：头像版本号在 IdentityUser.ExtraProperties 里的 key。
+    /// 头像版本号在 IdentityUser.ExtraProperties 里的 key。
     /// 前端拼头像 URL 时带 ?v={version} 击穿插件/CDN/浏览器缓存；不建真实列（从不按它查询）。
     /// </summary>
     public const string AvatarVersionPropertyName = "AvatarVersion";

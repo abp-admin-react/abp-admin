@@ -13,7 +13,7 @@ using Volo.Abp.Users;
 namespace AbpAdmin.Account;
 
 /// <summary>
-/// T2.7 无密码登录凭据的校验与消费（Domain 层，Application.Tests 可直接覆盖）。
+/// 无密码登录凭据的校验与消费（Domain 层，Application.Tests 可直接覆盖）。
 /// 一次性语义：验证码与 Magic Link token 共享同一条缓存记录，任一路径成功后整条删除，
 /// 另一路径立即失效；重发由 AccountProAppService 先删旧凭据再写新凭据。
 /// 令牌签发由 HttpApi.Host 的 PasswordlessTokenExtensionGrant 调用本类完成。
@@ -58,7 +58,7 @@ public class PasswordlessLoginManager : DomainService
 
         // 单次消费原子化（与 GDPR 下载 token 的 ConsumeDownloadTokenAsync 同型）：
         // ABP 的 IDistributedCache.RemoveAsync 不返回被删条目（无 Redis GETDEL 语义），
-        // 原先「读 → 验 → 删」三步非原子，并发重放可双双通过校验各自换取令牌。
+        // 「读 → 验 → 删」三步非原子时，并发重放可双双通过校验各自换取令牌。
         // 分布式锁把三步收进临界区：并发重放只有一个能在锁内命中缓存条目，
         // 删除释放后后来者读到的必是未命中。
         await using var handle = await _distributedLock.TryAcquireAsync(
@@ -73,7 +73,7 @@ public class PasswordlessLoginManager : DomainService
 
         var cacheItem = await _passwordlessTokenCache.GetAsync(cacheKey);
 
-        // 比对改 CryptographicOperations.FixedTimeEquals（UTF8 字节级常数时间）：
+        // 比对用 CryptographicOperations.FixedTimeEquals（UTF8 字节级常数时间）：
         // string == 按字符比较、首字符不同即返回，理论上可作时间侧信道逐位猜码
         //（校验侧限流 5 次/10 分钟已缓解，这里把残余风险也消掉）。
         var isValid = cacheItem != null

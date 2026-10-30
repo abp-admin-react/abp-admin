@@ -9,7 +9,7 @@ using Volo.Abp.Threading;
 namespace AbpAdmin.Identity;
 
 /// <summary>
-/// T4.1：按设置项清理不活跃会话。默认 1 小时一轮、保留 30 天。
+/// 按设置项清理不活跃会话。默认 1 小时一轮、保留 30 天。
 /// 判定用 LastAccessed（没有则 SignedIn）。请求中间件会 TouchIfStaleAsync，避免把还在打 API 的会话当僵尸。
 /// </summary>
 public class IdentitySessionCleanupBackgroundWorker : AsyncPeriodicBackgroundWorkerBase

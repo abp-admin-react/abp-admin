@@ -13,8 +13,8 @@ internal static class ImagingConfigurator
 {
     public static void ConfigureImaging(this IServiceCollection services, IConfiguration configuration)
     {
-        // T3.1: 图片处理。provider = SkiaSharp（MIT），不用 ImageSharp（Split License）。
-        // 已核实（10.6.0 程序集反射）：SkiaSharpResizerOptions 的成员名是 SKSamplingOptions，
+        // 图片处理。provider = SkiaSharp（MIT），不用 ImageSharp（Split License）。
+        // SkiaSharpResizerOptions 的成员名是 SKSamplingOptions（10.6.0 程序集反射核实），
         // Quality 默认 75；SkiaSharpCompressOptions 只有 Quality（默认 75）。
         services.Configure<SkiaSharpCompressOptions>(options =>
         {

@@ -14,7 +14,7 @@ using Volo.Abp.Timing;
 namespace AbpAdmin.AuditLogs;
 
 /// <summary>
-/// 审计导出文件清理（T3.3 第 6 步，JobType = AbpAdmin.AuditLogExportCleanup）。
+/// 审计导出文件清理。
 /// 删除超过保留期的导出记录（AbpAuditLogExcelFiles）及其 blob。
 /// 只认 audit-logs- 前缀的文件名：AuditLogExcelFile 表同时被用户导出（UserExportJob，
 /// blob 在另一个容器）复用，靠文件名前缀区分归属，避免删错行、清错容器。
@@ -57,7 +57,7 @@ public class AuditLogExportCleanupJobHandler : IScheduledJobHandler, ITransientD
     {
         var cutoff = _clock.Now.AddDays(-RetentionDays);
 
-        // NV-27：查询关过滤器全租户清扫（宿主上下文默认只见 TenantId IS NULL 行，租户用户的
+        // 查询关过滤器全租户清扫（宿主上下文默认只见 TenantId IS NULL 行，租户用户的
         // 审计导出文件永不过期）。blob 删除另需按行切租户：容器 IsMultiTenant=true 时 blob
         // 路径跟 CurrentTenant 走，过滤器禁用不影响它——不切就删到 host 路径上，租户 blob 残留。
         using (_dataFilter.Disable<IMultiTenant>())

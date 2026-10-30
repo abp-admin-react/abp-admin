@@ -13,7 +13,7 @@ public class SaasSettingDefinitionProvider : SettingDefinitionProvider
 {
     public override void Define(ISettingDefinitionContext context)
     {
-        // ========== T2.8 SaaS Pro 缺口 ==========
+        // ========== SaaS Pro 缺口 ==========
         // 对齐 Pro 的 Volo.Saas.EnableTenantBasedConnectionStringManagement，默认 true。
         // isVisibleToClients: true —— 前端需要通过 application-configuration 读取该值来隐藏连接串管理 UI。
         context.Add(

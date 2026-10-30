@@ -1,7 +1,7 @@
 namespace AbpAdmin.Sms;
 
 /// <summary>
-/// 短信厂商标识（T3.5），即 <see cref="Settings.AbpAdminSettings.Sms.Provider"/> 设置项的可选值。
+/// 短信厂商标识，即 <see cref="Settings.AbpAdminSettings.Sms.Provider"/> 设置项的可选值。
 /// </summary>
 public static class AbpAdminSmsProviders
 {

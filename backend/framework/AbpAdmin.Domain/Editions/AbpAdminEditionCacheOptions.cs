@@ -3,7 +3,7 @@ using System;
 namespace AbpAdmin.Editions;
 
 /// <summary>
-/// 版本解析缓存选项（T2.8 SaaS Pro 缺口第 3 项）。
+/// 版本解析缓存选项。
 /// 对齐 Pro 的 EditionDynamicClaimsPrincipalContributorCacheOptions，
 /// 作用于 TenantConfigurationCacheItem（租户的「有效版本」由 EditionAwareTenantStore 写入该缓存）。
 /// </summary>

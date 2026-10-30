@@ -1,7 +1,7 @@
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 通知渠道标识常量（T3.5）。值与 T3.4 数据字典 NotificationMethod、
+/// 通知渠道标识常量。值与 数据字典 NotificationMethod、
 /// EasyAbp NotificationService 的 NotificationMethod 对齐——散落的裸字符串拼错要到运行时才暴露。
 /// </summary>
 public static class NotificationMethodConsts

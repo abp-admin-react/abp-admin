@@ -16,8 +16,8 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.AuditLogs;
 
 /// <summary>
-/// 过期审计日志清理（T3.3 第 6 步，JobType = AbpAdmin.AuditLogCleanup）。
-/// 由 T2.1 的 ExpiredAuditLogDeleterWorker（固定间隔 worker）迁移而来，业务逻辑不变：
+/// 过期审计日志清理。
+/// 由 的 ExpiredAuditLogDeleterWorker（固定间隔 worker）迁移而来，业务逻辑不变：
 /// 两层开关——host 侧总开关 + 租户侧保留天数设置。
 /// host 级作业（TenantId 为 null）保持原 worker 语义：遍历所有租户 + host 各自清理；
 /// 租户级作业只清理本租户。
@@ -106,7 +106,7 @@ public class AuditLogCleanupJobHandler : IScheduledJobHandler, ITransientDepende
         // 避免一条 DELETE 打穿几十万行导致锁表。
         // 取消语义：取消检查发生在批边界，但事务粒度是"租户"而非"批"——
         // uow.SaveChangesAsync 只是把已删批发进本租户事务，租户中途取消时
-        // CompleteAsync 不会执行、该租户本轮全部已删批回滚；此前已 Complete 的租户不受影响。
+        // CompleteAsync 不会执行、该租户本轮全部已删批回滚；已 Complete 的租户不受影响。
         using (var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
         {
             while (true)

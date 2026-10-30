@@ -169,7 +169,7 @@ public class MenuManager : DomainService, ITransientDependency
     public virtual async Task EnsureTenantMenusAsync(Guid tenantId, HashSet<Guid>? allowedTemplateMenuIds = null)
     {
         // 短缓存命中：该租户一分钟内已确认过非空，跳过计数查询（my-menu 是全站最高频接口）。
-        // 过期条目顺手驱逐（round4）：只读不删会让字典随租户创建/删除无限增长。
+        // 过期条目顺手驱逐：只读不删会让字典随租户创建/删除无限增长。
         if (SeededCheckCache.TryGetValue(tenantId, out var until))
         {
             if (DateTime.UtcNow < until)

@@ -15,7 +15,7 @@ namespace AbpAdmin.DataDictionaries;
 public class EnumDictionarySyncItemPlan
 {
     /// <summary>枚举成员的数值字符串（"0"、"1"）。不用成员名：ABP 的 JSON 输出侧枚举序列化为数值，
-    /// 前端 valueEnum 的键必须跟接口返回值对得上（04 T3.4 第 11 步，已拍板）。</summary>
+    /// 前端 valueEnum 的键必须跟接口返回值对得上（04 ，已拍板）。</summary>
     public string Code { get; set; } = default!;
 
     /// <summary>成员上的 [Description]，缺省回落成员名（并打 Warning）。</summary>
@@ -46,7 +46,7 @@ public class EnumDictionarySyncPlan
 }
 
 /// <summary>
-/// 枚举 → 数据字典的同步计划构建器（T3.4 第 11 步）。静态方法独立出来是为了单测
+/// 枚举 → 数据字典的同步计划构建器。静态方法独立出来是为了单测
 /// （Warning、冲突抛异常、Description 回落这些行为不用起数据库就能验）。
 /// </summary>
 public static class EnumDictionarySyncPlanBuilder

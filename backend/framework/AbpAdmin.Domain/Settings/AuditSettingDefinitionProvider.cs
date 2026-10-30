@@ -13,7 +13,7 @@ public class AuditSettingDefinitionProvider : SettingDefinitionProvider
 {
     public override void Define(ISettingDefinitionContext context)
     {
-        // T2.1 审计日志过期清理
+        // 审计日志过期清理
         context.Add(
             new SettingDefinition(
                 AbpAdminSettings.Audit.ExpiredItemDeletionEnabled,

@@ -62,7 +62,7 @@ namespace AbpAdmin;
     typeof(AbpDataDictionaryDomainModule),
     typeof(AbpSettingUiDomainModule),
     typeof(AbpImagingSkiaSharpModule),
-    // T3.5 通知服务：核心 + 邮件/短信 provider + MailKit + 短信厂商。
+    // 通知服务：核心 + 邮件/短信 provider + MailKit + 短信厂商。
     // 注意不引 EasyAbp.Abp.Sms.TencentCloud 的包装模块 AbpSmsTencentCloudModule：
     // 它的凭据设置项 isEncrypted: false（1.21.0 反编译核实），不满足"凭据必须加密"；
     // 我们依赖底层 AbpTencentCloudSmsModule（提供 ITencentCloudApiRequester 与请求类型），
@@ -80,7 +80,7 @@ public class AbpAdminDomainModule : AbpModule
 {
     public override void PreConfigureServices(ServiceConfigurationContext context)
     {
-        // T2.5: 注册操作限流拦截器
+        // 注册操作限流拦截器
         context.Services.OnRegistered(OperationRateLimitingInterceptorRegistrar.RegisterIfNeeded);
         // 防重复提交（对标 RuoYi @RepeatSubmit）
         context.Services.OnRegistered(RateLimiting.PreventDuplicateSubmitInterceptorRegistrar.RegisterIfNeeded);
@@ -125,7 +125,7 @@ public class AbpAdminDomainModule : AbpModule
     // 反方向是安全的：Async 路径会经基类默认实现调到这里的同步方法，宿主行为不变。
     public override void OnApplicationInitialization(ApplicationInitializationContext context)
     {
-        // T3.1: 双向约束的启动期校验——头像白名单里每个扩展名都必须能被
+        // 双向约束的启动期校验——头像白名单里每个扩展名都必须能被
         // FileSignatures 识别，对不上就快速失败（快速失败胜过运行期放行）
         var imagingOptions = context.ServiceProvider.GetRequiredService<IOptions<Imaging.AbpAdminImagingOptions>>().Value;
         var unrecognizable = Imaging.FileSignaturesImageContentValidator
@@ -137,7 +137,7 @@ public class AbpAdminDomainModule : AbpModule
                 $"{string.Join(", ", unrecognizable)}。请修正白名单或在 FileSignaturesImageContentValidator 补格式映射。");
         }
 
-        // T2.5: 校验所有策略引用的具名分区解析器已注册（启动时失败而不是运行时发现）
+        // 校验所有策略引用的具名分区解析器已注册（启动时失败而不是运行时发现）
         var rateLimitingOptions = context.ServiceProvider.GetRequiredService<IOptions<AbpAdminOperationRateLimitingOptions>>().Value;
         foreach (var (policyName, policy) in rateLimitingOptions.Policies)
         {
@@ -157,7 +157,7 @@ public class AbpAdminDomainModule : AbpModule
             }
         }
 
-        // T2.2: 为所有本地化资源添加数据库贡献者。
+        // 为所有本地化资源添加数据库贡献者。
         // 贡献者是进程级常驻对象：必须给它应用根容器（IAbpApplication.ServiceProvider），
         // 不能给 context.ServiceProvider——ABP 的 InitializeModules 用 using CreateScope()
         // 跑模块初始化，该 scope 初始化结束即销毁（00-overview 6.5 节 captive dependency）。
@@ -170,7 +170,7 @@ public class AbpAdminDomainModule : AbpModule
             resource.Contributors.Add(new DbLocalizationResourceContributor(rootServiceProvider, currentTenant));
         }
 
-        // T3.3：T2.1 的 ExpiredAuditLogDeleterWorker 已删除，过期审计日志清理改由
+        // 过期审计日志清理由
         // AuditLogCleanupJobHandler（JobType = AbpAdmin.AuditLogCleanup）按 cron 执行。
     }
 }

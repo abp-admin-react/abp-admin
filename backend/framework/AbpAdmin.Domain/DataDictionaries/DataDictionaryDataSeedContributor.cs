@@ -12,7 +12,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.DataDictionaries;
 
 /// <summary>
-/// 手写字典种子（T3.4 第 5 步）：没有对应 C# 枚举的字典在这里定义。
+/// 手写字典种子：没有对应 C# 枚举的字典在这里定义。
 /// 对应枚举的字典（TenantActivationState/FileThumbnailState/DataScope）不在这里写——
 /// 交给 EnumDataDictionarySyncDataSeedContributor 自动物化，否则枚举加成员时要同时改两处、必然漂移。
 ///
@@ -123,7 +123,7 @@ public class DataDictionaryDataSeedContributor : IDataSeedContributor, ITransien
             new(AbpAdminDictionaryCodes.EnabledStatusItems.Disabled, "停用", TagType: DataDictionaryTagTypes.Error)
         ]),
 
-        // 翻译表：对齐 T3.5 通知渠道标识（EasyAbp NotificationService 的 NotificationMethod 值：
+        // 翻译表：对齐 通知渠道标识（EasyAbp NotificationService 的 NotificationMethod 值：
         // Mailing = 模块 Mailing provider，Sms = 模块 Sms provider，InApp = 自研站内信）
         new(AbpAdminDictionaryCodes.NotificationMethod, "通知渠道", "翻译表（对齐 T3.5 渠道标识，值集合由后端渠道实现决定）",
         [
@@ -142,14 +142,14 @@ public class DataDictionaryDataSeedContributor : IDataSeedContributor, ITransien
             new("PATCH", "PATCH")
         ]),
 
-        // 翻译表：对齐 T3.3 ScheduledJobExecution.Success（bool）的 JSON 表示
+        // 翻译表：对齐 ScheduledJobExecution.Success（bool）的 JSON 表示
         new(AbpAdminDictionaryCodes.ScheduledJobResult, "定时作业执行结果", "翻译表（对齐 T3.3 执行结果）",
         [
             new("true", "成功", TagType: DataDictionaryTagTypes.Success),
             new("false", "失败", TagType: DataDictionaryTagTypes.Error)
         ]),
 
-        // 翻译表：T2.4 的状态由 ReadyTime 推导（无独立状态字段），Pending = 准备中，Ready = 已就绪
+        // 翻译表：的状态由 ReadyTime 推导（无独立状态字段），Pending = 准备中，Ready = 已就绪
         new(AbpAdminDictionaryCodes.GdprRequestState, "GDPR 请求状态", "翻译表（T2.4 由 ReadyTime 推导）",
         [
             new("Pending", "准备中", TagType: DataDictionaryTagTypes.Processing),

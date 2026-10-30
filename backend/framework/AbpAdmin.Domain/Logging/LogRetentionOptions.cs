@@ -3,7 +3,7 @@ using System;
 namespace AbpAdmin.Logging;
 
 /// <summary>
-/// 日志保留期（借鉴 Admin.NET LogJob / ruoyi-vue-pro 日志清理 Job——两家都有、基座此前缺）。
+/// 日志保留期（借鉴 Admin.NET LogJob / ruoyi-vue-pro 日志清理 Job——两家都有）。
 /// 键位跟随各日志子系统：<c>OperationLogs:RetentionDays</c> 与 <c>Auditing:RetentionDays</c>，
 /// 由 Host 模块从 IConfiguration 逐键绑定。
 /// 语义：<see cref="OperationLogRetentionDays"/> / <see cref="AuditLogRetentionDays"/>

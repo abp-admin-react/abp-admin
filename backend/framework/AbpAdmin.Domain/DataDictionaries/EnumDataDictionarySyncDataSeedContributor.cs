@@ -14,12 +14,12 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.DataDictionaries;
 
 /// <summary>
-/// 把 C# 枚举自动同步为数据字典（T3.4 第 11 步）。
+/// 把 C# 枚举自动同步为数据字典。
 /// 放在 IDataSeedContributor 而不是 BackgroundWorker：枚举随代码发布变化，同步只需部署时跑一次，
 /// DbMigrator 每次部署都跑、且 IDataSeeder 本来就逐租户调用（模块没有租户回落，字典必须逐租户写），
 /// 时机与租户遍历都白拿。新建租户由 AbpAdminDatabaseMigrationEventHandler 补跑。
 ///
-/// 规则（细节见 04-batch3-enhancements.md T3.4）：
+/// 规则（细节见 04-batch3-enhancements.md ）：
 /// - 只扫我们自己的两个程序集（Domain.Shared / Application.Contracts），不扫全部已加载程序集。
 /// - 公开枚举必须以 Enum 结尾；字典 Code 取去后缀名；字典项 Code 是成员数值字符串、
 ///   DisplayText 取 [Description]、Description 记成员名；字典与字典项都是 IsStatic = true。
@@ -29,7 +29,7 @@ namespace AbpAdmin.DataDictionaries;
 public class EnumDataDictionarySyncDataSeedContributor : IDataSeedContributor, ITransientDependency
 {
     /// <summary>
-    /// 扫描范围限定我们自己的两个程序集（规格 04 T3.4 第 11 步）。
+    /// 扫描范围限定我们自己的两个程序集（规格 04 ）。
     /// Application.Contracts 在 Domain 层的编译期不可见（依赖方向是 Contracts → Domain.Shared），
     /// 所以按程序集名加载——DbMigrator 与 Host 的模块图都包含它，运行时一定在输出目录里。
     /// </summary>

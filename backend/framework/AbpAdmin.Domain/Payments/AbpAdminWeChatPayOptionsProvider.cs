@@ -8,7 +8,7 @@ using Volo.Abp.Settings;
 namespace AbpAdmin.Payments;
 
 /// <summary>
-/// T4.7：微信支付凭据优先读加密 SettingUi 项 <c>AbpAdmin.Payment.WeChatPay.*</c>，
+/// 微信支付凭据优先读加密 SettingUi 项 <c>AbpAdmin.Payment.WeChatPay.*</c>，
 /// 空值再回落到 EasyAbp 自带设置。商户号未配时不抛异常，避免 Host 启动失败。
 /// </summary>
 [Dependency(ReplaceServices = true)]

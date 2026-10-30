@@ -8,8 +8,8 @@ namespace AbpAdmin.Identity;
 /// 客户端在登录/换 token 请求上带可选 device 参数（如 Mobile 端带 device=Mobile），
 /// 不传、传空或传未知值时一律回退 Web（保守默认，不因脏参数改变互踢面）。
 ///
-/// 这是三档防并发登录中「同类型设备互踢」的区分轴——此前所有会话都硬编码 Web，
-/// LogoutFromSameTypeDevices 与 LogoutFromAllDevices 等效（六透镜审查遗留项）。
+/// 这是三档防并发登录中「同类型设备互踢」的区分轴——所有会话若硬编码 Web，
+/// LogoutFromSameTypeDevices 与 LogoutFromAllDevices 等效（遗留项）。
 /// 客户端接入约定：token 请求附加 device=Mobile 即可让该端按独立设备类型参与互踢。
 ///
 /// 信任模型（设计边界，非漏洞）：device 是客户端自报提示，不构成安全控制——

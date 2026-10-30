@@ -7,7 +7,7 @@ using Volo.Abp.EventBus;
 namespace AbpAdmin.Editions;
 
 /// <summary>
-/// 版本删除时清理挂在它名下的功能值（T2.8 SaaS Pro 缺口）：
+/// 版本删除时清理挂在它名下的功能值：
 /// AbpFeatureValues 中 ProviderName="E"、ProviderKey=版本 Id 的行若不清理，
 /// 版本删除后成为孤儿数据。删除与缓存失效策略收敛在 <see cref="FeatureValueCleanupService"/>。
 ///

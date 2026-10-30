@@ -1,8 +1,7 @@
 namespace AbpAdmin;
 
 /// <summary>
-/// 安全审计 run-1（TV-03）新增错误码：身份声明写入不得携带权威类型。单独成文件——
-/// 同文件追加曾因本机增量构建陈旧缓存对下游不可见（见修复说明），新文件强制入编译。
+/// 身份声明写入不得携带权威类型的错误码。单独成文件（避免追加进既有文件时被增量构建跳过）。
 /// </summary>
 public static class AbpAdminIdentityClaimsErrorCodes
 {

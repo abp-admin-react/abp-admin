@@ -16,7 +16,7 @@ using Volo.Abp.Settings;
 namespace AbpAdmin.Sms;
 
 /// <summary>
-/// 基于设置项的阿里云 API 请求器（T3.5），替换 EasyAbp 的 DefaultAliyunApiRequester。
+/// 基于设置项的阿里云 API 请求器，替换 EasyAbp 的 DefaultAliyunApiRequester。
 /// 替换理由：默认实现从 IOptions&lt;AbpAliyunOptions&gt;（配置文件）读 AccessKeyId/Secret，
 /// 不支持 SettingUi 与多租户；本实现改从加密设置项读取（1.21.0 反编译核实默认实现的行为）。
 /// 请求签名仍复用 EasyAbp 的 ICommonRequest.SetCommonParameters/SetSignature 公共方法。
@@ -67,7 +67,7 @@ public class SettingBasedAliyunApiRequester : IAliyunApiRequester, ITransientDep
             throw new AbpException("阿里云 API 公共参数没有正确配置。");
         }
 
-        // M-5（SSRF 防线）：url 当前由 EasyAbp 包构造（非管理员可控），但出站 URL 按
+        // SSRF 防线：url 当前由 EasyAbp 包构造（非管理员可控），但出站 URL 按
         // "一律过闸"的口径统一——包未来若引入可配置端点，这里已经是闸口。与 Webhook/
         // 探活/腾讯云 SMS 同一 SafeHttpUrl；放行开关 Sms:AllowIntranetTargets 显式
         // true 才豁免。

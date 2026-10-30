@@ -11,7 +11,7 @@ namespace AbpAdmin.DataDictionaries;
 public sealed record DataDictionaryItemMetaSaveItem(string ItemCode, string? TagType, int Order);
 
 /// <summary>
-/// 字典项元数据的写入入口（T3.4 第 12 步）。
+/// 字典项元数据的写入入口。
 /// 三个语义，按调用方分开：管理页原子保存用 <see cref="SaveForDictionaryAsync"/>
 /// （用户改动必须落库，含孤儿清理）；字典整本删除用 <see cref="DeleteAllForDictionaryAsync"/>；
 /// 两个种子贡献者（枚举同步、手写字典）用 <see cref="UpsertIfMissingAsync"/>——

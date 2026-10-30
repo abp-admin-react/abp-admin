@@ -28,7 +28,7 @@ public static class AbpAdminOpenIddictDefaults
     }
 
     /// <summary>
-    /// T2.7 扩展授权（grant_type 字面量，与 HttpApi.Host 的 Passwordless/Impersonation
+    /// 扩展授权（grant_type 字面量，与 HttpApi.Host 的 Passwordless/Impersonation
     /// ExtensionGrant 实现及 Domain 种子共享；值即 OpenIddict Permissions.Prefixes.GrantType 后缀）。
     /// </summary>
     public static class GrantTypes

@@ -11,7 +11,7 @@ using Volo.Abp.TenantManagement;
 namespace AbpAdmin.Tenants;
 
 /// <summary>
-/// 租户删除后的资源清理（T2.8 SaaS Pro 缺口：删租户此前只删 AbpTenants 聚合，共享库内
+/// 租户删除后的资源清理（删租户若只删 AbpTenants 聚合，共享库内
 /// 挂在租户名下的功能值、菜单、菜单角色勾选全部成为孤儿数据）：
 /// - 功能值：AbpFeatureValues 中 ProviderName="T"、ProviderKey=租户 Id 的行；
 /// - 菜单与菜单授权：AppMenus / AppMenuGrants 中 TenantId=租户 Id 的行（硬删除，

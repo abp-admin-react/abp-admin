@@ -10,7 +10,7 @@ using Volo.Abp.Sms;
 namespace AbpAdmin.Sms;
 
 /// <summary>
-/// ISmsSender 的唯一入口（T3.5）：按设置项 AbpAdmin.Sms.Provider 分发到具体厂商。
+/// ISmsSender 的唯一入口：按设置项 AbpAdmin.Sms.Provider 分发到具体厂商。
 /// 注册在 AbpAdminDomainModule（先 RemoveAll&lt;ISmsSender&gt; 再显式登记本类）。
 ///
 /// 要点：
@@ -42,7 +42,7 @@ public class SmsSenderResolver : ISmsSender, ITransientDependency
 
     public virtual async Task SendAsync(SmsMessage smsMessage)
     {
-        // T2.5 限流：同一手机号按用途分策略。验证码消息由 VerificationCodeSmsMessageFactory
+        // 限流：同一手机号按用途分策略。验证码消息由 VerificationCodeSmsMessageFactory
         // 打了 Purpose 标记，走验证码策略（1 小时 3 次）；其余（NotificationService fan-out 通知等）
         // 走通知策略（阈值独立配置），避免运营批量通知撞验证码阈值被静默记失败。
         // CheckAsync = 检查并递增；超限时它自己抛 429 异常，不需要再判一次。

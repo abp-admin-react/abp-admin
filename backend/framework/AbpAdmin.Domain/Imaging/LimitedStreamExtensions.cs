@@ -9,7 +9,7 @@ namespace AbpAdmin.Imaging;
 /// <summary>
 /// 流复制扩展。名字刻意与 BCL 的 CopyToAsync 区分开——
 /// Stream.CopyToAsync(Stream, int) 的第二个参数是缓冲区大小而不是字节上限，
-/// 把上限传给它能编译、能跑，但一个字节都拦不住（规格 T3.1 第 5 步的易错点）。
+/// 把上限传给它能编译、能跑，但一个字节都拦不住（规格 第 5 步的易错点）。
 /// </summary>
 public static class LimitedStreamExtensions
 {

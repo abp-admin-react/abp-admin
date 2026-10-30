@@ -43,7 +43,7 @@ public class SystemSettingDefinitionProvider : SettingDefinitionProvider
                 .WithUi(AbpAdminSettingUiConsts.Groups.System, "Appearance", SettingUiConst.Components.Select,
                     options: "|Light|Dark|Auto"),
 
-            // T1.4.8 验收：新增 SettingDefinition 不改前端即出现
+            // 新增 SettingDefinition 不改前端即出现
             new SettingDefinition(
                 AbpAdminSettings.System.WelcomeMessage,
                 "Welcome to AbpAdmin!",
@@ -52,11 +52,11 @@ public class SystemSettingDefinitionProvider : SettingDefinitionProvider
                 .WithUi(AbpAdminSettingUiConsts.Groups.System, "General", SettingUiConst.Components.Text)
         );
 
-        // T3.5：SMTP 等 9 个邮件设置的 SettingUi 元数据由 EasyAbp.Abp.SettingUi 自带 JSON 提供
+        // SMTP 等 9 个邮件设置的 SettingUi 元数据由 EasyAbp.Abp.SettingUi 自带 JSON 提供
         //（Group1=Mail，2.10.0 反编译核实；该 JSON 与应用侧重复定义同名 key 会让合并直接抛
         // duplicate key，所以不要在我们的 abpadmin.json 里再写一遍）。
         // 加密项的密码框与脱敏统一在 Application 层 AbpAdminSettingUiAppService 里做
-        //（定义侧改动取决于 provider 执行顺序，不可控，已实测 GetOrNull 拿不到）。
+        //（定义侧改动取决于 provider 执行顺序，不可控，GetOrNull 拿不到）。
     }
 
     private static LocalizableString L(string name)

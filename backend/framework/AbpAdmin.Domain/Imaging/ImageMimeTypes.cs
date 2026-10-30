@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace AbpAdmin.Imaging;
 
 /// <summary>
-/// 图片扩展名 ↔ MIME 映射（T3.1）。头像、缩略图、内容类型响应共用这一份，
+/// 图片扩展名 ↔ MIME 映射。头像、缩略图、内容类型响应共用这一份，
 /// 不要在各处散落 if/switch。
 /// </summary>
 public static class ImageMimeTypes

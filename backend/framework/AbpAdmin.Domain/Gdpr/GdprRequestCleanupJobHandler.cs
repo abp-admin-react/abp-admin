@@ -11,7 +11,7 @@ using Volo.Abp.Timing;
 namespace AbpAdmin.Gdpr;
 
 /// <summary>
-/// 过期 GDPR 请求清理（T3.3 第 6 步，JobType = AbpAdmin.GdprRequestCleanup）。
+/// 过期 GDPR 请求清理。
 /// 个人数据请求的导出结果不该长期留存在系统里（数据最小化），到期连请求记录
 /// 与各模块贡献的 GdprInfo payload 一起删除。
 /// 保留天数走 AbpAdminGdprOptions.RetentionDays（法域相关合规参数）；
@@ -50,7 +50,7 @@ public class GdprRequestCleanupJobHandler : IScheduledJobHandler, ITransientDepe
     {
         var cutoff = _clock.Now.AddDays(-_gdprOptions.RetentionDays);
 
-        // NV-27：host 级副本宿主上下文执行，过滤器不过关就只删 TenantId IS NULL 行——租户用户
+        // host 级副本宿主上下文执行，过滤器不过关就只删 TenantId IS NULL 行——租户用户
         // 的 GDPR 请求/个人数据行永不过期，保留期承诺（RetentionDays）对租户层失效。
         // 关过滤器全租户清扫（纯 DB 删除）。
         using (_dataFilter.Disable<IMultiTenant>())

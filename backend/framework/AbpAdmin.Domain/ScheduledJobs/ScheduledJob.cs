@@ -6,8 +6,8 @@ using Volo.Abp.MultiTenancy;
 namespace AbpAdmin.ScheduledJobs;
 
 /// <summary>
-/// 定时作业配置（T3.3，表 AppScheduledJobs）。一条记录对应 Quartz 里的一个动态 worker。
-/// 系统级配置，不实现 IHasDataScope（判断依据见 04-batch3-enhancements.md T3.3 第 5 步）。
+/// 定时作业配置（表 AppScheduledJobs）。一条记录对应 Quartz 里的一个动态 worker。
+/// 系统级配置，不实现 IHasDataScope。
 /// </summary>
 public class ScheduledJob : FullAuditedAggregateRoot<Guid>, IMultiTenant
 {
@@ -88,7 +88,7 @@ public class ScheduledJob : FullAuditedAggregateRoot<Guid>, IMultiTenant
         LastRunMessage = message?.Truncate(ScheduledJobConsts.MaxMessageLength);
     }
 
-    /// <summary>只写这一个派生字段。并发修改以用户的编辑为准，见 T3.3 第 7 步说明 3。</summary>
+    /// <summary>只写这一个派生字段。并发修改以用户的编辑为准。</summary>
     public virtual void SetNextRunTime(DateTime? nextRunTime)
     {
         NextRunTime = nextRunTime;

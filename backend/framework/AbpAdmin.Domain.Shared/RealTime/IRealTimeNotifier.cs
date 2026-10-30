@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 namespace AbpAdmin.RealTime;
 
 /// <summary>
-/// 实时推送门面（T3.2）。业务代码（Application / Domain 层）只依赖此接口，
+/// 实时推送门面。业务代码（Application / Domain 层）只依赖此接口，
 /// 不直接碰 SignalR 的 IHubContext——后者只存在于 HttpApi.Host 层，
 /// 且客户端方法名集中在 <see cref="RealTimeMessageNames"/>，改名不用全局搜。
 /// 推送是最佳努力交付：实现必须吞掉异常，绝不能影响主流程。

@@ -12,7 +12,7 @@ public class SmsSettingDefinitionProvider : SettingDefinitionProvider
 {
     public override void Define(ISettingDefinitionContext context)
     {
-        // ========== T3.5 通知服务：短信渠道 ==========
+        // ========== 通知服务：短信渠道 ==========
         // 厂商凭据必须加密（isEncrypted: true）；明文值永不下发前端（见 Application 层
         // AbpAdminSettingUiAppService 的脱敏覆写），提交空值表示不修改。
         context.Add(

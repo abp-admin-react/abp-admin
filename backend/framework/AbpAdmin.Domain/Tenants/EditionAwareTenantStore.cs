@@ -50,7 +50,7 @@ public class EditionAwareTenantStore : TenantStore
     /// 「映射 + 应用版本 + 解密连接串 + 包缓存项」的公共实现（修复缓存写入缺陷：先改后写，
     /// 不复用基类的写入——基类 SetCacheAsync 内部已经调了 Cache.SetAsync，之后才写 EditionId
     /// 会导致无 UoW 时 EditionId 根本没进缓存）。同步/异步两个 override 都只做写缓存，
-    /// 公共逻辑收敛在此防止单边漏改（历史上正是异步版漏写 EditionId 的缓存缺陷）。
+    /// 公共逻辑收敛在此防止单边漏改。
     /// </summary>
     private TenantConfigurationCacheItem BuildCacheItem([CanBeNull] Tenant tenant)
     {
@@ -73,7 +73,7 @@ public class EditionAwareTenantStore : TenantStore
             return;
         }
 
-        // T2.8：版本过期判定内联在这里，这是唯一接入点。
+        // 版本过期判定内联在这里，这是唯一接入点。
         // 过期后不设置 configuration.EditionId（保持 null），feature 解析自然回落；
         // 但 Tenant 上存的版本关联仍然保留（便于续费时恢复），不会去动它。
         // 注意：自然到期不主动清缓存，最长要等 TenantConfigurationCacheItem 的

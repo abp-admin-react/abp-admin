@@ -17,8 +17,8 @@ using FileType = EasyAbp.FileManagement.Files.FileType;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// 缩略图回填（T3.1）：扫 State == Pending 的映射行与「还没有映射行的图片文件」，批量入队。
-/// T3.3 的 ScheduledJobHandler（ThumbnailBackfillJobHandler）调本管理器做周期回填；
+/// 缩略图回填：扫 State == Pending 的映射行与「还没有映射行的图片文件」，批量入队。
+/// 的 ScheduledJobHandler（ThumbnailBackfillJobHandler）调本管理器做周期回填；
 /// 也可以被管理端手动触发。
 ///
 /// 注意 Failed 不在自动回填范围：失败是永久留痕（如像素超限），自动重试会形成无限循环，
@@ -54,7 +54,7 @@ public class FileThumbnailBackfillManager : DomainService
         _options = options.Value;
     }
 
-    /// <summary>返回本次入队的作业数。调用方必须已开 UoW（T3.3 的 worker 按 00-overview 6.5 自己开）。</summary>
+    /// <summary>返回本次入队的作业数。调用方必须已开 UoW。</summary>
     public virtual async Task<int> EnqueuePendingAndMissingAsync(CancellationToken cancellationToken = default)
     {
         // 跨租户全量扫描：回填是运维动作，不走当前请求的租户过滤
@@ -66,7 +66,7 @@ public class FileThumbnailBackfillManager : DomainService
             // 单轮只入队一批：入队不改状态（作业执行前仍是 Pending），再查还是同一批 → 死循环；
             // 后续状态推进由作业自身完成（Done/Unsupported/Failed），下一轮调度自然衔接。
             // 查询即按 Id 排序 + Take(MaxEnqueuedPerRun)：历史库 Pending 堆积数万行时
-            // 不再整体物化进内存，按 Id 排序保证多轮之间分批稳定（见代码审查 round1）。
+            // 不再整体物化进内存，按 Id 排序保证多轮之间分批稳定。
             var pendingQueryable = await _thumbnailRepository.GetQueryableAsync();
             var pending = await _asyncExecuter.ToListAsync(
                 pendingQueryable
@@ -81,7 +81,7 @@ public class FileThumbnailBackfillManager : DomainService
             }
 
             // 2) 还没有映射行的图片文件（历史数据/事件丢失）：建行 + 入队。
-            // round4 重写（round3 声称的「NOT EXISTS 反连接」实际未落地——EasyAbp File 与
+            // 重写（声称的「NOT EXISTS 反连接」实际未落地——EasyAbp File 与
             // FileThumbnail 分属两个 DbContext，EF 不允许单查询跨上下文组合，只能两段式）：
             // a) FileType/扩展名谓词下推进 SQL——目录与非图片文件不再进入翻页与反查
             //    （扩展名必须进 SQL：留在内存会让永远不入队的非图片占住翻页头部，真缺行的图片轮不到）；

@@ -151,11 +151,11 @@ public class AbpAdminDbMigrationService : ITransientDependency
                 AbpAdminConsts.AdminEmailDefaultValue)
             .WithProperty(IdentityDataSeedContributor.AdminPasswordPropertyName,
                 adminPassword)
-            // T3.4：每个贡献者独立 UoW 且立即提交。DataSeeder.SeedAsync 自身的 [UnitOfWork]
+            // 每个贡献者独立 UoW 且立即提交。DataSeeder.SeedAsync 自身的 [UnitOfWork]
             // 会让全部贡献者共用一个未提交 UoW，框架 PermissionDataSeedContributor 与我们的
             // SettingUi/FileManagement/DataScope 权限种子贡献者互相看不到对方的未提交授予行，
             // 去重失效后重复插入，租户种子在唯一索引上炸掉（host 因测试库把 NULL TenantId
-            // 视为互不相同而静默通过——此前「空库跑通」只验了 host，一直没暴露）。
+            // 视为互不相同而静默通过——「空库跑通」只验 host 时暴露不出来）。
             // RequiresNew 必须为 true：否则子 UoW 并入环境 UoW，仍然攒到最后一次提交。
             //
             // 代价（问题10 关联说明）：SeedInSeparateUow + RequiresNew 意味着种子贡献者逐个独立

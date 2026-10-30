@@ -3,7 +3,7 @@ using System.Linq;
 namespace AbpAdmin.DataDictionaries;
 
 /// <summary>
-/// 字典项标签颜色的可选值集合（T3.4 第 12 步）。
+/// 字典项标签颜色的可选值集合。
 /// 收敛到常量类是为了避免前端拿到拼错的值静默不生效。
 /// Success/Processing/Error/Warning/Default 对应 ProTable valueEnum 的 status 语义；
 /// 其余为 antd 预设色值（对应 antd Tag 的 color）。

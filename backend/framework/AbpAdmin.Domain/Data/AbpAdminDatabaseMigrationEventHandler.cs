@@ -11,28 +11,27 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Data;
 
 /// <summary>
-/// 新建租户后为该租户补跑数据字典种子（T3.4 第 10 步）。
+/// 新建租户后为该租户补跑数据字典种子。
 /// 数据字典模块没有「租户查不到回落到 host」的逻辑（已核实：CacheDataDictionaryValueProvider
 /// 与 DataDictionaryAppService 全程没有 Disable&lt;IMultiTenant&gt; 也没有切 host），
 /// host 种的字典租户看不见，必须逐租户种。DbMigrator 只覆盖部署时已存在的租户，
 /// 运行期新建的租户靠这个事件补齐。
 ///
-/// 事件选型（实测更正：04 规格原稿说「TenantCreatedEto 在 ABP 10.6 已不存在」，失实——
-/// 反编译确认 10.6.0 基类 TenantAppService.CreateAsync 确实发布 TenantCreatedEto，
+/// 事件选型（反编译确认：10.6.0 基类 TenantAppService.CreateAsync 发布 TenantCreatedEto，
 /// 只是 OSS 模块内没有它的处理器。本类不订阅它，仍选 EntityCreatedEto&lt;TenantEto&gt;）：
 /// TenantManagement 模块注册了 EtoMappings.Add&lt;Tenant, TenantEto&gt;，
 /// 插入 Tenant 聚合时框架自动发布分布式事件 EntityCreatedEto&lt;TenantEto&gt;
 /// （EntityChangeEventHelper.PublishEntityCreatedEvent），任何建租户路径都会触发，
 /// 不限于 TenantAppService 一条。
 ///
-/// 为什么只跑字典两个贡献者而不是规格原文的全量 IDataSeeder.SeedAsync（实测结论）：
+/// 为什么只跑字典两个贡献者而不是全量 IDataSeeder.SeedAsync：
 /// 全量种子在事件上下文里会连环触发其它模块种子贡献者的潜伏冲突——
 /// ① 框架 PermissionDataSeedContributor 与 T1 自研的 SettingUi/FileManagement/DataScope
 ///    权限种子在同一 UoW 里互相看不到未提交行，去重失效重复插入（AbpPermissionGrants 唯一索引）；
 /// ② IdentityDataSeedContributor 建租户 admin 用户触发的 UserEto 事件会让 FileManagement 的
 ///    FileUser 同步器重复插入（EasyAbpFileManagementUsers 主键）。
 /// 这些都不是字典该修的。租户 admin 用户由 TenantAppService 建租户时自己创建；
-/// 其余按租户的种子（定时作业等）仍是 DbMigrator 的职责，与 T3.4 之前一致、无回退。
+/// 其余按租户的种子（定时作业等）仍是 DbMigrator 的职责，与 之前一致、无回退。
 ///
 /// [UnitOfWork(IsDisabled = true)]：事件处理器会被 UoW 拦截器包住（建租户请求路径下还会并入
 /// 正在完成的请求 UoW）。禁掉后两个贡献者各自的 [UnitOfWork] 独立开 UoW、随做随提交。

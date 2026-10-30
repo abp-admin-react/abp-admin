@@ -13,7 +13,7 @@ public class PaymentSettingDefinitionProvider : SettingDefinitionProvider
 {
     public override void Define(ISettingDefinitionContext context)
     {
-        // ========== T4.7 微信支付 ==========
+        // ========== 微信支付 ==========
         context.Add(
             new SettingDefinition(
                 AbpAdminSettings.Payment.WeChatPayMchId,

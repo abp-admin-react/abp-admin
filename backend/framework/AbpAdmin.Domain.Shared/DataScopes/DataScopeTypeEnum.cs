@@ -4,7 +4,7 @@ namespace AbpAdmin.DataScopes;
 
 /// <summary>
 /// 数据范围类型。多角色时取并集，任一角色为 <see cref="All"/> 则整体为 <see cref="All"/>。
-/// T3.4：以 Enum 结尾的公开枚举会被种子同步为静态数据字典（字典编码 DataScopeType）。
+/// 以 Enum 结尾的公开枚举会被种子同步为静态数据字典（字典编码 DataScopeType）。
 /// </summary>
 [Description("数据范围类型")]
 public enum DataScopeTypeEnum

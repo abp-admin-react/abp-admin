@@ -16,7 +16,7 @@ public class AccountSettingDefinitionProvider : SettingDefinitionProvider
     public override void Define(ISettingDefinitionContext context)
     {
         context.Add(
-            // ========== T2.7 Account Pro 缺口：无密码登录与防枚举设置 ==========
+            // ========== Account Pro 缺口：无密码登录与防枚举设置 ==========
             new SettingDefinition(
                 AbpAdminSettings.Account.PasswordlessLoginMode,
                 "OtpAndMagicLink",
@@ -42,7 +42,7 @@ public class AccountSettingDefinitionProvider : SettingDefinitionProvider
                 isVisibleToClients: false)
                 .WithUi(AbpAdminSettingUiConsts.Groups.Account, "Security", SettingUiConst.Components.Checkbox),
 
-            // ========== T4.1 / T4.4 会话与登录安全 ==========
+            // ========== / 会话与登录安全 ==========
             new SettingDefinition(
                 AbpAdminSettings.Account.SessionCleanupInactiveDays,
                 "30",
@@ -103,7 +103,7 @@ public class AccountSettingDefinitionProvider : SettingDefinitionProvider
                 isVisibleToClients: false)
                 .WithUi(AbpAdminSettingUiConsts.Groups.Account, "Captcha", AbpAdminSettingUiConsts.PasswordType),
 
-            // ========== 外部登录（T2.7 GitHub/Microsoft，T4.4 微信/Google） ==========
+            // ========== 外部登录 ==========
             new SettingDefinition(
                 AbpAdminSettings.Account.ExternalLoginGitHubEnabled,
                 "false",
@@ -199,7 +199,7 @@ public class AccountSettingDefinitionProvider : SettingDefinitionProvider
                 .WithUi(AbpAdminSettingUiConsts.Groups.Account, "ExternalLogin", AbpAdminSettingUiConsts.PasswordType)
         );
 
-        // T2.6 Password Aging：密码有效期设置的 SettingUi 元数据在 SettingProperties/abpadmin.json 中配置
+        // 密码有效期设置的 SettingUi 元数据在 SettingProperties/abpadmin.json 中配置
     }
 
     private static LocalizableString L(string name)

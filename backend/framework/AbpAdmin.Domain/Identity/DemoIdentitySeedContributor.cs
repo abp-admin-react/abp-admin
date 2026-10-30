@@ -31,7 +31,7 @@ namespace AbpAdmin.Identity;
 /// 运维口径（幂等的边界）：本贡献者只保证 DB 侧幂等。宿主运行期有权限判定缓存
 /// （PermissionChecker 结果进分布式缓存，键形如 c:Volo.Abp.PermissionManagement.PermissionGrant,...）——
 /// 对带流量的宿主重跑本种子修正授权后，需清权限缓存或重启宿主，否则已缓存的 false 判定
-/// 不随库失效（docker 全量实测踩过：修行后仍 403，FLUSHALL 恢复）。
+/// 不随库失效（权限缓存存续期内仍 403，FLUSHALL 才恢复）。
 /// </summary>
 public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDependency
 {
@@ -205,7 +205,7 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
     {
         // 自带环境 UoW：migrator 侧外层已有大 UoW 时嵌套加入；测试/裸调时兜底供 DbContext。
         // OU 创建逐个 requiresNew 单独提交——OU 父子校验按 parentId 从库里 FindAsync，
-        // 同批未提交的插入对它不可见（实测 010010），逐个落库让父节点在子节点创建前可查。
+        // 同批未提交的插入对它不可见，逐个落库让父节点在子节点创建前可查。
         using (var ambient = _unitOfWorkManager.Begin())
         {
             var ouList = await _organizationUnitRepository.GetListAsync();

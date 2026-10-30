@@ -21,7 +21,7 @@ using Volo.Abp.Users;
 namespace AbpAdmin.Account;
 
 /// <summary>
-/// T2.7 模拟登录核心逻辑（Domain 层，Application.Tests 可直接覆盖）。
+/// 模拟登录核心逻辑（Domain 层，Application.Tests 可直接覆盖）。
 /// 负责目标用户/租户解析、impersonator claim 构建、返回原身份校验；
 /// 令牌签发出 HttpApi.Host 的 ImpersonationTokenExtensionGrant 完成，
 /// 这里产出的 claim 会被它写入令牌，审计日志的 ImpersonatorUserId 列即从该 claim 取值。
@@ -131,7 +131,7 @@ public class ImpersonationManager : DomainService
     }
 
     /// <summary>
-    /// T4.2：进入权限委托。当前用户必须是委托的 TargetUserId，签入 SourceUserId。
+    /// 进入权限委托。当前用户必须是委托的 TargetUserId，签入 SourceUserId。
     /// </summary>
     public virtual async Task<ImpersonationTarget> CreateDelegationImpersonationAsync(Guid delegationId)
     {

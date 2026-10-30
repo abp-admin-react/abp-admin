@@ -12,7 +12,7 @@ using Volo.Abp.MultiTenancy;
 namespace AbpAdmin.Mailing;
 
 /// <summary>
-/// 开发/测试环境的邮件降级发送器：把每封邮件写成 .eml 文件，供本地 E2E 观测
+/// 开发/测试环境的邮件降级发送器：把每封邮件写成 .eml 文件，供本地开发观测
 /// （魔法链接、双因素邮箱码、联系方式确认码等依赖邮件内容的流程）。
 /// 注册时机：Mailing:UseRealSender = false 时替代 NullEmailSender（邮件不再静默丢失）。
 /// 文件落盘 ContentRootPath/App_Data/outgoing-emails/{时间戳}-{主题}.eml，

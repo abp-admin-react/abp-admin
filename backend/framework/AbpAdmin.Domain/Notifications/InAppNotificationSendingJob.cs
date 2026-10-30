@@ -10,7 +10,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 站内信发送作业（T3.5），照模块的 SmsNotificationSendingJob 写。
+/// 站内信发送作业，照模块的 SmsNotificationSendingJob 写。
 /// </summary>
 public class InAppNotificationSendingJob : IAsyncBackgroundJob<InAppNotificationSendingJobArgs>, ITransientDependency
 {

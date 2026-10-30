@@ -16,7 +16,6 @@ namespace AbpAdmin.AuditLogs;
 /// 筛选经 <see cref="ApplyUnhandled"/>（单表 HandledAt IS NULL）；
 /// 读经 <see cref="GetStatesAsync"/>（列投影）——不能用 GetProperty 读：模块仓储的
 /// GetListAsync 是 AsNoTracking，影子列不触发 ABP 的 track 回填，字典恒为空
-/// （实测 JSON 双写也不兜底）。
 /// </summary>
 public interface IAuditLogHandledColumnQueries
 {

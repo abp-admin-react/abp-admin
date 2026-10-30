@@ -9,7 +9,7 @@ namespace AbpAdmin.Imaging;
 /// 与「处理结果的实际格式/宽高」确认使用。
 ///
 /// 实现方式（与 SafeSkiaImageContributors 同因同解）：把流头部拷进原生 SKData 后再建
-/// codec，全程不创建 SKManagedStream。此前用 SKManagedStream(disposeManagedStream:false)
+/// codec，全程不创建 SKManagedStream。不用 SKManagedStream(disposeManagedStream:false)
 /// 包流（Windows 上验证过）——但 native 侧对 wrapper 的句柄回收会延迟到 GC/finalizer
 /// 阶段，那时调用方的流早已释放，Linux 上稳定触发「finalizer 线程读已关闭流」打崩进程
 /// （CI 全量测试两轮复现；mono/SkiaSharp#2263 记载的 Stream 重载生命周期不可控问题）。

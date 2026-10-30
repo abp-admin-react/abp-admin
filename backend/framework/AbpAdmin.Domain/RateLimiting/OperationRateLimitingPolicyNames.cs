@@ -2,7 +2,7 @@ namespace AbpAdmin.RateLimiting;
 
 /// <summary>
 /// 操作限流策略名常量（全量 12 个，与 RateLimitingConfigurator 的 AddPolicy 一一对应）。
-/// 收敛动机（round3 review）：此前策略名以裸字符串散落在 Configurator、[OperationRateLimiting] 特性
+/// 收敛动机：策略名若以裸字符串散落在 Configurator、[OperationRateLimiting] 特性
 /// 与 CheckAsync/ResetAsync 直调点三处，改名时极易漏改导致 CheckAsync 抛「策略未注册」或特性静默失效。
 /// 注册处（RateLimitingConfigurator）与消费点必须都引用本类；新增策略时先加常量再注册。
 /// 注意：短信侧另有 SmsRateLimitingPolicies（SmsSenderResolver 按用途选择），其常量已改为引用本类，勿再写字面量。
@@ -12,7 +12,7 @@ public static class OperationRateLimitingPolicyNames
     /// <summary>密码登录：按 IP + 按邮箱双规则（防跨账户 password spraying，消费者在 Login 页面）。</summary>
     public const string Login = "Login";
 
-    /// <summary>令牌端点全 grant 兜底：按 IP 宽阈值（安全审计 M-2；消费者 TokenEndpointRateLimitingMiddleware，
+    /// <summary>令牌端点全 grant 兜底：按 IP 宽阈值（消费者 TokenEndpointRateLimitingMiddleware，
     /// password grant 在此之上叠加 Login 策略双计数）。</summary>
     public const string TokenEndpoint = "TokenEndpoint";
 
@@ -46,6 +46,6 @@ public static class OperationRateLimitingPolicyNames
     /// <summary>GDPR 匿名个人数据下载：按 IP（token 单次消费凭据）。</summary>
     public const string GdprDownload = "GdprDownload";
 
-    /// <summary>匿名图形验证码取图：按 IP（防刷 Skia 渲染与分布式缓存写入，round4）。</summary>
+    /// <summary>匿名图形验证码取图：按 IP（防刷 Skia 渲染与分布式缓存写入，）。</summary>
     public const string CaptchaImage = "CaptchaImage";
 }

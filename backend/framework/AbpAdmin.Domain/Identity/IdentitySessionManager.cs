@@ -16,7 +16,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Identity;
 
 /// <summary>
-/// T4.1：开源 Identity 有 <see cref="IdentitySession"/> 实体和仓储，没有 SessionManager / CleanupWorker。
+/// 开源 Identity 有 <see cref="IdentitySession"/> 实体和仓储，没有 SessionManager / CleanupWorker。
 /// <see cref="CreateAsync"/> 按 sessionId upsert（已存在则刷新 LastAccessed/IP）。
 /// <see cref="TouchIfStaleAsync"/> 给请求中间件续期，避免 Cleanup 把仍在用的会话当僵尸删掉。
 /// 撤销会清动态声明缓存。
@@ -274,7 +274,7 @@ public class IdentitySessionManager : DomainService
             {
                 // 防御兜底：没有环境 UoW 时删除永远刷不进库（[UnitOfWork] 特性被类内 this 调用
                 // 绕过拦截时会出现），下一批查询命中同一批行 → 无限循环。记警告后退出本轮，
-                // 由调用方补 UoW 重试，宁可少删不可死循环（见代码审查 round1）。
+                // 由调用方补 UoW 重试，宁可少删不可死循环。
                 Logger.LogWarning(
                     "CleanupInactiveAsync is running without an ambient unit of work; " +
                     "deletions cannot be flushed and the batch loop is aborted to avoid an infinite loop.");

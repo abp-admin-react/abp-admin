@@ -6,7 +6,7 @@ namespace AbpAdmin.Captcha;
 /// <summary>
 /// 图形验证码生成器（对标 RuoYi CaptchaController 的数学/字符验证码，取字符方案）。
 /// 纯生成、无状态：4 位无歧义字符（去掉 0O1I 等）+ 干扰线 + 噪点，120x44 PNG。
-/// SkiaSharp 与 T3.1 图片处理共用同一传递依赖（MIT），不新增包。
+/// SkiaSharp 与 图片处理共用同一传递依赖（MIT），不新增包。
 /// </summary>
 public class CaptchaImageGenerator : Volo.Abp.Domain.Services.DomainService
 {

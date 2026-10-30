@@ -24,7 +24,7 @@ public static class AbpAdminSettings
         /// <summary>演示自定义设置：默认主题（select）。</summary>
         public const string DefaultTheme = Prefix + ".DefaultTheme";
 
-        /// <summary>演示自定义设置：欢迎消息（text）。用于 T1.4.8 验收「新增 SettingDefinition 不改前端即出现」。</summary>
+        /// <summary>演示自定义设置：欢迎消息（text）。用于 .8 验收「新增 SettingDefinition 不改前端即出现」。</summary>
         public const string WelcomeMessage = Prefix + ".WelcomeMessage";
     }
 
@@ -153,7 +153,7 @@ public static class AbpAdminSettings
         public const string TencentCloudSign = Prefix + ".Sms.TencentCloud.Sign";
 
         /// <summary>
-        /// 手机验证码（T2.7）使用的模板编码：阿里云填模板 CODE，腾讯云填 TemplateID（同一个设置项两家复用）。
+        /// 手机验证码使用的模板编码：阿里云填模板 CODE，腾讯云填 TemplateID（同一个设置项两家复用）。
         /// 模板参数名约定为 code（腾讯模板按位置取第一个参数）。
         /// </summary>
         public const string VerificationCodeTemplateCode = Prefix + ".Sms.VerificationCode.TemplateCode";

@@ -10,7 +10,7 @@ namespace AbpAdmin.RateLimiting;
 
 /// <summary>
 /// 操作限流目标解析器（问题5 修复）：
-/// MVC Filter 与 DI 拦截器原先各维护一套近乎相同的「取特性 + 解析分区参数」逻辑（约 70 行/套），
+/// MVC Filter 与 DI 拦截器若各维护一套近乎相同的「取特性 + 解析分区参数」逻辑（约 70 行/套），
 /// 任何一处修 bug 另一处必漏。本类是唯一实现，两处适配层只做各自的元数据适配。
 /// </summary>
 public class OperationRateLimitingTargetResolver : ITransientDependency

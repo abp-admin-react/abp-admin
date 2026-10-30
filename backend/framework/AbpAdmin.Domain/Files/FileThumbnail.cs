@@ -5,7 +5,7 @@ using Volo.Abp.MultiTenancy;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// 文件 → 缩略图映射表（T3.1，表 AppFileThumbnails）。
+/// 文件 → 缩略图映射表。
 /// EasyAbp 的 File 实体在模块内定义不能加字段，缩略图状态机必须可查询
 /// （重试、回填、统计），所以落一张自建映射表而不是 File.ExtraProperties JSON 列。
 /// </summary>

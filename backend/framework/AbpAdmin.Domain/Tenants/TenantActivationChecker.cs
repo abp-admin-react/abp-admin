@@ -7,7 +7,7 @@ using Volo.Abp.TenantManagement;
 namespace AbpAdmin.Tenants;
 
 /// <summary>
-/// 租户激活状态校验（T2.8 SaaS Pro 缺口）。
+/// 租户激活状态校验。
 /// 在登录流程（OpenIddict ProcessSignIn 事件，见 HttpApi.Host 的
 /// TenantActivationOpenIddictServerHandler）中调用：
 /// - <see cref="TenantActivationStateEnum.Passive"/> → 拒绝，提示租户已停用；

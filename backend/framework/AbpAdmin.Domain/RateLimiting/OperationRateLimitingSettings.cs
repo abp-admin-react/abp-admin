@@ -2,7 +2,7 @@ namespace AbpAdmin.RateLimiting;
 
 /// <summary>
 /// 操作限流策略参数（问题7 修复）：
-/// 原先 14 个 GetValue 硬编码默认值散在 AbpAdminDomainModule 里，与 appsettings.json 双轨漂移
+/// 取代散在 AbpAdminDomainModule 的 14 个 GetValue 硬编码默认值（与 appsettings.json 双轨漂移）
 /// （多数策略的键在 json 里根本不存在）。默认值集中到本类（属性初始化器），
 /// 模块用 configuration.GetSection(SectionName).Get&lt;T&gt;() 一次绑定，appsettings.json 显式列出全部键。
 /// 注意：属性名与 appsettings 键名一一对应（绑定不区分大小写），改键名要两边同步。
@@ -20,7 +20,7 @@ public class OperationRateLimitingSettings
     /// <summary>登录策略：按 IP + 按邮箱双规则。</summary>
     public LoginPolicySettings Login { get; set; } = new();
 
-    /// <summary>令牌端点全 grant 兜底策略（安全审计 M-2）：按 IP 宽阈值。</summary>
+    /// <summary>令牌端点全 grant 兜底策略：按 IP 宽阈值。</summary>
     public TokenEndpointPolicySettings TokenEndpoint { get; set; } = new();
 
     /// <summary>短信验证码发送侧：按手机号（租户隔离）。</summary>
@@ -76,8 +76,8 @@ public class SmsVerificationCodePolicySettings
     public int DurationHours { get; set; } = 1;
 
     /// <summary>
-    /// 安全审计 run-1（TV-08）补的 IP 并联规则阈值（同窗口）：与邮件侧 round3 修法同构——
-    /// 原先只按手机号分区，单源可换号喷发付费 SMS / 锁死受害者收码路径。默认 3 次/小时，
+    /// IP 并联规则阈值（同窗口）：与邮件侧同构——
+    /// 只按手机号分区时，单源可换号喷发付费 SMS / 锁死受害者收码路径。默认 3 次/小时，
     /// 与手机号阈值同量级（发码本身 3/小时，IP 维度给共享出口 NAT 留同量级余量即可）。
     /// </summary>
     public int IpMaxCount { get; set; } = 3;
@@ -88,7 +88,7 @@ public class SmsNotificationPolicySettings
     public int MaxCount { get; set; } = 20;
     public int DurationHours { get; set; } = 1;
 
-    /// <summary>安全审计 run-1（TV-08）补的 IP 并联规则阈值（同窗口），动机同 SmsVerificationCode。</summary>
+    /// <summary>IP 并联规则阈值（同窗口），动机同 SmsVerificationCode。</summary>
     public int IpMaxCount { get; set; } = 20;
 }
 
@@ -98,7 +98,7 @@ public class EmailVerificationCodePolicySettings
     public int DurationHours { get; set; } = 1;
 
     /// <summary>
-    /// round3 补的 IP 并联规则阈值（同窗口）：防攻击者换 IP 定向烧光受害者发码配额；
+    /// 补的 IP 并联规则阈值（同窗口）：防攻击者换 IP 定向烧光受害者发码配额；
     /// 默认 30 次/小时，放宽是给共享出口 NAT 的正常用户留余量。
     /// </summary>
     public int IpMaxCount { get; set; } = 30;
@@ -110,7 +110,7 @@ public class VerificationCodeVerifyPolicySettings
     public int DurationMinutes { get; set; } = 10;
 
     /// <summary>
-    /// round3 补的 IP 并联规则阈值（同窗口，邮件/短信校验侧共用）：防换 IP 定向烧光受害者验码配额。
+    /// 补的 IP 并联规则阈值（同窗口，邮件/短信校验侧共用）：防换 IP 定向烧光受害者验码配额。
     /// </summary>
     public int IpMaxCount { get; set; } = 30;
 }

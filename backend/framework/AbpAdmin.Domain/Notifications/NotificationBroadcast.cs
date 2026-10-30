@@ -7,7 +7,7 @@ using Volo.Abp.Timing;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 广播通知批次（T3.5 第 10 步）。EasyAbp 的 NotificationInfo 没有批次/续跑游标/计数，
+/// 广播通知批次。EasyAbp 的 NotificationInfo 没有批次/续跑游标/计数，
 /// 这张自研表存"一份正文 + keyset 游标 + 计数"，支撑分批 fan-out 与批次级幂等续跑：
 /// 作业失败重试时从库里的 LastProcessedUserId 续，不会给已处理用户重复发。
 /// </summary>
@@ -21,7 +21,7 @@ public class NotificationBroadcast : AuditedAggregateRoot<Guid>, IMultiTenant
     /// <summary>角色 Id 或组织单元 Id；TargetType = All 时为 null。</summary>
     public virtual Guid? TargetId { get; protected set; }
 
-    /// <summary>渠道，逗号分隔（Mailing,Sms,InApp），与 T3.4 字典 NotificationMethod 对齐。</summary>
+    /// <summary>渠道，逗号分隔（Mailing,Sms,InApp），与 字典 NotificationMethod 对齐。</summary>
     public virtual string NotificationMethods { get; protected set; } = default!;
 
     public virtual string Title { get; protected set; } = default!;
@@ -107,7 +107,7 @@ public class NotificationBroadcast : AuditedAggregateRoot<Guid>, IMultiTenant
         CompletionTime = clock.Now;
     }
 
-    /// <summary>运营弃单（NV-17）：Abandon 队列记录时回写的持久化停止意图——看门狗只挑
+    /// <summary>运营弃单：Abandon 队列记录时回写的持久化停止意图——看门狗只挑
     /// Running 天然跳过，广播作业与终态一并短路，被叫停的扇出链不再被看门狗复活。</summary>
     public void Cancel()
     {
@@ -146,7 +146,7 @@ public static class NotificationBroadcastStates
     public const string Failed = "Failed";
 
     /// <summary>
-    /// 运营弃单（NV-17）：管理端 Abandon 掉队列记录时回写本状态，作为持久化的停止意图。
+    /// 运营弃单：管理端 Abandon 掉队列记录时回写本状态，作为持久化的停止意图。
     /// 看门狗只挑 Running（天然跳过），广播作业与 Completed/Failed 一并短路——否则弃单后
     /// 看门狗 1 小时内按停滞重入队一条全新（非 abandoned）记录，扇出链复活，被叫停的
     /// 通知继续发给余下收件人。

@@ -14,7 +14,7 @@ internal static class PaymentsConfigurator
 {
     public static void ConfigurePayments(this IServiceCollection services)
     {
-        // T4.7：注册 Free / Prepayment / WeChatPay 渠道。0 元单走 Free，可在本地测通下单。
+        // 注册 Free / Prepayment / WeChatPay 渠道。0 元单走 Free，可在本地测通下单。
         services.Configure<PaymentServiceOptions>(options =>
         {
             options.Providers.Configure<FreePaymentServiceProvider>(FreePaymentServiceProvider.PaymentMethod);

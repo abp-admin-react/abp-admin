@@ -6,7 +6,7 @@ using Volo.Abp.Sms;
 namespace AbpAdmin.Sms;
 
 /// <summary>
-/// SmsMessage.Properties 的容错读取（T3.5）。
+/// SmsMessage.Properties 的容错读取。
 /// 属性值经分布式事件 JSON 序列化一圈后会变成 JsonElement 而不是 string，
 /// 直接 `as string` 会静默拿到 null（EasyAbp 的 TencentCloudSmsSender 就有这个坑），这里统一处理。
 /// </summary>

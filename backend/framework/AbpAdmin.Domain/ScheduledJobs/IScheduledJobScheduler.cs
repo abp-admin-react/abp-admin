@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace AbpAdmin.ScheduledJobs;
 
 /// <summary>
-/// 定时作业调度器（T3.3 第 7 步）。把 AppScheduledJobs 的配置行映射到
+/// 定时作业调度器。把 AppScheduledJobs 的配置行映射到
 /// ABP 的 IDynamicBackgroundWorkerManager（Quartz 实现），不自研调度内核。
 /// </summary>
 public interface IScheduledJobScheduler

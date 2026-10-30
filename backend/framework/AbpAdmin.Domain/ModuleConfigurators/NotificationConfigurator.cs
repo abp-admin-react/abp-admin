@@ -18,7 +18,7 @@ internal static class NotificationConfigurator
 {
     public static void ConfigureNotificationChannels(this IServiceCollection services, IConfiguration configuration)
     {
-        // ========== T3.5 通知服务 ==========
+        // ========== 通知服务 ==========
 
         // 站内信渠道注册（复用模块的记录/状态/重试机制，自研 manager 只做 SignalR 推送）
         services.Configure<NotificationServiceOptions>(options =>
@@ -39,7 +39,7 @@ internal static class NotificationConfigurator
         // MailKitSmtpEmailSender 带 ReplaceServices（10.6.0 反编译核实），这里再 Replace 一次覆盖它。
         if (!configuration.GetValue<bool>("Mailing:UseRealSender", true))
         {
-            // 降级发送器写成 .eml 文件（App_Data/outgoing-emails），本地 E2E 可观测邮件内容，
+            // 降级发送器写成 .eml 文件（App_Data/outgoing-emails），本地开发可观测邮件内容，
             // 替代 NullEmailSender 的静默丢弃
             services.Replace(ServiceDescriptor.Singleton<IEmailSender, Mailing.FileEmlEmailSender>());
             services.GetInitLogger<AbpAdminDomainModule>().LogWarning(

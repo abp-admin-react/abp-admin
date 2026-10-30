@@ -25,9 +25,9 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.ScheduledJobs;
 
 /// <summary>
-/// T3.3 第 7 步：把 AppScheduledJobs 配置映射到 ABP 的 IDynamicBackgroundWorkerManager。
+/// 把 AppScheduledJobs 配置映射到 ABP 的 IDynamicBackgroundWorkerManager。
 ///
-/// 依赖纪律（规则出处 00-overview.md 6.5，本类的具体形状见 04 T3.3 第 7 步）：
+/// 依赖纪律（规则出处 00-overview.md 6.5）：
 /// 动态 worker 委托被进程级 IDynamicBackgroundWorkerHandlerRegistry 持有到进程结束，
 /// 所以 RunAsync 及其调用链里除 _distributedLock / _dynamicWorkerManager 外的每个依赖
 /// 都从本次触发的 serviceProvider 解析，一个都不许改成字段。
@@ -162,7 +162,7 @@ public class ScheduledJobScheduler : DomainService, IScheduledJobScheduler
     private async Task RunAsync(Guid scheduledJobId, IServiceProvider serviceProvider, CancellationToken cancellationToken)
     {
         // 0. 本次触发要用的 scoped 服务，全部从传进来的 serviceProvider 解析。
-        //    一个都不许改成字段（理由见类注释与 04 T3.3 第 7 步那张依赖表）。
+        //    一个都不许改成字段（理由见类注释的依赖纪律）。
         //    配置读取 / 触发缓存 / handler 执行三段已分别提取到
         //    LoadJobConfigAsync / TryConsumeTriggeredByAsync / ExecuteHandlerAsync，
         //    依赖同样从各自的 serviceProvider 参数解析。
@@ -170,8 +170,8 @@ public class ScheduledJobScheduler : DomainService, IScheduledJobScheduler
         var handlers = serviceProvider.GetServices<IScheduledJobHandler>();
 
         // Logger 属性也不能用：它经 LazyServiceProvider 从【构造本实例的那个 scope】
-        // （启动排程时的 scope，早被释放）惰性解析，触发时已 disposed——e2e 实测堆栈顶在
-        // DomainService.get_Logger。日志与别的依赖同规，从本次触发的 serviceProvider 解析。
+        // （启动排程时的 scope，早被释放）惰性解析，触发时已 disposed（堆栈顶在
+        // DomainService.get_Logger）。日志与别的依赖同规，从本次触发的 serviceProvider 解析。
         var logger = serviceProvider.GetRequiredService<ILogger<ScheduledJobScheduler>>();
 
         // 低成本自检：连续两次触发这个值应当不同（每次触发都是新 scope，05 14.3 已核实）。
@@ -339,7 +339,7 @@ public class ScheduledJobScheduler : DomainService, IScheduledJobScheduler
             // 事务在这里，失败即回滚 handler 的写入。
             using (var uow = unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
             {
-                // 后台没有登录用户，行级数据范围算不出来（T1.5 约定 fail-closed 零行可见），
+                // 后台没有登录用户，行级数据范围算不出来（fail-closed 零行可见），
                 // 必须显式关掉数据范围过滤器。范围只包住 handler 这一次调用：
                 // RecordAsync 写的 ScheduledJobExecution 不实现 IHasDataScope，不跟着放开。
                 using (dataFilter.Disable<IDataScopeEnabled>())

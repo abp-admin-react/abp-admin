@@ -21,8 +21,7 @@ internal static class HttpRemoteConfigurator
     {
         var configuration = services.GetConfiguration();
 
-        // T4.4 Turnstile 校验走命名 HttpClient（开关关闭时不会发请求）；
-        // 注册自 CachingAndTenancyConfigurator 迁入（round4 审查 D4：绑定与注册同处，好找）。
+        // Turnstile 校验走命名 HttpClient（开关关闭时不会发请求）；绑定与注册同处。
         services.AddHttpClient(TurnstileHttpClients.SiteVerify);
 
         // Profiler：HttpRemote:Profiler=true 时【全部】出站客户端（Turnstile / connect/token 回环 /

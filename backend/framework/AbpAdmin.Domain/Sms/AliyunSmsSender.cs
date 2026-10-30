@@ -13,7 +13,7 @@ using Volo.Abp.Sms;
 namespace AbpAdmin.Sms;
 
 /// <summary>
-/// 把 EasyAbp.Abp.Aliyun.Sms 的 AliyunSmsService 适配到 ABP 的 ISmsSender（T3.5）。
+/// 把 EasyAbp.Abp.Aliyun.Sms 的 AliyunSmsService 适配到 ABP 的 ISmsSender。
 /// 该包本身不实现 ISmsSender（1.21.0 反编译核实）。
 ///
 /// SmsMessage.Properties 约定 key：

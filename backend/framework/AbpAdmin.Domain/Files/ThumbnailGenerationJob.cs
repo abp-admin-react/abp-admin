@@ -22,7 +22,7 @@ using FileType = EasyAbp.FileManagement.Files.FileType;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// 异步缩略图生成作业（T3.1）。上传请求只负责入队，CPU 密集的缩放/压缩在这里做。
+/// 异步缩略图生成作业。上传请求只负责入队，CPU 密集的缩放/压缩在这里做。
 ///
 /// 行为约定：
 /// - 幂等：State == Done 直接返回（ABP 后台作业可能重试）。

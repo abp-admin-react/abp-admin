@@ -13,7 +13,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.ScheduledJobs;
 
 /// <summary>
-/// 定时作业种子（T3.3 第 10 步）：为 7 个内置 handler 各建一条配置记录。
+/// 定时作业种子：为 7 个内置 handler 各建一条配置记录。
 /// 全部默认停用（IsEnabled = false）——这是刻意的：让部署者主动决定开哪些、
 /// 什么时间跑，而不是部署完就有 7 个作业在跑。种子只负责"把选项摆出来"。
 /// 幂等：按 Name 查存在则跳过（DbMigrator 可能重复运行；多租户过滤器使
@@ -67,7 +67,7 @@ public class ScheduledJobDataSeedContributor : IDataSeedContributor, ITransientD
         (ThumbnailBackfillJobHandler.JobTypeName, "0 */30 * * * ?", "每 30 分钟回填缺失的缩略图"),
         // 广播断链看门狗：handler 在 Application 层（要构造 BroadcastNotificationJobArgs，
         // Domain 不能反向引用），JobType 收口在 Domain.Shared 的 ScheduledJobConsts，
-        // 与 handler、HostOnlyScheduledJobTypes 共用同一常量（round4 前是三处字面量靠注释同步）。
+        // 与 handler、HostOnlyScheduledJobTypes 共用同一常量。
         (ScheduledJobConsts.BroadcastNotificationWatchdogJobType, "0 */15 * * * ?", "每 15 分钟巡检停滞的广播并按游标续跑"),
     ];
 }

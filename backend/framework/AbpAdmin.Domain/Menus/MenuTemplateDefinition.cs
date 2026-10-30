@@ -40,7 +40,7 @@ public static class MenuTemplateDefinition
         new("collection-hot-wallet", "collection", MenuTypeEnum.Menu, "热钱包监控", "collection-hot-wallet", "/collection/hot-wallet", "monitor", 28, "AbpAdmin.Collection.WithdrawAdmin"),
         new("collection-network", "collection", MenuTypeEnum.Menu, "链网配置", "collection-network", "/collection/network", "setting", 29, "AbpAdmin.Collection.Network.Admin"),
 
-        // ===== 财务域（AbpAdmin.Ledger 基础财务层 A1–A7，此前只有路由未挂菜单） =====
+        // ===== 财务域（AbpAdmin.Ledger 基础财务层 A1–A7 的菜单挂载） =====
         // 菜单可见性统一粗粒度绑 Finance.Ledger.View（引导面）；页面/按钮各有细粒度权限。
         new("finance", null, MenuTypeEnum.Catalog, "财务会计", "finance", "/finance", "calculator", 30, "Finance.Ledger.View"),
         new("finance-overview", "finance", MenuTypeEnum.Menu, "资金总览", "finance-overview", "/finance/overview", "fund", 31, "Finance.Ledger.View"),

@@ -13,13 +13,13 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 站内信渠道的 NotificationManager（T3.5 第 7 步，方案 B：复用模块的 Notification 记录）。
+/// 站内信渠道的 NotificationManager。
 /// 照着模块自带的 EmailNotificationManager / SmsNotificationManager 写（3.9.0 反编译核实基类成员：
 /// 抽象属性 NotificationMethod + 抽象方法 CreateAsync / SendNotificationAsync）。
 ///
-/// 站内信的"发送"= 通过 SignalR 推一下（T3.2 的 IRealTimeNotifier，最佳努力）。
+/// 站内信的"发送"= 通过 SignalR 推一下。
 /// 记录本身由模块的事件管线持久化；用户不在线时推送为空操作，记录视为已送达（收件箱模型），
-/// 与 T3.2 第 7 步"推送失败不影响落库"一致——所以推送后直接标记成功。
+/// 与 "推送失败不影响落库"一致——所以推送后直接标记成功。
 /// </summary>
 public class InAppNotificationManager : NotificationManagerBase, ITransientDependency
 {

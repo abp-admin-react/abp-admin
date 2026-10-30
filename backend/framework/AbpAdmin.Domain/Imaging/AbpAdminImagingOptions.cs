@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace AbpAdmin.Imaging;
 
 /// <summary>
-/// T3.1 图片处理自研选项，绑定 appsettings.json 的 Imaging 节。
+/// 图片处理自研选项，绑定 appsettings.json 的 Imaging 节。
 /// ABP provider 自身的选项（SkiaSharpCompressOptions / SkiaSharpResizerOptions / ImageResizeOptions）
 /// 在 AbpAdminDomainModule 中单独配置，这里只放我们自己的约束。
 /// </summary>
@@ -15,7 +15,7 @@ public class AbpAdminImagingOptions
     /// <summary>
     /// 头像允许的扩展名（小写，含点）。双向约束：每个扩展名必须能被
     /// FileSignaturesImageContentValidator 的格式映射识别，启动期校验不通过则 AbpInitializationException。
-    /// 刻意不含 .svg（XXE / 内联脚本 / SSRF 攻击面，见规格 T3.1 第 9 步）。
+    /// 刻意不含 .svg（XXE / 内联脚本 / SSRF 攻击面，见规格 ）。
     /// </summary>
     public List<string> AvatarAllowedExtensions { get; set; } = [".jpg", ".jpeg", ".png"];
 

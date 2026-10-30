@@ -11,9 +11,9 @@ using Volo.Abp.DependencyInjection;
 namespace AbpAdmin.Imaging;
 
 /// <summary>
-/// 包装 FileSignatures 7.3.0（MIT）的 magic bytes 校验实现（T3.1）。
+/// 包装 FileSignatures 7.3.0（MIT）的 magic bytes 校验实现。
 ///
-/// 「需先验证」结论（对 7.3.0 程序集反射 + 手工文件头实测）：
+/// 「需先验证」结论（7.3.0 程序集反射 + 文件头实测）：
 /// - 识别入口是 IFileFormatInspector.DetermineFileFormat(Stream)，
 ///   实例经 new FileFormatInspector(FileFormatLocator.GetFormats()) 构造；
 ///   规格提到的旧 API「FileFormatLocator.GetFileFormatLocator()」在 7.3.0 已不存在。

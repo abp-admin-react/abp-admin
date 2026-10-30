@@ -90,7 +90,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
 
     /// <summary>宽容解析配置里的 URI：非法/相对返回 null（调用方跳过该条并留日志）。
     /// IsFile 且原串未显式写 file: 视为非法——Unix 上 Uri.TryCreate("/x", Absolute) 会按
-    /// 绝对路径解析成 file:///x 返回 true（Linux 容器实测），不拦会把相对 RootUrl 种进库。</summary>
+    /// 绝对路径解析成 file:///x 返回 true，不拦会把相对 RootUrl 种进库。</summary>
     private static Uri? ParseUri(string raw) =>
         Uri.TryCreate((raw ?? "").Trim(), UriKind.Absolute, out var uri)
         && (!uri.IsFile || (raw ?? "").Trim().StartsWith("file:", StringComparison.OrdinalIgnoreCase))
@@ -160,8 +160,8 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     /// 端口/源只来自 OpenIddict:Applications:AbpAdmin_App:RootUrl + Extra*（Host Configuration），
     /// 本方法不硬编码任何端口。CreateOrUpdate 对已有客户端的 URI 集合更新在部分路径上不可靠，
     /// 这里用 Populate + 清空 + 再写入，保证 compose 改 WEB_PUBLIC_URL 后重跑种子立即生效。
-    /// 库内值与配置完全一致时跳过本方法的整只更新——消掉种子路径上的重复二次写（OCR 修复：
-    /// 此前每次种子都无条件重写）。整只级别的零写放大由本类覆写的 CreateOrUpdateApplicationAsync
+    /// 库内值与配置完全一致时跳过本方法的整只更新——消掉种子路径上的重复二次写——
+    /// 否则每次种子都无条件重写）。整只级别的零写放大由本类覆写的 CreateOrUpdateApplicationAsync
     /// 保证（对已存在应用逐域比对，全等直接跳过基类的无条件 UpdateAsync）；本方法只在其
     /// 判定出回调集合有差异时才会被走到，是差异路径里的二次兜底。
     /// </summary>
@@ -269,7 +269,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                 // SPA（oidc-client-ts）的 post_logout_redirect_uri = {origin}/user/login
                 //（与 redirect_uri 的 /user/callback 对称）。缺了它 end-session 在 Validate
                 // 阶段即被拒（invalid post_logout_redirect_uri→400），服务端会话吊销处理器
-                // 根本不执行，SPA 只是本地清 token——UI 登出路径的会话吊销被静默短路（实测）。
+                // 根本不执行，SPA 只是本地清 token——UI 登出路径的会话吊销被静默短路。
                 $"{appClientRootUrl}/user/login"
             };
             postLogoutRedirectUris.AddRange(configurationSection
@@ -287,8 +287,8 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                     OpenIddictConstants.GrantTypes.RefreshToken,
                     // ROPC（grant_type=password）已从 SPA 客户端移除：OAuth 2.0 Security BCP 禁用，
                     // OAuth 2.1 移除；SPA 实际走授权码+PKCE。移除后 Turnstile 保护的登录页
-                    // 不再能被令牌端点旁路。脚本化/E2E 通道改走下方 AbpAdmin_TestCli（机密客户端）。
-                    // T2.7: 无密码登录与模拟登录扩展授权；LinkAccounts: 关联账号切换
+                    // 不再能被令牌端点旁路。脚本化/E2E 测试通道走下方 AbpAdmin_TestCli（机密客户端）。
+                    // 无密码登录与模拟登录扩展授权；LinkAccounts: 关联账号切换
                     AbpAdminOpenIddictDefaults.GrantTypes.Passwordless,
                     AbpAdminOpenIddictDefaults.GrantTypes.Impersonation,
                     AbpAdminOpenIddictDefaults.GrantTypes.LinkedAccount
@@ -300,9 +300,9 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                 logoUri: "/images/clients/angular.svg"
             );
 
-            // H-1：公共客户端的授权码通道强制 PKCE（前端 oidc-client-ts 的 code flow
+            // 公共客户端的授权码通道强制 PKCE（前端 oidc-client-ts 的 code flow
             // 默认发出 code_challenge，服务端强制不改变现有登录行为，只封住「无
-            // code_challenge 兑换授权码」的劫持面；实测种子后 AbpAdmin_App 的
+            // code_challenge 兑换授权码」的劫持面；种子后 AbpAdmin_App 的
             // requirePkce=true 已落库，authorize 无 challenge → 400）。ABP 10.6.1 的种子
             // 基类没有 requirements 参数，种入后在这里幂等补挂（已带该 requirement 则
             // 跳过，不产生写放大）。

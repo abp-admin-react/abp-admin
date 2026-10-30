@@ -9,7 +9,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 站内信创建 ETO 的处理器（T3.5），照模块的 CreateSmsNotificationEventHandler 写：
+/// 站内信创建 ETO 的处理器，照模块的 CreateSmsNotificationEventHandler 写：
 /// 创建 NotificationInfo + 每个用户一条 Notification。创建后的实体事件由
 /// InAppNotificationCreationEventHandler 接管（入队发送作业）。
 /// </summary>

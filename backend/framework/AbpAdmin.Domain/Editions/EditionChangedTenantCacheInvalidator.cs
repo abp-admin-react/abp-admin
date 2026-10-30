@@ -10,7 +10,7 @@ using Volo.Abp.TenantManagement;
 namespace AbpAdmin.Editions;
 
 /// <summary>
-/// 版本变更时使关联租户的 TenantConfigurationCacheItem 失效（T2.8 SaaS Pro 缺口第 3 项）。
+/// 版本变更时使关联租户的 TenantConfigurationCacheItem 失效。
 /// 失效规则与 Pro 一致：
 /// - 更新或删除租户 → 由开源 TenantConfigurationCacheItemInvalidator 负责（已有，不重复实现）；
 /// - 更新或删除版本 → 本类负责，使所有「版本关联指向该版本」的租户缓存失效；

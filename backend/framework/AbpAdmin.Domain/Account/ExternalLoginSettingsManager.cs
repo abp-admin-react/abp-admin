@@ -6,7 +6,7 @@ using Volo.Abp.Settings;
 namespace AbpAdmin.Account;
 
 /// <summary>
-/// T2.7 外部登录每租户配置的读取核心（Domain 层，Application.Tests 可直接覆盖租户隔离）。
+/// 外部登录每租户配置的读取核心（Domain 层，Application.Tests 可直接覆盖租户隔离）。
 /// 设置命名约定（定死）：AbpAdmin.Account.ExternalLogin.{Scheme}.Enabled / .ClientId / .ClientSecret。
 /// ClientSecret 的 SettingDefinition 标记了 isEncrypted，ISettingProvider 读出的是解密后的明文。
 /// </summary>

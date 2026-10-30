@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace AbpAdmin.Imaging;
 
 /// <summary>
-/// 图片内容校验门面（T3.1）。业务代码只依赖本接口，不直接碰 FileSignatures。
+/// 图片内容校验门面。业务代码只依赖本接口，不直接碰 FileSignatures。
 /// </summary>
 public interface IImageContentValidator
 {

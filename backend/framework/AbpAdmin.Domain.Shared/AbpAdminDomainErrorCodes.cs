@@ -84,7 +84,7 @@ public static class AbpAdminDomainErrorCodes
     }
 
     /// <summary>
-    /// T2.8 SaaS Pro 缺口：租户相关错误码。
+    /// 租户相关错误码。
     /// </summary>
     public static class Tenants
     {
@@ -108,7 +108,7 @@ public static class AbpAdminDomainErrorCodes
     }
 
     /// <summary>
-    /// T2.8 SaaS Pro 缺口：版本相关错误码。
+    /// 版本相关错误码。
     /// </summary>
     public static class Editions
     {
@@ -185,7 +185,7 @@ public static class AbpAdminDomainErrorCodes
     }
 
     /// <summary>
-    /// T2.9 OpenIddict Pro 缺口：应用/scope 管理错误码。
+    /// 应用/scope 管理错误码。
     /// </summary>
     public static class OpenIddict
     {
@@ -224,7 +224,7 @@ public static class AbpAdminDomainErrorCodes
     }
 
     /// <summary>
-    /// T2.7 Account Pro 缺口：账户相关错误码。
+    /// 账户相关错误码。
     /// </summary>
     public static class Account
     {
@@ -342,7 +342,7 @@ public static class AbpAdminDomainErrorCodes
     }
 
     /// <summary>
-    /// T2.5 操作限流错误码。
+    /// 操作限流错误码。
     /// </summary>
     public static class RateLimiting
     {
@@ -357,7 +357,7 @@ public static class AbpAdminDomainErrorCodes
     }
 
     /// <summary>
-    /// T3.1 图片处理错误码。
+    /// 图片处理错误码。
     /// </summary>
     public static class Imaging
     {
@@ -420,7 +420,7 @@ public static class AbpAdminDomainErrorCodes
     }
 
     /// <summary>
-    /// T3.3 定时作业错误码。
+    /// 定时作业错误码。
     /// </summary>
     public static class ScheduledJobs
     {
@@ -438,7 +438,7 @@ public static class AbpAdminDomainErrorCodes
     }
 
     /// <summary>
-    /// T3.5 通知服务错误码。
+    /// 通知服务错误码。
     /// </summary>
     public static class Notifications
     {

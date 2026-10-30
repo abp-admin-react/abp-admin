@@ -3,9 +3,9 @@ using System;
 namespace AbpAdmin.Account;
 
 /// <summary>
-/// 邮箱确认 6 位数字码的缓存项（审查 E2E 轮引入：原先用 Identity 的
-/// GenerateEmailConfirmationTokenAsync 生成 200+ 字符 SecureToken 作「确认码」，
-/// 与前端 6 位输入框语义不匹配，确认闭环走不通；改为 6 位数字码 + 缓存 10 分钟，
+/// 邮箱确认 6 位数字码的缓存项（不用 Identity 的
+/// GenerateEmailConfirmationTokenAsync——它生成 200+ 字符 SecureToken 作「确认码」，
+/// 与前端 6 位输入框语义不匹配，确认闭环走不通；用 6 位数字码 + 缓存 10 分钟，
 /// 与手机号确认（GenerateChangePhoneNumberTokenAsync，6 位数字）口径对齐。
 /// 只存 SHA-256 哈希不存明文；校验侧比对用常数时间比较（与免密登录同法）。
 /// </summary>

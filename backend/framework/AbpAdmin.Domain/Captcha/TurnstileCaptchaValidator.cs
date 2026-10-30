@@ -9,7 +9,7 @@ using Volo.Abp.Settings;
 namespace AbpAdmin.Captcha;
 
 /// <summary>
-/// T4.4：校验 Cloudflare Turnstile。开关关闭时直接通过。
+/// 校验 Cloudflare Turnstile。开关关闭时直接通过。
 /// HTTP 调用走 ITurnstileSiteVerifyApi 声明式客户端（HttpAgent，绑定 "Turnstile" 命名 HttpClient）。
 /// </summary>
 public class TurnstileCaptchaValidator : DomainService
