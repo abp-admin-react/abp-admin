@@ -53,10 +53,10 @@ export async function postApiAppProfileAvatarUpload(
 
     if (item !== undefined && item !== null) {
       // 注意：此处用 Object.prototype.toString 判别 File 而非 item instanceof File。
-        // 本文件由 openapi 生成器产出（npm run openapi 会覆盖手工改动，需同步生成模板）；
-        // @types/node 的 File 声明会把 DOM File 遮蔽成纯类型，instanceof 直接编译报
-        // TS2359（pnpm tsc 存量失败的根因，见 docs/TEST_EVIDENCE_2026-09-21.md D6）。
-        if (typeof item === "object" && Object.prototype.toString.call(item) !== "[object File]") {
+      // 本文件由 openapi 生成器产出（npm run openapi 会覆盖手工改动，需同步生成模板）；
+      // @types/node 的 File 声明会把 DOM File 遮蔽成纯类型，instanceof 直接编译报
+      // TS2359（pnpm tsc 存量失败的根因，见 docs/TEST_EVIDENCE_2026-09-21.md D6）。
+      if (typeof item === "object" && Object.prototype.toString.call(item) !== "[object File]") {
         if (item instanceof Array) {
           item.forEach((f) => formData.append(ele, f || ""));
         } else {
