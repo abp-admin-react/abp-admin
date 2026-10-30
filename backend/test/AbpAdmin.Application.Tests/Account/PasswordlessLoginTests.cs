@@ -17,7 +17,7 @@ using Xunit;
 
 namespace AbpAdmin.Account;
 
-/* T2.7 无密码登录集成测试。
+/* 无密码登录集成测试。
  * 覆盖：一次性语义（码成功则链接失效、反之亦然）、重发使旧凭据失效、
  * 重发重置校验侧限流、token 有效期钳制（设 10 → 生效 30）、邮件内容随模式变化、
  * 并发重放同一验证码恰好消费一次（分布式锁内「读-验-删」原子化）。
@@ -112,7 +112,7 @@ public abstract class PasswordlessLoginTests<TStartupModule> : AbpAdminApplicati
         // 并发重放同一验证码（与 GDPR DownloadAsync_Concurrent_Replay 同型场景）：
         // ValidateAndConsumeAsync 把「读缓存-比对-删除」收进分布式锁临界区，
         // 先拿到锁的请求命中缓存条目并整条删除（等锁期间 DbContext 也只有赢家在碰），
-        // 释放后后来者必然读到缓存未命中。原先无锁的 TOCTOU 写法下
+        // 释放后后来者必然读到缓存未命中。（无锁的 TOCTOU 写法下
         // 两个请求都能通过比对各自换取登录令牌（一次性凭据被消费两次）。
         var first = _passwordlessLoginManager.ValidateAndConsumeAsync(email, credentials.Code, null);
         var second = _passwordlessLoginManager.ValidateAndConsumeAsync(email, credentials.Code, null);
@@ -234,7 +234,7 @@ public abstract class PasswordlessLoginTests<TStartupModule> : AbpAdminApplicati
     [Fact]
     public async Task Inactive_User_Credentials_Should_Be_Rejected_At_Exchange()
     {
-        // round4 fail closed：管理员停用账户后，已送达邮箱的 OTP/magic link 在有效期内
+        // fail closed：管理员停用账户后，已送达邮箱的 OTP/magic link 在有效期内
         // 不得再换票——发码侧只查锁定不查 IsActive，状态复核必须发生在消费时刻
         var email = await CreateTestUserAsync();
         var credentials = await SendAndGetCredentialsAsync(email);
@@ -251,7 +251,7 @@ public abstract class PasswordlessLoginTests<TStartupModule> : AbpAdminApplicati
     [Fact]
     public async Task Locked_User_Credentials_Should_Be_Rejected_At_Exchange()
     {
-        // round4 fail closed：发码后才发生的锁定（如密码侧爆破触发）不应被仍有效的 OTP 绕过
+        // fail closed：发码后才发生的锁定（如密码侧爆破触发）不应被仍有效的 OTP 绕过
         var email = await CreateTestUserAsync();
         var credentials = await SendAndGetCredentialsAsync(email);
 
@@ -267,7 +267,7 @@ public abstract class PasswordlessLoginTests<TStartupModule> : AbpAdminApplicati
             .ShouldBeNull("锁定账户不得凭有效 OTP 换票");
     }
 
-    // ========== 六透镜审查轮补测：LoginWithMagicLinkAsync 端点 ==========
+    // ========== 轮补测：LoginWithMagicLinkAsync 端点 ==========
 
     [Fact]
     public async Task LoginWithMagicLink_Without_Credentials_Throws_InvalidMagicLink()

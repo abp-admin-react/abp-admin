@@ -14,7 +14,7 @@ using Xunit;
 
 namespace AbpAdmin.ScheduledJobs;
 
-/* T3.3 定时作业集成测试。
+/* 定时作业集成测试。
  * 覆盖验收标准里的服务端条目：
  * - 提交 "0 3 * * *"（Unix 5 段）与 "0 0 3 * * *"（日和周都是 *）返回 InvalidCronExpression
  * - 提交 "0 0 3 * * ?" 通过，PreviewCronAsync 返回接下来 5 天的凌晨 3 点
@@ -243,7 +243,7 @@ public abstract class ScheduledJobAppServiceTests<TStartupModule> : AbpAdminAppl
 
         foreach (var fireTime in result.NextFireTimes)
         {
-            // cron 的默认时区是服务器本地时区（已实测 Quartz 3.15.0），3 点指本地凌晨 3 点
+            // cron 的默认时区是服务器本地时区（Quartz 3.15.0 行为），3 点指本地凌晨 3 点
             var local = fireTime.ToLocalTime();
             local.Hour.ShouldBe(3);
             local.Minute.ShouldBe(0);
@@ -271,7 +271,7 @@ public abstract class ScheduledJobAppServiceTests<TStartupModule> : AbpAdminAppl
     [Fact]
     public async Task PreviewCronAsync_Should_Return_Invalid_Not_500_For_Malformed_Expression()
     {
-        // 渗透测试实测：Quartz 对 "bad cron !!" 抛的不是 ParseException（500 路径），
+        // Quartz 对 "bad cron !!" 抛的不是 ParseException（500 路径），
         // 预览必须整体兜底、按非法表达式返回而不是炸 500
         var result = await _appService.PreviewCronAsync("bad cron !!");
 
@@ -285,7 +285,7 @@ public abstract class ScheduledJobAppServiceTests<TStartupModule> : AbpAdminAppl
     [Fact]
     public async Task PreviewCronAsync_Should_Return_Invalid_Not_500_For_Out_Of_Range_Value()
     {
-        // 渗透测试实测："0 0 25 * * ?"（小时 25）解析或推算阶段抛异常（500 路径），
+        // "0 0 25 * * ?"（小时 25）解析或推算阶段抛异常（500 路径），
         // 必须按非法表达式返回
         var result = await _appService.PreviewCronAsync("0 0 25 * * ?");
 
@@ -391,7 +391,7 @@ public abstract class ScheduledJobAppServiceTests<TStartupModule> : AbpAdminAppl
     [Fact]
     public async Task Tenant_Should_Be_Rejected_On_All_Four_Entry_Points_For_Host_Only_Job_Type()
     {
-        // round3 security F5 的回归锚（round4 前零锚定）：Host 专属 JobType（广播看门狗，
+        // 回归锚：Host 专属 JobType（广播看门狗，
         // 会关租户过滤器跨租户巡检）在租户上下文的 Create/Update/SetEnabled/Trigger 一律拒绝；
         // 普通 JobType 不受影响（上面其余用例已覆盖普通类型的租户侧可用性）。
         await CleanupAsync();

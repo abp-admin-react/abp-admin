@@ -111,7 +111,7 @@ public class QuoteManagerTests : OrderingTestBase
     [Fact]
     public async Task Concurrent_StartPay_Unique_Violation_Reads_Back_Winner_Idempotently()
     {
-        // 本窗口修复的并发 start-pay 双击回归测试（OCR test 修复：catch 23505 → 幂等读回此前零覆盖）。
+        // 本窗口修复的并发 start-pay 双击回归测试（catch 23505 → 幂等读回分支必须覆盖）。
         // 确定性复现：事务 A 插入 Active 赢者但不提交 → 事务 B 走 QuoteManager，SELECT 读不到未提交行 →
         // INSERT 在部分唯一索引上阻塞 → A 提交 → B 撞 23505 进 catch → 读回赢者，双双 200。
         var order = await CreateOrderAsync(10m);
@@ -154,7 +154,7 @@ public class QuoteManagerTests : OrderingTestBase
 
                 // 等 loser 走到 INSERT 阻塞点（唯一索引等 winner 的事务出结果），再提交赢者。
                 // 若 loser 未达阻塞点就先提交，SELECT 直接读到已提交赢者走幂等读回——两条路径结果一致，
-                // 但只有前者覆盖 23505 catch 分支（OCR R2 修复：await 移进 scope2，避免提前释放 loser 借用的作用域）
+                // 但只有前者覆盖 23505 catch 分支（await 须在 scope2 内，避免提前释放 loser 借用的作用域）
                 await Task.Delay(500);
                 await uow1.CompleteAsync();
                 loser = await loserTask;

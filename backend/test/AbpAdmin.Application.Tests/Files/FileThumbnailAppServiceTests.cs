@@ -14,7 +14,7 @@ using Xunit;
 
 namespace AbpAdmin.Files;
 
-/* T3.1 文件缩略图集成测试。
+/* 文件缩略图集成测试。
  * 覆盖验收标准：
  * - 上传图片 → 映射行 Pending（事件入队），手动执行作业 → Done + blob 存在 + 宽高受限；
  * - 上传 .txt → 记录为 Unsupported，作业不抛异常（不会进入 ABP 重试循环）；

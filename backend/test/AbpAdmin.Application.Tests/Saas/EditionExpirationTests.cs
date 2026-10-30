@@ -13,7 +13,7 @@ using Xunit;
 namespace AbpAdmin.Saas;
 
 /// <summary>
-/// T2.8 SaaS Pro 缺口：版本过期与版本缓存失效。
+/// 版本过期与版本缓存失效。
 /// 链路（已核实 10.6 源码）：IFeatureChecker 的 EditionFeatureValueProvider
 /// → ITenantStore.FindAsync(tenantId).EditionId → EditionAwareTenantStore.ApplyEdition（过期判定内联在此）。
 /// 所以本测试在 TenantStore 层断言：过期后 TenantConfiguration.EditionId 为 null，

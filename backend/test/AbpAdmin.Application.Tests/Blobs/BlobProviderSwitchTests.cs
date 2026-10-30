@@ -9,7 +9,7 @@ using Xunit;
 
 namespace AbpAdmin.Blobs;
 
-/* 验证 BLOB 存储多 provider 改造（T0.2）。
+/* 验证 BLOB 存储多 provider 改造。
  * 默认（未配置 Blob 节）回落 Database provider，存取应成功。
  */
 public abstract class BlobProviderSwitchTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>

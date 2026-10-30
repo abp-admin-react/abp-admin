@@ -18,7 +18,7 @@ using Xunit;
 
 namespace AbpAdmin.Profile;
 
-/* T3.1 头像上传链路集成测试。
+/* 头像上传链路集成测试。
  * 覆盖验收标准：
  * - .exe 改名 .png → 业务异常且 BLOB 容器里没有产生任何文件；
  * - 真实 PNG 改名 .jpg → 同样被拒；
@@ -239,9 +239,9 @@ public abstract class ProfileAvatarAppServiceTests<TStartupModule> : AbpAdminApp
             }
         }
 
-        // host 上下文：同一 userId 探测不到。安全审计 L-2 起，非本人 id 一律 404
+        // host 上下文：同一 userId 探测不到；非本人 id 一律 404
         //（EntityNotFoundException）——与"不存在的 id"完全同响应，既探不到内容也探不到存在性；
-        // 此前语义是返回 null（同样探测不到，两种口径都成立，此处随实现更新断言）
+        // 返回 null 的旧口径同样探测不到；此处随实现断言 404
         await Should.ThrowAsync<EntityNotFoundException>(
             () => _profileAvatarAppService.GetAsync(tenantUser.Id));
     }

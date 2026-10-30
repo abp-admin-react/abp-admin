@@ -12,7 +12,7 @@ using Xunit;
 
 namespace AbpAdmin.Localization;
 
-/* T2.2 语言管理集成测试（03-batch2-pro-parity.md T2.2 验收标准：
+/* 语言管理集成测试（03-batch2-pro-parity.md 验收标准：
  * 「LanguageAppServiceTests.cs 与 LanguageTextAppServiceTests.cs 覆盖业务规则与租户隔离」）。
  *
  * 覆盖：种子语言（20 条、zh-Hans 默认）、创建、重复 CultureName 拒绝、

@@ -14,7 +14,7 @@ using Xunit;
 
 namespace AbpAdmin.Account;
 
-/* T2.7 模拟登录集成测试。
+/* 模拟登录集成测试。
  * 覆盖：模拟签发含 impersonator claim（ImpersonationManager 产出的 claim 即 grant 写入令牌的内容）、
  * 租户模拟解析到目标租户的 admin 用户、BackToMyAccount 正常返回、
  * 无 impersonator claim 的普通身份调返回端点被拒（AbpAuthorizationException → 403）。

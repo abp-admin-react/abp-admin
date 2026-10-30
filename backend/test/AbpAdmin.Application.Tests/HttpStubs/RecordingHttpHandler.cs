@@ -13,7 +13,7 @@ namespace AbpAdmin.HttpStubs;
 /// HttpAgent 声明式客户端的录制型 HttpMessageHandler 替身（挂命名 HttpClient 主处理器位，
 /// 测试模块晚于生产模块注册生效），不真实外呼。测试入队 (状态码, 响应体)，
 /// 用 RecordedRequests 断言请求形状（方法/URL/表单/Authorization 头）——
-/// 这是全仓第一例出站 HTTP 层面的假件（此前惯例是替换更外层的请求器接口，
+/// 出站 HTTP 层面的假件（不同于替换更外层请求器接口的惯例，
 /// HttpAgent 绑定命名 HttpClient 后主处理器成为新的可替换点）。
 /// </summary>
 public abstract class RecordingHttpHandler : HttpMessageHandler

@@ -16,7 +16,7 @@ using Xunit;
 
 namespace AbpAdmin.DataDictionaries;
 
-/* T3.4 数据字典种子与枚举同步的集成测试。
+/* 数据字典种子与枚举同步的集成测试。
  * 覆盖验收标准：
  * - 12 个初始字典（6 手写 + 6 枚举同步：TenantActivationState / FileThumbnailState /
  *   DataScopeType / MenuType / PostStatus / MaskKind），

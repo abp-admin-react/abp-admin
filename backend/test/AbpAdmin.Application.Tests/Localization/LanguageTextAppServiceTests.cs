@@ -13,7 +13,7 @@ using Xunit;
 
 namespace AbpAdmin.Localization;
 
-/* T2.2 语言管理集成测试：本地化文本覆盖（03-batch2-pro-parity.md T2.2 验收标准：
+/* 语言管理集成测试：本地化文本覆盖（03-batch2-pro-parity.md 验收标准：
  * 覆盖保存后不重启即生效、恢复默认回到静态 json 原文、租户覆盖不外泄）。
  *
  * 「生效」断言走真实本地化管线：IStringLocalizer<AbpAdminResource> 的 contributor 链里

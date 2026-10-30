@@ -61,7 +61,7 @@ public abstract class IdentitySessionAppServiceTests<TStartupModule> : AbpAdminA
     [Fact]
     public async Task Manager_Find_Should_Work_Without_Ambient_UnitOfWork()
     {
-        // round4 实证锚（function F2）：IdentitySessionValidationMiddleware 在 UseUnitOfWork
+        // 实证锚：IdentitySessionValidationMiddleware 在 UseUnitOfWork
         // 之后调用 FindBySessionIdAsync/TouchIfStaleAsync，那个位置没有环境 UoW（Reserve 未 Begin）。
         // 管理器若不受 UnitOfWork 拦截保护，裸调用会抛
         // "A DbContext can only be created inside a unit of work!"（每个带 session_id 的请求 500）。
@@ -327,7 +327,7 @@ public abstract class IdentitySessionAppServiceTests<TStartupModule> : AbpAdminA
 
     /// <summary>
     /// 端到端语义锚：Mobile 会话与 Web 会话在 LogoutFromSameTypeDevices 下互不影响——
-    /// 此前 Device 硬编码 Web，该档位与 AllDevices 等效（遗留项修复的行为基线）。
+    /// Device 硬编码 Web 时该档位与 AllDevices 等效（行为基线）。
     /// </summary>
     [Fact]
     public async Task SameType_Mode_Should_Distinguish_Mobile_From_Web()

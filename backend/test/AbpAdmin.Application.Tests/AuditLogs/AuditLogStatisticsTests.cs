@@ -11,8 +11,8 @@ using Xunit;
 
 namespace AbpAdmin.AuditLogs;
 
-/* T2.1 审计日志对标：统计端点与单实体变更历史集成测试。
- * 对应 03-batch2-pro-parity.md T2.1 第 8/10 项：
+/* 审计日志对标：统计端点与单实体变更历史集成测试。
+ * 对应 03-batch2-pro-parity.md 第 8/10 项：
  * - GetAverageExecutionDurationPerDayAsync / GetErrorRateAsync 的聚合结果正确
  *   （聚合下推数据库侧的验收靠 MCP 抓 SQL，这里验证结果语义）；
  * - GetEntityChangeHistoryAsync 返回该实体的全部历史变更（跨多条审计日志），

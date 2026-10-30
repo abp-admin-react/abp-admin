@@ -124,7 +124,7 @@ public static class AbpAdminTestPg
     /// <summary>
     /// 用例间隔离：Respawn 清空该程序集库的全部业务表（保留迁移记账表）。
     /// 未注册库的程序集（纯单测，不碰数据库）零成本直通。放在测试基类 Dispose 里调用——
-    /// 下一个用例启动时种子重新播，等价于此前「每用例一座独立内存库」的隔离语义。
+    /// 下一个用例启动时种子重新播，等价「每用例一座独立内存库」的隔离语义。
     /// </summary>
     public static void Reset(Assembly forAssembly)
     {

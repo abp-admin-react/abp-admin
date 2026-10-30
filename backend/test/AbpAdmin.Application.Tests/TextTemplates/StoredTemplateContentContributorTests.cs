@@ -11,7 +11,7 @@ using Xunit;
 
 namespace AbpAdmin.TextTemplates;
 
-/* T2.3 文本模板管理集成测试（03-batch2-pro-parity.md T2.3 验收标准：
+/* 文本模板管理集成测试（03-batch2-pro-parity.md 验收标准：
  * 「StoredTemplateContentContributorTests.cs 覆盖：数据库覆盖生效、租户隔离、恢复默认、缓存失效」）。
  *
  * 核心断言是「数据库覆盖真实生效于模板渲染」：全部用例都走 ITemplateRenderer.RenderAsync
@@ -216,7 +216,7 @@ public abstract class StoredTemplateContentContributorTests<TStartupModule> : Ab
     [Fact]
     public async Task Update_Should_Invalidate_Cache_For_Cultures_Outside_Common_List()
     {
-        // 曾经的负债：缓存失效按硬编码文化清单逐条 Remove，清单外文化（如 fr）保存后
+        // 边界形态：缓存失效若按硬编码文化清单逐条 Remove，清单外文化（如 fr）保存后
         // 要等 1 小时滑动过期才不脏读。版本号化后 (Tenant, Name) 维度一次作废所有文化，
         // 本用例在旧实现下必然失败——守住修复。
         var name = TestTemplateDefinitionProvider.CacheInvalidation;

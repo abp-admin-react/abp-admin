@@ -30,8 +30,8 @@ public interface ITenantDatabaseCreationRecorder
 }
 
 /// <summary>
-/// T2.8 SaaS Pro 缺口补齐的四条链路：
-/// 1) FeatureManagement ProviderPolicies——租户/版本级功能编辑此前抛
+/// SaaS Pro 缺口补齐的四条链路：
+/// 1) FeatureManagement ProviderPolicies——租户/版本级功能编辑若未映射策略会抛
 ///    "No policy defined to get/set permissions for the provider"（点开即 500）；
 /// 2) 版本删除清理该版本功能值（AbpFeatureValues 不再留 "E" 孤儿行）；
 /// 3) 租户删除清理功能值 + 菜单/授权；
@@ -114,7 +114,7 @@ public abstract class SaasFeaturePolicyAndCleanupTests<TStartupModule> : AbpAdmi
         var editionId = await CreateEditionAsync();
         var tenantId = await CreateTenantAsync();
 
-        // 此前两条 Get 均抛 "No policy defined..."；策略映射后按权限放行（admin 已授予全部权限）
+        // 未映射策略时两条 Get 均抛 "No policy defined..."；映射后按权限放行
         (await _featureAppService.GetAsync(TenantFeatureValueProvider.ProviderName, tenantId.ToString()))
             .Groups.ShouldNotBeEmpty();
         (await _featureAppService.GetAsync(EditionFeatureValueProvider.ProviderName, editionId.ToString()))
@@ -253,7 +253,7 @@ public abstract class SaasFeaturePolicyAndCleanupTests<TStartupModule> : AbpAdmi
     [Fact]
     public async Task Should_Reject_Mask_Containing_ConnectionString_Value()
     {
-        // 守卫场景：值"包含"掩码字面量但不是纯掩码回传——此前会被当真值加密入库，
+        // 守卫场景：值"包含"掩码字面量但不是纯掩码回传——会被当真值加密入库，
         // 解密出的「掩码+连接串」任何数据库驱动都解析不了
         var tenantId = await CreateTenantAsync();
         var bad = "Data Source=x.db" + TenantConnectionStringProtector.Mask;

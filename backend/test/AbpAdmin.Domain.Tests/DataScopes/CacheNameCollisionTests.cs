@@ -8,7 +8,7 @@ using Xunit;
 namespace AbpAdmin.DataScopes;
 
 /// <summary>
-/// T1.5.0 [CacheName] 撞键一次性验证。
+/// .0 [CacheName] 撞键一次性验证。
 ///
 /// 验证：两个字段形状不同的缓存项类型打同一个 [CacheName]，
 /// 用同一个业务键写入再读取，是否真的会读到对方的字节并抛反序列化异常。

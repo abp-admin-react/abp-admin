@@ -8,8 +8,8 @@ using Xunit;
 
 namespace AbpAdmin.Account;
 
-/* round4 test F2：ConfirmEmailAsync / ConfirmPhoneNumberAsync 此前零覆盖。
- * 这两个匿名端点是可暴力猜码的验证面，且 round3 刚补过防枚举延时——必须锚定：
+/* test F2：ConfirmEmailAsync / ConfirmPhoneNumberAsync 此前零覆盖。
+ * 这两个匿名端点是可暴力猜码的验证面，且 刚补过防枚举延时——必须锚定：
  * 1. 未知邮箱/手机号与错误验证码返回同一个错误码（响应形状一致，不可枚举已注册账户）
  * 2. 错误验证码不翻转 EmailConfirmed / PhoneNumberConfirmed
  * 3. 正确验证码走通（邮箱：6 位码缓存机制，从录制邮件提取，与真实用户视角一致；手机：Identity SetPhoneNumberConfirmed(true) 落库）
@@ -69,7 +69,7 @@ public abstract class ConfirmEmailPhoneTests<TStartupModule> : AbpAdminApplicati
     [Fact]
     public async Task ConfirmEmail_Valid_Code_Should_Confirm()
     {
-        // E2E 审查修复后的口径：确认码是 6 位数字（与手机确认同口径），经发码端点
+        // 口径：确认码是 6 位数字（与手机确认同口径），经发码端点
         // 写缓存 + 邮件发出；测试从录制邮件正文提取验证码（与真实用户视角一致）
         var user = await CreateUserAsync("ce-ok-");
         var emailSender = (RecordingEmailSender)GetRequiredService<Volo.Abp.Emailing.IEmailSender>();

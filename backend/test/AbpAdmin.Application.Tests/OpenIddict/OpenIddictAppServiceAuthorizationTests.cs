@@ -10,9 +10,9 @@ using Xunit;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// NV-23 回归锁：OpenIddict 客户端 Create/Update 全量重写权限面（scopes/grant types/flows/
-/// PKCE 要求清空重填），必须同时要求 ManagePermissions——该授权位此前在权限树里定义了却
-/// 从未接线（死代码），任何持 Applications.Update 的主体都能把机密客户端改成 password 流、
+/// 回归锁：OpenIddict 客户端 Create/Update 全量重写权限面（scopes/grant types/flows/
+/// PKCE 要求清空重填），必须同时要求 ManagePermissions——该授权位不接线即为死代码，
+/// 任何持 Applications.Update 的主体都能把机密客户端改成 password 流、
 /// 剥掉 PKCE。本锁以元数据断言钉死接线（与匿名端点全量审计同一哲学：行为由源码钉死时，
 /// 断言元数据 = 断言行为）；同时钉死 UpdateTokenLifetimeAsync 不需要该位（仅覆盖 lifetime
 /// settings，不碰权限面，误加会破坏纯生命周期管理角色）。

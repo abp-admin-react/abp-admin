@@ -90,7 +90,7 @@ public class SharedTransactionTestModule : AbpModule
 {
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
-        // 只补 Collection 上下文的建表（其余接线由 OrderingTestModule 完成——评审 M 级：
+        // 只补 Collection 上下文的建表（其余接线由 OrderingTestModule 完成：
         // 整块复制会让两份接线各自漂移）
         var database = AbpAdminTestPg.GetDatabase(typeof(OrderingTestModule).Assembly);
         database.MigrateOnce("CollectionDbContext", () =>

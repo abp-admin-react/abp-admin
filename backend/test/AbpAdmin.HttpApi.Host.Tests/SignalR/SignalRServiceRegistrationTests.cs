@@ -14,7 +14,7 @@ using Xunit;
 namespace AbpAdmin.SignalR;
 
 /// <summary>
-/// T3.2 SignalR 注册的静态核对，复用 <see cref="HostUnderTest"/> 的真实宿主服务集合。
+/// SignalR 注册的静态核对，复用 <see cref="HostUnderTest"/> 的真实宿主服务集合。
 /// 不解析任何会连 Redis 的服务：本类只读 ServiceDescriptor 与 Options
 /// （IOptions&lt;RedisOptions&gt; 的求值不建连接）。
 /// </summary>
@@ -23,7 +23,7 @@ namespace AbpAdmin.SignalR;
 /// RedisHubLifetimeManager）都是 internal，无法 typeof 引用，只能按类型名断言；
 /// 名字本身就是"后注册者胜出"链条的核对点：AddSignalRCore 用 TryAdd 注册 Default，
 /// AddStackExchangeRedis 用 AddSingleton 追加 Redis，解析时取最后一条
-/// （05-reference-facts.md 第 13.8 节原先标"推断，待验证"，本类把它钉在注册表层面）。
+/// （05-reference-facts.md 第 13.8 节的推断在本类钉死于注册表层面）。
 /// </remarks>
 public class SignalRServiceRegistrationTests
 {

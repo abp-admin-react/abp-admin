@@ -135,7 +135,7 @@ public class WithdrawSwitchSettingsTests : CollectionTestBase
     public async Task HotWallet_Status_Degrades_To_Unconfigured_When_Gateway_Cannot_Assemble()
     {
         // 全新环境（无 RPC/key 池）：状态卡是只读展示面，必须 Configured=false 而不是 500
-        //（用户实测踩中：未配置环境打开提现页弹服务器错误）。资金路径不经此降级。
+        //（未配置环境打开提现页会弹服务器错误）。资金路径不经此降级。
         await SeedNetworkOnlyAsync(); // 种网络行但不配 RPC/key
         var admin = GetRequiredService<CollectionWithdrawAdminAppService>();
         var status = await admin.GetHotWalletAsync();

@@ -18,7 +18,7 @@ namespace AbpAdmin.Ordering;
 /// <summary>
 /// 补状态作业用例（桩环境，计划第 3.3、8 节）：事件丢失时作业能发现已支付订单的第二笔到账；
 /// 过期待支付单按 CancelAsync→关单路径处理；到账匹配把待支付单标 Paid；
-/// 错额异常行只追加一次（PaymentAnomaly 标志去重，评审 M 级）。
+/// 错额异常行只追加一次（PaymentAnomaly 标志去重）。
 /// </summary>
 public class OrderStatusSyncJobTests : OrderingStubTestBase
 {

@@ -9,7 +9,7 @@ using Xunit;
 
 namespace AbpAdmin.DataDictionaries;
 
-/* T3.4 第 3 / 9 步：规则扫描与后端渲染。
+/* ：规则扫描与后端渲染。
  * 覆盖验收标准：「ScanRules 执行过且扫到了规则（数量必须大于 0）」
  * 与「导出路径上字典字段输出显示文本而不是编码」。 */
 public abstract class DataDictionaryRenderTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>

@@ -84,7 +84,7 @@ public class PermissionAndAgentScopeTests : LedgerScenarioTestBase
     }
 
     /// <summary>
-    /// NV-02 回归锁：Ledger.View + Scope.Agent（无 Scope.All）的组合此前只在子户列表路径
+    /// 回归锁：Ledger.View + Scope.Agent（无 Scope.All）的组合不能只在子户列表路径
     /// 被切片，GetBalanceAsync / GetTrialBalanceAsync / FinOverview 三个读面绕过了
     /// ResolveAgentScopeAsync——切片代理可携带任意 OwnerId 读他人余额 / 全平台试算合计 /
     /// 平台资金总览。修复后：余额与试算强制按自己的 AgentId；平台总览整体拒绝。

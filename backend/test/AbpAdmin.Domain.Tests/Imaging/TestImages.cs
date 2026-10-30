@@ -3,7 +3,7 @@ using SkiaSharp;
 namespace AbpAdmin.Imaging;
 
 /// <summary>
-/// 测试图片生成（T3.1）。用 SkiaSharp 编码出真实图片，
+/// 测试图片生成。用 SkiaSharp 编码出真实图片，
 /// 避免在仓库里放二进制 fixture 文件。
 /// </summary>
 public static class TestImages

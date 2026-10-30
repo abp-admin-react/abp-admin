@@ -145,7 +145,7 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     [Fact]
     public async Task Settle_clamps_to_held_and_zero_settles_to_full_release()
     {
-        // 钳制分支补测（OCR test 修复）：流式用量超预占是真实形态——结算封顶到预占额；
+        // 钳制分支补测：流式用量超预占是真实形态——结算封顶到预占额；
         // actual=0 → 全额解冻、只写 Release 流水不写 Settle
         var w = NewWallet();
         await w.CreditAsync(U, 1000, "t-" + Guid.NewGuid());
@@ -164,7 +164,7 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
 
         await using var db = await Db.CreateDbContextAsync();
         // ThenBy(Amount) 消同 Kind 平局的不稳定序（FrozenClock 下两笔 Reserve 的 CreatedAt 相同，
-        // 纯 Kind 排序的平局序无契约保证，OCR R2 修复）
+        // 纯 Kind 排序的平局序无契约保证）
         var kinds = await db.Ledger.Where(e => e.UserId == U).OrderBy(e => e.Kind).ThenBy(e => e.Amount)
             .Select(e => new { e.Kind, e.Amount }).ToListAsync();
         kinds.Select(k => (k.Kind, k.Amount)).ShouldBe(new[]
@@ -196,7 +196,7 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     [Fact]
     public async Task Estimate_counts_non_message_fields_so_tools_heavy_body_reserves_more()
     {
-        // NV-09 回归锁：上游按整个请求体计费（tools 等非消息字段原样转发），预估只数
+        // 回归锁：上游按整个请求体计费（tools 等非消息字段原样转发），预估只数
         // messages[].content 会结构性低估 → 结算 clamp 到预占额 = 平台倒贴上游差额。
         // 修复后非消息字段的序列化质量计入估算（宁多冻不少冻）。
         var tiny = JsonNode.Parse("""{"messages":[{"role":"user","content":"hi"}]}""")!.AsObject();
@@ -225,7 +225,7 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     [Fact]
     public async Task Stream_abort_after_delivered_frames_charges_estimate_instead_of_full_release()
     {
-        // NV-10 回归锁：流式中客户端断开——已 flush 的帧真实消耗上游计费，修复前走 FailAsync
+        // 回归锁：流式中客户端断开——已 flush 的帧真实消耗上游计费，不得全额解冻
         // 全额解冻 = 已交付内容零计费。修复后 SettleAbortedAsync 按粗估收费（clamp 到预占额），
         // 用量行 success=false 区分正常完成；零交付（首帧前断开）仍走 FailAsync 全额解冻。
         var w = NewWallet();
@@ -290,7 +290,7 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     [Fact]
     public async Task Deactivated_identity_rejects_existing_key_and_session_at_use_time()
     {
-        // NV-08 回归锁：凭证签发时刻查过 IsActive 不代表此刻有效——hb- 无到期、hbs- 最长一周，
+        // 回归锁：凭证签发时刻查过 IsActive 不代表此刻有效——hb- 无到期、hbs- 最长一周，
         // 停用/锁定账户的存量凭证必须在使用时刻过身份状态门（与未知 Key 同错 401，不泄露状态差异）。
         var keys = NewKeys();
         var key = await keys.IssueOrReuseKeyAsync(U);

@@ -10,7 +10,7 @@ namespace AbpAdmin.Permissions;
 using AbpAdmin.EntityFrameworkCore;
 
 /// <summary>
-/// NV-25 回归锁：包侧退款权限必须被钉到 Host。反编译定案：EasyAbp PaymentService 2.21.0
+/// 回归锁：包侧退款权限必须被钉到 Host。反编译定案：EasyAbp PaymentService 2.21.0
 /// 的 PaymentServicePermissionDefinitionProvider 以 MultiTenancySides.Both 定义 Refund 树，
 /// 租户创建种子随后授予每个租户 admin——包 HttpApi 的 RefundController 因此成为绕过
 /// repo 侧 IPaymentRefundGuard 的退款平行走道。本锁断言 PostDefine 改写生效：

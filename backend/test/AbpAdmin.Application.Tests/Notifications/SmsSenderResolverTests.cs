@@ -17,7 +17,7 @@ using Xunit;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// T3.5 SmsSenderResolver 测试：唯一 ISmsSender 入口、按设置项分发、限流、
+/// 唯一 ISmsSender 入口、按设置项分发、限流、
 /// 两家厂商的消息映射（凭据走加密设置项，请求器是录制替身）。
 /// 每个用例用不同的手机号隔离限流计数（同一份进程内分布式缓存）。
 /// </summary>
@@ -171,7 +171,7 @@ public abstract class SmsSenderResolverTests<TStartupModule> : AbpAdminApplicati
     public async Task Rate_Limit_Should_Throw_After_Threshold()
     {
         await SetProviderAsync(AbpAdmin.Sms.AbpAdminSmsProviders.Null);
-        // 验证码策略：同一手机号 1 小时 3 次（T2.5 SmsVerificationCode）。
+        // 验证码策略：同一手机号 1 小时 3 次。
         // 消息必须带 Purpose=VerificationCode 标记（VerificationCodeSmsMessageFactory 发的都带），
         // 未打标的消息走 SmsNotification 策略（阈值独立配置，见 SmsRateLimitingPolicies）。
         var phone = "138" + Random.Shared.Next(10000000, 99999999);

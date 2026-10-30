@@ -17,7 +17,7 @@ using Xunit;
 
 namespace AbpAdmin.AuditLogs;
 
-/* T2.1 审计日志对标：导出集成测试（03-batch2-pro-parity.md T2.1 验收标准：
+/* 审计日志对标：导出集成测试（03-batch2-pro-parity.md 验收标准：
  * 「集成测试 AuditLogExportTests.cs 覆盖同步导出、转后台、无权限 403 三条路径」）。
  *
  * - 同步导出：AuditLogExcelBuilder 生成的 xlsx 列头为中文、行数与筛选结果一致。
@@ -69,7 +69,7 @@ public abstract class AuditLogExportTests<TStartupModule> : AuditLogTestBase<TSt
 
         var rows = ParseExcelRows(bytes);
         rows.Count.ShouldBe(3);
-        // 列头是中文（T2.1 验收：用 Excel 打开列头是中文）
+        // 列头是中文
         var firstRow = rows[0];
         firstRow.Keys.ShouldContain("执行时间");
         firstRow.Keys.ShouldContain("用户名");

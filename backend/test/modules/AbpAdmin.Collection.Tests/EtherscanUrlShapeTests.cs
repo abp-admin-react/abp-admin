@@ -6,7 +6,7 @@ using Xunit;
 namespace AbpAdmin.Collection;
 
 /// <summary>
-/// Etherscan V2 兜底 URL 组装形状锁（E2E 真链实测抓出的回归）：
+/// Etherscan V2 兜底 URL 组装形状锁：
 /// 回退路径（裸端点无 "?"）曾拼出 "v2/api&contractaddress=…"——连查询串起点都没有；
 /// key 池路径（基座以 ?apikey=KEY 结尾）缺 chainid=56 会被 V2 拒绝。
 /// </summary>
@@ -44,7 +44,7 @@ public class EtherscanUrlShapeTests
             "https://api.etherscan.io/v2/api?chainid=56",
             "https://api.etherscan.io/v2/api?chainid=56&contractaddress=",
         };
-        // 自带其它查询参数（无 chainid）：& 连接后补 chainid（OCR 补锁：唯一未覆盖分支）
+        // 自带其它查询参数（无 chainid）：& 连接后补 chainid（唯一未覆盖分支）
         yield return new object[]
         {
             "https://api.etherscan.io/v2/api?foo=1",

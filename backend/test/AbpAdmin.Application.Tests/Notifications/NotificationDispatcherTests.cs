@@ -14,7 +14,7 @@ using Xunit;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// T3.5 INotificationDispatcher 门面测试：
+/// INotificationDispatcher 门面测试：
 /// 三个发送方法各自创建对应渠道的 Notification 记录；广播写批次记录并入队作业。
 /// 发送本身由每通知一个的发送作业完成（测试环境 IsJobExecutionEnabled=false，手动执行）。
 /// </summary>

@@ -7,7 +7,7 @@ using Xunit;
 
 namespace AbpAdmin.Imaging;
 
-/* T3.1 magic bytes 校验（FileSignatures 包装）正/负用例。
+/* magic bytes 校验（FileSignatures 包装）正/负用例。
  * 对应验收标准：
  * - .exe 改名 .png 被拒；
  * - 真实 PNG 改名 .jpg 被拒（PNG 校验器不覆盖 .jpg，JPEG 校验器不认 PNG 头）；

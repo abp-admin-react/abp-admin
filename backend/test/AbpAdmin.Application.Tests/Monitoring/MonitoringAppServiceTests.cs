@@ -79,7 +79,7 @@ public abstract class MonitoringAppServiceTests<TStartupModule> : AbpAdminApplic
     // 用户词原样进入 glob（含元字符也只影响中段、逃不出锚定；后置 IsAllowedKey 兜底）
     [InlineData("user*name", null, "[ct]:*user*name*")]
     // 隔离前缀（keyPrefix）非空：必含段拼进 glob——与 IsAllowedKey 硬边界同口径，
-    // 扫描天然只命中本应用键（此前前缀只是页面过滤词，属装饰性边界）
+    // 扫描天然只命中本应用键（前缀若只作页面过滤词即装饰性边界）
     // 空用户词 + 必含段：收尾 **（与无必含段时空用户词的 "[ct]:**" 同一口径）
     [InlineData(null, "AbpAdmin:", "[ct]:*AbpAdmin:**")]
     [InlineData("user", "AbpAdmin:", "[ct]:*AbpAdmin:*user*")]

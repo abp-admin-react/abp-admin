@@ -18,8 +18,8 @@ using Xunit;
 
 namespace AbpAdmin.Identity;
 
-/* T2.6 Identity Pro 缺口：用户导入导出 + 周期改密集成测试。
- * 对应 03-batch2-pro-parity.md T2.6 验收标准：
+/* Identity Pro 缺口：用户导入导出 + 周期改密集成测试。
+ * 对应 03-batch2-pro-parity.md 验收标准：
  * - 导入的部分成功语义（逐行独立 UoW，成功行真实落库，失败行进明细文件）；
  * - 导入模板列名与解析列名同源（UserImportColumnNames）：直接按模板格式构造文件导入；
  * - 失败明细文件可解析，含原始行内容与具体失败原因；
@@ -601,7 +601,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
     /// <summary>
     /// 布尔列内联列表必须是带引号的字符串字面量（OOXML 要求，Excel 自身生成 "是,否"）：
     /// 不加引号会被 Excel 当非法公式在加载时丢弃整个验证——下拉与拦截全部失效
-    /// （审查实测回归）。ClosedXML 读回不保留引号语义差异，直接解包断言原始 XML。
+    /// （回归）。ClosedXML 读回不保留引号语义差异，直接解包断言原始 XML。
     /// </summary>
     [Fact]
     public async Task Import_Template_Inline_List_Must_Be_Quoted_In_Raw_Xml()
@@ -718,7 +718,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
     }
 
     /// <summary>
-    /// OU 列回归（代码审查 round1 修复）：用户查询改 includeDetails:false 后，
+    /// OU 列回归 修复）：用户查询改 includeDetails:false 后，
     /// OU 列由 IdentityUserOrganizationUnit 连接表批量查询提供——导出必须仍带出 OU 显示名。
     /// </summary>
     [Fact]

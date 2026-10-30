@@ -43,10 +43,10 @@ public class ModuleBoundaryContractTests
         var document = XDocument.Load(csproj);
 
         // 直接引用 = ProjectReference + PackageReference 两类都要查（只扫工程引用会漏掉
-        // 直接引的 EasyAbp 包——评审实测抓到过这种漏网）
+        // 直接引的 EasyAbp 包——防这种漏网）
         var projectRefs = document.Descendants("ProjectReference")
             // csproj 的 Include 属性用反斜杠相对路径，Linux 上 Path.GetFileName 不切 \ ——
-            // 先归一为 / 再取文件名（CI 首次全量实测：Windows 绿 Linux 红的平台坑）
+            // 先归一为 / 再取文件名（Windows/Linux 路径分隔符平台坑）
             .Select(e => Path.GetFileNameWithoutExtension(e.Attribute("Include")!.Value.Replace('\\', '/')))
             .ToList();
         var packageRefs = document.Descendants("PackageReference")

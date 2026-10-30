@@ -30,8 +30,8 @@ namespace AbpAdmin.Payments;
  *    且不产生任何退款落库（客户端可乱填金额，服务端以库里行项为唯一真相，超额不截断成部分退）
  * 2. RefundAmount=null 全额退款成功后，再退同一单 → RefundAmountInvalid（无剩余可退）
  * 3. abpadmin:refund:{paymentId} 分布式锁被占用 → RefundInProgress；释放后同一单可正常退
- * 4. round4：指定金额的部分退款——按 ItemKey 升序确定性贪心分配（前项退满才动下一项），
- *    部分退后剩余仍可退；指定金额恰好等于 Σ 剩余可退的等值边界应成功（round4 前该分支零锚定）。
+ * 4. 指定金额的部分退款——按 ItemKey 升序确定性贪心分配（前项退满才动下一项），
+ *    部分退后剩余仍可退；指定金额恰好等于 Σ 剩余可退的等值边界应成功。
  *    期望值由测试按同一规则自推导：行项加载顺序不保证，分配只对 ItemKey 序确定性成立
  */
 public abstract class PaymentAdminAppServiceRefundTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
@@ -262,7 +262,7 @@ public abstract class PaymentAdminAppServiceRefundTests<TStartupModule> : AbpAdm
     [Fact]
     public async Task RefundAsync_Partial_Amount_Then_Remaining_Should_Both_Succeed()
     {
-        // 单行项 100：先指定退 40，再全额退剩余——部分退款分支（round4 前零锚定），
+        // 单行项 100：先指定退 40，再全额退剩余——部分退款分支，
         // 验证指定金额真实落到行项并回流账户，且剩余可退不受首轮影响
         var (paymentId, itemKeys, accountId) = await CreatePaidPaymentAsync(PaymentAmount);
 
@@ -291,7 +291,7 @@ public abstract class PaymentAdminAppServiceRefundTests<TStartupModule> : AbpAdm
     public async Task RefundAsync_Two_Item_Payment_Partial_Refund_Should_Fill_Items_In_Order()
     {
         // 两行项 60 + 40，指定退 80：贪心分配应为第一项退满 60、第二项退 20，
-        // 不允许任何单项超过自身剩余可退（round4：多行项分配此前从未被测试执行过）
+        // 不允许任何单项超过自身剩余可退
         var (paymentId, itemKeys, accountId) = await CreatePaidPaymentAsync(60m, 40m);
 
         await _paymentAdminAppService.RefundAsync(paymentId,

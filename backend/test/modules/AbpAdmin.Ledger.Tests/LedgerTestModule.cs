@@ -32,7 +32,7 @@ public class LedgerTestModule : AbpModule
     {
         // 测试应用的宿主环境显式钉 Production：不设时 ABP 按缺省解析，演示种子（LedgerDataSeed
         // Contributor 的 Finance:SeedDemoData 门控）可能随 IsDevelopment() 一起被打开，演示凭证
-        // 与用例自建分录同科目过账，余额断言全部抬高（CI 首次全量实测：期望 100 实测 1350）。
+        // 与用例自建分录同科目过账，余额断言全部抬高（期望 100 会变 1350）。
         // 本模块没有再注入 Finance:SeedDemoData=false——环境钉死已足够；该键作为不依赖
         // 环境判定的强制关开关保留在种子门控里（部署形态需要时用）。
         context.Services.Replace(
@@ -95,10 +95,10 @@ public static class TestUsers
     public static readonly Guid AccountantSelfApprover = Guid.Parse("f0000000-0000-0000-0000-00000000000f");
     /// <summary>老板权限 + Finance.Adjust.Create（老板给自己勾上建单）。</summary>
     public static readonly Guid BossWithCreate = Guid.Parse("c1000000-0000-0000-0000-0000000000c1");
-    /// <summary>NV-02 边界组合：Ledger.View + Scope.Agent（无 Scope.All）——读路径切片的受测主体。</summary>
+    /// <summary>边界组合：Ledger.View + Scope.Agent（无 Scope.All）——读路径切片的受测主体。</summary>
     public static readonly Guid AgentWithLedgerView = Guid.Parse("d2000000-0000-0000-0000-0000000000d2");
 
-    /// <summary>NV-02：读路径切片受测权限组 = 会计的 Ledger.View + 代理的 Scope.Agent。</summary>
+    /// <summary>：读路径切片受测权限组 = 会计的 Ledger.View + 代理的 Scope.Agent。</summary>
     public static readonly string[] AgentWithLedgerViewPerms =
     {
         FinancePermissions.Ledger.View, FinancePermissions.Scope.Agent,

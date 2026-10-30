@@ -7,7 +7,7 @@ using Xunit;
 
 namespace AbpAdmin.Imaging;
 
-/* T3.1 图片处理并发闸门：并发上限 + 等待超时转 503 业务异常。 */
+/* 图片处理并发闸门：并发上限 + 等待超时转 503 业务异常。 */
 public class ImageProcessingThrottleTests
 {
     [Fact]

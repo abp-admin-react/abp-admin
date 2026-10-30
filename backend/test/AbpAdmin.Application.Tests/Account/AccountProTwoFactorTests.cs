@@ -10,7 +10,7 @@ using Xunit;
 
 namespace AbpAdmin.Account;
 
-/* AccountPro 双因素开关的自服务面测试（六透镜审查轮补测）。
+/* AccountPro 双因素开关的自服务面测试（轮补测）。
  * 既有 SetTwoFactorEnabledAsync 测试测的是 IIdentityUserAdminAppService（管理端，不验码）；
  * 本文件钉住自服务语义：启用不需验码（加保护无需确认），关闭必须先验一次双因素验证码
  * （撤保护必须本人确认，与会话劫持者关闭保护对抗）。

@@ -30,7 +30,7 @@ public abstract class TenantCreationSeedTests<TStartupModule> : AbpAdminApplicat
 
     protected TenantCreationSeedTests()
     {
-        // 与运行时一致：基类类型解析到 T2.8 的替换实现（CreateAsync override 在本类上）
+        // 与运行时一致：基类类型解析到 的替换实现（CreateAsync override 在本类上）
         _tenantAppService = GetRequiredService<Volo.Abp.TenantManagement.TenantAppService>();
         _permissionGrantRepository = GetRequiredService<IPermissionGrantRepository>();
         _currentTenant = GetRequiredService<ICurrentTenant>();

@@ -37,7 +37,7 @@ public class CollectionIntegrationServiceTests : CollectionTestBase
         var input = Input(amount: "72.45");
 
         // 调用方持有开了但未提交的环境 UoW（模拟应用服务外层）：内部 requiresNew 提交必须
-        // 不受环境 UoW 影响——这是「渠道调用在 requiresNew 提交之后」的强形式（评审 M 级）
+        // 不受环境 UoW 影响——这是「渠道调用在 requiresNew 提交之后」的强形式
         using var ambient = ServiceProvider.GetRequiredService<Volo.Abp.Uow.IUnitOfWorkManager>().Begin();
         var created = await Service.CreateAsync(input);
 

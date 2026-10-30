@@ -16,7 +16,7 @@ using Xunit;
 namespace AbpAdmin.DataScopes;
 
 /* 角色数据范围配置（RoleDataScopeAppService）写入侧测试。
- * 重点回归（代码审查 round1）：Create 的唯一性检查必须用规范角色名——
+ * 重点回归：Create 的唯一性检查必须用规范角色名——
  * 混合大小写输入不得绕过应用层查重、落库成规范名后直撞唯一索引变成原始 500。
  *
  * 防提权（借鉴 Admin.NET GrantDataScope）：持有 Manage 权限但自身快照受限的操作者，
@@ -141,7 +141,7 @@ public abstract class RoleDataScopeAppServiceTests<TStartupModule> : AbpAdminApp
     }
 
     /// <summary>
-    /// 安全审计 run-1（TV-03b/c04）：CurrentOu/CurrentOuAndChildren 在解析期从「目标用户自己的
+    /// CurrentOu/CurrentOuAndChildren 在解析期从「目标用户自己的
     /// OU + 子树」展开（CurrentDataScopeProvider.ResolveAsync），与授权人快照无关——挂到树根附近
     /// 的成员即解析出整棵树，等于变相 All。与 All 同口径：非 IsAll 操作者一律拒绝。
     /// </summary>

@@ -11,7 +11,7 @@ using Xunit;
 namespace AbpAdmin.Saas;
 
 /// <summary>
-/// T2.8 SaaS Pro 缺口：租户激活状态校验（TenantActivationChecker）。
+/// 租户激活状态校验（TenantActivationChecker）。
 /// 覆盖三态与到期判定；异常错误码决定登录拒绝时的提示文案。
 /// </summary>
 public abstract class TenantActivationTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>

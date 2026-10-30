@@ -6,7 +6,7 @@ using Xunit;
 namespace AbpAdmin.EntityFrameworkCore;
 
 /// <summary>
-/// WebhooksHistoryTableSql 的标识符转义契约（安全审计 LOW-1 修复的回归锚）：
+/// WebhooksHistoryTableSql 的标识符转义契约：
 /// schema 名拼进建表 DDL（标识符不能参数化），必须做 PG 双引号转义——
 /// 含 `"` 的 schema 名若未转义，可提前终止标识符向 DDL 注入后续语句。
 /// schema 来源是连接串 SearchPath（管理员配置面，可达性低），测试钉住的是

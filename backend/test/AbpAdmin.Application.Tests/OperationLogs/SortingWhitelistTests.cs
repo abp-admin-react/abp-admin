@@ -6,7 +6,7 @@ using Xunit;
 namespace AbpAdmin.OperationLogs;
 
 /* SortingWhitelist 单测：合法形态放行、注入载荷与畸形串全部拒绝。
- * 覆盖浏览器实测的注入样本（分号拼接 DROP、Dynamic LINQ 构造表达式）。 */
+ * 覆盖真实注入样本（分号拼接 DROP、Dynamic LINQ 构造表达式）。 */
 public class SortingWhitelistTests
 {
     private static readonly string[] Fields = ["ExecutionTime", "Duration", "Type"];

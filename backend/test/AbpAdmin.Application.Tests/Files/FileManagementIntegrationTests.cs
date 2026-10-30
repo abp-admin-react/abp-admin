@@ -9,7 +9,7 @@ using Xunit;
 
 namespace AbpAdmin.Files;
 
-/* 验证 EasyAbp.FileManagement 搬运（T1.1）的三条核心路径：
+/* 验证 EasyAbp.FileManagement 搬运的三条核心路径：
  * 上传 -> 列表 -> download-info -> download 内容一致；
  * 扩展名白名单拒绝（.exe）；
  * configuration 端点返回容器约束供前端预校验。

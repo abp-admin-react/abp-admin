@@ -12,7 +12,7 @@ using Xunit;
 
 namespace AbpAdmin.RateLimiting;
 
-/* T2.5 操作限流单元测试。
+/* 操作限流单元测试。
  * 覆盖验收标准第 1155 行要求的场景：
  * - 四个方法的语义（CheckAsync 递增、IsAllowedAsync 只读、GetStatusAsync 只读、ResetAsync 重置）
  * - 七种分区（Parameter/CurrentUser/CurrentTenant/ClientIp/Email/PhoneNumber/Custom）
@@ -275,10 +275,10 @@ public abstract class OperationRateLimitingCheckerTests<TStartupModule> : AbpAdm
     [Fact]
     public async Task ClientIp_Partition_Derives_Solely_From_Provider_Not_From_Xff_Header()
     {
-        // NV-24 固化：分区键只取 WebClientInfoProvider.ClientIpAddress（= 连接对端地址）。
+        // 固化：分区键只取 WebClientInfoProvider.ClientIpAddress（= 连接对端地址）。
         // 反代后所有客户端的 RemoteIpAddress 收敛为代理 IP，X-Forwarded-For 不参与分区——
         // 「经代理后共享桶坍缩」是既有默认（防伪造 XFF 撑爆/绕限流的 fail-safe 方向）；
-        // 修复路径（TV-06a）是让运维经 ForwardedHeaders:KnownProxies 显式钉代理后启用
+        // 修复路径是让运维经 ForwardedHeaders:KnownProxies 显式钉代理后启用
         // XForwardedFor 处理，由 ForwardedHeaders 中间件改写 RemoteIpAddress，本层不感知。
         // 本测试钉死：同对端 IP、不同 XFF 头 ⇒ 同一分区键（头不被本层消费）。
         var resolver = GetRequiredService<PartitionKeyResolvers.ClientIpOperationRateLimitingPartitionKeyResolver>();
@@ -720,9 +720,9 @@ public abstract class OperationRateLimitingCheckerTests<TStartupModule> : AbpAdm
 }
 
 /// <summary>
-/// 安全审计 run-1（TV-08）回归锁：SMS 发送侧两条策略必须带 IP 并联规则——
-/// 原先只按手机号分区，匿名发码接口单源可换号喷发付费 SMS / 换 IP 锁死受害者收码路径
-/// （邮件侧 round3 已修，SMS 漏网）。与邮件侧同断言口径：规则存在且名为 *ByIp。
+/// 回归锁：SMS 发送侧两条策略必须带 IP 并联规则——
+/// 只按手机号分区时，匿名发码接口单源可换号喷发付费 SMS / 换 IP 锁死受害者收码路径
+/// （邮件侧 已修，SMS 漏网）。与邮件侧同断言口径：规则存在且名为 *ByIp。
 /// </summary>
 public abstract class SmsPolicyIpRuleTests<TStartupModule> : AbpAdminDomainTestBase<TStartupModule>
     where TStartupModule : IAbpModule

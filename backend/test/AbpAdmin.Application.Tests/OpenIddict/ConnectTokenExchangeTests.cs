@@ -15,7 +15,7 @@ namespace AbpAdmin.OpenIddict;
 /* /connect/token 声明式客户端（HttpAgent）迁移的回归锚。
  * 覆盖：client_credentials 成功映射与请求形状（URL 拼接、表单字段、无 Authorization 头）、
  * 标准 OAuth 错误体 → BusinessException reason、非 JSON 错误体 → 回落 HTTP 状态码（原 TryReadTokenError 语义）、
- * 2xx 畸形响应（缺 access_token / 非 JSON 体）→ 显式业务错误（round4 审查补）、
+ * 2xx 畸形响应（缺 access_token / 非 JSON 体）→ 显式业务错误、
  * impersonation 的 Bearer 头与 extraParameters 合并、token_type 缺省回落 Bearer、
  * 网络层异常不抑制原样穿透（HttpAgent 默认无 SuppressExceptions 的契约锚）。
  * 出站请求由 RecordingConnectTokenHandler 截停（不真实外呼）。
@@ -91,7 +91,7 @@ public abstract class ConnectTokenExchangeTests<TStartupModule> : AbpAdminApplic
     [Fact]
     public async Task Success_without_access_token_throws_explicit_business_error()
     {
-        // 2xx 但 JSON 缺 access_token（原版此处抛 KeyNotFoundException，现为显式业务错误——round4 审查锚）
+        // 2xx 但 JSON 缺 access_token（原版此处抛 KeyNotFoundException，现为显式业务错误——审查锚）
         _handler.Enqueue(HttpStatusCode.OK, """{"token_type":"Bearer","expires_in":3600}""");
 
         var exception = await Should.ThrowAsync<BusinessException>(
@@ -163,7 +163,7 @@ public abstract class ConnectTokenExchangeTests<TStartupModule> : AbpAdminApplic
         exception.Data["reason"]?.ToString().ShouldBe("invalid_grant: target user not found");
     }
 
-    // ========== 六透镜审查轮补测：passwordless / linked-account 换票器 ==========
+    // ========== 轮补测：passwordless / linked-account 换票器 ==========
 
     [Fact]
     public async Task Passwordless_exchange_posts_email_and_token_without_authorization()

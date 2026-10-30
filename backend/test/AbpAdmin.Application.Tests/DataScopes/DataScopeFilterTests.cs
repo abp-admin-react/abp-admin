@@ -10,7 +10,7 @@ using Xunit;
 
 namespace AbpAdmin.DataScopes;
 
-/* 验证 T1.5 行级数据权限的 5 种范围类型全局筛选器行为。
+/* 验证 行级数据权限的 5 种范围类型全局筛选器行为。
  * 测试策略：直接操作 ICurrentDataScopeState.Change 模拟不同用户的数据范围快照，
  * 然后查询 DataScopeDemo 验证全局筛选器是否正确过滤。
  *

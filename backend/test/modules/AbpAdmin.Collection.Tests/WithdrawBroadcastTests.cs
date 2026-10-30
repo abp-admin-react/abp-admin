@@ -317,7 +317,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
     [Fact]
     public async Task Retry_NoHash_Nonce_Overrun_Refuses_And_Keeps_Nonce_Evidence()
     {
-        // NV-04 回归锁：BroadcastFailed 无哈希 + NonceUsed=7 + 链上 pending=8 —— 原交易可能
+        // 回归锁：BroadcastFailed 无哈希 + NonceUsed=7 + 链上 pending=8 —— 原交易可能
         // 已进 mempool/已挖。修复前：重试直接 RequeueToProcessingAsync 清掉 NonceUsed 证据，
         // 下一轮以新 nonce 二次转账 ActualAmount = 双付；RefundAsync 对同一单状态有仲裁而
         // RetryCoreAsync 没有。修复后与 RefundAsync 同裁决：pending > NonceUsed ⇒ 拒绝，

@@ -14,7 +14,7 @@ using Xunit;
 
 namespace AbpAdmin.DataDictionaries;
 
-/* T3.4 第 12 步：字典管理面（视图合并 + 列表/创建/删除 + 原子保存）。
+/* ：字典管理面（视图合并 + 列表/创建/删除 + 原子保存）。
  * 模块 HttpApi 依赖已移除，这里是字典唯一的写入口与静态不变量的落点。 */
 public abstract class DataDictionaryViewAppServiceTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
     where TStartupModule : IAbpModule

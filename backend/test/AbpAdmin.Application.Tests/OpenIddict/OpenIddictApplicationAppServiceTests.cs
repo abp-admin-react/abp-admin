@@ -14,7 +14,7 @@ using Xunit;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// T2.9 OpenIddict Pro 缺口。断言要点：
+/// OpenIddict Pro 缺口。断言要点：
 /// 权限不再只增不减（更新时 Clear 重建）、写死的权限已移除、Hybrid/强制 PAR 两条派生规则、
 /// client secret 只写语义五条规则、内置 scope 名拒绝、token lifetime 读写（Settings 字段）。
 /// </summary>

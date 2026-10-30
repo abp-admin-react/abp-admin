@@ -20,8 +20,8 @@ namespace AbpAdmin.Ordering;
 /// <summary>
 /// 用户端订单应用服务用例（桩环境）：钉住 Auto API 环境事务下的事务边界——
 /// StartPayAsync 显式开 requiresNew 非事务工作单元，渠道异常不得连带回滚报价写库
-///（E2E 实测抓到过：报价随渠道异常被环境事务回滚，评审 H 级回归）；
-/// Stripe 报价剩余不足 30 分钟时发起支付前强制换新报价（评审 M 级）。
+///（报价随渠道异常被环境事务回滚的回归）；
+/// Stripe 报价剩余不足 30 分钟时发起支付前强制换新报价。
 /// </summary>
 public class OrderAppServiceTests : OrderingStubTestBase
 {
@@ -86,7 +86,7 @@ public class OrderAppServiceTests : OrderingStubTestBase
     [Fact]
     public async Task CreateAsync_Rejects_Control_Characters_In_Subject()
     {
-        // E2E 对抗测试实证：subject 含 \u0000 穿过应用层校验后在 PG 写入时 22021 → 500；
+        // subject 含 \u0000 穿过应用层校验后在 PG 写入时 22021 → 500；
         // 必须在应用层以业务错误拒绝（退款 Note 走同一校验助手）
         var service = GetRequiredService<OrderAppService>();
 
@@ -135,7 +135,7 @@ public class OrderAppServiceTests : OrderingStubTestBase
         page1.TotalCount.ShouldBe(3);
         page1.Items.Count.ShouldBe(2);
 
-        // 第 2 页：最旧一笔——原先硬顶 50 无 Skip，这里永远到不了
+        // 第 2 页：最旧一笔（硬顶 50 无 Skip 时永远取不到）
         var page2 = await service.GetListAsync(new Services.Dtos.OrderListFilterDto { SkipCount = 2, MaxResultCount = 2 });
         page2.Items.Count.ShouldBe(1);
 
@@ -161,7 +161,7 @@ public class OrderAppServiceTests : OrderingStubTestBase
     private async Task ShiftStripeQuoteExpiryAsync(Guid orderId, int minutesFromNow)
     {
         // 时间一律以服务的 IClock 为准（本地钟）：拿 UtcNow 写库会让报价在服务眼里已过期，
-        // 测试就会测到别的分支（实测踩过）
+        // 测试就会测到别的分支
         var now = GetRequiredService<Volo.Abp.Timing.IClock>().Now;
         using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
         var dbContext = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();

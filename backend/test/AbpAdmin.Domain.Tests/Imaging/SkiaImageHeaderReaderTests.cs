@@ -4,7 +4,7 @@ using Xunit;
 
 namespace AbpAdmin.Imaging;
 
-/* T3.1 SKCodec 只读文件头取尺寸（规格要求用单测验证「喂已知尺寸 PNG，断言宽高正确」）。
+/* SKCodec 只读文件头取尺寸（规格要求用单测验证「喂已知尺寸 PNG，断言宽高正确」）。
  * 这是解码前像素上限（防解压炸弹）的可行性依据。
  */
 public class SkiaImageHeaderReaderTests

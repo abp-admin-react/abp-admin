@@ -18,7 +18,7 @@ namespace AbpAdmin.Notifications;
 using AbpAdmin.EntityFrameworkCore;
 
 /// <summary>
-/// NV-17 回归锁：管理端 Abandon 掉广播队列记录后，IsAbandoned 只作用于那一条记录——
+/// 回归锁：管理端 Abandon 掉广播队列记录后，IsAbandoned 只作用于那一条记录——
 /// 看门狗重入队的是一条全新（非 abandoned）记录，被叫停的扇出链 1 小时内按「停滞」复活，
 /// 继续给余下收件人发通知。修复：Abandon 把停止意图持久化到广播实体（Cancelled）；
 /// 看门狗只挑 Running 天然跳过，广播作业与 Completed/Failed 一并短路。

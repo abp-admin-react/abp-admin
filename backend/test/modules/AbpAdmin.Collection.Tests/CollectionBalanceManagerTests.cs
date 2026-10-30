@@ -227,7 +227,7 @@ public class CollectionBalanceManagerTests : CollectionTestBase
         var businessId = Guid.NewGuid();
 
         // 非事务环境 UoW 下各语句自动提交，失败路径会留下孤儿扣款行（补状态作业会把它当
-        // 付款证据标 Paid）——必须当场拒绝，不降级（评审 H 级 fail-closed）
+        // 付款证据标 Paid）——必须当场拒绝，不降级（fail-closed）
         using var ambient = GetRequiredService<IUnitOfWorkManager>().Begin(isTransactional: false);
         var ex = await Should.ThrowAsync<InvalidOperationException>(
             () => Manager.DebitAsync("Order", businessId, User1, CollectionCurrency.Usdt, 20m));
@@ -245,7 +245,7 @@ public class CollectionBalanceManagerTests : CollectionTestBase
         var businessId = Guid.NewGuid();
 
         // 两个独立 scope 并发扣同一业务单：部分唯一索引 + ON CONFLICT 保证只有一个赢家，
-        // 输家走幂等分支拿回原流水号——余额只扣一次（评审 H 级测试缺口）
+        // 输家走幂等分支拿回原流水号——余额只扣一次
         var results = await Task.WhenAll(
             DebitInNewScopeAsync(businessId, 30m),
             DebitInNewScopeAsync(businessId, 30m));
@@ -290,7 +290,7 @@ public class CollectionBalanceManagerTests : CollectionTestBase
         // 接口枚举解析仍是宿主挑作业的方式
         var handler = GetRequiredService<AbpAdmin.Collection.Jobs.BalanceAuditJobHandler>();
 
-        // 健康账本：检测谓词必须为空（原先只测不抛，恒空退化也绿——评审测试债）
+        // 健康账本：检测谓词必须为空（只测不抛时恒空退化也绿）
         (await handler.QueryMismatchesAsync()).ShouldBeEmpty();
         await handler.ExecuteAsync(new AbpAdmin.ScheduledJobs.ScheduledJobContext
         {

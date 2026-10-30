@@ -10,7 +10,7 @@ using Xunit;
 
 namespace AbpAdmin.ScheduledJobs;
 
-/* 跨节点回退注册表回归测试（OCR：Quartz clustering 下 handler 委托缺失会被静默丢弃）。
+/* 跨节点回退注册表回归测试（Quartz clustering 下 handler 委托缺失会被静默丢弃）。
  * 契约 pin：worker 名格式 "ScheduledJob:{id:N}" 是 decorator 与 scheduler 之间的
  * 字符串协议，这里用格式往返（N 格式解析、D 格式/畸形/异前缀拒绝）防止协议漂移。
  * DynamicBackgroundWorkerHandlerRegistry 与 decorator 均为纯逻辑，无需 ABP 测试基建。

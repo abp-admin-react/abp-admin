@@ -13,7 +13,7 @@ using Xunit;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// T3.5 管理侧服务测试：默认列表排除重试记录、重试端点创建指向原记录的新通知、
+/// 默认列表排除重试记录、重试端点创建指向原记录的新通知、
 /// 未失败不能重试。
 /// </summary>
 public abstract class NotificationManagementAppServiceTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>

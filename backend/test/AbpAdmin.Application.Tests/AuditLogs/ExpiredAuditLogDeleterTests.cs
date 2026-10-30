@@ -12,9 +12,9 @@ using Xunit;
 
 namespace AbpAdmin.AuditLogs;
 
-/* T2.1 审计日志对标：过期清理测试（03-batch2-pro-parity.md T2.1 验收标准：
+/* 审计日志对标：过期清理测试（03-batch2-pro-parity.md 验收标准：
  * 「ExpiredAuditLogDeleterTests.cs 覆盖两层开关」）。
- * T3.3 已把 ExpiredAuditLogDeleterWorker 迁移为 AuditLogCleanupJobHandler，
+ * 已把 ExpiredAuditLogDeleterWorker 迁移为 AuditLogCleanupJobHandler，
  * 这里测 handler 本体：
  * - host 总开关开 + 保留 1 天：3 天前的日志被删，当天的保留；
  * - host 总开关关：即使天数设置存在，一条都不删。

@@ -30,7 +30,7 @@ namespace AbpAdmin.Authorization;
 /// 判定是同构的，静态断言覆盖的就是真实行为。
 /// </remarks>
 /// <para>
-/// <b>双向断言</b>：只有"已匿名必登记"是不够的——OCR 评审实证过反例（10.6.1 的
+/// <b>双向断言</b>：只有"已匿名必登记"是不够的——反例实证（10.6.1 的
 /// end-session 控制器类名是 LogoutController，按 GitHub dev 分支写的 EndSessionController
 /// 匹配了个不存在的类，约定静默失配、全套测试照样绿、SPA 登出炸掉）。所以
 /// <see cref="Login_Flow_Endpoints_Must_Actually_Be_Anonymous"/> 反向钉死登录链路端点
@@ -78,7 +78,7 @@ public class AnonymousEndpointSweepTests
                  or "connect/endsession"),
 
         new(
-            // 安全审计 run-1（TV-07）：匿名只保留 /health-status 探针端点（k8s/lb 探活不带凭据，
+            // 匿名只保留 /health-status 探针端点（k8s/lb 探活不带凭据，
             // NoExceptionDetails 已防异常回显）。UI 面板整组（/health-ui、/health-api 执行历史、
             // /healthchecks-webhooks 通知注册管理面）改回 FallbackPolicy 要求登录——原匿名清单
             // 把可写 webhooks 管理面与执行历史一并暴露给未认证调用方。
@@ -176,8 +176,8 @@ public class AnonymousEndpointSweepTests
     /// 登录链路必须匿名可达的端点（反向断言）：
     /// connect 三件套（token=登录、authorize=授权码流程、endsession=SPA 登出）+
     /// Razor 登录页 + application-configuration/application-localization（前端登录页拉基础
-    /// 配置与本地化；Chrome 实测抓到过开默认拒绝后它们 401——上游 10.6.1 控制器根本没有
-    /// [AllowAnonymous]，此前只是"事实上匿名"）。
+    /// 配置与本地化；开默认拒绝后它们 401（上游 10.6.1 控制器没有
+    /// [AllowAnonymous]，属"事实上匿名"而非显式豁免）。
     /// 约定失配（ABP 升级改类名/页面路径）时这里先红，而不是等登录/登出在线上炸了才发现。
     /// </summary>
     private static readonly string[] MustBeAnonymousTemplates =
@@ -190,7 +190,7 @@ public class AnonymousEndpointSweepTests
         "api/abp/application-localization",
         "api/abp/multi-tenancy/tenants/by-name/{name}",
         "api/abp/multi-tenancy/tenants/by-id/{id}",
-        // 登录页 <script> 引用的三个脚本端点：302 到登录页 = MIME 拒执行（GUI 实测形态）
+        // 登录页 <script> 引用的三个脚本端点：302 到登录页 = MIME 拒执行
         "Abp/ApplicationConfigurationScript",
         "Abp/ApplicationLocalizationScript",
         "Abp/ServiceProxyScript",

@@ -95,7 +95,7 @@ public abstract class TurnstileValidatorTests<TStartupModule> : AbpAdminApplicat
     [Fact]
     public async Task Enabled_with_blank_token_throws_captcha_failed_and_skips_http()
     {
-        // 开关开启但 token 为空：CaptchaFailed（round4 审查锚：防未来调整校验顺序翻转异常类型）
+        // 开关开启但 token 为空：CaptchaFailed
         await EnableCaptchaAsync();
 
         var exception = await Should.ThrowAsync<BusinessException>(() => _validator.ValidateAsync(" "));

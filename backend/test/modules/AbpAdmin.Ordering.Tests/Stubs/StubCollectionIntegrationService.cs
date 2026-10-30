@@ -138,7 +138,7 @@ public class StubCollectionIntegrationService : ICollectionIntegrationService, I
     public Task<ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount)
     {
         // 对齐契约（与真实现同一语义）：正向序号段 + 最近 7 天重扫段（游标之前、窗口之内）。
-        // 没有重扫腿的话，作业级幂等重跑测试拿不到任何行，断言空转（评审 M 级）
+        // 没有重扫腿的话，作业级幂等重跑测试拿不到任何行，断言空转
         var cutoff = DateTime.Now.AddDays(-7);
         var forward = CreditedTxns.Where(t => t.Seq > afterSeq).OrderBy(t => t.Seq).Take(maxCount).ToList();
         var rescan = CreditedTxns

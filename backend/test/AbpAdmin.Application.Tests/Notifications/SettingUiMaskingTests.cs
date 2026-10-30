@@ -14,7 +14,7 @@ using Xunit;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// T3.5 SettingUi 加密设置项脱敏测试（信息泄露风险点的验收）：
+/// SettingUi 加密设置项脱敏测试（信息泄露风险点的验收）：
 /// GET /api/setting-ui 不下发加密项明文；提交空值不清空已保存的密钥。
 /// </summary>
 public abstract class SettingUiMaskingTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
@@ -122,7 +122,7 @@ public abstract class SettingUiMaskingTests<TStartupModule> : AbpAdminApplicatio
     [Fact]
     public async Task Explicit_Reset_Should_Clear_Encrypted_Setting()
     {
-        // 曾经的副作用：ResetSettingValuesAsync 走 SetAsync(name, null)，
+        // 副作用形态：ResetSettingValuesAsync 走 SetAsync(name, null)，
         // 被"空值不覆盖"守卫拦下 → 加密项永远无法重置清空。现在显式重置绕过守卫。
         await WithUnitOfWorkAsync(async () =>
             await _settingManager.SetGlobalAsync(AbpAdminSettings.Sms.TencentCloudSecretKey, "to-be-reset"));

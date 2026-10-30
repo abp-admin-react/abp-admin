@@ -31,7 +31,7 @@ public abstract class DemoOrgComboSeedTests<TStartupModule> : AbpAdminApplicatio
     private async Task SeedTwiceAsync()
     {
         // 直调不用 WithUnitOfWorkAsync 包裹：根容器解析的 contributor 与包裹 scope 的
-        // DbContext 混用会让 OU 父子链在同一批未提交插入里互相不可见（实测 010010）；
+        // DbContext 混用会让 OU 父子链在同一批未提交插入里互相不可见；
         // 直调时各 manager 调用自带 UoW 逐次提交，跨调用走已提交状态——migrator 真实
         // 路径是单一环境 UoW（同上下文跟踪可见），两条路径语义一致。
         await GetRequiredService<DemoIdentitySeedContributor>().SeedOrgComboDemoAsync();

@@ -143,7 +143,7 @@ public class OrderCommerceTests : OrderingTestBase
         var after = await UowAsync(() => ReloadAsync(order.Id));
         after.RefundedAmount.ShouldBe(8.5m);
         // 退款是常规运营动作，不点亮 PaymentAnomaly 异常标（否则干净支付单永远挂红标，
-        // 且过期复活守卫 !PaymentAnomaly 的语义被污染——OCR 评审 design F9）
+        // 且过期复活守卫 !PaymentAnomaly 的语义被污染）
         after.PaymentAnomaly.ShouldBeFalse();
 
         // 用户侧自己的详情能看到退款明细（可见性的验收点）
@@ -189,7 +189,7 @@ public class OrderCommerceTests : OrderingTestBase
     [Fact]
     public async Task Expired_Close_Revive_Persists_TradeNo()
     {
-        // OCR test F2：复活也是渠道版标 Paid，对账凭证不能缺（修复前此路径丢 ChannelTradeNo）
+        // 复活也是渠道版标 Paid，对账凭证不能缺（ChannelTradeNo 必须落）
         var order = await CreateOrderAsync(Me);
         var collectionId = Guid.NewGuid();
         await UowAsync(async () =>
@@ -218,7 +218,7 @@ public class OrderCommerceTests : OrderingTestBase
     [Fact]
     public async Task ManualRefund_Note_Only_Does_Not_Accumulate()
     {
-        // OCR test F1：只记说明不记金额的分支（amount=null → 不累加、不抛）
+        // 只记说明不记金额的分支（amount=null → 不累加、不抛）
         var order = await CreateOrderAsync(Me, 20m);
         await UowAsync(() => GetRequiredService<OrderPaymentManager>()
             .AppendManualRefundAsync(order.Id, 5m, CollectionCurrency.Usdt, "real-refund"));
@@ -236,7 +236,7 @@ public class OrderCommerceTests : OrderingTestBase
     [Fact]
     public async Task ManualRefund_Currency_Must_Match_Order_And_Max_Two_Decimals()
     {
-        // OCR high-1 + M3：币种混入累计列 = 对用户的错误金额；子分位被 PG 静默舍入
+        // 币种混入累计列 = 对用户的错误金额；子分位被 PG 静默舍入
         var order = await CreateOrderAsync(Me); // Currency = USD
         var service = GetRequiredService<OrderAdminAppService>();
 

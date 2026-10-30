@@ -5,9 +5,9 @@ using Xunit;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// NV-16 回归锁：限流器路径门的归一化语义。OpenIddict 受理判定（对本地缓存程序集
+/// 回归锁：限流器路径门的归一化语义。OpenIddict 受理判定（对本地缓存程序集
 /// InferEndpointType 的反编译口径）= 路径 OrdinalIgnoreCase 等值 + 恰好一个尾斜杠；
-/// 门限必须与受理同口径（TV-06b 修复），不得更宽（漏计）也不必更窄（误放）。
+/// 门限必须与受理同口径（修复），不得更宽（漏计）也不必更窄（误放）。
 /// </summary>
 public class TokenEndpointPathGateTests
 {

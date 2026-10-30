@@ -137,7 +137,7 @@ public class ChainWorkerRegistrationTests
     [Fact]
     public void Compose_Migrator_Must_Join_Shared_Redis_For_Seed_Cache_Invalidation()
     {
-        // E2E 实锤类别的唯一可自动化防线：migrator 不连 Redis 时，种子写设置的缓存失效
+        // 该类别的唯一可自动化防线：migrator 不连 Redis 时，种子写设置的缓存失效
         // 只落迁移进程内存，Host 读共享 Redis 一直拿旧值（开关种 true 读 false）。
         // compose 重构丢掉这两行即回到事故态——文件契约锁（同 appsettings 迁移锁先例）。
         var dir = new System.IO.DirectoryInfo(LocateHostDirectory());

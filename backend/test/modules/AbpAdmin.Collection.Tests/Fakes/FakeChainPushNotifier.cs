@@ -6,7 +6,7 @@ namespace AbpAdmin.Collection.Fakes;
 
 /// <summary>
 /// 推送假实现（静态单例 <see cref="Instance"/>，DI 注册同一实例）：
-/// 收集全部 ETO 供断言（热钱包监控的「告警+推送」安全载荷此前零覆盖）。
+/// 收集全部 ETO 供断言（覆盖热钱包监控的「告警+推送」安全载荷）。
 /// 测试间复位（同 FakeChannelGateway 的每用例复位纪律，见 CollectionTestBase）。
 /// </summary>
 public class FakeChainPushNotifier : IChainPushNotifier

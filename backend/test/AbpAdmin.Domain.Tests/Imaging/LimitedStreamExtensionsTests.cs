@@ -6,7 +6,7 @@ using Xunit;
 
 namespace AbpAdmin.Imaging;
 
-/* T3.1 LimitedCopyToAsync：带硬上限的流复制。
+/* LimitedCopyToAsync：带硬上限的流复制。
  * 关键点：超限立刻抛，不会先把整个流读完（客户端可以谎报 Content-Length），
  * 对应验收标准「服务端没有把超限内容全部读进内存」。
  */

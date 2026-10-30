@@ -3,7 +3,7 @@ using Volo.Abp.TextTemplating;
 namespace AbpAdmin.TextTemplates;
 
 /// <summary>
-/// 测试专用模板定义（T2.3 StoredTemplateContentContributorTests）。
+/// 测试专用模板定义。
 /// 每个用例一个独立模板名，避免 contributor 缓存 key 在用例间串扰。
 /// 这些模板没有虚拟文件基线：恢复默认后 ITemplateContentProvider 应返回 null。
 /// </summary>

@@ -6,7 +6,7 @@ using Xunit;
 
 namespace AbpAdmin.RealTime;
 
-/* T3.2 IRealTimeNotifier 门面测试（无 SignalR 的宿主形态，即 DbMigrator / 单测的形状）。
+/* IRealTimeNotifier 门面测试（无 SignalR 的宿主形态，即 DbMigrator / 单测的形状）。
  * 验收点：
  * - 没引 SignalR 时 IRealTimeNotifier 解析到 NullRealTimeNotifier（兜底存在，业务代码可注入）
  * - Null 实现的三个方法静默完成、绝不抛出（推送不能影响主流程）

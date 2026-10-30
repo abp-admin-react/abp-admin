@@ -10,7 +10,7 @@ using Xunit;
 namespace AbpAdmin.Logging;
 
 /// <summary>
-/// T3.2 日志脱敏器：Hosting 层的 "Request starting" 在任何中间件之前就用原始
+/// Hosting 层的 "Request starting" 在任何中间件之前就用原始
 /// QueryString 记录，管道内的剥离盖不住它，必须在这里定点替换。
 /// </summary>
 public class SignalRQueryStringSanitizingEnricherTests

@@ -616,7 +616,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
     }
 
     /// <summary>
-    /// SeededCheckCache 租户删除清理（代码审查 round1 修复）：租户删除事件必须清掉
+    /// SeededCheckCache 租户删除清理 修复）：租户删除事件必须清掉
     /// 「已播种」短缓存条目——否则同 Id 租户重建（数据恢复/迁移场景）后首访会被残留条目
     /// 短路跳过懒拷贝，菜单空树且无报错。事件分发直接调处理器（不经本地事件总线），保持确定性。
     /// </summary>

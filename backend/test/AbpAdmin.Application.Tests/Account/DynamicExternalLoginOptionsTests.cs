@@ -9,7 +9,7 @@ using Xunit;
 
 namespace AbpAdmin.Account;
 
-/* T2.7 外部登录每租户动态配置集成测试。
+/* 外部登录每租户动态配置集成测试。
  * 覆盖：两个租户各配一套不同的 GitHub 凭据，各自解析出各自值（租户隔离）；
  * ClientSecret 在数据库里是密文（SettingDefinition 标记 isEncrypted），读出时为明文。
  * Host 层的 DynamicExternalLoginOptionsManager 只是读取核心的薄包装。

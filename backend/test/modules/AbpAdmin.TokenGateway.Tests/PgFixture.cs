@@ -52,7 +52,7 @@ public sealed class PgCollection : ICollectionFixture<PgFixture>
     public const string Name = "tg-pg";
 }
 
-/// <summary>NV-08：身份状态门测试桩。默认放行，置 Usable=false 模拟停用/锁定/已删。</summary>
+/// <summary>：身份状态门测试桩。默认放行，置 Usable=false 模拟停用/锁定/已删。</summary>
 public sealed class TestUserGate : ITgUserGate
 {
     public bool Usable { get; set; } = true;

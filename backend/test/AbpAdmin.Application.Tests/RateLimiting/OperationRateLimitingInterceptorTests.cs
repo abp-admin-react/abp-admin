@@ -8,7 +8,7 @@ using Xunit;
 
 namespace AbpAdmin.RateLimiting;
 
-/* T2.5 操作限流拦截器集成测试。
+/* 操作限流拦截器集成测试。
  * 覆盖验收标准第 1156 行要求的场景：
  * - 特性在应用服务上真的生效（virtual 方法）
  * - 非 virtual 方法不生效（负向用例）

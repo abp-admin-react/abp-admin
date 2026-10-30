@@ -198,8 +198,8 @@ public class OrderStateMachineTests : OrderingStubTestBase
         var revived = await UowAsync(() => ReloadAsync(order.Id));
         revived.Status.ShouldBe(OrderStatus.Paid);
         revived.CollectionId.ShouldBe(current.CollectionId);
-        // 复活不清 ClosedAt 是当前契约（OCR test 修复：此前零断言，有人"顺手"清掉或 DTO
-        // 依赖它判关闭时无回归锁）；PaidAt/ChannelTradeNo 才是复活归因
+        // 复活不清 ClosedAt 是当前契约（必须断言钉住——被"顺手"清掉或 DTO
+        // 依赖它判关闭时要有回归锁）；PaidAt/ChannelTradeNo 才是复活归因
         revived.ClosedAt.ShouldNotBeNull();
     }
 
@@ -400,7 +400,7 @@ public class OrderStateMachineTests : OrderingStubTestBase
     [Fact]
     public async Task Balance_Paid_Order_Late_Channel_Completion_Records_Anomaly()
     {
-        // 评审 H 级回归：余额支付后的订单残留旧 CollectionId（换渠道前的渠道尝试），
+        // 回归：余额支付后的订单残留旧 CollectionId（换渠道前的渠道尝试），
         // 旧渠道实际付款完成时不得被「同一来源再投递」吞掉——必须记异常
         var order = await PrepareWechatPaidCandidateAsync();
         var current = await UowAsync(() => ReloadAsync(order.Id));

@@ -31,11 +31,11 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
 {
     private static readonly Guid User1 = Guid.Parse("66666666-6666-6666-6666-666666666666");
 
-    /// <summary>资金路径用例各自独立用户：共享 PG 库跨用例串台（实测踩过）。</summary>
+    /// <summary>资金路径用例各自独立用户：共享 PG 库会跨用例串台。</summary>
     private static Guid NewUser() => Guid.NewGuid();
     private static readonly Guid User2 = Guid.Parse("69696969-6969-6969-6969-696969696969");
 
-    /// <summary>每用例唯一地址：用例共享同一 PG 库，固定地址会跨用例串行（实测踩过）。</summary>
+    /// <summary>每用例唯一地址：用例共享同一 PG 库，固定地址会跨用例串行。</summary>
     private static string WatchAddress => "0x" + Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N")[..8];
 
     /// <summary>落库设置网络充值费率/自动归集额度（RunTokenRound 会重读网络行，内存改动无效）。</summary>
@@ -784,7 +784,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var dbContext = await DbAsync();
         (await dbContext.DepositOrders.AsNoTracking().SingleAsync(o => o.Id == boundaryId)).SweepTaskId.ShouldNotBeNull();
 
-        // 负值：钳为 0 = 全部持有（实体文档口径；此前 autoMax>=0 前置条件会 fail-open 放行一切）
+        // 负值：钳为 0 = 全部持有（实体文档口径；autoMax>=0 前置条件会 fail-open 放行一切）
         await SetNetworkDepositPolicyAsync(network.Id, 0m, -5m);
         var heldId = await SeedOrderAsync(network.Id, usdt, watched, 30m, addressId, userId: scUser, blockNumber: 481);
         await scan.RunTokenRoundAsync(network, usdt, gateway, 12, 50, 1440,
@@ -845,8 +845,8 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         _openUows.Clear();
 
         // 必须补调基类：显式接口实现会遮蔽基类 public Dispose（应用释放 + Respawn 清库都在那）。
-        // 此前漏调 → 本类用例间从不清库，Col/Fin 数据跨用例累计——账本科目全量断言（如 1001
-        // 链上资产合计）实测 60 而非 20 抓出；旧用例靠"每用例新 GUID"的相对断言侥幸未炸。
+        // 不清理则本类用例间 Col/Fin 数据跨用例累计，全量断言（如链上资产合计）会 60 而非 20；
+        // 相对断言（"每用例新 GUID"）察觉不到这种累计。
         base.Dispose();
     }
 

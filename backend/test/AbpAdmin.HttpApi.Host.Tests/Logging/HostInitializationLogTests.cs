@@ -55,7 +55,7 @@ public class HostInitializationLogTests
     /// Initialization-time warnings that are accepted as they are.
     /// </summary>
     /// <remarks>
-    /// The T3.5 entry is deliberate rather than incidental: the spec requires the "emails are not
+    /// The entry is deliberate rather than incidental: the spec requires the "emails are not
     /// really sent" state to be visible in the startup log instead of silent.
     /// </remarks>
     private static readonly IReadOnlyList<ExpectedInitializationWarning> ExpectedWarningsWithRedisDisabled =
@@ -69,7 +69,7 @@ public class HostInitializationLogTests
     /// <remarks>
     /// Turning Redis on registers <c>MedallionAbpDistributedLock</c>, which lives in the
     /// Volo.Abp.DistributedLocking assembly. It used to trip <c>WarnForOrphanedAbpModules</c>
-    /// because the module was not in the host's [DependsOn] chain — a consciously deferred T3.3
+    /// because the module was not in the host's [DependsOn] chain — a consciously deferred 
     /// to-do, pinned here as an accepted warning. The dependency is now declared
     /// (<c>typeof(AbpDistributedLockingModule)</c> on <c>AbpAdminHttpApiHostModule</c>), so the
     /// warning is gone; this list is identical to the Redis-disabled one, which is itself the
@@ -82,7 +82,7 @@ public class HostInitializationLogTests
     ];
 
     /// <summary>
-    /// T3.5 的开发环境邮件告警条目（两个清单共用）。
+    /// 的开发环境邮件告警条目（两个清单共用）。
     /// </summary>
     private static class ExpectedT35NullEmailSenderWarning
     {
@@ -158,8 +158,8 @@ public class HostInitializationLogTests
     /// Runs the same check over the host as it looks with Redis switched on.
     /// </summary>
     /// <remarks>
-    /// This is the half that currently has something to say. T3.2 (SignalR with a Redis backplane)
-    /// and T3.3 (Quartz scheduling with distributed locks) both need Redis, so the branch that is off
+    /// This is the half that currently has something to say. (SignalR with a Redis backplane)
+    /// and (Quartz scheduling with distributed locks) both need Redis, so the branch that is off
     /// today is the shape this host is heading for, and the orphaned-module warning is a defect that
     /// lands the day the switch is flipped.
     /// <para>

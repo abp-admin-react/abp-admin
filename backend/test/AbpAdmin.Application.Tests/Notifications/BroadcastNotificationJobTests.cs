@@ -14,7 +14,7 @@ using Xunit;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// T3.5 广播 fan-out 测试：分批创建、游标续跑（批次级幂等）、站内信发送作业标记成功。
+/// 分批创建、游标续跑（批次级幂等）、站内信发送作业标记成功。
 /// 测试环境 IsJobExecutionEnabled=false，作业手动执行。
 /// </summary>
 public abstract class BroadcastNotificationJobTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
@@ -246,11 +246,11 @@ public abstract class BroadcastNotificationJobTests<TStartupModule> : AbpAdminAp
     [Fact]
     public async Task Watchdog_Requeue_Guard_Window_Should_Skip_Recent_Marker_In_Both_Shapes()
     {
-        // 防重入窗口（round4 前零锚定，且时基修复本身需要回归锚）：
+        // 防重入窗口：
         // 标记 31 分钟前（超窗）→ 允许重入队；标记 10 分钟前（窗内）→ 跳过且不覆盖标记。
         // 两种持久化形态都要认——写入侧是 UTC "O" 字符串，ABP ExtraProperties 转换器
         // 读回时可能还原成装箱 DateTime（Kind 丢失按 UTC 处理），只认一种会让窗口形同虚设。
-        // 关键回归点：窗口比较必须与写入侧同为 UTC 墙钟（此前拿 IClock 本地墙钟减 UTC 标记，
+        // 关键回归点：窗口比较必须与写入侧同为 UTC 墙钟（拿 IClock 本地墙钟减 UTC 标记会
         // UTC+8 宿主上恒偏 +8h → 窗口永不生效，每次扫描都重复入队繁殖并发链）。
         var clock = GetRequiredService<Volo.Abp.Timing.IClock>();
         var expiredBoxedId = Guid.Empty;

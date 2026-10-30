@@ -9,7 +9,7 @@ using Xunit;
 namespace AbpAdmin.Domain.Tests.DataDictionaries
 {
     /// <summary>
-    /// EnumDictionarySyncPlanBuilder 的纯逻辑单测（T3.4 第 11 步）。
+    /// EnumDictionarySyncPlanBuilder 的纯逻辑单测。
     /// 不依赖数据库：Warning、冲突抛异常、Description 回落、截断、TagType 校验都在这层验。
     /// </summary>
     public class EnumDictionarySyncPlanBuilderTests

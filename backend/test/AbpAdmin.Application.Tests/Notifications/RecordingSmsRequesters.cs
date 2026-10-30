@@ -14,7 +14,7 @@ using TencentResponse = EasyAbp.Abp.TencentCloud.Common.Models.ICommonResponse;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 阿里云 API 请求器的录制替身（T3.5 测试）：替代 SettingBasedAliyunApiRequester，
+/// 阿里云 API 请求器的录制替身：替代 SettingBasedAliyunApiRequester，
 /// 避免真实外呼；记录请求参数供断言，固定返回 Code = "OK"。
 /// </summary>
 public class RecordingAliyunApiRequester : IAliyunApiRequester
@@ -47,7 +47,7 @@ public class RecordingAliyunApiRequester : IAliyunApiRequester
 }
 
 /// <summary>
-/// 腾讯云 API 请求器的录制替身（T3.5 测试）：记录请求与凭据，固定返回 SendStatusSet[0].Code = "Ok"。
+/// 腾讯云 API 请求器的录制替身：记录请求与凭据，固定返回 SendStatusSet[0].Code = "Ok"。
 /// </summary>
 public class RecordingTencentCloudApiRequester : ITencentCloudApiRequester
 {

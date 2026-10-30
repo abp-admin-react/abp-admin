@@ -13,7 +13,7 @@ using Xunit;
 
 namespace AbpAdmin.Identity;
 
-/* T2.6 Identity Pro 缺口集成测试。
+/* Identity Pro 缺口集成测试。
  * 覆盖场景：
  * 1. 密码有效期：GetCurrentAccountStatusAsync 返回正确状态
  * 2. 强制改密：RequireChangePasswordOnNextLoginAsync 设置标志

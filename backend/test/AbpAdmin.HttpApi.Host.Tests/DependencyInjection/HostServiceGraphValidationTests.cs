@@ -193,7 +193,7 @@ public class HostServiceGraphValidationTests
     /// gets deployed, and that principle is broken here on purpose: appsettings.json has
     /// Redis:IsEnabled false, which means ConfigureRedis returns early and the two registrations it
     /// would add, <see cref="IDistributedLockProvider"/> and <see cref="IAbpDistributedLock"/>, are
-    /// absent from the graph the tests above validate. T3.2 (SignalR with a Redis backplane) and T3.3
+    /// absent from the graph the tests above validate. (SignalR with a Redis backplane) and 
     /// (Quartz scheduling with distributed locks) both require Redis, so the branch that is unchecked
     /// today is the shape this host is heading for, and it is cheaper to hold the guardrail over it
     /// now than to discover a captive dependency after the switch is flipped.
@@ -276,7 +276,7 @@ public class HostServiceGraphValidationTests
     }
 
     /// <summary>
-    /// T3.5：邮件发送开关与短信唯一入口的服务图断言。
+    /// 邮件发送开关与短信唯一入口的服务图断言。
     /// </summary>
     /// <remarks>
     /// HostUnderTest 把环境钉在 Development，所以"默认集合"读到的是

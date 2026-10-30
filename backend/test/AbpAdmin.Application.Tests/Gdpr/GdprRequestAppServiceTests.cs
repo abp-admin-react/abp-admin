@@ -19,7 +19,7 @@ using Xunit;
 
 namespace AbpAdmin.Gdpr;
 
-/* T2.4 GDPR 集成测试。
+/* GDPR 集成测试。
  * 覆盖验收标准要求的 5 个场景：
  * 1. 请求间隔限制（一天内第二次发起请求被拒绝）
  * 2. 数据未就绪不消耗 token（ReadyTime 前下载抛 DataNotReady，同一 token 就绪后仍可用）
@@ -418,7 +418,7 @@ public abstract class GdprRequestAppServiceTests<TStartupModule> : AbpAdminAppli
 
         // 并发重放同一 token：ConsumeDownloadTokenAsync 在分布式锁内「读-验-删」，
         // 恰好一个请求能在锁内命中缓存条目并完成下载，另一个必须拿到缓存未命中
-        //（InvalidDownloadToken）。原先「先 Get 再 Remove」的 TOCTOU 写法下两个请求
+        //（InvalidDownloadToken）。「先 Get 再 Remove」的 TOCTOU 写法下两个请求
         // 会各自成功下载一次（token 被消费两次）。
         var first = CaptureBusinessExceptionAsync(_gdprRequestAppService.DownloadAsync(requestId, token));
         var second = CaptureBusinessExceptionAsync(_gdprRequestAppService.DownloadAsync(requestId, token));
@@ -527,7 +527,7 @@ public abstract class GdprRequestAppServiceTests<TStartupModule> : AbpAdminAppli
         }
     }
 
-    // ========== 六透镜审查轮补测：头像 GDPR 导出与删户 blob 清理 ==========
+    // ========== 轮补测：头像 GDPR 导出与删户 blob 清理 ==========
 
     [Fact]
     public async Task Avatar_Provider_Contributes_Prepared_Entry_Without_Avatar()

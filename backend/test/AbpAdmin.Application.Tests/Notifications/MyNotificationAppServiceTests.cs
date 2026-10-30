@@ -16,7 +16,7 @@ using Xunit;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// T3.5 "我的通知"测试（第 11 步核心验收）：
+/// "我的通知"测试：
 /// 只返回自己的站内信；未读数 3 → 全部已读 0 → 再发 1 → 1。
 /// </summary>
 public abstract class MyNotificationAppServiceTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>

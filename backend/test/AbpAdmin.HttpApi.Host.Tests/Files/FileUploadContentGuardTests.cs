@@ -10,9 +10,9 @@ using Xunit;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// NV-05/NV-16 回归锁（中间件级，不启动宿主）：
+/// 回归锁（中间件级，不启动宿主）：
 /// 1. 路径门归一化——尾斜杠受理（与 MVC 路由同口径）、大小写不敏感、非守卫路径不拦。
-/// 2. chunked（ContentLength=null）请求同样进扫——此前整体跳过守卫，匿名主体可用
+/// 2. chunked（ContentLength=null）请求同样进扫——不得整体跳过，否则匿名主体可用
 ///    分块传输把改名文件直送模型绑定。
 /// 3. 魔数判定照常生效（改名可执行文件拒、真 PNG 放行）。
 /// </summary>
@@ -61,7 +61,7 @@ public class FileUploadContentGuardTests
     [Fact]
     public async Task Chunked_request_is_also_scanned()
     {
-        // NV-05：chunked（ContentLength=null）此前整体跳过守卫——分块传输可把改名文件直送模型绑定。
+        // chunked（ContentLength=null）同样进扫——分块传输可把改名文件直送模型绑定。
         var body = MultipartBody("shell.jpg", "MZ"u8.ToArray());
         var (status, reached) = await InvokeAsync("/api/file-management/file", contentLength: null, body);
         status.ShouldBe(400, "chunked 请求必须同样进内容防线");

@@ -37,7 +37,7 @@ public class AbpAdminApplicationTestModule : AbpModule
                 ["AuthServer:Authority"] = "https://test.local"
             }).Build()));
 
-        // round4：ConfirmEmail/ConfirmPhone/无密码走通需要 Identity 的 token providers
+        // ConfirmEmail/ConfirmPhone/无密码走通需要 Identity 的 token providers
         // （GenerateEmailConfirmationTokenAsync / GenerateChangePhoneNumberTokenAsync），
         // ABP 域模块不注册默认 providers，缺了会抛 "No IUserTwoFactorTokenProvider named 'Default'"。
         // DataProtectorTokenProvider 还依赖 IDataProtectionProvider——测试基座没有 Web 宿主的
@@ -52,25 +52,25 @@ public class AbpAdminApplicationTestModule : AbpModule
         // IdentityUserAdminAppServiceTests 的整段单 UoW 写法）；
         // DefaultTokenProviders 注册的 DataProtection 型 providers（2FA Email/Phone 等）无此要求。
 
-        // T2.3：测试专用模板定义（StoredTemplateContentContributorTests 的被测模板）
+        // 测试专用模板定义（StoredTemplateContentContributorTests 的被测模板）
         Configure<AbpTextTemplatingOptions>(options =>
         {
             options.DefinitionProviders.Add<TestTemplateDefinitionProvider>();
         });
 
-        // T2.7：防枚举/无密码登录测试需要断言「是否调用了邮件服务」，
+        // 防枚举/无密码登录测试需要断言「是否调用了邮件服务」，
         // 用录制型替身替换（Domain 层 DEBUG 下注册的 NullEmailSender 之后生效）。
         context.Services.Replace(ServiceDescriptor.Singleton<IEmailSender, RecordingEmailSender>());
 
         // IP 归属地：真实 IpRegionSearcher 依赖 xdb 文件（测试环境无），换固定映射替身。
         context.Services.Replace(ServiceDescriptor.Singleton<IpRegions.IIpRegionSearcher, IpRegions.StubIpRegionSearcher>());
 
-        // T3.3：真实 ScheduledJobScheduler 依赖 Quartz 的 IScheduler（测试环境没有），
+        // 真实 ScheduledJobScheduler 依赖 Quartz 的 IScheduler（测试环境没有），
         // 且默认动态 worker manager 收到 cron 会抛 AbpException。
         // 换成录制型替身，测试断言 AppService 与调度器的交互。
         context.Services.Replace(ServiceDescriptor.Singleton<IScheduledJobScheduler, RecordingScheduledJobScheduler>());
 
-        // T3.5：阿里云/腾讯云请求器换成录制替身，避免真实外呼；测试断言消息映射与凭据读取。
+        // 阿里云/腾讯云请求器换成录制替身，避免真实外呼；测试断言消息映射与凭据读取。
         // 必须排在 Domain 层 SettingBasedAliyunApiRequester（ReplaceServices）之后——本模块 ConfigureServices 更晚。
         context.Services.Replace(ServiceDescriptor.Singleton<EasyAbp.Abp.Aliyun.Common.IAliyunApiRequester, Notifications.RecordingAliyunApiRequester>());
         context.Services.Replace(ServiceDescriptor.Singleton<EasyAbp.Abp.TencentCloud.Common.Requester.ITencentCloudApiRequester, Notifications.RecordingTencentCloudApiRequester>());

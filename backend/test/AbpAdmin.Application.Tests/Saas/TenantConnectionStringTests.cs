@@ -17,7 +17,7 @@ using Xunit;
 namespace AbpAdmin.Saas;
 
 /// <summary>
-/// T2.8 SaaS Pro 缺口第 4/6 项：租户连接字符串管理。
+/// 租户连接字符串管理。
 /// 断言要点：库里落密文（不是明文）、管理 API 返回掩码、留空保持原值、
 /// 「使用共享数据库」删除记录、校验端点不写库、设置项禁用后更新被拒（业务异常）。
 /// </summary>
@@ -261,7 +261,7 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
     [Fact]
     public async Task UpdateConnectionStrings_Plaintext_Should_Not_Enter_Audit_Action_Parameters()
     {
-        // NV-03 回归锁：Items[].Value 是明文连接串，实体列走 protector 加密，但方法参数副本
+        // 回归锁：Items[].Value 是明文连接串，实体列走 protector 加密，但方法参数副本
         // 会被审计拦截器序列化进 AbpAuditLogActions.Parameters（90 天保留 = 凭据明文随审计
         // 裸奔）。修复与 SetWithdrawVaultAsync 同款：方法级 [DisableAuditing] 整体退出审计
         // 参数通道；操作留痕走 OperationLog 不受影响。断言审计作用域内任何动作参数都不含明文
@@ -293,7 +293,7 @@ public abstract class TenantConnectionStringTests<TStartupModule> : AbpAdminAppl
     [Fact]
     public async Task CheckConnectionString_Plaintext_Should_Not_Enter_Audit_Action_Parameters()
     {
-        // NV-03 回归锁（校验端点）：探测目标串同样是明文入参，失败探测（不可达地址）也要留痕，
+        // 回归锁（校验端点）：探测目标串同样是明文入参，失败探测（不可达地址）也要留痕，
         // 但探测串本身不得进审计动作参数。
         const string secret = "Host=10.255.255.1;Port=5432;Password=Audit!Probe#42;Timeout=1";
         var tenantId = await CreateTenantAsync();
