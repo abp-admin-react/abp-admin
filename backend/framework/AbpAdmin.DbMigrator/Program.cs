@@ -70,8 +70,8 @@ class Program
 
                 cfg.Sources.Clear();
                 // 与宿主 Program.cs 同一相对次序：基线 appsettings 先、Configuration/*.json 后（覆盖基线）。
-                // 此前两区次序相反（Configuration 先、appsettings 后），只因基线刻意不含业务键才没炸——
-                // 这层"键不重复"约束没有测试钉住，一旦回填即 Host 与 Migrator 各取一头（OCR design 修复）。
+                // 两区键集不得相交（次序决定同键覆盖方向，回填业务键时 Host 与 Migrator 会各取一头）；
+                // 该约束没有测试钉住，调整任一区时人工核对。
                 cfg.AddJsonFile(Path.Combine(hostDir, "appsettings.json"), optional: true, reloadOnChange: false);
                 var hostConfigDir = Path.Combine(hostDir, "Configuration");
                 if (Directory.Exists(hostConfigDir))

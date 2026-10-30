@@ -48,8 +48,8 @@ public class AbpAdminDbContextFactory : IDesignTimeDbContextFactory<AbpAdminDbCo
             ?? throw new InvalidOperationException(
                 $"未能定位仓库根（AbpAdmin.slnx）——设计时工厂从 '{AppContext.BaseDirectory}' 向上查找失败。");
 
-        // 分层与宿主运行时同源（OCR design 修复：连接串真源已拆到 Configuration/Database.json，
-        // 此前工厂只读 appsettings.json + secrets，照新模板配置的开发者跑 dotnet ef 直接扑空）
+        // 分层与宿主运行时同源（连接串真源在 Configuration/Database.json；
+        // 只读 appsettings.json + secrets 的工厂会让照新模板配置的开发者 dotnet ef 扑空）
         return new ConfigurationBuilder()
             .AddJsonFile(
                 Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.json"),

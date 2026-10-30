@@ -9,7 +9,7 @@ using Volo.Abp.Content;
 namespace AbpAdmin.Controllers;
 
 /// <summary>
-/// T4.6：分享链接匿名下载。应用服务负责校验 token、占用次数并按流读 blob；本控制器只钉死 GET。
+/// 分享链接匿名下载。应用服务负责校验 token、占用次数并按流读 blob；本控制器只钉死 GET。
 /// 业务失败一律 404，不把 BusinessException 冒泡到开发异常页（会带堆栈，也便于枚举 token）。
 /// 限流命中（AbpAdminOperationRateLimitingException，429）不在此吞掉，交给 ABP 异常处理返回 429 + Retry-After。
 /// </summary>

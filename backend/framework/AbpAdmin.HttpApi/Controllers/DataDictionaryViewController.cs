@@ -7,7 +7,7 @@ using Volo.Abp.Application.Dtos;
 namespace AbpAdmin.Controllers;
 
 /// <summary>
-/// 字典管理面控制器（T3.4 第 12 步，后经收口扩展为列表/创建/删除）。
+/// 字典管理面控制器。
 /// 应用服务的方法标记了 [RemoteService(false)]，路由由这里钉死：
 /// ABP 常规路由只会把名为 id 的参数放进路径（ConventionalRouteBuilder），
 /// 规格要求的 /api/app/data-dictionary-view/* 路由只能靠显式 Controller。

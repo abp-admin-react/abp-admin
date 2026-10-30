@@ -16,7 +16,7 @@ namespace AbpAdmin.Controllers;
 /// 匿名端点限流（GdprDownload 策略，按 IP 10 次/分钟）：特性标在
 /// GdprRequestAppService.DownloadAsync 上、经 DI 拦截器生效——与 FileShare 下载
 /// 同一落点（FileShareController 亦未在 Controller 上标注）。MVC 侧没有 Filter
-/// 消费 [OperationRateLimiting]（round3 已删除从未注册进 MvcOptions 的死 Filter
+/// 消费 [OperationRateLimiting]（已删除从未注册进 MvcOptions 的死 Filter
 /// OperationRateLimitingActionFilter），Controller 级特性无效；且双落点会对同一
 /// 请求计两次数。
 ///

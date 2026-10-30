@@ -17,7 +17,7 @@ namespace AbpAdmin.EntityFrameworkCore;
 /// tables_postgres.sql——升级 ABP/Quartz 后若 store schema 有变，需对照上游脚本复核本文件；
 /// 真库锚由 AbpAdmin.EntityFrameworkCore.Tests 的 QuartzTablesEnsurerTests 钉住
 /// （幂等 ×2 + 11 表 information_schema 断言，无凭证自动跳过）。
-/// 此前注释声称"QRTZ DDL 已随 EF 迁移"与事实不符（本地开发默认内存 store 从未踩到），
+/// QRTZ DDL 不随 EF 迁移（本地开发默认内存 store 察觉不到），
 /// Production 姿势（UsePersistentStore=true）对全新库必崩，本类补上该缺口。
 /// </summary>
 internal static class QuartzTablesEnsurer

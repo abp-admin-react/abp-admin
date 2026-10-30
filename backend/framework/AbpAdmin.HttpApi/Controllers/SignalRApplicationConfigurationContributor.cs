@@ -7,10 +7,10 @@ using Volo.Abp.Data;
 namespace AbpAdmin.Controllers;
 
 /// <summary>
-/// 通过 application-configuration 端点下发 SignalR 开关（T3.2），
+/// 通过 application-configuration 端点下发 SignalR 开关，
 /// 前端 getInitialState() 读到 signalr.enabled = false 时直接不尝试连接，
 /// 省掉一轮注定失败的重试；isRealTimeAvailable() 同步置 false，
-/// T3.5 的铃铛据此降级为轮询。靠"连不上就是没启用"区分不了网络问题，所以要显式下发。
+/// 的铃铛据此降级为轮询。靠"连不上就是没启用"区分不了网络问题，所以要显式下发。
 /// </summary>
 public class SignalRApplicationConfigurationContributor : IApplicationConfigurationContributor
 {

@@ -12,7 +12,7 @@ public class NotificationBroadcastConfig : IEntityTypeConfiguration<Notification
 {
     public void Configure(EntityTypeBuilder<NotificationBroadcast> b)
     {
-        // T3.5：广播通知批次（系统级配置，不挂行级数据权限）。
+        // 广播通知批次（系统级配置，不挂行级数据权限）。
         // 迁移单独生成（Added_NotificationBroadcast），与 Added_NotificationService 分开，便于独立回退。
         b.ToTable(AbpAdminConsts.DbTablePrefix + "NotificationBroadcasts", AbpAdminConsts.DbSchema);
         b.ConfigureByConvention();

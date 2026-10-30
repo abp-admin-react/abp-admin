@@ -13,7 +13,7 @@ public class ScheduledJobConfig : IEntityTypeConfiguration<ScheduledJob>
 {
     public void Configure(EntityTypeBuilder<ScheduledJob> b)
     {
-        // T3.3：定时作业配置与执行历史。系统级配置，不挂行级数据权限（IHasDataScope）。
+        // 定时作业配置与执行历史。系统级配置，不挂行级数据权限（IHasDataScope）。
         b.ToTable(AbpAdminConsts.DbTablePrefix + "ScheduledJobs", AbpAdminConsts.DbSchema);
         b.ConfigureByConvention();
         b.Property(x => x.Name).IsRequired().HasMaxLength(ScheduledJobConsts.MaxNameLength);

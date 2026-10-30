@@ -6,8 +6,8 @@ using Volo.Abp.Users;
 namespace AbpAdmin.Controllers;
 
 /// <summary>
-/// 匿名请求裁剪 application-configuration 的 <c>setting.values</c>（安全审计
-/// F-E3 / 总结 #4）。背景：匿名 GET /api/abp/application-configuration 返回 200 / 355066 字节，
+/// 匿名请求裁剪 application-configuration 的 <c>setting.values</c>。
+/// 背景：匿名 GET /api/abp/application-configuration 返回 200 / 355066 字节，
 /// 逐键给出 Lockout 5 次/300 秒、口令最低 6 位且复杂度四项全关、Captcha.Enabled=false、
 /// IdleSessionTimeoutMinutes=0、允许自建注册——等于把登录防线画像免费发给攻击者做
 /// 口令喷洒/撞库前的侦察。官方口径（abp.io/support/questions/9877）：端点匿名可达是

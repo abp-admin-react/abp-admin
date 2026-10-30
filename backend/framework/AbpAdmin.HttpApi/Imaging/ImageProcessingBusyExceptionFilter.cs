@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 namespace AbpAdmin.Imaging;
 
 /// <summary>
-/// 给 <see cref="AbpAdminImageProcessingBusyException"/>（HTTP 503）补 Retry-After 响应头（T3.1）。
+/// 给 <see cref="AbpAdminImageProcessingBusyException"/>（HTTP 503）补 Retry-After 响应头。
 ///
 /// 落地方式说明：本过滤器不接管异常（ExceptionHandled 保持 false），只把头写进 Response，
 /// 响应体仍由 ABP 的 AbpExceptionFilter 统一转换为标准 error JSON。

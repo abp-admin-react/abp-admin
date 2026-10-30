@@ -20,7 +20,7 @@ public static class AbpAdminEfCoreEntityExtensionMappings
 
         OneTimeRunner.Run(() =>
         {
-            // T2.8 SaaS Pro 缺口：将租户扩展属性映射为 AbpTenants 表的真实列
+            // 将租户扩展属性映射为 AbpTenants 表的真实列
             // 已验证：MapEfCoreProperty 扩展方法在 Volo.Abp.ObjectExtending 10.6 存在
             ObjectExtensionManager.Instance
                 .MapEfCoreProperty<Tenant, byte>(

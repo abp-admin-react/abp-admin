@@ -46,8 +46,8 @@ public class AuditLogExportController : AbpController
     [HttpGet("export")]
     public async Task<IActionResult> ExportAsync([FromQuery] GetAuditLogListInput input)
     {
-        // round3 补限流：Controller 不经 DI 拦截器（特性只对 AppService 生效），同步导出这条
-        // 贵路径此前零限流——与异步路径（AuditLogAppService.EnqueueExportAsync 特性）共用
+        // 补限流：Controller 不经 DI 拦截器（特性只对 AppService 生效），同步导出这条
+        // 贵路径同样限流——与异步路径（AuditLogAppService.EnqueueExportAsync 特性）共用
         // AuditLogExport 策略（按当前用户 1 天 10 次，租户隔离），两侧合计计入同一配额。
         // 超限抛 AbpAdminOperationRateLimitingException，交给 ABP 异常处理返回 429 + Retry-After。
         await _rateLimitingChecker.CheckAsync(
@@ -77,7 +77,7 @@ public class AuditLogExportController : AbpController
     public async Task<IActionResult> GetExportFileAsync(Guid id)
     {
         // FindAsync + 显式 404：仓储 GetAsync 抛的 EntityNotFoundException 在 MVC 控制器
-        //（非应用服务）链路上不会被转成 404，渗透测试实测不存在的 id 直接 500。
+        //（非应用服务）链路上不会被转成 404，不存在的 id 直接 500。
         var excelFile = await _auditLogExcelFileRepository.FindAsync(id);
         if (excelFile == null)
         {

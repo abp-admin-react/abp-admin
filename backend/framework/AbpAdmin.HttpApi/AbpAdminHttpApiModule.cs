@@ -42,7 +42,7 @@ public class AbpAdminHttpApiModule : AbpModule
     {
         ConfigureLocalization();
 
-        // T3.1: ImageProcessingBusy（503）响应补 Retry-After 头
+        // ImageProcessingBusy（503）响应补 Retry-After 头
         Configure<MvcOptions>(options =>
         {
             options.Filters.Add<ImageProcessingBusyExceptionFilter>();

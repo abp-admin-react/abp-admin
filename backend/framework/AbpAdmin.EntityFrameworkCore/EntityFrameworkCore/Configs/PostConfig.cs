@@ -39,7 +39,7 @@ public class UserExcelFileConfig : IEntityTypeConfiguration<UserExcelFile>
 {
     public void Configure(EntityTypeBuilder<UserExcelFile> b)
     {
-        // 用户导入/导出文件记录（Identity 模块自有表，替代原先借用的 AbpAuditLogExcelFiles）。
+        // 用户导入/导出文件记录（Identity 模块自有表，不借用 AbpAuditLogExcelFiles）。
         // 按创建人下载的查询路径建 (TenantId, CreatorId) 索引；存量数据不迁移（见重构报告问题 6）。
         b.ToTable(AbpAdminConsts.DbTablePrefix + "UserExcelFiles", AbpAdminConsts.DbSchema);
         b.ConfigureByConvention();

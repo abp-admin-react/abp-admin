@@ -41,7 +41,7 @@ public class MenuGrantConfig : IEntityTypeConfiguration<MenuGrant>
         // TenantId 前缀索引服务角色侧读路径（GetRoleMenuGrantsAsync / 级联按角色名清理）。
         b.HasIndex(x => new { x.MenuId, x.ProviderName, x.ProviderKey }).IsUnique();
         b.HasIndex(x => new { x.TenantId, x.ProviderName, x.ProviderKey });
-        // 外键级联：授权行随菜单行生灭（应用层此前手工删除是唯一防线，这里补上 DB 层防线——
+        // 外键级联：授权行随菜单行生灭（应用层手工删除之外补 DB 层防线——
         // 任何绕过应用层的删除都不再留下孤儿授权行）。菜单删除是硬删除，级联可生效。
         b.HasOne<Menu>()
             .WithMany()

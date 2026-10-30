@@ -12,7 +12,7 @@ public class DataDictionaryItemMetaConfig : IEntityTypeConfiguration<DataDiction
 {
     public void Configure(EntityTypeBuilder<DataDictionaryItemMeta> b)
     {
-        // T3.4：字典项展示元数据（旁挂模块表，逻辑关联不建外键）。
+        // 字典项展示元数据（旁挂模块表，逻辑关联不建外键）。
         b.ToTable(AbpAdminConsts.DbTablePrefix + "DataDictionaryItemMetas", AbpAdminConsts.DbSchema);
         b.ConfigureByConvention();
         b.Property(x => x.DictionaryCode).IsRequired().HasMaxLength(DataDictionaryItemMetaConsts.MaxDictionaryCodeLength);
