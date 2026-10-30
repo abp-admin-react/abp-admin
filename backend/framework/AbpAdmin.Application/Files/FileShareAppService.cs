@@ -19,7 +19,7 @@ using File = EasyAbp.FileManagement.Files.File;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// T4.6：文件分享。创建/查询/撤销都要求当前用户持有该文件的「下载」权限
+/// 文件分享。创建/查询/撤销都要求当前用户持有该文件的「下载」权限
 /// （复用 EasyAbp 的 GetDownloadInfo 操作授权 + 每用户限流）——分享本质是把下载权外包给匿名 token，
 /// 只用「读」权限校验会让仅有查看权限的用户为任意文件开出公开下载链接。
 /// 匿名下载只认公开、未过期、未用尽次数的 token；先预检文件与 BlobName、再占用次数（乐观并发）、

@@ -19,7 +19,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 广播 fan-out 批次作业（T3.5 第 10 步）。每批取一页目标用户、按渠道各发一个创建事件、
+/// 广播 fan-out 批次作业。每批取一页目标用户、按渠道各发一个创建事件、
 /// 推进游标、自入队下一批（并发天然为 1，不会打爆数据库）。
 ///
 /// 关键设计：
@@ -90,7 +90,7 @@ public class BroadcastNotificationJob : IAsyncBackgroundJob<BroadcastNotificatio
             {
                 var broadcast = await _broadcastRepository.GetAsync(args.BroadcastId);
 
-                // NV-17：Cancelled = 运营弃单（Abandon 回写），与终态一并短路——
+                // Cancelled = 运营弃单（Abandon 回写），与终态一并短路——
                 // 看门狗重入队的全新队列记录不再复活被叫停的扇出链。
                 if (broadcast.State is NotificationBroadcastStates.Completed or NotificationBroadcastStates.Failed
                     or NotificationBroadcastStates.Cancelled)

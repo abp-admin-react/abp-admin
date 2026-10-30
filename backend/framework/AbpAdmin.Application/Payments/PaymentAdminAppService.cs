@@ -95,7 +95,7 @@ public class PaymentAdminAppService : AbpAdminAppService, IPaymentAdminAppServic
             }
 
             var refundItems = new List<CreateRefundItemInput>();
-            // 行项加载顺序不保证（EF Include 返回序随查询计划/引擎变化，集成测试实测同库内可翻转）；
+            // 行项加载顺序不保证（EF Include 返回序随查询计划/引擎变化，同库内可翻转）；
             // 贪心分配必须确定性：按 ItemKey 升序（支付单创建后不变），同一单在任何环境重放分配一致。
             // 不能用 Id 排序——ABP 默认 IGuidGenerator 是 SimpleGuidGenerator（Guid.NewGuid），不携带创建序
             foreach (var item in payment.PaymentItems.OrderBy(x => x.ItemKey))

@@ -15,7 +15,7 @@ namespace AbpAdmin.Gdpr.Providers;
 
 /// <summary>
 /// 头像 GDPR 数据贡献者：把头像二进制（base64 内嵌 JSON）导出进个人数据包。
-/// 头像是个人数据（可识别个人的图像），此前导出与删户均未覆盖。
+/// 头像是个人数据（可识别个人的图像），导出与删户必须覆盖。
 /// 无头像也回发 Prepared（hasAvatar=false）：贡献者计数稳定，
 /// 且「其它 Provider 都就绪、唯独头像缺失」不会被误判为整体未就绪。
 /// </summary>

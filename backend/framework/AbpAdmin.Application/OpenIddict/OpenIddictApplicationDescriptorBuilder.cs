@@ -11,7 +11,7 @@ using Volo.Abp.OpenIddict.Applications;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// T2.9：把 Create/Update DTO 应用到 <see cref="AbpApplicationDescriptor"/> 的唯一入口。
+/// 把 Create/Update DTO 应用到 <see cref="AbpApplicationDescriptor"/> 的唯一入口。
 /// 旧实现把一组权限写死、且更新时 Permissions 只 Add 不 Clear（只增不减），
 /// 这里一律 <see cref="HashSet{T}.Clear"/> 后按入参重建。
 ///
@@ -221,7 +221,7 @@ public static class OpenIddictApplicationDescriptorBuilder
             descriptor.Permissions.Add(OpenIddictConstants.Permissions.Endpoints.PushedAuthorization);
         }
 
-        // H-1（派生规则 3）：公共客户端 + 授权码通道 → 无条件强制 PKCE。OAuth 2.0 Security
+        // 公共客户端 + 授权码通道 → 无条件强制 PKCE。OAuth 2.0 Security
         // BCP 要求公共客户端（无 client secret）的授权码流程必须携带 code_challenge——被截获
         // 的授权码没有第二道防线，PKCE 是唯一劫持防线。input.RequirePkce 对机密客户端仍可选
         // 生效（加固项）。swagger-ui 这类不发 code_challenge 的工具应注册为机密客户端或只存在于

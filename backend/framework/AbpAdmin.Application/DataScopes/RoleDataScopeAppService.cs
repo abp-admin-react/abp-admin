@@ -20,7 +20,7 @@ namespace AbpAdmin.DataScopes;
 [Authorize(AbpAdminPermissions.DataScopes.Manage)]
 public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppService
 {
-    /// <summary>排序白名单（安全审计 M-4）：Sorting 直达 Dynamic LINQ 的字符串 OrderBy，非法值应 400 而非 500。</summary>
+    /// <summary>排序白名单：Sorting 直达 Dynamic LINQ 的字符串 OrderBy，非法值应 400 而非 500。</summary>
     private static readonly string[] SortableFields =
     [
         nameof(RoleDataScope.RoleName),
@@ -100,7 +100,7 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
     {
         // 先取规范角色名再用它查重：落库存的是规范 Name，若用客户端原样大小写查重，
         // 「Admin」在库中只有「admin」记录时可绕过应用层检查、落库成「admin」直撞
-        // 唯一索引变成原始 500（见代码审查 round1）。
+        // 唯一索引变成原始 500。
         var canonicalRoleName = await GetCanonicalRoleNameAsync(input.RoleName);
 
         var existing = await _repository.FirstOrDefaultAsync(x => x.RoleName == canonicalRoleName);
@@ -194,7 +194,7 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
                 .WithData("ScopeType", input.ScopeType);
         }
 
-        // 安全审计 run-1（TV-03b/c04）：CurrentOu/CurrentOuAndChildren 在解析期从「目标用户自己的
+        // CurrentOu/CurrentOuAndChildren 在解析期从「目标用户自己的
         // OU + 子树」展开（CurrentDataScopeProvider.ResolveAsync），与授权人快照无关——原守卫只限
         // All/Custom，漏掉这两个 OU 派生值：受限快照的操作者可给任意角色授 CurrentOuAndChildren，
         // 挂到树根附近的成员即解析出整棵树，等于变相 All。与 All 同口径：除非快照本身 IsAll，

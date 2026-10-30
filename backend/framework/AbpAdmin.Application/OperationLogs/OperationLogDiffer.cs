@@ -62,7 +62,7 @@ public static class OperationLogDiffer
     /// <summary>
     /// 在实例自己的类型上解析同名属性取值——不能拿 targetType 的 PropertyInfo 直接读另一个类型的实例：
     /// _diff 的两侧通常是不同类型（匿名旧值快照 vs 更新 DTO），跨类型 GetValue 抛 ArgumentException
-    /// 被 catch 吞成 null，表现为旧值全部「(空)」（浏览器实测发现的回归）。
+    /// 被 catch 吞成 null，表现为旧值全部「(空)」。
     /// </summary>
     private static string? SafeGet(object instance, string propertyName)
     {

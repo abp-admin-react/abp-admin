@@ -178,7 +178,7 @@ public class AccountStatusDto
 }
 
 /// <summary>
-/// 用户导出行的字典渲染载体（T3.4 第 9 步）。
+/// 用户导出行的字典渲染载体。
 /// 导出场景没有前端参与，必须在服务端把编码渲染成显示文本，所以这里用
 /// [DictionaryCodeField]/[DictionaryRenderField] 声明式标注，由 UserExcelBuilder 调 Renderer。
 /// 注意取舍：普通列表查询接口不要加这种 XxxText 字段（白增数据量），渲染只用于导出/模板路径。

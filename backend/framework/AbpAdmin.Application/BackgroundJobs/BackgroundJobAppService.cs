@@ -64,7 +64,7 @@ public class BackgroundJobAppService : AbpAdminAppService, IBackgroundJobAppServ
         job.IsAbandoned = true;
         await _jobRepository.UpdateAsync(job);
 
-        // NV-17：IsAbandoned 只作用于单条队列记录；看门狗重入队的是一条全新记录（非 abandoned），
+        // IsAbandoned 只作用于单条队列记录；看门狗重入队的是一条全新记录（非 abandoned），
         // 弃掉的广播链会被它按「停滞」复活。把停止意图持久化到广播实体（Cancelled）：
         // 看门狗只挑 Running 天然跳过，广播作业与 Completed/Failed 一并短路。解析不出广播参数
         // （非广播作业 / 历史格式）则只弃队列记录，保持原语义。

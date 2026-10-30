@@ -43,7 +43,7 @@ public abstract class AbpAdminAppService : ApplicationService
     }
 
     /// <summary>
-    /// 字典渲染器（T3.4 第 9 步）。模块没有自动拦截的 MVC Filter，必须显式调用。
+    /// 字典渲染器。模块没有自动拦截的 MVC Filter，必须显式调用。
     /// </summary>
     protected IDataDictionaryRenderer DataDictionaryRenderer
         => LazyServiceProvider.LazyGetRequiredService<IDataDictionaryRenderer>();

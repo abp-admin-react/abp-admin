@@ -252,7 +252,7 @@ public class AuditLogAppService : AbpAdminAppService, IAuditLogAppService
     /// 异步导出审计日志。转后台作业，完成后发邮件通知。
     /// 同步导出请走 Controller 的 GET /api/app/audit-log/export。
     /// ABP 动态 API 路由：POST /api/app/audit-log/enqueue-export
-    /// T2.5: 操作限流 - 按当前用户 1 天 10 次（租户隔离）
+    /// 操作限流 - 按当前用户 1 天 10 次（租户隔离）
     /// </summary>
     [Authorize(AbpAdminPermissions.AuditLogs.Export)]
     [OperationRateLimiting(OperationRateLimitingPolicyNames.AuditLogExport)]

@@ -56,7 +56,7 @@ namespace AbpAdmin;
 public class AbpAdminApplicationModule : AbpModule
 {
     /// <summary>
-    /// 应用内回环调用 /connect/token 的命名 HttpClient（T2.7 impersonation、T2.9 GenerateAccessToken）。
+    /// 应用内回环调用 /connect/token 的命名 HttpClient。
     /// 开发环境 AuthServer:Authority 指向 https://localhost:44395（自签 dev-cert），
     /// 操作系统不信任该证书，默认 handler 的 SSL 校验会失败，故 Development 下跳过校验。
     /// </summary>
@@ -68,11 +68,11 @@ public class AbpAdminApplicationModule : AbpModule
      * 无需在此手动移除。详见该 handler 文件头注释。 */
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
-        // T2.9：OpenIddictApplicationAppService.GenerateAccessToken 依赖 IHttpClientFactory
+        // OpenIddictApplicationAppService.GenerateAccessToken 依赖 IHttpClientFactory
         // （AddHttpClient 内部是 TryAdd，重复调用安全）。
         // "Turnstile" 命名客户端唯一注册点在 Domain 的 CachingAndTenancyConfigurator
-        // （消费方 TurnstileCaptchaValidator 在 Domain，注册跟随消费方，round4 收敛重复注册）。
-        // NV-30：无名（默认）客户端统一关闭自动重定向。腾讯云 SMS 的 ITencentCloudApiRequester
+        // （消费方 TurnstileCaptchaValidator 在 Domain，注册跟随消费方，收敛重复注册）。
+        // 无名（默认）客户端统一关闭自动重定向。腾讯云 SMS 的 ITencentCloudApiRequester
         // （EasyAbp 包）与 SettingBasedAliyunApiRequester 都走 CreateClient()——前者的 EndPoint
         // 是管理员可编辑设置，SafeHttpUrl 只校验入口 URL，跟 3xx 会把签名请求原样重放到内网
         // 目标（SSRF 防线整体失效）；包自身不配置重定向策略，仓库侧在默认客户端上统一收口。
@@ -90,7 +90,7 @@ public class AbpAdminApplicationModule : AbpModule
         context.Services.AddHttpClient(Monitoring.HttpProbeJobHandler.HttpClientName)
             .ConfigurePrimaryHttpMessageHandler(() => SafeHttpUrl.CreateNoRedirectPrimaryHandler());
 
-        // T2.8 SaaS Pro 缺口：租户/版本级功能编辑的授权策略。
+        // 租户/版本级功能编辑的授权策略。
         // 开源 FeatureAppService 只对 Host 功能（T + providerKey == null，严格 null 比较）
         // 硬编码 ManageHostFeatures；其余 provider 未配置策略时抛
         // "No policy defined to get/set permissions for the provider"。
@@ -111,7 +111,7 @@ public class AbpAdminApplicationModule : AbpModule
         // 显式 30 秒超时：HttpClient 默认 100 秒，/connect/token 是登录链路上的同步回环调用，
         // 挂 100 秒会把登录请求一起拖死；30 秒足够覆盖慢握手 + token 签发（要调长走配置）。
         // BaseAddress 供 IConnectTokenApi 声明式接口的相对地址 connect/token 拼接
-        // （HttpAgent 底层用本命名 HttpClient 发请求，等价于原先运行时 authority + "/connect/token" 字符串拼接）。
+        // （HttpAgent 底层用本命名 HttpClient 发请求）。
         // 捕获 IConfiguration 而非快照值：ConfigureHttpClient 随 handler 过期重建（约 2 分钟）重跑，
         // 每次重读配置，与两个 Exchanger 的运行时守卫保持同源（避免启动快照与守卫分裂）。
         var configuration = context.Services.GetConfiguration();
@@ -139,7 +139,7 @@ public class AbpAdminApplicationModule : AbpModule
         // Func<bool> 重载随 handler 过期重建重读配置，与上方"捕获 IConfiguration 而非快照值"同风格。
         builder.AddProfilerDelegatingHandler(() => configuration.GetValue("HttpRemote:Profiler", false));
 
-        // T3.4：模块的 DataDictionaryRenderer 构造函数要 IList<IDataDictionaryValueProvider>。
+        // 模块的 DataDictionaryRenderer 构造函数要 IList<IDataDictionaryValueProvider>。
         // Autofac 能隐式解析 IList<T>，MS.DI 不能——宿主的服务图校验（HostServiceGraphValidationTests）
         // 用 MS.DI 静态构建全部注册，缺这条会让 Renderer 及其消费方（UserExcelBuilder/UserExportJob）
         // 被判不可构建。显式注册工厂后两个容器都能构建，内容与 Autofac 的隐式列表解析等价。
@@ -161,7 +161,7 @@ public class AbpAdminApplicationModule : AbpModule
 
     public override void OnApplicationInitialization(ApplicationInitializationContext context)
     {
-        // T3.4 第 3 步：模块的特性扫描不自动执行，必须手动触发。
+        // 模块的特性扫描不自动执行，必须手动触发。
         // ScanRules 是同步、一次只吃一个程序集、有返回值——返回值必须 AddRange 进
         // AbpDataDictionaryOptions.Rules 才生效（光扫不算数，漏了这一句与扫错程序集一样是静默无渲染）。
         // 扫的是放着 [DictionaryCodeField]/[DictionaryRenderField] 特性的 DTO 所在程序集。

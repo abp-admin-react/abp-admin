@@ -6,7 +6,7 @@ using Volo.Abp.Content;
 namespace AbpAdmin.Profile;
 
 /// <summary>
-/// 当前用户头像（T3.1）。上传走完整链路：扩展名白名单 → 大小上限 → magic bytes →
+/// 当前用户头像。上传走完整链路：扩展名白名单 → 大小上限 → magic bytes →
 /// 解码前像素上限 → 缩放（Crop 正方形）→ 压缩 → 写 BLOB。
 /// </summary>
 public interface IProfileAvatarAppService : IApplicationService
@@ -25,7 +25,7 @@ public interface IProfileAvatarAppService : IApplicationService
 
     /// <summary>
     /// 当前用户头像信息（含带版本参数的 URL）。头像 URL 由后端拼装下发，
-    /// 前端不要自己拼路径（规格 T3.1 第 5 步）。
+    /// 前端不要自己拼路径。
     /// </summary>
     Task<AvatarInfoDto> GetMyAvatarInfoAsync();
 }

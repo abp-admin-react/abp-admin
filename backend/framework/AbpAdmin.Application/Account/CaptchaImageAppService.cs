@@ -13,7 +13,7 @@ namespace AbpAdmin.Account;
 /// 也避免为二进制内容协商多开一条匿名路由。
 /// 注意：不做"是否启用"校验——生成一张图无害，缓存 TTL 5 分钟自然回收；
 /// 校验端（LoginCaptchaManager）才决定是否强制。
-/// round4：补按 IP 的操作限流（CaptchaImage 策略）——此前匿名无限刷 Skia 渲染与缓存写入。
+/// 按 IP 的操作限流（CaptchaImage 策略）——不限流则匿名无限刷 Skia 渲染与缓存写入。
 /// </summary>
 [AllowAnonymous]
 public class CaptchaImageAppService : ApplicationService

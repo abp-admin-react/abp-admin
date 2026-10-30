@@ -40,7 +40,7 @@ public class ClaimTypeDto : EntityDto<Guid>
 
 public class CreateClaimTypeDto
 {
-    // GUI 测试 D4：Name/ValueType 此前无校验——空名与越界枚举值（如 valueType=7）
+    // Name/ValueType 必须校验——空名与越界枚举值（如 valueType=7）
     // 均可入库。校验与字典标签展示共用同一枚举定义，避免两处漂移。
     [Required]
     [StringLength(128)]

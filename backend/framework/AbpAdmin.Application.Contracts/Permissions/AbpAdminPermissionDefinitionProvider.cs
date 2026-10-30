@@ -164,14 +164,14 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
         dataScopes.AddChild(AbpAdminPermissions.DataScopes.Manage, L("Permission:DataScopes.Manage"));
         dataScopes.AddChild(AbpAdminPermissions.DataScopes.Demo, L("Permission:DataScopes.Demo"));
 
-        // T2.6 Identity Pro 缺口：用户导入导出权限
+        // 用户导入导出权限
         var identityUsers = group.AddPermission(
             AbpAdminPermissions.Identity.Users.Default,
             L("Permission:Identity.Users"));
         identityUsers.AddChild(AbpAdminPermissions.Identity.Users.Import, L("Permission:Identity.Users.Import"));
         identityUsers.AddChild(AbpAdminPermissions.Identity.Users.Export, L("Permission:Identity.Users.Export"));
 
-        // T2.7 Account Pro 缺口：模拟登录权限
+        // 模拟登录权限
         var impersonation = group.AddPermission(
             AbpAdminPermissions.Impersonation.Default,
             L("Permission:Impersonation"));

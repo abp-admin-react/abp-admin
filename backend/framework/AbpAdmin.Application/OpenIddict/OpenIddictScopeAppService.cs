@@ -50,7 +50,7 @@ public class OpenIddictScopeAppService : AbpAdminAppService, IOpenIddictScopeApp
     /// <summary>托管 scope（数据库记录）+ 5 个内置 scope（IsBuiltIn=true，不在 OpenIddictScopes 表）。</summary>
     public virtual async Task<ListResultDto<OpenIddictScopeLookupDto>> GetAllAsync()
     {
-        // 恢复按 Name 排序（代码审查 round1）：带 sorting 的 GetListAsync 重载在 SQL 侧排序，
+        // 恢复按 Name 排序：带 sorting 的 GetListAsync 重载在 SQL 侧排序，
         // scope 下拉列表顺序稳定，不再退化为物理存储顺序
         var items = await _scopeRepository.GetListAsync(
             sorting: nameof(OpenIddictScope.Name),

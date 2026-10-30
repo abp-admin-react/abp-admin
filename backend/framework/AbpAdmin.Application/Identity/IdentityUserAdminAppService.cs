@@ -129,7 +129,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
 
         // 文件级解析一次：OU 编码/显示名字典与角色名集合在行循环外构建。
         // 每行独立 requiresNew UoW 使任何跨行缓存失效——逐行全表查询会把导入拖成
-        // O(行数 × OU 数)（六透镜审查 performance-High：5000 行 × 1000 OU ≈ 5000 次全表 SELECT）。
+        // O(行数 × OU 数)（performance-High：5000 行 × 1000 OU ≈ 5000 次全表 SELECT）。
         var allUnits = await _organizationUnitRepository.GetListAsync();
         var ouIdByCode = allUnits
             .Where(ou => !string.IsNullOrWhiteSpace(ou.Code))
@@ -184,7 +184,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
     /// <summary>
     /// 批量获取用户双因素认证状态。Volo 开源版用户列表契约（IdentityUserDto）不含
     /// twoFactorEnabled 字段，列表页用它页级补齐——缺失时 2FA 列恒显示「否」、开关恒发 true
-    /// （六透镜审查 function-High）。
+    /// （function-High）。
     /// ABP 动态 API 路由：GET /api/app/identity-user-admin/two-factor-statuses?userIds=...&amp;userIds=...
     ///（约定路由剥离 Get 前缀，注释按实际路由标注）
     /// </summary>
@@ -572,7 +572,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
 
     /// <summary>
     /// 电子表格公式注入加固（OWASP CSV Injection 的 xlsx 对应物，纵深防御）：
-    /// 实现已收拢到 <see cref="SpreadsheetTextSanitizer.Sanitize"/>（L-4 导出构建器复用同一口径），
+    /// 实现已收拢到 <see cref="SpreadsheetTextSanitizer.Sanitize"/>（导出构建器复用同一口径），
     /// 保留本方法作为既有调用点的稳定入口。
     /// </summary>
     protected virtual string SanitizeSpreadsheetText(string? value)

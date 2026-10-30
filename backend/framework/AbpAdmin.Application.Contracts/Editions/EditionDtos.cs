@@ -21,7 +21,7 @@ public class UpdateEditionDto : CreateEditionDto
 }
 
 /// <summary>
-/// T2.8 SaaS Pro 缺口第 5 项：删除版本时的租户迁移选项。
+/// 删除版本时的租户迁移选项。
 /// </summary>
 public class DeleteEditionInput
 {

@@ -27,7 +27,7 @@ using Volo.Abp.VirtualFileSystem;
 namespace AbpAdmin.Settings;
 
 /// <summary>
-/// SettingUi 应用服务替换（T3.5）：加密设置项脱敏 + 写权限收口。
+/// SettingUi 应用服务替换：加密设置项脱敏 + 写权限收口。
 /// 2.10.0 反编译核实的基类行为：host 侧 GetSettingValueAsync 经 SettingProvider 返回
 /// 解密后的明文——SMTP 密码、短信 SecretKey 会随 GET /api/setting-ui 泄露给任何有
 /// 设置页权限的人。这里覆写取值，加密项永不下发值（前端显示空）；
@@ -38,8 +38,8 @@ namespace AbpAdmin.Settings;
 /// [RemoteService(false)]：Host 对整个 Application 程序集建常规控制器，
 /// 不关掉的话本类会被额外暴露一份 /api/app/setting-ui（EasyAbp 的 /api/setting-ui 控制器不受影响）。
 /// [Authorize(ShowSettingPage)]：上游 EasyAbp.SettingUi（含 2.10.0）的 SettingUiAppService 与
-/// SettingUiController 都没有 [Authorize]，/api/setting-ui/* 实际匿名可达——此前只有前端
-/// access.ts 的 canManageSettings 在拦（UI 不是防线）。授权拦截器作用于本服务实例，
+/// SettingUiController 都没有 [Authorize]，/api/setting-ui/* 实际匿名可达——唯一拦截在前端
+/// access.ts 的 canManageSettings（UI 不是防线）。授权拦截器作用于本服务实例，
 /// EasyAbp 控制器注入的正是本类代理，类级特性即覆盖 GET/写值/重置全部入口。
 /// 读写分离（模块五收口）：类级 ShowSettingPage 是读门禁；SetSettingValuesAsync /
 /// ResetSettingValuesAsync 叠加方法级 AbpAdmin.SettingUi.Update（ABP 拦截器会把类级
@@ -168,7 +168,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
     ///    目标 provider（如 WithProviders("G") 的设置清 U 层直接抛 AbpException → 重置 500），
     ///    所以每层清除前先按声明过滤，未声明 Providers 的设置保持全层清的历史口径；
     /// ② host 的 G 层写回定义默认值而非清空：ABP SettingManagementStore 对清空（null 值）
-    ///    只删/置空 DB 行、读端缓存条目不失效，实测重置后设置页与业务读在缓存存续期内
+    ///    只删/置空 DB 行、读端缓存条目不失效——重置后设置页与业务读在缓存存续期内
     ///    长期返回旧值；写默认值则行与缓存同步更新，读立即回落（语义等价：G 显式默认 = 未覆盖）。
     /// </summary>
     [Authorize(AbpAdminPermissions.SettingUi.Update)]
@@ -184,7 +184,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
                 continue;
             }
 
-            // 安全审计 run-1（TV-04）：重置面必须与设置页写入面同口径——只处理 UI 注册的设置
+            // 重置面必须与设置页写入面同口径——只处理 UI 注册的设置
             // （WithUi 挂了 Group1 元数据的定义）。原实现按名字盲解析任意定义，host 上下文还会
             // 写 G 层默认值：域设置若故意 omit WithUi 移出设置页（如 Collection.Withdraw.Halt，
             // 唯一写门是 Withdraw.Admin 域端点），这条盲路径就成了绕开域权限的改写通道。
@@ -224,7 +224,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
             if (!CurrentTenant.IsAvailable)
             {
                 // host 侧管理页（EasyAbp 路由）对未声明 Providers 的设置会把保存写到
-                // T 层且 ProviderKey 为空（AbpSettings 实测行：ProviderName='T', Key=NULL），
+                // T 层且 ProviderKey 为空（AbpSettings 实际行形态：ProviderName='T', Key=NULL），
                 // 而读链会命中它——重置须同步清掉这一层，否则设置页与业务读取仍是旧值。
                 if (Allows(TenantSettingValueProvider.ProviderName))
                 {
@@ -233,7 +233,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
                 }
 
                 // G 层写回定义默认值，而不是 SetAsync(name, null)：ABP SettingManagementStore
-                // 对清空（null 值）只删/置空 DB 行、读端缓存条目不失效（实测 reset 后设置页
+                // 对清空（null 值）只删/置空 DB 行、读端缓存条目不失效（reset 后设置页
                 // 与业务读在缓存存续期内长期返回旧值）；写默认值则行与缓存同步更新，读立即
                 // 回落默认。语义等价（G 层显式默认值 = 未覆盖）。
                 if (Allows(GlobalSettingValueProvider.ProviderName))

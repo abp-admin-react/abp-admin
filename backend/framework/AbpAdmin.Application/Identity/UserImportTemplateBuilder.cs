@@ -104,7 +104,7 @@ public class UserImportTemplateBuilder : IUserImportTemplateBuilder, ITransientD
         var validation = sheet.Range(2, column, ValidationRowCount, column).CreateDataValidation();
         validation.AllowedValues = XLAllowedValues.List;
         // OOXML 内联列表必须是带引号的字符串字面量（Excel 自己生成的 XML 是 "是,否"）；
-        // 不加引号会被 Excel 当非法公式在加载时丢弃整个验证（审查实测 ClosedXML 原样落盘）
+        // 不加引号会被 Excel 当非法公式在加载时丢弃整个验证（ ClosedXML 原样落盘）
         validation.List($"\"{UserImportBooleanTexts.Yes},{UserImportBooleanTexts.No}\"");
         validation.ShowErrorMessage = true;
         validation.ErrorStyle = XLErrorStyle.Stop;

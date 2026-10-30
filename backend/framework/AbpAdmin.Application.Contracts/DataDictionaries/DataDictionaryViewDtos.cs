@@ -9,7 +9,7 @@ using Volo.Abp.Application.Services;
 namespace AbpAdmin.DataDictionaries;
 
 /// <summary>
-/// 字典管理面的唯一 HTTP 入口（T3.4 第 12 步，后经收口扩展为列表/创建/删除）。
+/// 字典管理面的唯一 HTTP 入口。
 /// 前端的 useDictionary / dictionaryValueEnum 统一读这个端点，不直连模块端点：
 /// 模块的 DataDictionaryItemDto 只有 Code/DisplayText/Description（没有 isStatic/tagType）。
 /// 模块 HttpApi/Application 依赖已整体移除（其控制器路由 api/data-dictionary/data-dictionary

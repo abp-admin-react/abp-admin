@@ -249,7 +249,7 @@ public class GdprRequestAppService : AbpAdminAppService, IGdprRequestAppService
     /// <summary>
     /// 单次消费下载 token：分布式锁内「读 + 验 + 删」。
     /// 说明：ABP 10.6 的 IDistributedCache.RemoveAsync 只返回 Task、不返回被删条目
-    /// （没有 Redis GETDEL 语义），原先「先 Get 再 Remove」存在 TOCTOU 窗口——并发重放
+    /// （没有 Redis GETDEL 语义），「先 Get 再 Remove」存在 TOCTOU 窗口——并发重放
     /// 可双双通过校验各下载一次。这里借 IAbpDistributedLock 把三步收进临界区
     /// （与 DistributedCacheOperationRateLimitingStore 的计数递增同一锁模式）：
     /// 并发重放只有一个请求能在锁内命中缓存条目，删除释放后后来者必未命中。

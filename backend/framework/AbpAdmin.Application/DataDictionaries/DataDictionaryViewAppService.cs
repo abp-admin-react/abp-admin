@@ -10,7 +10,7 @@ using Volo.Abp.Domain.Repositories;
 namespace AbpAdmin.DataDictionaries;
 
 /// <summary>
-/// 字典管理面的唯一应用服务（T3.4 第 12 步，后经收口扩展为列表/创建/删除）。
+/// 字典管理面的唯一应用服务。
 /// 权限口径：字典视图 GET {code} 放开给所有登录用户（普通用户的下拉不依赖模块权限）；
 /// 列表与写操作沿用模块权限定义 Default/Create/Update/Delete，不另造权限。
 /// EasyAbp 模块的 HttpApi/Application 依赖已整体移除——其控制器（全量替换、无静态

@@ -65,7 +65,7 @@ public class CacheMonitorRedisConnection : ISingletonDependency, IDisposable
     /// 抖动后的监控页永久报连接失败、直到进程重启；完全不重试限流则每次请求都白等满超时。
     /// 冷却期内直接复用失败结果（不重拨），冷却过后放行下一次尝试。
     /// 连接用 ConnectAsync 异步建立：Connect 会同步阻塞调用线程（默认超时数秒），
-    /// 且此前发生在 lock 内，首次调用超时会卡住所有并发请求。
+    /// 且若发生在 lock 内，首次调用超时会卡住所有并发请求。
     /// </summary>
     public virtual async Task<ConnectionMultiplexer?> GetMultiplexerAsync()
     {
@@ -107,7 +107,7 @@ public class CacheMonitorRedisConnection : ISingletonDependency, IDisposable
                 // 常见的 abortConnect=false 会让 ConnectAsync 在 Redis 不可达时静默返回未连接的
                 // 多路复用器——监控页随后每条命令都付一次超时、被误报成 INFO/连接异常，正是
                 // 本类注释宣称要避免的误导诊断。运行期断线自愈由 SE.Redis 自动重连承担，
-                // 不依赖该开关（此前直接以字符串 ConnectAsync，该纪律只在宿主侧成立）。
+                // 不依赖该开关（不得直接以字符串 ConnectAsync，纪律与宿主侧一致）。
                 var options = ConfigurationOptions.Parse(_configuration["Redis:Configuration"]!);
                 options.AbortOnConnectFail = true;
                 _multiplexer = await ConnectionMultiplexer.ConnectAsync(options);
@@ -130,7 +130,7 @@ public class CacheMonitorRedisConnection : ISingletonDependency, IDisposable
     }
 
     /// <summary>
-    /// 随容器关停释放多路复用器（此前该类不是 IDisposable，连接在进程退出前从不释放——
+    /// 随容器关停释放多路复用器（不释放则连接在进程退出前一直占用——
     /// 与宿主 SharedRedisConnection 的关停纪律对齐）。释放与拨号在同一把信号量下串行，
     /// 关停撞上首用拨号时不会泄漏刚建好的连接。
     /// </summary>

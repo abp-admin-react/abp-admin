@@ -9,11 +9,11 @@ using Volo.Abp;
 namespace AbpAdmin.OpenIddict;
 
 /// <summary>
-/// 标准 /connect/token 端点声明式客户端（HttpAgent），T2.7 impersonation 与 T2.9 GenerateAccessToken 共用，
-/// 替代原先两处近乎复制的手写 HttpClient form 组装 + JSON 解析。
+/// 标准 /connect/token 端点声明式客户端（HttpAgent），impersonation 与 GenerateAccessToken 共用，
+/// 收拢两处近乎复制的手写 HttpClient form 组装 + JSON 解析。
 /// 基地址由 "AuthServerTokenExchange" 命名 HttpClient 的 BaseAddress 提供
 /// （AbpAdminApplicationModule 从 AuthServer:Authority 读取设置，调用方仍保留未配置守卫给出友好错误；
-/// 不能用 [BaseAddress("[[AuthServer:Authority]]")]——实测 2.2.0 的特性占位符不解析配置，直接当字面量拼 URI）；
+/// 不能用 [BaseAddress("[[AuthServer:Authority]]")]——2.2.0 的特性占位符不解析配置，直接当字面量拼 URI）；
 /// 该命名 HttpClient 的 30s 超时 + Development 跳过自签证书注册保持不变。
 /// 返回 HttpRemoteResult：非 2xx 不抛异常，调用方读 OAuth error 字段（保持原语义）；
 /// 非 JSON 错误体由 TolerantJsonContentConverter 兜底为 null Result（状态码仍在，可回落 "HTTP {status}"）。

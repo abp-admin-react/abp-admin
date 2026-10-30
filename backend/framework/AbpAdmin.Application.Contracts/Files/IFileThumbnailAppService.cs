@@ -9,7 +9,7 @@ using Volo.Abp.Content;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// 文件缩略图（T3.1）。缩略图 blob 的命名与存取规则全部封装在后端，
+/// 文件缩略图。缩略图 blob 的命名与存取规则全部封装在后端，
 /// 前端只消费本服务下发的 URL，不要自己拼规则。
 /// </summary>
 public interface IFileThumbnailAppService : IApplicationService

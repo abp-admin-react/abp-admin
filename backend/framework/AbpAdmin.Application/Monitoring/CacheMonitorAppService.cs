@@ -73,7 +73,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
         // 这些命令会被服务器拒绝，但连接与键浏览完全正常——单独归类，不误报成"连接失败"。
         // 两条命令都走 raw Execute：该实例的兼容层会让 SE.Redis 对部分"server 级" API
         // 在客户端本地（ConnectionMultiplexer.CheckMessage 的 admin gate 判定）直接拒绝
-        // ——2026-09-29 对该实例实测 server.InfoAsync() 抛 RedisCommandException 而
+        // ——对该实例 server.InfoAsync() 抛 RedisCommandException 而
         // ExecuteAsync("INFO") 返回全文；DBSIZE 本就是 per-db 命令，也不需要 IServer/
         // GetEndPoints 的端点猜测，统一走当前 IDatabase 最简。
         var infoErrors = new List<string>();
@@ -155,7 +155,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
 
         // 单次 SCAN 只是"扫描提示"，返回的键可能多于 maxResultCount：旧实现 .Take(N) 截断后
         // 游标已前进，溢出键跨页永久丢失。这里循环 SCAN 攒够一页，溢出键 + 游标留在
-        // 进程内缓冲（PageBuffer），下一页请求带合成游标来时续上（round1 审查问题，round2 预审方案）。
+        // 进程内缓冲（PageBuffer），下一页请求带合成游标来时续上。
         List<string> keys;
         long scanCursor;
 
@@ -187,7 +187,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
 
         // COUNT 是每次迭代的扫描提示（不保证返回条数），攒够一页或扫完（游标归零）为止。
         // 首页（cursor==0 进入）必须先无条件 SCAN 一次：SCAN 语义里游标 0 是"从头开始"而非"已结束"，
-        // 若用 while 且 scanCursor 初值 0，循环一次都不执行 → 首页恒空、NextCursor=0（round3 lens 发现的回归）。
+        // 若用 while 且 scanCursor 初值 0，循环一次都不执行 → 首页恒空、NextCursor=0。
         if (cursor == 0)
         {
             var first = await ScanPageAsync(database, 0, pattern, maxResultCount);
@@ -582,7 +582,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
     /// <see cref="AbpDistributedCacheOptions.KeyPrefix"/> 不在键首，插在 k: 段内
     /// （键形如 c:{CacheName},k:{KeyPrefix}{业务key}）。配置了隔离前缀时守卫随之收紧：
     /// 键还必须含 ",k:{KeyPrefix}"——其它 ABP 应用的键（无此前缀或前缀不同）据此拒读拒删。
-    /// 隔离边界不得宽于缓存自身的隔离机制（此前前缀只作页面默认过滤词，清空搜索框即可
+    /// 隔离边界不得宽于缓存自身的隔离机制（前缀若只作页面默认过滤词，清空搜索框即可
     /// 越界浏览/删除，属装饰性边界）。
     /// </summary>
     protected virtual void AssertAbpKey(string key)
@@ -616,7 +616,7 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
     /// 默认锚定 glob 字符类 <c>[ct]:</c> 一次覆盖两种（单模式单游标）；用户词以 c:/t:
     /// 开头时把锚定段收窄到该前缀并剥掉重复段——否则过滤词 <c>c:</c> 会变成
     /// <c>[ct]:*c:*</c>（要求前缀之后再次出现 "c:"），一个键都匹配不到（2026-09-29
-    /// 页面实测回归）。隔离前缀（keyPrefix，来自 AbpDistributedCacheOptions）非空时作为
+    /// 页面回归验证）。隔离前缀（keyPrefix，来自 AbpDistributedCacheOptions）非空时作为
     /// 必含段拼进 glob——扫描天然只命中本应用键，与 IsAllowedKey 的硬边界同口径；用户词
     /// 已含前缀时不重复拼（页面默认过滤词就是 KeyPrefix，重复拼接会要求键中出现两次而漏光）。
     /// 依据（redis.io SCAN 文档）：MATCH 是元素取回之后的过滤，锚定并不减少服务器扫描量，

@@ -6,7 +6,7 @@ namespace AbpAdmin.Identity;
 /// <summary>
 /// 用户导出 Excel 构建器（同步导出与后台作业共用同一实现，见重构报告问题 2）。
 /// 接口放 Contracts：HttpApi 控制器（同步导出）与 Application（异步导出作业）都能引用，
-/// 消除原先 UserExportController 中 75 行内联副本。
+/// 收拢 UserExportController 的 75 行内联副本。
 /// 与 IAuditLogExcelBuilder 的既有差异：不提供 CountAsync——审计侧筛选输入是复杂 DTO，
 /// 计数与构建必须同源防漂移故收进接口；用户侧筛选只是一个 string filter，
 /// 计数由调用方直接走 IIdentityUserRepository.GetCountAsync(filter)（ABP 原生参数化计数），

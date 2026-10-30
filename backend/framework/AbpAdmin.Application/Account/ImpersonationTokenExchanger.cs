@@ -79,7 +79,7 @@ public class ImpersonationTokenExchanger : ITransientDependency
                 .WithData("reason", "token 端点响应缺少 access_token");
         }
 
-        // 直接返回 Contracts DTO（round4 审查 R1：原包装类与 ImpersonationResultDto 字段逐一相同，
+        // 直接返回 Contracts DTO（审查 R1：原包装类与 ImpersonationResultDto 字段逐一相同，
         // 中间映射是纯拷贝，删掉——与 OpenIddictTokenExchanger 直接返回 GenerateAccessTokenResultDto 同款）
         return new ImpersonationResultDto
         {

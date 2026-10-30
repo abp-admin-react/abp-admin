@@ -131,7 +131,7 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
         {
             if (!usersById.TryGetValue(userId, out var user))
             {
-                // 与原先 GetByIdAsync（找不到抛 EntityNotFound）保持一致的行为
+                // 与 GetByIdAsync（找不到抛 EntityNotFound）同一行为
                 throw new EntityNotFoundException(typeof(IdentityUser), userId);
             }
 
@@ -174,7 +174,7 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
         await _organizationUnitManager.RemoveRoleFromOrganizationUnitAsync(roleId, id);
     }
 
-    /// <summary>组织单元 → DTO 的唯一映射出口（原先同一段手工映射重复 3 份）。</summary>
+    /// <summary>组织单元 → DTO 的唯一映射出口（收拢重复 3 份的手工映射）。</summary>
     private static OrganizationUnitDto MapToDto(OrganizationUnit ou)
     {
         return new OrganizationUnitDto

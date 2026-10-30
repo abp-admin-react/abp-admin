@@ -7,7 +7,7 @@ using EasyAbp.NotificationService.Notifications;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 通知发送门面（T3.5 第 9 步）。业务代码只用这个接口，不直接构造 EasyAbp 的 ETO——
+/// 通知发送门面。业务代码只用这个接口，不直接构造 EasyAbp 的 ETO——
 /// ETO 构造函数签名会随模块版本漂移（3.9.0 的短信创建 ETO 就比 README 示例
 /// 多出第 5 个 IJsonSerializer 参数），直接构造会让版本升级的编译错误散布到所有调用点。
 ///
@@ -32,7 +32,7 @@ public interface INotificationDispatcher
 
     // ========== 批量形态（BroadcastNotificationJob 分批调用） ==========
     // 参数 NotificationUserInfoModel 是 EasyAbp 的公开模型，放 Contracts 无泄漏；
-    // 作业按接口依赖才能在测试里替身（见 T3.5 广播测试）。
+    // 作业按接口依赖才能在测试里替身（见广播测试）。
 
     /// <summary>一批用户共享一条 NotificationInfo 的邮件创建事件。</summary>
     Task SendEmailBatchAsync(Guid? tenantId, List<NotificationUserInfoModel> users, string subject, string body);

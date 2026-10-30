@@ -60,7 +60,7 @@ public class AdminFileOperationAuthorizationHandler : BasicFileOperationAuthoriz
     {
         // 先走 base 的功能权限判定（File.Create），未 Fail（即有权创建）才做配额检查：
         // 配额检查是一次 SUM 聚合 + 进程锁，放在权限之前会让无权限请求也白付这笔开销
-        //（代码审查 round1），且无权限时配额异常会盖掉 403 的语义。
+        //，且无权限时配额异常会盖掉 403 的语义。
         await base.HandleCreateAsync(context, requirement, resource);
         if (!context.HasFailed)
         {

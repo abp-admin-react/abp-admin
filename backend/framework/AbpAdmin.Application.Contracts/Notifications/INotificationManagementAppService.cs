@@ -8,7 +8,7 @@ using Volo.Abp.Application.Services;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 管理侧通知服务（T3.5 第 11/12 步）。全部端点要 EasyAbp.NotificationService.Notification.Manage。
+/// 管理侧通知服务。全部端点要 EasyAbp.NotificationService.Notification.Manage。
 /// 不用模块的 INotificationAppService 做列表，因为它的筛选表达不了"默认排除重试记录"
 /// （RetryForNotificationId == null）且给不出每行的重试次数/最终状态（3.9.0 反编译核实其
 /// NotificationGetListInput 的 RetryForNotificationId 只能等值过滤）。

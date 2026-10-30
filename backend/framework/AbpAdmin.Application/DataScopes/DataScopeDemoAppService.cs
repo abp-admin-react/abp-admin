@@ -19,7 +19,7 @@ namespace AbpAdmin.DataScopes;
 [Authorize(AbpAdminPermissions.DataScopes.Demo)]
 public class DataScopeDemoAppService : ApplicationService, IDataScopeDemoAppService
 {
-    /// <summary>排序白名单（安全审计 M-4）：Sorting 直达 Dynamic LINQ 的字符串 OrderBy，非法值应 400 而非 500。</summary>
+    /// <summary>排序白名单：Sorting 直达 Dynamic LINQ 的字符串 OrderBy，非法值应 400 而非 500。</summary>
     private static readonly string[] SortableFields =
     [
         nameof(DataScopeDemo.Name),

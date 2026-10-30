@@ -14,7 +14,7 @@ using Volo.Abp.Users;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 用户侧"我的通知"（T3.5 第 11 步）。只标 [Authorize]，不要任何具体权限；
+/// 用户侧"我的通知"。只标 [Authorize]，不要任何具体权限；
 /// 查询强制 Where(UserId == CurrentUser.GetId())，是整个端点的安全边界。
 /// 只返回站内信（InApp）——用户不需要在"我的通知"里看到"系统给你发了一条短信"。
 /// </summary>

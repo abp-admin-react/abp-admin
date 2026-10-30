@@ -79,7 +79,7 @@ public class MenuDto : EntityDto<Guid>
 
     /// <summary>
     /// 并发戳（乐观并发）：编辑表单携带加载时的值回传，服务端与库内当前值不一致即 409。
-    /// 实体上有该列（FullAuditedAggregateRoot），此前未下发导致编辑冲突被静默覆盖。
+    /// 实体上有该列（FullAuditedAggregateRoot），不下发则编辑冲突被静默覆盖。
     /// </summary>
     public string? ConcurrencyStamp { get; set; }
 }

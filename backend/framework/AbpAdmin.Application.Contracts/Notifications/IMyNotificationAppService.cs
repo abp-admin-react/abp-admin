@@ -6,7 +6,7 @@ using Volo.Abp.Application.Services;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 用户侧的"我的通知"（T3.5 第 11 步）。
+/// 用户侧的"我的通知"。
 /// 不能用模块的 INotificationAppService：它的 GetListPolicyName 是 Manage，
 /// 而 Manage 意味着能看所有人的通知（3.9.0 反编译核实）。
 /// 本服务只标 [Authorize]（任意已登录用户），查询强制 CurrentUser.GetId()，

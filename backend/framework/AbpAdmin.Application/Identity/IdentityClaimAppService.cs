@@ -37,7 +37,7 @@ public class IdentityClaimAppService : AbpAdminAppService, IIdentityClaimAppServ
     [Authorize(IdentityPermissions.Users.Update)]
     public virtual async Task UpdateUserClaimsAsync(Guid userId, List<ClaimValueDto> claims)
     {
-        // 安全审计 run-1（TV-03）：声明写入不得携带权威类型。ABP 动态声明默认清单含 role，
+        // 声明写入不得携带权威类型。ABP 动态声明默认清单含 role，
         // 写入 {role:'admin'} 会让 CurrentUser.Roles 命中数据范围的 admin 豁免（IsAll 行可见 +
         // RoleDataScope 反提权守卫豁免）——等价于绕开角色管理权限的自我提权。Users.Update 授的
         // 是「维护用户资料」，不该包含「铸造角色身份」；角色归属只能走 AbpIdentity.Users.Update.
@@ -74,7 +74,7 @@ public class IdentityClaimAppService : AbpAdminAppService, IIdentityClaimAppServ
         var role = await _roleManager.GetByIdAsync(roleId);
         var current = await _roleManager.GetClaimsAsync(role);
 
-        // 先算 diff 再增删（原先全删再逐条加，往返多一倍）：
+        // 先算 diff 再增删（全删再逐条加多一倍往返）：
         // 终态语义不变——角色声明集合等于请求集合（按 Type+Value 比对，请求内重复项去重）。
         var requested = claims
             .Where(x => !string.IsNullOrWhiteSpace(x.ClaimType))

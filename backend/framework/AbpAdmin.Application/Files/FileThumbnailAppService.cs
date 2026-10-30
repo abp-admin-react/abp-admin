@@ -14,7 +14,7 @@ using Volo.Abp.Domain.Repositories;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// 文件缩略图读取与「文件列表 + 缩略图 URL」（T3.1）。
+/// 文件缩略图读取与「文件列表 + 缩略图 URL」。
 /// 授权复用 EasyAbp 模块自身（已核实模块的 GetAsync/GetListAsync 内部都走
 /// AuthorizationService.CheckAsync 与 FileOperationAuthorizationHandler），
 /// 不在本服务重新实现权限判断。

@@ -16,7 +16,7 @@ using AbpAdmin.OperationLogs;
 namespace AbpAdmin.ScheduledJobs;
 
 /// <summary>
-/// 定时作业管理（T3.3 第 8 步）。与 BackgroundJobAppService 职责分离：
+/// 定时作业管理。与 BackgroundJobAppService 职责分离：
 /// 那边管一次性队列作业（AbpBackgroundJobs 表），这边管周期性调度配置（AppScheduledJobs 表）。
 /// </summary>
 [Authorize(AbpAdminPermissions.ScheduledJobs.Default)]
@@ -69,9 +69,9 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     public virtual async Task<ScheduledJobDto> CreateAsync(CreateScheduledJobDto input)
     {
         ValidateCronExpression(input.CronExpression);
-        // GUI 测试 D10：未知 JobType 此前可入库，作业到点必败——创建时即按处理器清单白名单校验
+        // 未知 JobType 入库则作业到点必败——创建时即按处理器清单白名单校验
         EnsureJobTypeKnown(input.JobType);
-        // security F5：Host 专属 JobType（跨租户巡检类，见 HostOnlyScheduledJobTypes）禁止租户侧创建，
+        // Host 专属 JobType（跨租户巡检类，见 HostOnlyScheduledJobTypes）禁止租户侧创建，
         // 否则租户管理员可自建 watchdog 作业驱动 Host 级跨租户扫描。
         EnsureJobTypeAllowedForCurrentSide(input.JobType);
         await EnsureNameUniqueAsync(input.Name);
@@ -106,7 +106,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
         ValidateCronExpression(input.CronExpression);
 
         var job = await _jobRepository.GetAsync(id);
-        // security F5：UpdateDto 不含 JobType，这里挡的是租户侧已存在的 Host 专属作业行
+        // UpdateDto 不含 JobType，这里挡的是租户侧已存在的 Host 专属作业行
         // （种子会为每个租户也种一份 watchdog，默认停用）被更新后重新注册进调度器。
         EnsureJobTypeAllowedForCurrentSide(job.JobType);
         if (!string.Equals(job.Name, input.Name, StringComparison.Ordinal))
@@ -134,7 +134,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     public virtual async Task DeleteAsync(Guid id)
     {
         var job = await _jobRepository.GetAsync(id);
-        // 安全审计 run-1（TV-09）：与 Create/Update/SetEnabled/Trigger 同口径的侧界守卫。
+        // 与 Create/Update/SetEnabled/Trigger 同口径的侧界守卫。
         // 迁移器会把 host-only 作业行种到每个租户（默认停用）——不设防则租户管理员可删掉
         // host 在该租户层启用的跨租户巡检驱动（BroadcastNotificationWatchdog 关 IMultiTenant
         // 扫全租户），静默拆掉 Host 级作业且无任何错误 surfaced。
@@ -150,7 +150,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     {
         var job = await _jobRepository.GetAsync(id);
 
-        // security F5：启用即注册进调度器——种子给每个租户也种了 watchdog 行（默认停用），
+        // 启用即注册进调度器——种子给每个租户也种了 watchdog 行（默认停用），
         // 不拦这条路径的话租户管理员开个开关就能激活 Host 级跨租户巡检，等同绕过 Create 校验。
         EnsureJobTypeAllowedForCurrentSide(job.JobType);
 
@@ -187,7 +187,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
             throw new BusinessException(AbpAdminDomainErrorCodes.ScheduledJobs.ScheduledJobDisabled);
         }
 
-        // security F5：手动触发同样不允许租户侧驱动 Host 专属作业（防绕过启停校验直接点火）。
+        // 手动触发同样不允许租户侧驱动 Host 专属作业（防绕过启停校验直接点火）。
         EnsureJobTypeAllowedForCurrentSide(job.JobType);
 
         // "推送给触发者"的数据通道必须自建：动态 worker 的 JobDataMap 里只有 worker 名，
@@ -250,7 +250,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     {
         // 渗透测试修复：整体兜底。Quartz 解析畸形输入（"bad cron !!"）抛非 ParseException，
         // 越界值（"0 0 25 * * ?"）即使解析通过也会在 GetNextValidTimeAfter 抛出——
-        // 此前两条路径都是 500，前端只能显示笼统的「预览失败」。任何异常一律按非法表达式返回。
+        // 任何异常一律按非法表达式返回（否则前端只能显示笼统的「预览失败」）。
         try
         {
             if (!IsCronExpressionValid(cronExpression))
@@ -289,7 +289,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     {
         // 资源串用命名占位符 {Expression}（与 BusinessException.WithData 同一套），
         // 不能走 L[key, arg] 位置参数——那会以 string.Format 处理命名占位符直接抛
-        // FormatException（渗透测试回归实测）。这里本地化后手动替换。
+        // FormatException。这里本地化后手动替换。
         var message = L[AbpAdminDomainErrorCodes.ScheduledJobs.InvalidCronExpression];
         return new CronPreviewDto
         {
@@ -304,7 +304,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     // 调度同步统一挂 UoW 完成后（Create/Update/SetEnabled 共用）：
     // UoW 内就调调度器，后续 UoW 回滚会在 Quartz 里留下数据库没有对应记录的 job。
     // OnCompleted 里必须 try/catch：此时事务已提交，配置写库本身成功，注册/注销失败
-    // 只影响后续触发节奏；抛出去会让客户端对一次已成功的写操作收到 500（round1 审查，
+    // 只影响后续触发节奏；抛出去会让客户端对一次已成功的写操作收到 500（审查，
     // 与 Language/LanguageText/TextTemplate AppService 的 5 处 OnCompleted 同修法）
     private void ScheduleOnUowCompleted(ScheduledJob job) =>
         UnitOfWorkManager.Current?.OnCompleted(async () =>
@@ -337,7 +337,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
         });
 
     /// <summary>
-    /// security F5（round3）：Host 专属 JobType（见 <see cref="HostOnlyScheduledJobTypes"/>）在租户上下文一律拒绝。
+    /// Host 专属 JobType（见 <see cref="HostOnlyScheduledJobTypes"/>）在租户上下文一律拒绝。
     /// 复用 AbpAdmin:HostSideOnly 错误码与本地化（同 Editions 的 EnsureHostSide 语义），
     /// 区别是只对白名单 JobType 生效——普通作业租户侧照常可用。
     /// </summary>
@@ -351,7 +351,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     }
 
     /// <summary>
-    /// GUI 测试 D10：JobType 是自由字符串，未知类型此前能入库，作业到点必败并污染执行历史。
+    /// JobType 是自由字符串，未知类型入库后作业到点必败并污染执行历史。
     /// 创建/更新时按已注册处理器清单白名单校验。
     /// </summary>
     private void EnsureJobTypeKnown(string jobType)
@@ -386,7 +386,7 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
 
     /// <summary>
     /// 校验 cron 表达式是否合法。必须兜住 Quartz 抛出的一切异常：
-    /// 渗透测试实测 IsValidExpression 只捕获 ParseException，而畸形输入（"bad cron !!"）
+    /// Quartz 的 IsValidExpression 只捕获 ParseException，畸形输入（"bad cron !!"）
     /// 与越界值（"0 0 25 * * ?"）会抛 FormatException/ArgumentOutOfRangeException 等，
     /// 不兜住就是 500（预览）或未处理异常（创建/更新）。抛异常一律视为非法表达式。
     /// </summary>

@@ -18,7 +18,7 @@ using File = EasyAbp.FileManagement.Files.File;
 namespace AbpAdmin.Files;
 
 /// <summary>
-/// T4.6：创建文件前按租户 Feature 校验存储配额。0 或未配置表示不限制。
+/// 创建文件前按租户 Feature 校验存储配额。0 或未配置表示不限制。
 /// 授权 handler 是单例，这里也按单例注册，每次检查自己开 scope + 新 UoW，避免 captive DbContext，
 /// 也避免 GetQueryableAsync 在没有环境工作单元时拿到已释放的上下文。
 /// 占用统计走 SQL SUM（只选 ByteSize，且显式限定当前租户以利用 (TenantId, FileType) 索引），

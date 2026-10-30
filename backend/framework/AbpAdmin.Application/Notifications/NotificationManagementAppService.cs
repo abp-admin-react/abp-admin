@@ -16,7 +16,7 @@ using AbpAdmin.OperationLogs;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// 管理侧通知服务（T3.5 第 11/12 步）。全部端点要 Notification.Manage——
+/// 管理侧通知服务。全部端点要 Notification.Manage——
 /// 管理员看全量发送记录本来就该是高权限操作（模块自己的只读端点同样要求 Manage）。
 /// </summary>
 [Authorize(NotificationServicePermissions.Notification.Manage)]

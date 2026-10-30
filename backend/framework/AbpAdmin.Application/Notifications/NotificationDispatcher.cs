@@ -20,7 +20,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Notifications;
 
 /// <summary>
-/// INotificationDispatcher 实现（T3.5）：ETO 构造与发布的唯一地点。
+/// INotificationDispatcher 实现：ETO 构造与发布的唯一地点。
 /// 不实现 IApplicationService——避免被 Host 的常规控制器配置暴露成 HTTP API；
 /// UoW 用显式 Begin（requiresNew: false：有环境 UoW 就并入，没有就自己开）。
 /// </summary>

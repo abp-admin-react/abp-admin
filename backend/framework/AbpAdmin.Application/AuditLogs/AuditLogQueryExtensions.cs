@@ -10,7 +10,7 @@ using Volo.Abp.Domain.Repositories;
 namespace AbpAdmin.AuditLogs;
 
 /// <summary>
-/// GetAuditLogListInput 的 10 个筛选实参此前在 AppService / ExcelBuilder / ExportController /
+/// GetAuditLogListInput 的 10 个筛选实参散在 AppService / ExcelBuilder / ExportController /
 /// ExportJob 多处以相同顺序复制传递，新增一个筛选项要同步改多处，漏一处即产生
 /// "列表有筛选、导出没有"的隐性分叉。统一封装成按 input 对象透传的扩展，筛选口径只改这里。
 /// </summary>

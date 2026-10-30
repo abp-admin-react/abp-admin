@@ -20,7 +20,7 @@ using Volo.Abp.Users;
 namespace AbpAdmin.Profile;
 
 /// <summary>
-/// 头像上传链路（T3.1）：扩展名白名单 → 大小上限 → magic bytes → 解码前像素上限 →
+/// 头像上传链路：扩展名白名单 → 大小上限 → magic bytes → 解码前像素上限 →
 /// 缩放（Crop 正方形）→ 压缩 → 写 BLOB。顺序不能变。
 ///
 /// 两个与规格文本的偏差（均已在规格允许范围内，注释备查）：
@@ -152,7 +152,7 @@ public class ProfileAvatarAppService : AbpAdminAppService, IProfileAvatarAppServ
 
     public virtual async Task<IRemoteStreamContent?> GetAsync(Guid id)
     {
-        // 安全审计 L-2：仅允许取本人头像。此前任意已认证用户可按 id 枚举同租户任意用户的
+        // 仅允许取本人头像——任意已认证用户可按 id 枚举同租户任意用户的
         // 头像（仓储仅租户过滤、无所有权谓词）；前端唯一调用方是"我的头像"（my-avatar-info
         // 下发的就是本人 id）。越权/未知 id 一律 404——不区分"存在但无权"与"不存在"，
         // 顺带消除同租户用户存在性探测面。

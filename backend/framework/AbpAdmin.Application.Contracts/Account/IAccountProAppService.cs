@@ -8,7 +8,7 @@ using Volo.Abp.Application.Services;
 namespace AbpAdmin.Account;
 
 /// <summary>
-/// T2.7 Account Pro 缺口：邮箱与手机号验证、无密码登录、防枚举、双因素、模拟登录、自助注册开关。
+/// 邮箱与手机号验证、无密码登录、防枚举、双因素、模拟登录、自助注册开关。
 /// </summary>
 public interface IAccountProAppService : IApplicationService
 {
@@ -87,7 +87,7 @@ public interface IAccountProAppService : IApplicationService
     Task<ImpersonationResultDto> BackToMyAccountAsync();
 
     /// <summary>
-    /// T4.2：进入有效权限委托（当前用户必须是委托目标）。
+    /// 进入有效权限委托（当前用户必须是委托目标）。
     /// </summary>
     Task<ImpersonationResultDto> StartDelegationAsync(Guid delegationId);
 

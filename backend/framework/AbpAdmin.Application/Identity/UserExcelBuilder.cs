@@ -59,7 +59,7 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
     /// 角色名与 OU 归属均经批量接口常数次查询（修复逐用户 2 次查询的 N+1）；
     /// 用户行 includeDetails:false——ABP 对 IdentityUser 的 IncludeDetails 会连带
     /// Roles/Logins/Claims/Tokens/PasswordHistories/Passkeys 七张集合表，
-    /// 导出只读标量列，全部用不到，历史库下纯属过度加载（见代码审查 round1）。
+    /// 导出只读标量列，全部用不到，历史库下纯属过度加载。
     /// </summary>
     public virtual async Task<byte[]> BuildAsync(string? filter, int maxResultCount, bool maskSensitive, CancellationToken cancellationToken = default)
     {
@@ -139,7 +139,7 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
                 .Select(n => n!)
                 .ToList());
 
-        // T3.4：「是否启用」列走数据字典渲染（EnabledStatus：Enabled/Disabled → 启用/停用）。
+        // 「是否启用」列走数据字典渲染（EnabledStatus：Enabled/Disabled → 启用/停用）。
         // 字典未种子或项缺失时渲染结果为 null，回落原硬编码文案，导出不因此失败。
         var renderDtos = users.Select(x => new UserExportRenderDto
         {
@@ -151,7 +151,7 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
 
         var rows = users.Zip(renderDtos, (x, r) => new Dictionary<string, object?>
         {
-            // 安全审计 L-4：用户可控文本一律过公式中和（= + - @ 开头加 ' 前缀）
+            // 用户可控文本一律过公式中和（= + - @ 开头加 ' 前缀）
             [UserExportColumnNames.UserName] = SpreadsheetTextSanitizer.Sanitize(x.UserName),
             [UserExportColumnNames.Name] = SpreadsheetTextSanitizer.Sanitize(x.Name),
             [UserExportColumnNames.Surname] = SpreadsheetTextSanitizer.Sanitize(x.Surname),

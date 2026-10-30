@@ -30,7 +30,7 @@ using AbpAdmin.OperationLogs;
 namespace AbpAdmin.Tenants;
 
 /// <summary>
-/// 替换开源 TenantManagement 的 <see cref="Volo.Abp.TenantManagement.TenantAppService"/>（T2.8 SaaS 缺口）。
+/// 替换开源 TenantManagement 的 <see cref="Volo.Abp.TenantManagement.TenantAppService"/>。
 /// 走 ABP 的服务替换机制，不改 ABP 源码：
 /// - 开源 HttpApi 层的显式 TenantController（/api/multi-tenancy/tenants）注入 ITenantAppService，
 ///   会解析到本类，因此原有路由的行为一并变为加密存储/掩码返回；
@@ -75,7 +75,7 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
 
     /// <summary>
     /// 与基类逻辑逐步一致，唯一差别：租户数据种子按贡献者分离 UoW、随做随提交
-    /// （T3.4 在 AbpAdminDbMigrationService 的同款修法，运行时路径漏修导致建租户 500）。
+    /// 。
     /// 基类在同一请求 UoW 里跑全部 IDataSeedContributor：框架 PermissionDataSeedContributor
     /// 把当前定义的全部权限授给 admin 角色（插入但本 UoW 内未提交），而 T1 自研的
     /// SettingUi/FileManagement/DataScope/NotificationService 权限种子走 IPermissionDataSeeder
@@ -200,7 +200,7 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
         tenant.SetDefaultConnectionString(encrypted);
         await TenantRepository.UpdateAsync(tenant);
 
-        // T2.8 SaaS Pro 缺口：配独立连接串后运行期建库+迁 schema（此前租户请求直接失败，
+        // 配独立连接串后运行期建库+迁 schema（否则租户请求直接失败，
         // 只能离线重跑 DbMigrator）。分布式事件缓冲到 UoW 提交后投递，
         // 处理器（TenantDatabaseMigrationNeededHandler）读到的是已提交的新连接串。
         // 语义：提交了明文 Default（非掩码/空）即发布——不与 changed 挂钩，

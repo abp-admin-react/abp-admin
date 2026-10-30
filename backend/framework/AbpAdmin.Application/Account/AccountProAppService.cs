@@ -24,7 +24,7 @@ using Volo.Abp.Users;
 namespace AbpAdmin.Account;
 
 /// <summary>
-/// T2.7 Account Pro 缺口：邮箱与手机号验证、无密码登录、防枚举、双因素、模拟登录、自助注册开关。
+/// 邮箱与手机号验证、无密码登录、防枚举、双因素、模拟登录、自助注册开关。
 /// </summary>
 public class AccountProAppService : AbpAdminAppService, IAccountProAppService
 {
@@ -121,9 +121,9 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
             return;
         }
 
-        // 生成 6 位数字确认码入缓存（E2E 审查修复：原先用 Identity 的
+        // 生成 6 位数字确认码入缓存（不用 Identity 的
         // GenerateEmailConfirmationTokenAsync 产出 200+ 字符 SecureToken 当「确认码」，
-        // 与前端 6 位输入框语义不匹配；改与手机号确认同口径——6 位数字码，10 分钟有效。
+        // 与前端 6 位输入框语义不匹配；与手机号确认同口径——6 位数字码，10 分钟有效。
         // 缓存只存哈希；验码侧限流（5 次/10 分钟）约束爆破面）
         var code = System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         var cacheKey = BuildEmailConfirmationCacheKey(input.Email);
@@ -161,7 +161,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
         var user = users.FirstOrDefault();
         var isValidUser = user != null && !await _userManager.IsLockedOutAsync(user);
 
-        // 发码侧限流已收口到 T3.5 的 SmsSenderResolver（所有短信路径全覆盖），这里不再重复计数，
+        // 发码侧限流已收口到 的 SmsSenderResolver（所有短信路径全覆盖），这里不再重复计数，
         // 否则有效用户每发一条会被记两次（本方法一次、resolver 一次）。
         // 未注册手机号的探测不再消耗发码配额——反正对它们也不会真发短信。
 
@@ -174,7 +174,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
 
         var code = await _userManager.GenerateChangePhoneNumberTokenAsync(user!, input.PhoneNumber);
 
-        // T3.5：经 SmsSenderResolver 发送（厂商/凭据走 SettingUi；未配置厂商时日志记录不抛异常）
+        // 经 SmsSenderResolver 发送（厂商/凭据走 SettingUi；未配置厂商时日志记录不抛异常）
         await _smsSender.SendAsync(await _smsMessageFactory.BuildAsync(input.PhoneNumber, code));
 
         // 发新码重置校验侧限流：用户重新要码，上一轮失败尝试不再计入
@@ -193,7 +193,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
         if (user == null)
         {
             // 未知用户即时抛错、已知用户要先走 token 哈希校验——响应耗时差可枚举已注册邮箱，
-            // 与发码侧同法补防枚举延时（round3 security lens）
+            // 与发码侧同法补防枚举延时
             await AccountAntiEnumeration.DelayAsync();
             throw new BusinessException(AbpAdminDomainErrorCodes.Account.InvalidEmailConfirmationCode);
         }
@@ -226,7 +226,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
         var user = users.FirstOrDefault();
         if (user == null)
         {
-            // 同邮箱确认：耗时对齐防枚举（round3 security lens）
+            // 同邮箱确认：耗时对齐防枚举
             await AccountAntiEnumeration.DelayAsync();
             throw new BusinessException(AbpAdminDomainErrorCodes.Account.InvalidPhoneConfirmationCode);
         }
@@ -491,7 +491,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
         else
         {
             code = await _userManager.GenerateTwoFactorTokenAsync(user, "Phone");
-            // T3.5：经 SmsSenderResolver 发送（厂商/凭据走 SettingUi；未配置厂商时日志记录不抛异常）
+            // 经 SmsSenderResolver 发送（厂商/凭据走 SettingUi；未配置厂商时日志记录不抛异常）
             await _smsSender.SendAsync(await _smsMessageFactory.BuildAsync(user.PhoneNumber!, code));
         }
 
@@ -518,7 +518,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
     private async Task VerifyTwoFactorCodeInternalAsync(
         Volo.Abp.Identity.IdentityUser user, string? code, string? provider)
     {
-        // 通道解析:邮箱 → 手机 → 验证器(E2E 审查修复:仅启用验证器的用户在关闭 2FA 时
+        // 通道解析:邮箱 → 手机 → 验证器(仅启用验证器的用户在关闭 2FA 时
         // 没有已确认邮箱/手机可收码,提供 Authenticator 兜底,否则该人群无法走完关闭确认流)
         var resolved = provider
                        ?? (user.EmailConfirmed ? "Email" : null)
@@ -598,7 +598,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
     {
         var cancellationToken = GetRequestAbortedOrNone();
 
-        // 直接返回 Exchanger 构造好的 DTO（round4 审查 R1：原字段逐一拷贝的中间映射已删）
+        // 直接返回 Exchanger 构造好的 DTO
         return await _tokenExchanger.ExchangeAsync(
             AccessTokenProvider.GetAccessToken()!,
             extraParameters,

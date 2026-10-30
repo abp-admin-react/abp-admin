@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations;
 namespace AbpAdmin.Tenants;
 
 /// <summary>
-/// 租户连接字符串管理视图（T2.8 SaaS Pro 缺口第 4 项）。
+/// 租户连接字符串管理视图。
 /// 管理 API 永不返回明文：已设值的项 Value 为固定掩码 "********"。
 /// </summary>
 public class TenantConnectionStringManagementDto

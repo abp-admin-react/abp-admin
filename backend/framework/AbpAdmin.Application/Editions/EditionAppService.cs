@@ -68,7 +68,7 @@ public class EditionAppService : AbpAdminAppService, IEditionAppService
     public virtual async Task DeleteAsync(Guid id, DeleteEditionInput input)
     {
         EnsureHostSide();
-        // T2.8 SaaS Pro 缺口第 5 项：删除版本时迁移租户
+        // 删除版本时迁移租户
         if (input.MoveTenantsToEditionId == id)
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.Editions.CannotMoveTenantsToSameEdition);

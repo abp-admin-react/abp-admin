@@ -45,7 +45,7 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
     /// 分批用 Id 游标推进（GetListByInputAsync 的 afterId keyset 路径）而不是 skipCount
     /// 递增 OFFSET：深偏移在审计表上每批都要重新扫过前面所有批，且透传 input.Sorting 时
     /// 跨批顺序未定义可重可漏；固定 Id 升序游标分页确定性不重不漏（导出行序随之变为 Id 升序）。
-    /// 列头固定中文（T2.1 验收标准：用 Excel 打开列头是中文），不做本地化——
+    /// 列头固定中文，不做本地化——
     /// 因此本类不注入 IStringLocalizer。
     /// </summary>
     public virtual async Task<byte[]> BuildAsync(GetAuditLogListInput input, int maxResultCount)
@@ -85,7 +85,7 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
         var rows = logs.Select(x => new
         {
             执行时间 = x.ExecutionTime,
-            // 安全审计 L-4：用户可控文本（用户名/URL/IP/关联 ID/异常消息可回显用户输入）过公式中和
+            // 用户可控文本（用户名/URL/IP/关联 ID/异常消息可回显用户输入）过公式中和
             用户名 = SpreadsheetTextSanitizer.Sanitize(x.UserName),
             应用 = x.ApplicationName,
             请求方法 = x.HttpMethod,
