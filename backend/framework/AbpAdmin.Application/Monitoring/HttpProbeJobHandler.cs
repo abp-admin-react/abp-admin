@@ -29,7 +29,7 @@ namespace AbpAdmin.Monitoring;
 /// （SafeHttpUrl.CreateNoRedirectPrimaryHandler）——守卫只校验入口 URL，跟随 3xx
 /// 会绕过守卫打到重定向目标。
 /// 日志语义（与下方日志字符串一一对应）：
-/// - 成功 = Information「HTTP probe succeeded for {Url} ({StatusCode})」；
+/// - 成功 = Information「HTTP probe succeeded for {Url} ({StatusCode}).」；
 /// - 失败 = Warning「HTTP probe failed for {Url}: {Error}」+ 抛 AbpException
 ///   「HTTP 探活失败：{Url} → {StatusCode}：{Error}」（无响应时为「（无响应）」），
 ///   异常消息由调度器截断后落 ScheduledJobExecution.Message 与作业行 LastRunMessage；

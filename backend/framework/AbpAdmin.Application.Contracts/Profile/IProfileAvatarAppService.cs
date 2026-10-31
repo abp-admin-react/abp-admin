@@ -18,8 +18,8 @@ public interface IProfileAvatarAppService : IApplicationService
     Task DeleteAsync();
 
     /// <summary>
-    /// 读取任意用户的头像（头像要在用户列表等场景展示，允许已登录用户互读）。
-    /// id 会按当前租户过滤，防止跨租户探测；用户或头像不存在返回 null。
+    /// 读取本人头像（仅限 id = 当前用户；非本人 id 一律 EntityNotFound——防同租户存在性探测）。
+    /// 用户或头像不存在返回 null。
     /// </summary>
     Task<IRemoteStreamContent?> GetAsync(Guid id);
 

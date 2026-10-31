@@ -30,7 +30,7 @@ public interface IAccountLinkAppService : IApplicationService
 
 public class LinkedAccountDto
 {
-    /// <summary>关联记录 Id（UnlinkAsync / SwitchAsync 的入参）。</summary>
+    /// <summary>关联记录 Id（DeleteAsync / SwitchAsync 的入参）。</summary>
     public Guid LinkId { get; set; }
 
     /// <summary>对端账号 Id。</summary>

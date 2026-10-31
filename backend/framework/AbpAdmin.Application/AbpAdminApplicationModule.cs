@@ -57,7 +57,7 @@ public class AbpAdminApplicationModule : AbpModule
 {
     /// <summary>
     /// 应用内回环调用 /connect/token 的命名 HttpClient。
-    /// 开发环境 AuthServer:Authority 指向 https://localhost:44395（自签 dev-cert），
+    /// 开发环境 AuthServer:Authority 指向 https://localhost:44300（自签 dev-cert），
     /// 操作系统不信任该证书，默认 handler 的 SSL 校验会失败，故 Development 下跳过校验。
     /// </summary>
     public const string AuthServerTokenExchangeHttpClient = "AuthServerTokenExchange";

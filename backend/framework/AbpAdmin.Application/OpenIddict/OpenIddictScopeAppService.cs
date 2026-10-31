@@ -15,7 +15,7 @@ namespace AbpAdmin.OpenIddict;
 public class OpenIddictScopeAppService : AbpAdminAppService, IOpenIddictScopeAppService
 {
     /// <summary>
-    /// 内置 scope 共 5 个，不是数据库记录。已核实 OpenIddict.Abstractions 7.5.0：
+    /// 内置 scope 共 5 个，不是数据库记录。已核实 OpenIddict.Abstractions 7.7.0：
     /// OpenIddictConstants.Scopes 顶层类含 Address/Email/Phone/Profile/Roles
     /// （Roles="roles" 在该版本已存在，无需手写字面量；另外还有 OpenId/OfflineAccess，
     /// 按任务规格不列入内置清单）。

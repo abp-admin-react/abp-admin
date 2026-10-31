@@ -44,7 +44,8 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
     /// 后台作业分支传 AuditLogExportConsts.AsyncMaxRows（调用方负责截断语义与邮件说明）。
     /// 分批用 Id 游标推进（GetListByInputAsync 的 afterId keyset 路径）而不是 skipCount
     /// 递增 OFFSET：深偏移在审计表上每批都要重新扫过前面所有批，且透传 input.Sorting 时
-    /// 跨批顺序未定义可重可漏；固定 Id 升序游标分页确定性不重不漏（导出行序随之变为 Id 升序）。
+    /// 跨批顺序未定义可重可漏；固定 Id 降序游标分页确定性不重不漏（导出行序为 Id 降序、最新优先，
+    /// 截断保留的是最新 N 条）。
     /// 列头固定中文，不做本地化——
     /// 因此本类不注入 IStringLocalizer。
     /// </summary>
@@ -73,7 +74,7 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
             }
 
             logs.AddRange(batch);
-            // 批内按 Id 升序，最后一个即本批最大 Id，作为下一批游标
+            // 批内按 Id 降序，最后一个即本批最小 Id，作为下一批游标（取更小的 Id）
             afterId = batch[^1].Id;
 
             if (batch.Count < currentBatchSize)

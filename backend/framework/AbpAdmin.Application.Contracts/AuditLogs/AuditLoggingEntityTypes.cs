@@ -2,7 +2,8 @@ namespace AbpAdmin.AuditLogs;
 
 /// <summary>
 /// 需要开启变更历史的实体类型清单。
-/// 与 AbpAuditingOptions.EntityHistorySelectors 的白名单保持同一份定义。
+/// 审计历史本身经 EntityHistorySelectors.AddAllEntities() 全库开启；本清单是实体级
+/// ViewChangeHistory 权限判定与回滚白名单的唯一数据源（两处消费共用同一份定义）。
 /// </summary>
 public static class AuditLoggingEntityTypes
 {

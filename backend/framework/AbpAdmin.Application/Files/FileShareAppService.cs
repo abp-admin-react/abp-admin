@@ -52,7 +52,7 @@ public class FileShareAppService : AbpAdminAppService, IFileShareAppService
         // 租户级每用户限流（GetDownloadInfoTimesLimitEachUserPerMinute），无权下载直接 403/404。
         await _fileAppService.GetDownloadInfoAsync(input.FileId);
 
-        // 本批只做匿名公开链接；IsPublic=false 没有已认证下载路径，创建出来会永远 业务失败。
+        // 本批只做匿名公开链接；IsPublic=false 没有已认证下载路径，创建出来会永远业务失败。
         if (!input.IsPublic)
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.Files.ShareLinkInvalid);

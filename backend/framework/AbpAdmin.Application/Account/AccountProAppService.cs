@@ -161,7 +161,7 @@ public class AccountProAppService : AbpAdminAppService, IAccountProAppService
         var user = users.FirstOrDefault();
         var isValidUser = user != null && !await _userManager.IsLockedOutAsync(user);
 
-        // 发码侧限流已收口到 的 SmsSenderResolver（所有短信路径全覆盖），这里不再重复计数，
+        // 发码侧限流已收口到 Sms 的 SmsSenderResolver（所有短信路径全覆盖），这里不再重复计数，
         // 否则有效用户每发一条会被记两次（本方法一次、resolver 一次）。
         // 未注册手机号的探测不再消耗发码配额——反正对它们也不会真发短信。
 

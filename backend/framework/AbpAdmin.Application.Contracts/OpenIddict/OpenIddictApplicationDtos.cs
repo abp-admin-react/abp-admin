@@ -79,7 +79,7 @@ public class OpenIddictApplicationDto : EntityDto<Guid>
     /// <summary>已授予的 scope 权限（scp: 前缀已剥离）。</summary>
     public List<string> Scopes { get; set; } = new();
 
-    /// <summary>已授予的 extension grant types（gt: 前缀已剥离，不含 8 种标准 flow）。</summary>
+    /// <summary>已授予的 extension grant types（gt: 前缀已剥离，不含 7 种标准 flow——Ciba 未列入）。</summary>
     public List<string> ExtensionGrantTypes { get; set; } = new();
 }
 
@@ -183,7 +183,7 @@ public class UpdateOpenIddictApplicationDto : CreateOpenIddictApplicationDto
 /// <summary>
 /// 按客户端的 token 生命周期覆盖，单位秒；null 表示移除该项覆盖、使用服务器默认值。
 /// 存储在 OpenIddict application 的 Settings 字段（tkn_lft:* 键）。
-/// 注意：OpenIddict 7.5.0 只支持以下 8 项——OpenIddictApplicationDescriptor 仅有 8 个
+/// 注意：OpenIddict 7.7.0 只支持以下 8 项——OpenIddictApplicationDescriptor 仅有 8 个
 /// Set*Lifetime 方法且 OpenIddict.Server 只读取这 8 个 tkn_lft 键；
 /// State token 没有应用级 lifetime 设置（descriptor / server options 均无此 API），故不在本 DTO 中。
 /// </summary>

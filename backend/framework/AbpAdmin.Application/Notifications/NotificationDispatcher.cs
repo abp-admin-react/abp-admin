@@ -160,7 +160,7 @@ public class NotificationDispatcher : INotificationDispatcher, ITransientDepende
 
     // ========== 批量发布（仅供 BroadcastNotificationJob 调用，接口形态见 INotificationDispatcher） ==========
     // 全代码库只有本文件构造 ETO（验收 grep 据此成立）：
-    // rg "CreateSmsNotificationEto|CreateEmailNotificationEto|CreateNotificationEto" src/ --glob '!**/NotificationDispatcher.cs'
+    // rg "CreateSmsNotificationEto|CreateEmailNotificationEto|CreateNotificationEto" backend/framework backend/modules --glob '!**/NotificationDispatcher.cs'
 
     public virtual async Task SendEmailBatchAsync(Guid? tenantId, List<NotificationUserInfoModel> users, string subject, string body)
     {

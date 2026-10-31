@@ -22,7 +22,7 @@ namespace AbpAdmin.OpenIddict;
 /// </summary>
 public static class OpenIddictApplicationDescriptorBuilder
 {
-    /// <summary>8 种标准 flow 的 grant type 权限，用于从存储权限中反解 extension grant types。</summary>
+    /// <summary>7 种标准 flow 的 grant type 权限（Ciba 未列入），用于从存储权限中反解 extension grant types。</summary>
     public static readonly ImmutableArray<string> StandardGrantTypePermissions =
     [
         OpenIddictConstants.Permissions.GrantTypes.AuthorizationCode,
@@ -253,7 +253,7 @@ public static class OpenIddictApplicationDescriptorBuilder
 
     /// <summary>
     /// 把 8 项 token lifetime 覆盖写入 descriptor.Settings（单位秒，null=移除该项覆盖）。
-    /// 注意：OpenIddict 7.5.0 的 descriptor 只有 8 个 Set*Lifetime 方法（无 Get*、无 State token），
+    /// 注意：OpenIddict 7.7.0 的 descriptor 只有 8 个 Set*Lifetime 方法（无 Get*、无 State token），
     /// OpenIddict.Server 也只读取这 8 个 tkn_lft:* 键；State token 没有应用级 lifetime 设置可写。
     /// </summary>
     public static void ApplyTokenLifetimes(

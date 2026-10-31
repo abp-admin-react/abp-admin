@@ -58,7 +58,7 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
     /// maxResultCount 是硬上限：同步分支传实际条数（≤ 1000），后台作业分支传允许的最大行数。
     /// 角色名与 OU 归属均经批量接口常数次查询（修复逐用户 2 次查询的 N+1）；
     /// 用户行 includeDetails:false——ABP 对 IdentityUser 的 IncludeDetails 会连带
-    /// Roles/Logins/Claims/Tokens/PasswordHistories/Passkeys 七张集合表，
+    /// Roles/OrganizationUnits/Logins/Claims/Tokens/PasswordHistories/Passkeys 七张集合表，
     /// 导出只读标量列，全部用不到，历史库下纯属过度加载。
     /// </summary>
     public virtual async Task<byte[]> BuildAsync(string? filter, int maxResultCount, bool maskSensitive, CancellationToken cancellationToken = default)

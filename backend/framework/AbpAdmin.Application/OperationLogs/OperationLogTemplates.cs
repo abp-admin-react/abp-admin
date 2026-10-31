@@ -23,7 +23,7 @@ public static partial class OperationLogTemplates
     /// <summary>根名解析失败的哨兵：区别于「解析成功但值为 null」。</summary>
     private static readonly object UnresolvedMarker = new();
 
-    // 非贪婪以支持 _diff{a,b} 的内层花括号（组捕获到最外层 }} 之前的内容）
+    // 非贪婪以支持 _diff(a,b) 的内层圆括号（组捕获到最外层 }} 之前的内容）
     [GeneratedRegex(@"\{\{\s*(.*?)\s*\}\}")]
     private static partial Regex TokenRegex();
 

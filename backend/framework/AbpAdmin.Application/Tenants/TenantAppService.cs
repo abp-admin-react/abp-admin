@@ -74,8 +74,7 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
     }
 
     /// <summary>
-    /// 与基类逻辑逐步一致，唯一差别：租户数据种子按贡献者分离 UoW、随做随提交
-    /// 。
+    /// 与基类逻辑逐步一致，唯一差别：租户数据种子按贡献者分离 UoW、随做随提交。
     /// 基类在同一请求 UoW 里跑全部 IDataSeedContributor：框架 PermissionDataSeedContributor
     /// 把当前定义的全部权限授给 admin 角色（插入但本 UoW 内未提交），而 T1 自研的
     /// SettingUi/FileManagement/DataScope/NotificationService 权限种子走 IPermissionDataSeeder
