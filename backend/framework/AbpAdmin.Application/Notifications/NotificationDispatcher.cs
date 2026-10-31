@@ -64,7 +64,7 @@ public class NotificationDispatcher : INotificationDispatcher, ITransientDepende
         CheckUserIds(input.UserIds);
 
         await _distributedEventBus.PublishAsync(
-            new CreateEmailNotificationEto(_currentTenant.Id, input.UserIds, input.Subject, input.Body));
+            new CreateEmailNotificationEto(_currentTenant.Id, await FilterInTenantUserIdsAsync(input.UserIds), input.Subject, input.Body));
     }
 
     public virtual async Task SendSmsAsync(SendSmsNotificationInput input)
@@ -75,7 +75,7 @@ public class NotificationDispatcher : INotificationDispatcher, ITransientDepende
         await _distributedEventBus.PublishAsync(
             new CreateSmsNotificationEto(
                 _currentTenant.Id,
-                input.UserIds,
+                await FilterInTenantUserIdsAsync(input.UserIds),
                 input.Text,
                 input.Properties ?? new Dictionary<string, object>(),
                 _jsonSerializer));
@@ -87,7 +87,7 @@ public class NotificationDispatcher : INotificationDispatcher, ITransientDepende
         CheckUserIds(input.UserIds);
 
         await _distributedEventBus.PublishAsync(
-            new CreateInAppNotificationEto(_currentTenant.Id, input.UserIds, input.Title, input.Body));
+            new CreateInAppNotificationEto(_currentTenant.Id, await FilterInTenantUserIdsAsync(input.UserIds), input.Title, input.Body));
     }
 
     /// <summary>
@@ -100,6 +100,30 @@ public class NotificationDispatcher : INotificationDispatcher, ITransientDepende
             throw new BusinessException(AbpAdminDomainErrorCodes.Notifications.EmptyUserIds)
                 .WithData("ParamName", "UserIds");
         }
+    }
+
+    /// <summary>
+    /// 定向发送的租户内用户校验（sectest b07）：上游 EasyAbp 管道对 UserIds 逐条建行，
+    /// 未知用户回 "__UNKNOWN" 也照建——租户 A 操作者传入租户 B/宿主用户 Id 即可造出
+    /// 跨租户幽灵行 + 经 SignalR Clients.User 的无租户定向推送。与广播路径（租户过滤
+    /// IdentityUser 查询解析收件人）同口径：只保留当前租户内存在的用户，全部无效则
+    /// 与空列表同错误码（不泄露跨租户用户是否存在）。
+    /// </summary>
+    private async Task<List<Guid>> FilterInTenantUserIdsAsync(List<Guid> userIds)
+    {
+        var distinct = userIds.Distinct().ToList();
+        var queryable = await _userRepository.GetQueryableAsync();
+        var valid = (await _asyncExecuter.ToListAsync(
+                         queryable.Where(u => distinct.Contains(u.Id)).Select(u => u.Id)))
+            .ToHashSet();
+        var filtered = distinct.Where(valid.Contains).ToList();
+        if (filtered.Count == 0)
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.Notifications.EmptyUserIds)
+                .WithData("ParamName", "UserIds");
+        }
+
+        return filtered;
     }
 
     public virtual async Task<Guid> BroadcastAsync(BroadcastNotificationInput input)

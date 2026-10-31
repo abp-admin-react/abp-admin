@@ -7,6 +7,7 @@ using EasyAbp.NotificationService.Notifications;
 using Shouldly;
 using Volo.Abp.BackgroundJobs;
 using Volo.Abp.Domain.Repositories;
+using Volo.Abp.Identity;
 using Volo.Abp.Modularity;
 using Volo.Abp.MultiTenancy;
 using Xunit;
@@ -153,17 +154,26 @@ public abstract class NotificationDispatcherTests<TStartupModule> : AbpAdminAppl
     [Fact]
     public async Task SendInAppAsync_In_Tenant_Context_Should_Stamp_TenantId()
     {
+        // 租户内真实用户：先在该租户种一个用户（定向发送按租户内存在性过滤目标）
         var tenantId = Guid.NewGuid();
         var title = "ut-tenant-" + Guid.NewGuid().ToString("N")[..8];
-
-        // 租户上下文发送：记录必须带上租户 Id，且 host 上下文查不到（全局验收第 7 条）
+        var tenantUserId = Guid.NewGuid();
         using (GetRequiredService<ICurrentTenant>().Change(tenantId))
         {
             await WithUnitOfWorkAsync(async () =>
             {
+                var userManager = GetRequiredService<IdentityUserManager>();
+                var user = new IdentityUser(Guid.NewGuid(), "ut.tenant." + Guid.NewGuid().ToString("N")[..8],
+                    $"ut-{Guid.NewGuid():N}@sectest.local", tenantId);
+                (await userManager.CreateAsync(user, "Sectest!1234")).Succeeded.ShouldBeTrue();
+                tenantUserId = user.Id;
+            });
+
+            await WithUnitOfWorkAsync(async () =>
+            {
                 await _dispatcher.SendInAppAsync(new SendInAppNotificationInput
                 {
-                    UserIds = new List<Guid> { AdminUserId },
+                    UserIds = new List<Guid> { tenantUserId },
                     Title = title,
                     Body = "租户内通知"
                 });
@@ -187,6 +197,35 @@ public abstract class NotificationDispatcherTests<TStartupModule> : AbpAdminAppl
         {
             var infos = await _notificationInfoRepository.GetListAsync();
             infos.ShouldNotContain(i => i.GetInAppTitle() == title);
+        });
+    }
+
+    [Fact]
+    public async Task SendInAppAsync_Should_Reject_Foreign_Tenant_UserIds()
+    {
+        // sectest b07 回归锁：定向发送只认「当前租户内存在」的用户——租户外 Id
+        // （host 用户对租户上下文不可见）不得建行/投递，全部无效与空列表同错误码，
+        // 不泄露跨租户用户是否存在。
+        var tenantId = Guid.NewGuid();
+        using (GetRequiredService<ICurrentTenant>().Change(tenantId))
+        {
+            var exception = await Should.ThrowAsync<Volo.Abp.BusinessException>(() =>
+                WithUnitOfWorkAsync(async () =>
+                {
+                    await _dispatcher.SendInAppAsync(new SendInAppNotificationInput
+                    {
+                        UserIds = new List<Guid> { AdminUserId }, // host 用户，租户上下文不可见
+                        Title = "ut-foreign",
+                        Body = "跨租户探测"
+                    });
+                }));
+            exception.Code.ShouldBe(AbpAdminDomainErrorCodes.Notifications.EmptyUserIds);
+        }
+
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var infos = await _notificationInfoRepository.GetListAsync();
+            infos.ShouldNotContain(i => i.GetInAppTitle() == "ut-foreign");
         });
     }
 
