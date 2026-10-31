@@ -130,12 +130,36 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
         // 改了验证码/短信凭据/锁定策略，实际全都没变）。入口处把裸设置名规范化为表单键，
         // 两种格式都接受；未知设置名仍走上游的静默跳过口径（整表单提交里混入垃圾键不炸）。
         var normalized = NormalizeToFormKeys(settingValues);
-        await base.SetSettingValuesAsync(normalized);
+
+        // 写入面与重置面同口径（安全审计 run-2 C-3）：只处理 UI 注册设置（definition.Properties
+        // 含 SettingUiConst.Group1 的 WithUi 定义）。上游 2.10.0 按表单键名盲解析任意已注册定义——
+        // Collection.Withdraw.Halt / Withdraw.Enabled / Chain.* 资金开关故意 omit WithUi 移出设置页
+        // （唯一写门是 Withdraw.Admin / Network.Admin 域端点 + AssertHost），裸持 SettingUi.Update
+        // 即可经本面清掉全局急停。收紧后非 UI 设置与未知表单键同语义：静默跳过，不产生任何层写入。
+        var writable = new Dictionary<string, string>(normalized.Count);
+        foreach (var (formKey, value) in normalized)
+        {
+            var name = ResolveSettingName(formKey);
+            if (name == null)
+            {
+                continue;
+            }
+
+            var definition = await _settingDefinitionManager.GetOrNullAsync(name);
+            if (definition == null || !definition.Properties.ContainsKey(SettingUiConst.Group1))
+            {
+                continue;
+            }
+
+            writable[formKey] = value;
+        }
+
+        await base.SetSettingValuesAsync(writable);
 
         // 参数含明文新密钥，ABP 审计参数序列化已被 IgnoredTypes 关掉；
-        // 语义轨迹在这里手写，只记设置名不记值。基于规范化后的键（裸名调用方也能记全轨迹）；
+        // 语义轨迹在这里手写，只记设置名不记值。基于过滤后的可写键（裸名调用方也能记全轨迹）；
         // 前端会把整个表单原样回传（未改的项值为空串），空值项没有信息量。密钥值永不落库。
-        var changedKeys = normalized
+        var changedKeys = writable
             .Where(kv => !string.IsNullOrEmpty(kv.Value))
             .Select(kv => ResolveSettingName(kv.Key))
             .Where(name => name != null)
