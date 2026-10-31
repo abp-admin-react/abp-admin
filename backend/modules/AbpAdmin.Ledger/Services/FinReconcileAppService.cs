@@ -9,6 +9,7 @@ using AbpAdmin.Ledger.Permissions;
 using AbpAdmin.Ledger.Services.Dtos;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Volo.Abp.Authorization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.EntityFrameworkCore;
@@ -35,6 +36,15 @@ public class FinReconcileAppService : FinanceAppServiceBase
 
     public virtual async Task<PagedResultDto<FinReconcileRunDto>> GetListAsync(FinReconcileListInput input)
     {
+        // 代理切片 fail closed（sectest b05 / 审计 NV-02 残余）：对账结果是租户级全量汇总
+        //（DiffJson 含平台借贷合计与各代理子账户投影差），Finance.Scope.Agent 持有者没有
+        // 有效的切片形态——与 FinOverviewAppService.GetAsync 同口径直接拒绝，而不是回退全量。
+        // run 侧已由 Reconcile.Run 权限单独把门（切片持有者不授予）。
+        if (await ResolveAgentScopeAsync() != null)
+        {
+            throw new AbpAuthorizationException(code: AbpAuthorizationErrorCodes.GivenPolicyHasNotGranted);
+        }
+
         var db = await _db.GetDbContextAsync();
         var q = db.ReconcileRuns.AsNoTracking();
         // 列表本身是对账运行记录；includeDemo 筛「该次是否包含演示」
@@ -54,6 +64,15 @@ public class FinReconcileAppService : FinanceAppServiceBase
     [Authorize(FinancePermissions.Reconcile.Run)]
     public virtual async Task<FinReconcileRunDto> RunAsync(FinReconcileRunInput input)
     {
+        // 切片 fail-closed 与列表侧同口径（NV-02 残余收口）：Run 的响应直接返回租户级
+        // 全量汇总（DiffJson 含平台借贷合计与全部子户投影差），落库的 run 行也是租户级
+        // ——切片持有者即使被授予 Reconcile.Run 也不得执行，否则「Run 权限不授予切片
+        // 操作员」只剩管理纪律、没有强制不变式（黑盒实证：切片主体 + Run 可拿到全量）。
+        if (await ResolveAgentScopeAsync() != null)
+        {
+            throw new AbpAuthorizationException(code: AbpAuthorizationErrorCodes.GivenPolicyHasNotGranted);
+        }
+
         // 三段聚合必须取自同一快照（READ COMMITTED 逐语句快照会让对账期间发生的过账产出假
         // HasDiff 假阳性，进 A1 的 UnreconciledCount）。requiresNew 开独立 UoW 作用域并指定
         // REPEATABLE READ——不能直接挂显式 BeginTransaction：环境事务型 UoW 的连接已在事务里

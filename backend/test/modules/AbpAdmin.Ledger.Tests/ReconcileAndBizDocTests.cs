@@ -49,6 +49,32 @@ public class ReconcileAndBizDocTests : LedgerScenarioTestBase
         }
     }
 
+    /// <summary>
+    /// 回归锁（NV-02 残余收口 / sectest 加压轮 p27）：Ledger.View + Scope.Agent 的切片主体
+    /// 即使被授予 Reconcile.Run，Run 也必须 fail-closed 拒绝——Run 的响应直接返回租户级
+    /// 全量汇总（DiffJson 含平台借贷合计与全部子户投影差），且落库 run 行同为租户级。
+    /// 与 GetListAsync 的切片守卫同口径；无切片的会计（AccountantA 含 Run）照常执行。
+    /// </summary>
+    [Fact]
+    public async Task Reconcile_Run_Is_Fail_Closed_For_Agent_Slice_Even_With_Run_Granted()
+    {
+        using (As(TestUsers.AgentWithRun))
+        {
+            var svc = GetRequiredService<FinReconcileAppService>();
+            await Should.ThrowAsync<AbpAuthorizationException>(() =>
+                svc.RunAsync(new FinReconcileRunInput()));
+            await Should.ThrowAsync<AbpAuthorizationException>(() =>
+                svc.GetListAsync(new FinReconcileListInput()));
+        }
+
+        using (As(TestUsers.AccountantA))
+        {
+            var run = await GetRequiredService<FinReconcileAppService>()
+                .RunAsync(new FinReconcileRunInput { IncludeDemo = false });
+            run.ShouldNotBeNull();
+        }
+    }
+
     [Fact]
     public async Task BizDoc_Agent_Scope_Forces_Own_AgentId()
     {

@@ -97,11 +97,18 @@ public static class TestUsers
     public static readonly Guid BossWithCreate = Guid.Parse("c1000000-0000-0000-0000-0000000000c1");
     /// <summary>边界组合：Ledger.View + Scope.Agent（无 Scope.All）——读路径切片的受测主体。</summary>
     public static readonly Guid AgentWithLedgerView = Guid.Parse("d2000000-0000-0000-0000-0000000000d2");
+    /// <summary>切片 + Reconcile.Run：验证 Run 面对切片持有者 fail-closed（NV-02 残余收口）。</summary>
+    public static readonly Guid AgentWithRun = Guid.Parse("d3000000-0000-0000-0000-0000000000d3");
 
     /// <summary>：读路径切片受测权限组 = 会计的 Ledger.View + 代理的 Scope.Agent。</summary>
     public static readonly string[] AgentWithLedgerViewPerms =
     {
         FinancePermissions.Ledger.View, FinancePermissions.Scope.Agent,
+    };
+
+    public static readonly string[] AgentWithRunPerms =
+    {
+        FinancePermissions.Ledger.View, FinancePermissions.Scope.Agent, FinancePermissions.Reconcile.Run,
     };
 
     public static readonly string[] Accountant =
@@ -143,6 +150,7 @@ public class TestPermissionChecker : IPermissionChecker
         [TestUsers.AccountantSelfApprover] = TestUsers.Accountant.Append(FinancePermissions.Adjust.ApproveOwn).ToHashSet(),
         [TestUsers.BossWithCreate] = TestUsers.BossPerms.Append(FinancePermissions.Adjust.Create).ToHashSet(),
         [TestUsers.AgentWithLedgerView] = TestUsers.AgentWithLedgerViewPerms.ToHashSet(),
+        [TestUsers.AgentWithRun] = TestUsers.AgentWithRunPerms.ToHashSet(),
     };
 
     private readonly ICurrentPrincipalAccessor _principalAccessor;
