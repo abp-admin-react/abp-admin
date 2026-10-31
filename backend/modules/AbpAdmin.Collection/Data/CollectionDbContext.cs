@@ -293,8 +293,6 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.BlockNumber, x.LogIndex });
             // 资金看板「今日」窗口（同提现表）
             b.HasIndex(x => x.CreationTime);
-            // 管理端流水分页（默认最新在前）与异常筛选
-            b.HasIndex(x => x.CreationTime);
             b.HasIndex(x => new { x.Status, x.CreationTime });
         });
 

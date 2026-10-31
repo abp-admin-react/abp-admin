@@ -23,10 +23,12 @@ namespace AbpAdmin.Collection.Withdrawals;
 /// <summary>
 /// 提现广播轮次逻辑（M3）：卡单恢复 → 小额自动审 → 广播队列。
 /// 与 SweepManager 同款纪律：AsNoTracking 读 + 守卫式 ExecuteUpdate 写、一动作一事务。
-/// 广播失败语义（对齐 exchange）：
-///  · Broadcasting 超时且有哈希 → 查回执：成功完结 / 失败重试（超限转 BroadcastFailed）
-///  · Broadcasting 超时且无哈希 → BroadcastFailed「需人工核查」，绝不盲目重播（双花防线）
-///  · 签名/发送抛异常 → 保持 Broadcasting（无哈希），交由卡单恢复人工核查——发送结果未知时宁可冻结也不重发
+/// 广播失败语义（全自动 nonce 仲裁，无人工）：
+///  · Broadcasting 超时且有哈希 → 查回执：成功完结 / 失败重试（超限自动退款 Rejected）
+///  · Broadcasting 超时且无哈希 → nonce 仲裁（202 行）：pending nonce ≤ NonceUsed =
+///    可证未出款 → 自动重播 / 超限自动退款；pending nonce 已越过 NonceUsed =
+///    可能已上链 → BroadcastFailed 等人工核查——绝不盲目重播（双花防线）
+///  · 签名/发送抛异常 → 保持 Broadcasting（无哈希），交由下一轮 nonce 仲裁自动处置
 /// nonce 每次广播取热钱包 pending nonce（不缓存复用），杜绝替换重签双花。
 /// </summary>
 public class WithdrawBroadcastManager : DomainService
@@ -435,25 +437,6 @@ public class WithdrawBroadcastManager : DomainService
         }
     }
 
-    /// <summary>回执明确失败（nonce 已消耗）：清哈希回 Processing，广播时取新 nonce。</summary>
-    private async Task RequeueAfterFailedReceiptAsync(ColWithdrawOrder order, string reason, CancellationToken ct)
-    {
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var rows = await dbContext.WithdrawOrders
-            .Where(o => o.Id == order.Id && o.Status == WithdrawStatus.Broadcasting && o.TxHash == order.TxHash)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(o => o.Status, WithdrawStatus.Processing)
-                .SetProperty(o => o.StatusChangedAt, _clock.Now)
-                .SetProperty(o => o.TxHash, (string?)null)
-                .SetProperty(o => o.NonceUsed, (long?)null)
-                .SetProperty(o => o.RetryCount, order.RetryCount + 1)
-                .SetProperty(o => o.FailReason, reason), ct);
-        if (rows > 0)
-        {
-            Logger.LogWarning("提现单 {OrderId} 回执失败，回 Processing 重试（第 {Retry} 次）", order.Id, order.RetryCount + 1);
-        }
-    }
-
     /// <summary>回执成功 → 完结（CAS + CompleteTime + 账本 payout；幂等：Broadcasting/Completed 双态容许重放）。</summary>
     public virtual async Task CompleteFromReceiptAsync(Guid orderId, string txHash)
     {
@@ -699,7 +682,7 @@ public class WithdrawBroadcastManager : DomainService
 
     /// <summary>
     /// 重试（仅 BroadcastFailed 且 RetryCount 未超限）：有哈希先验回执——成功直接完结、
-    /// 失败/不匹配清哈希回 Processing；无哈希过双花门（近期已向该地址付款则拒绝）。
+    /// 失败清哈希回 Processing；无哈希先过 nonce 仲裁门、再过双花门（近期已向该地址付款则拒绝）。
     /// </summary>
     public virtual async Task RetryAsync(Guid orderId, ColNetwork network, IBscChainGateway gateway, CancellationToken ct = default)
     {

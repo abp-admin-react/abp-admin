@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// Ankr BSC JSON-RPC 网关（https://rpc.ankr.com/bsc/&#123;project-key&#125;，测量见 docs/collection-chain-runbook）。
+/// Ankr BSC JSON-RPC 网关（https://rpc.ankr.com/bsc/&#123;project-key&#125;）。
 /// getLogs 按 5.6 节口径判「没读完」：节点报错，或条数 ≥ 上限八成（上限由实测得来，进配置）。
 /// 签名广播用 Nethereum 的 LegacyTransaction（EIP-155），JSON-RPC 走本类自写——网关薄、假实现可替。
 /// 多 KEY：同一服务商可挂多把（管理页维护），遇 429/401/403/配额类错误自动切下一把重试；

@@ -49,7 +49,7 @@ public class CollectionChainWorkerOptions
 }
 
 /// <summary>
-/// worker 注册扩展（计划第 59 行）：宿主调 AddCollectionChainWorkers；DbMigrator 不调——
+/// worker 注册扩展（计划第 59 节）：宿主调 AddCollectionChainWorkers；DbMigrator 不调——
 /// 迁移进程不起调度器（HostServiceGraphValidationTests 钉住 DbMigrator 服务图无这些 hosted service）。
 /// workers 无条件注册（默认关 = 纯睡眠）；开关热开后启动期无法预知，
 /// Redis 支撑守卫由基类在轮内懒检查（CollectionChainWorkerBase.EnsureRedisBackedLockBackend，

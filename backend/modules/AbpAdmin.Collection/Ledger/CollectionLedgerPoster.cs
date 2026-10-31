@@ -10,7 +10,8 @@ namespace AbpAdmin.Collection.Ledger;
 /// Collection→总账的过账薄封装（充值入账/手续费、提现全状态机、存量开账、币种码收口）：FinanceBizEvent 构造收口在此（From/To、金额口径、幂等 BizRefId），
 /// 业务管理器只挑 phase。所有过账加入调用方事务（ILedgerIntegrationService 进程内实现），
 /// 幂等由引擎的 (BizType, BizRefId, Phase) 唯一键承担——BizRefId 统一 = 提现单/进款单 Id 的 "D" 格式。
-/// 金额口径：freeze/unfreeze = Amount+Fee（冻结总额）；approve/payout/refund = ActualAmount（净额）；
+/// 金额口径：freeze/unfreeze = order.Amount（提现总额字段，本身即 ActualAmount + Fee，非两字段相加）；
+/// approve/payout/refund = ActualAmount（净额）；
 /// fee-take/fee-refund = Fee。
 /// </summary>
 public class CollectionLedgerPoster : DomainService
@@ -32,7 +33,7 @@ public class CollectionLedgerPoster : DomainService
     }
 
     /// <summary>
-    /// 充值入账净额（归集确认路径调用，与 ColBalance CreditAsync 同事务）。
+    /// 充值入账净额（归集确认路径调用，与 CollectionBalanceManager.CreditAsync 同事务）。
     /// 有手续费时另过 <see cref="PostDepositFeeAsync"/>（借 2201 用户可用 / 贷 6003 手续费收入）。
     /// </summary>
     public virtual Task<Guid> PostDepositCreditAsync(Guid depositOrderId, Guid userId, Contracts.CollectionCurrency currency, decimal amount)

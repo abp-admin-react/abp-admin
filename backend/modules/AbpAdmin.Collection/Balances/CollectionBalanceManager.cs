@@ -49,7 +49,7 @@ public class CollectionBalanceManager : DomainService
         _unitOfWorkManager = unitOfWorkManager;
     }
 
-    // ── 扣款（计划第 3.1 节 DebitBalanceAsync / 第 5.5 节扣款 SQL）────────────────────────
+    // ── 扣款（计划第 3.1 节的 DebitBalance 设计 / 第 5.5 节扣款 SQL，本地实现为 DebitAsync）────
 
     /// <summary>
     /// 扣 USDT / USDC。余额足够才减（行锁留到外层事务提交，命令超时读配置）；
@@ -267,7 +267,7 @@ public class CollectionBalanceManager : DomainService
                 Amount = CollectionAmounts.Format(t.Amount),
                 CreditedAt = t.CreationTime,
             }).ToList(),
-            // 单调：重扫-only 批的最大序号可能小于传入游标，不得回退（stub 与契约对齐）
+            // 单调：重扫-only 批的最大序号可能小于传入游标，不得回退（与契约对齐）
             Cursor = merged.Count > 0 ? Math.Max(afterSeq, merged.Max(t => t.Seq)) : afterSeq,
         };
         });
@@ -621,7 +621,7 @@ public class CollectionBalanceManager : DomainService
     // ── 内部 ─────────────────────────────────────────────────────────────────────────────
 
 
-    /// <summary>余额行加钱（回冲/充值共用同一 upsert；带符号语义由调用方保证为正数）。</summary>
+    /// <summary>余额行加钱（回冲/充值/提现退款共用同一 upsert；带符号语义由调用方保证为正数）。</summary>
     private async Task<decimal> AddToBalanceAsync(
         Microsoft.EntityFrameworkCore.DbContext dbContext, Guid userId, CollectionCurrency currency, decimal amount, DateTime now)
     {
@@ -637,7 +637,7 @@ public class CollectionBalanceManager : DomainService
         return balances.Count > 0 ? balances[0] : amount;
     }
 
-    /// <summary>流水行的 BalanceAfter 回填（扣/回冲/充值三处共用的第三条语句）。</summary>
+    /// <summary>流水行的 BalanceAfter 回填（扣/回冲/充值/提现各状态流转共用的第三条语句，7 个调用点）。</summary>
     private static Task<int> SetBalanceAfterAsync(
         Microsoft.EntityFrameworkCore.DbContext dbContext, Guid txnId, decimal balanceAfter)
     {
@@ -656,7 +656,7 @@ public class CollectionBalanceManager : DomainService
         if (current != null && !current.Options.IsTransactional)
         {
             throw new InvalidOperationException(
-                "DebitBalance/Credit must run inside a transactional unit of work (or none, so one can be self-opened). " +
+                "DebitAsync/CreditAsync must run inside a transactional unit of work (or none, so one can be self-opened). " +
                 "A non-transactional ambient unit of work would autocommit each statement separately and orphan the ledger row on failure.");
         }
     }

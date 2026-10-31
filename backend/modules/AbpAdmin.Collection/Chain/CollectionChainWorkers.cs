@@ -97,7 +97,8 @@ public class DepositScanWorker : CollectionChainWorkerBase
             }
         }
 
-        // 轮末推 SignalR 进度（全部代币通道的最新状态）
+        // 轮末推 SignalR 进度（全部代币通道；tokens 是本轮开始时快照，当轮扫描在自己的
+        // 工作单元重读更新的是另一实例，本推送不含当轮增量）
         if (pusher != null)
         {
             try

@@ -15,7 +15,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Jobs;
 
 /// <summary>
-/// 金库核对定时作业（计划第 57、291 行）：每日按币 balanceOf(金库) vs 用户余额合计，
+/// 金库核对定时作业（计划第 57、291 节）：每日按币 balanceOf(金库) vs 用户余额合计，
 /// 追加 ColVaultChecks；负差额告警（固定前缀之外的普通告警）。Host 专用、种子默认停用。
 /// </summary>
 [ExposeServices(typeof(IScheduledJobHandler))]

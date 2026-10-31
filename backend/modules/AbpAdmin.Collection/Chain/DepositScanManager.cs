@@ -368,7 +368,7 @@ public class DepositScanManager : DomainService
         }
     }
 
-private async Task CheckSkipRatioAsync(
+    private async Task CheckSkipRatioAsync(
         ColToken token, CollectionDbContext dbContext, DateTime now,
         TimeSpan window, decimal threshold, CancellationToken ct)
     {

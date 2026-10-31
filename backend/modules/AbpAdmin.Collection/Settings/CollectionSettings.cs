@@ -149,7 +149,7 @@ public static class CollectionSettings
         /// <summary>广播超时（分钟）：Broadcasting 超时进卡单恢复。默认 30。</summary>
         public const string BroadcastTimeoutMinutes = Prefix + ".Withdraw.BroadcastTimeoutMinutes";
 
-        /// <summary>广播重试上限（RetryCount 超过即 BroadcastFailed 终态等人工）。默认 3。</summary>
+        /// <summary>广播重试上限（重试耗尽且可证未出款走自动退款 Rejected 终态；仅不可证未出款的形态才 BroadcastFailed 等人工）。默认 3。</summary>
         public const string MaxRetries = Prefix + ".Withdraw.MaxRetries";
 
         /// <summary>热钱包 USDT 熔断地板：链上余额低于它则阻断所有审批并告警。默认 1000。</summary>

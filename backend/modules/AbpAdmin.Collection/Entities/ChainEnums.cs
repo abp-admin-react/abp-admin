@@ -40,12 +40,14 @@ public enum SweepTaskStatus
 
 /// <summary>
 /// 提现单状态（提现 M2，对齐 exchange 的状态机、去掉其废弃的 Approved）：
-/// Pending → Processing → Broadcasting → Completed（打款成功终态）
+/// Pending → Processing → Broadcasting → Completed（回执成功终态）
 /// Pending → Cancelled（用户撤单，解冻）
 /// Pending → Rejected（审核拒绝，解冻）
-/// Broadcasting → BroadcastFailed（广播/回执失败）
-/// BroadcastFailed → Processing（管理端重试，回执验证通过或双花门通过）
-/// BroadcastFailed → Rejected（退款终态：净额+手续费退回可用）
+/// Broadcasting → Processing（自动重播：回执失败重试，或无哈希经 nonce 仲裁 + 双花门放行）
+/// Broadcasting → Rejected（自动退款终态：重试耗尽且可证未出款，净额+手续费退回可用）
+/// Broadcasting → BroadcastFailed（不可自动裁决：如 nonce 已被后继交易占用且无法证实本单未出款）
+/// BroadcastFailed → Processing（管理端重试：有哈希先验回执，成功直接 Completed）
+/// BroadcastFailed → Rejected（退款终态：自动退款或人工处置）
 /// 所有迁移都是 CAS 条件 UPDATE（WHERE Status = 期望值），0 行 = InvalidStatus。
 /// </summary>
 public enum WithdrawStatus

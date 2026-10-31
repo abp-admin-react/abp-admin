@@ -22,17 +22,13 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 归集一轮（计划第 5.6 节）。写入纪律：列表全部 AsNoTracking，全部写入走带状态守卫的
-/// ExecuteUpdate——跟踪实体与原子更新混用会让轮末 SaveChanges 用陈旧值覆盖回列
-/// （冷却拉回的任务停在 Queued、TxHash 丢失）。跨 worker 的互斥由部分唯一索引兜底。
-/// 同址同币合并、每轮取出上限、同址两币不同时广播；冷却看 StatusChangedAt。
-/// 金库地址取自 ColToken；金库私钥系统不保存；用户地址私钥按助记词现推、不落日志。
-/// </summary>
-/// <summary>
 /// 归集一轮（计划第 5.6 节）：可再试失败冷却拉回 → Queued 激活（同址同币合并、每轮取出上限、
 /// 地址级抢占——同址已有 Fueling/Sweeping 时另一币不能再占，部分唯一索引兜底）→ 打油/广播 →
 /// 确认数达标同事务标 Swept + 按进款单逐笔入账（IdempotencyKey = 进款单 id）+ 提交后发
 /// BalanceCreditedEto。确认数不够保持 Sweeping 和原哈希不重签；宽限后无回执才重签（同 nonce 替换）。
+/// 写入纪律：列表全部 AsNoTracking，状态写入走带状态守卫的 ExecuteUpdate——跟踪实体与原子更新
+/// 混用会让轮末 SaveChanges 用陈旧值覆盖回列（冷却拉回的任务停在 Queued、TxHash 丢失）；
+/// 唯一例外是确认入账块（跟踪实体直改单据状态 + SaveChanges，在同一工作单元内收口）。
 /// 金库地址取自 ColToken；金库私钥系统不保存；用户地址私钥按助记词现推、不落日志。
 /// </summary>
 public class SweepManager : DomainService
@@ -226,8 +222,8 @@ public class SweepManager : DomainService
         }
         catch (Npgsql.PostgresException ex) when (ex.SqlState == "23505")
         {
-            // ExecuteUpdateAsync 把约束冲突的 PostgresException 直接抛出（不包 DbUpdateException——
-            // 不包 DbUpdateException）；内层事务随 dispose 回滚
+            // ExecuteUpdateAsync 把约束冲突的 PostgresException 直接抛出（不包 DbUpdateException）；
+            // 内层事务随 dispose 回滚
             Logger.LogWarning(
                 "任务 {TaskId} 激活被地址互斥拦下（同地址存在 Fueling/Sweeping 任务），本轮跳过；僵尸由卡死告警段处置",
                 task.Id);
@@ -343,8 +339,9 @@ public class SweepManager : DomainService
         var now = _clock.Now;
         var head = await gateway.GetLatestBlockNumberAsync(ct);
 
-        // 未广播：先自愈（激活的 claim 与选中单翻状态是两条自动提交语句，崩溃窗口会留下
-        // 已选中但仍是 Confirmed 的链接单），再签名广播（用户地址私钥现推）。
+        // 未广播：先自愈再签名广播（用户地址私钥现推）。激活已把 claim/翻状态/解链合并进
+        // 内层事务，新数据不会再留下「已选中但仍是 Confirmed」的中间态——这里的自愈升级
+        // 只防御存量库的历史部分激活行与人工补链。
         // 超上限尾巴单已在激活时解链，不会被这里误升级
         if (task.TxHash == null)
         {
@@ -421,7 +418,7 @@ public class SweepManager : DomainService
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(t => t.TxHash, txHash)
                     .SetProperty(t => t.BroadcastAt, now)
-                    .SetProperty(t => t.NonceUsed, nonce), ct); // StatusChangedAt 不动：宽限/卡住以 BroadcastAt 计
+                    .SetProperty(t => t.NonceUsed, nonce), ct); // StatusChangedAt 不动：重签宽限以 BroadcastAt 起算（见下行查回执），卡住告警仍按 StatusChangedAt（自激活起算）
             Logger.LogInformation("任务 {TaskId} 归集已广播 {Amount} {Symbol}（{Hash}）",
                 task.Id, task.Amount, token.Symbol, txHash);
             return;

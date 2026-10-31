@@ -10,7 +10,8 @@ namespace AbpAdmin.Collection.Chain;
 /// 链上告警出口（计划第 5.6 节）：三类固定前缀（Gas 过低/归集卡住/代币暂停）供日志采集按前缀告警；
 /// 同时发站内信给配置的 Host 用户名单（Collection:Chain:AlertRecipientUserIds，逗号分隔）。
 /// 名单为空 → LogError 且不发（不把通知标成已送达）；站内信用户离线时推送为空操作、记录留收件箱。
-/// 同类告警对同一主体的冷却由调用方持 ColNetworks 上的 AlertedAt 列控制。
+/// 同类告警对同一主体的冷却：网络级（Gas 过低/代币暂停）由调用方持 ColNetworks.AlertedAt 列控制，
+/// 币级（跳过比例/按地址兜底）由 DepositScanManager 的进程内静态字典冷却（多实例各有一份，有限重复可接受）。
 /// 收件人由模块装配注入（配置解析一次；构造注入保证可测，不在每轮读配置）。
 /// </summary>
 public class ChainAlertService
