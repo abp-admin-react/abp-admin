@@ -21,7 +21,7 @@ internal static class RateLimitingConfigurator
         services.Configure<AbpAdminOperationRateLimitingOptions>(options =>
         {
             // 全局开关改由 "OperationRateLimiting:IsEnabled" 配置节绑定（默认 true）——
-                        // 开发环境想关掉时在 appsettings.Development.json 里置 "OperationRateLimiting": { "IsEnabled": false }。
+            // 开发环境想关掉时在 appsettings.Development.json 里置 "OperationRateLimiting": { "IsEnabled": false }。
             options.IsEnabled = settings.IsEnabled;
 
             // 登录策略：按 IP 15 分钟 20 次 + 按邮箱 15 分钟 5 次。
