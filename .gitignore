@@ -309,8 +309,15 @@ AbpAdmin.db.backup*
 .mimosa/
 .playwright-mcp/
 .zcode/
-# FileEmlEmailSender 开发环境落盘的邮件产物（运行时输出，勿入库）
-backend/src/AbpAdmin.HttpApi.Host/App_Data/
+# 运行时输出目录（勿入库）：FileEmlEmailSender 开发邮件（密码重置链接/验证码 .eml）、
+# FileSystem blob 上传落盘。路径无关写法——宿主从 backend/src 迁到 backend/framework 后
+# 旧的字面量规则失效过一次（与 secrets 规则同类事故，run-2 C-6 修复）。
+**/App_Data/
+# web-UI 巡检工具的运行态产物（逐路由扫描结果与断点状态），重跑即重建
+/patrol-*.json
+# sectest 黑盒测试栈的本地产物：ROPC 令牌缓存（含真实会话令牌，勿入库）与 Python 字节码
+sectest/.tokens.json
+sectest/__pycache__/
 
 # 模板通用补充（公开主仓库对外适用）：跨平台杂项 / 前端本地产物 / 环境变量
 .DS_Store
