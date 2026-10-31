@@ -1,0 +1,34 @@
+# sectest 加压轮：变体攻击面探测报告
+
+- ✅ **p01_withbytes_json_mz** — 三种 JSON 形态全部非 2xx（with-bytes JSON 通道未成缺口）
+- ✅ **p03_many_withstream** — 400/AbpAdmin:Files:ContentMismatch
+- ✅ **p04_many_form** — 400/AbpAdmin:Files:ContentMismatch
+- ✅ **p05_case_path** — 大写路径 → 400 AbpAdmin:Files:ContentMismatch（须非 2xx）
+- ✅ **p06_percent_path** — %66ile 编码 → 400 AbpAdmin:Files:ContentMismatch（须非 2xx）
+- ✅ **p07_double_slash** — 双斜杠 → 302（须非 2xx）
+- ✅ **p08_trailing_slash** — 尾斜杠 → 400 AbpAdmin:Files:ContentMismatch（须非 2xx）
+- ✅ **p09_impersonate_deactivated** — 停用账户 impersonation → 400（须非 200），已还原激活
+- ✅ **p10_impersonate_locked_host_direct** — HOST 直连锁定账户 → 400（须非 200），已解锁
+- ✅ **p11_impersonate_restored_ok** — 还原后 impersonation → 200（须 200：未过度封锁）
+- ✅ **p12_cross_no_tenant_header** — tenantA→B 用户无租户头 → 400（须非 200）
+- ✅ **p13_tenant_admin_to_host_user** — tenantA→宿主用户 → 400（须非 200）
+- ✅ **p14_cross_cookie_tenant_host** — HOST+Cookie __tenant=sectestb → 400（须非 200）
+- ✅ **p15_cross_cookie_tenant_web** — WEB+Cookie __tenant=sectestb → 400（须非 200）
+- ✅ **p16_host_to_tenant_still_works** — 宿主admin→B 用户（宿主运维语义） → 200（须 200）
+- ✅ **p17_22_prepayment_all** — 租户B admin 全金面路由×双边界: host:26deda33-8d31-46da-bcde-50c94c4af0ec=302, web:26deda33-8d31-46da-bcde-50c94c4af0ec=302, host:26deda33-8d31-46da-bcde-50c94c4af0ec=302, web:26deda33-8d31-46da-bcde-50c94c4af0ec=302, host:26deda33-8d31-46da-bcde-50c94c4af0ec=302, web:26deda33-8d31-46da-bcde-50c94c4af0ec=302, host:26deda33-8d31-46da-bcde-50c94c4af0ec=302, web:26deda33-8d31-46da-bcde-50c94c4af0ec=302（须全 403/302）
+- ✅ **p23_prepayment_host_admin_control** — 宿主admin 对照组（须过授权门）: balance=404, locked-balance=404
+- ❌ **p24_prepayment_tx_read[host]** — 租户B admin 读交易列表 → 404（须 403/302：Transaction.Manage 钉 Host）
+- ❌ **p24_prepayment_tx_read[web]** — 租户B admin 读交易列表 → 404（须 403/302：Transaction.Manage 钉 Host）
+- ❌ **p25_prepayment_wr_read[host]** — 租户B admin 读提现申请列表 → 200（须 403/302）
+- ❌ **p25_prepayment_wr_read[web]** — 租户B admin 读提现申请列表 → 200（须 403/302）
+- ✅ **p26_agent_reconcile_host** — agent HOST 直连 GET → 302（须 403/302）
+- ✅ **p27_agent_reconcile_run_granted** — agent+Run POST run → 302（Run 未泄露或 fail-closed）
+- ✅ **p29_admin_reconcile_ok** — admin GET fin-reconcile → 200（须 200：未过度封锁）
+- ✅ **p30_findemo_host_direct** — finop HOST 直连 POST → 400（须非 2xx）
+- ✅ **p31_findemo_host_admin** — 宿主admin（全权限）POST → 400（须非 2xx：环境门不分权限）
+- ✅ **p32_email_cross** — tenantA→B 用户 Email 通道 → 403（须非 2xx：EmptyUserIds）
+- ✅ **p33_sms_cross** — tenantA→B 用户 Sms 通道 → 403（须非 2xx）
+- ✅ **p34_mixed_delivery** — 混合发送 → A 侧新行=1（须≥1）B 侧新行=0（须 0）——幽灵行消除落库证据
+- ℹ️ **p35_host_to_tenant_observe** — 宿主admin→B 用户（宿主跨租户语义，仅记录） → 403
+- ✅ **p36_withbytes_json_mz_guarded** — MZ-jpg=400/AbpAdmin:Files:ContentMismatch 落库=False 合法PNG=200（须 400/无落库/200）
+- ✅ **p37_agent_run_failclosed** — agent+Run POST run → 302（须 403/302：Run 面切片 fail-closed），已撤销授权

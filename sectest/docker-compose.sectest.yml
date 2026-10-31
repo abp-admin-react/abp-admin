@@ -1,0 +1,18 @@
+# 专用安全测试栈覆盖（sectest）：独立项目 abpadmin-sectest，与维护栈 abp-admin-* 完全隔离
+# （独立容器/网络/卷；端口 127.0.0.1:18000 web 边缘、127.0.0.1:18081 直连 host）。
+# 用法：
+#   WEB_BIND=127.0.0.1 WEB_HOST_PORT=18000 docker compose -p abpadmin-sectest \
+#     -f docker-compose.yml -f sectest/docker-compose.sectest.yml up -d --build
+# 清理：docker compose -p abpadmin-sectest -f docker-compose.yml -f sectest/docker-compose.sectest.yml down -v
+services:
+  migrator:
+    # 攻击测试栈显式选开发姿态种子（b08 修复后 compose 默认已是 Production）：
+    # 需要默认口令 admin/1q2w3E* + AbpAdmin_TestCli ROPC 客户端作为测试夹具凭据。
+    # b08 的验证断言改为检查 compose 渲染默认值=Production（见 sectest.py b08）。
+    environment:
+      DOTNET_ENVIRONMENT: Development
+      MIGRATOR_DOTNET_ENVIRONMENT: Development
+  host:
+    # 直连 host（绕过 nginx）：匿名面清点、健康端点、部分限流路径需要
+    ports:
+      - "127.0.0.1:18081:8080"
