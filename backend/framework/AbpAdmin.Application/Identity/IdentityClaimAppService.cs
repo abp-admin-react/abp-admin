@@ -4,9 +4,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
-using Volo.Abp;
 using Volo.Abp.Identity;
-using Volo.Abp.Security.Claims;
 
 namespace AbpAdmin.Identity;
 
@@ -37,19 +35,13 @@ public class IdentityClaimAppService : AbpAdminAppService, IIdentityClaimAppServ
     [Authorize(IdentityPermissions.Users.Update)]
     public virtual async Task UpdateUserClaimsAsync(Guid userId, List<ClaimValueDto> claims)
     {
-        // 声明写入不得携带权威类型。ABP 动态声明默认清单含 role，
-        // 写入 {role:'admin'} 会让 CurrentUser.Roles 命中数据范围的 admin 豁免（IsAll 行可见 +
-        // RoleDataScope 反提权守卫豁免）——等价于绕开角色管理权限的自我提权。Users.Update 授的
-        // 是「维护用户资料」，不该包含「铸造角色身份」；角色归属只能走 AbpIdentity.Users.Update.
-        // ManageRoles 门后的 SetRolesAsync（那里还限非 admin 只能授自己已有的角色）。
-        var forbidden = claims
-            .Where(x => !string.IsNullOrWhiteSpace(x.ClaimType))
-            .Where(x => x.ClaimType.Equals(AbpClaimTypes.Role, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (forbidden.Count > 0)
-        {
-            throw new BusinessException(AbpAdminIdentityClaimsErrorCodes.CannotCarryRole);
-        }
+        // 声明写入不得携带权威类型（用户面与角色面同口径，见 IdentityClaimAuthorityGuard）：
+        // ABP 动态声明默认清单含 role，写入 {role:'admin'} 会让 CurrentUser.Roles 命中数据
+        // 范围的 admin 豁免——等价于绕开角色管理权限的自我提权。角色归属只能走
+        // AbpIdentity.Users.Update.ManageRoles 门后的 SetRolesAsync（那里还限非 admin
+        // 只能授自己已有的角色）。
+        IdentityClaimAuthorityGuard.EnsureNoAuthoritativeClaimTypes(
+            claims.Select(x => (ClaimType: (string?)x.ClaimType, ClaimValue: (string?)x.ClaimValue)));
 
         var user = await _userManager.GetByIdAsync(userId);
         var current = await _userManager.GetClaimsAsync(user);
@@ -71,6 +63,13 @@ public class IdentityClaimAppService : AbpAdminAppService, IIdentityClaimAppServ
     [Authorize(IdentityPermissions.Roles.Update)]
     public virtual async Task UpdateRoleClaimsAsync(Guid roleId, List<ClaimValueDto> claims)
     {
+        // 角色声明写面与用户面同口径拒收权威类型：角色记录声明经 UserClaimsPrincipalFactory
+        // 进入全体成员 principal 的 role claims（宿主已启用动态声明重建），在角色上写
+        // {role:'admin'} 等于给全体成员铸造 admin 身份——Roles.Update 授的是「维护角色记录」，
+        // 不该包含「铸造角色身份」（安全审计 run-2 C-1：本面曾缺失用户面已有的拒收）。
+        IdentityClaimAuthorityGuard.EnsureNoAuthoritativeClaimTypes(
+            claims.Select(x => (ClaimType: (string?)x.ClaimType, ClaimValue: (string?)x.ClaimValue)));
+
         var role = await _roleManager.GetByIdAsync(roleId);
         var current = await _roleManager.GetClaimsAsync(role);
 

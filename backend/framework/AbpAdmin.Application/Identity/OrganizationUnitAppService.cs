@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.DataScopes;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
@@ -19,19 +20,22 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
     private readonly IRepository<IdentityUser, Guid> _userQueryRepository;
     private readonly IdentityUserManager _userManager;
     private readonly IIdentityRoleRepository _roleRepository;
+    private readonly ICurrentDataScopeProvider _currentDataScopeProvider;
 
     public OrganizationUnitAppService(
         OrganizationUnitManager organizationUnitManager,
         IOrganizationUnitRepository organizationUnitRepository,
         IRepository<IdentityUser, Guid> userQueryRepository,
         IdentityUserManager userManager,
-        IIdentityRoleRepository roleRepository)
+        IIdentityRoleRepository roleRepository,
+        ICurrentDataScopeProvider currentDataScopeProvider)
     {
         _organizationUnitManager = organizationUnitManager;
         _organizationUnitRepository = organizationUnitRepository;
         _userQueryRepository = userQueryRepository;
         _userManager = userManager;
         _roleRepository = roleRepository;
+        _currentDataScopeProvider = currentDataScopeProvider;
     }
 
     public virtual async Task<System.Collections.Generic.List<OrganizationUnitDto>> GetListAsync()
@@ -122,6 +126,19 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
     {
         var ou = await _organizationUnitRepository.GetAsync(id);
 
+        // 反提权守卫（run-2 C-2，与 OrganizationUnitRoleConferralGuard 同口径）：OU 派生角色
+        // 即完整角色成员资格——把成员加进一个挂着超越操作者自身权限角色的 OU，等价于
+        // 向该成员授予那个角色。OU 现挂角色必须落在操作者权限等价范围内（admin/IsAll/己有）。
+        // 未认证上下文跳过（后台作业/种子/单测直连，与 RoleDataScope 守卫的豁免口径一致）。
+        if (CurrentUser.IsAuthenticated)
+        {
+            var snapshot = await _currentDataScopeProvider.GetAsync();
+            foreach (var role in await _organizationUnitRepository.GetRolesAsync(ou))
+            {
+                OrganizationUnitRoleConferralGuard.EnsureRoleAttachable(role.Name, CurrentUser.Roles, snapshot.IsAll);
+            }
+        }
+
         // 先批量取回用户（一次查询），再逐个加入（Manager 内含查重），替代逐用户 GetByIdAsync 的 N+1
         var distinctUserIds = userIds.Distinct().ToList();
         var users = await _userQueryRepository.GetListAsync(u => distinctUserIds.Contains(u.Id));
@@ -162,6 +179,21 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
     [Authorize(AbpAdminPermissions.OrganizationUnits.ManageRoles)]
     public virtual async Task AddRolesAsync(Guid id, Guid[] roleIds)
     {
+        // 反提权守卫（run-2 C-2）：OU 挂角色 = 给全体成员授该角色（权限 + 数据范围一并生效，
+        // IdentityUserStore.GetRolesAsync 并集 OU 派生角色），与 RoleDataScope 写面
+        // EnsureOperatorCanGrantAsync 同一威胁模型。非 admin/非 IsAll 操作者只能挂自己
+        // 已持有的角色（与 SetRolesAsync 的「非 admin 只能授己有角色」等价口径）。
+        // 未认证上下文跳过（后台作业/种子/单测直连）。
+        if (CurrentUser.IsAuthenticated)
+        {
+            var snapshot = await _currentDataScopeProvider.GetAsync();
+            foreach (var roleId in roleIds.Distinct())
+            {
+                var role = await _roleRepository.GetAsync(roleId);
+                OrganizationUnitRoleConferralGuard.EnsureRoleAttachable(role.Name, CurrentUser.Roles, snapshot.IsAll);
+            }
+        }
+
         foreach (var roleId in roleIds.Distinct())
         {
             await _organizationUnitManager.AddRoleToOrganizationUnitAsync(roleId, id);
