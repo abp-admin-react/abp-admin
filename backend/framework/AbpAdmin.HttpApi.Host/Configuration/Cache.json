@@ -31,9 +31,8 @@
     //                    多项目共用同一 Redis 时靠 KeyPrefix 隔离；若要换库须所有实例一起改，
     //                    改错 → 各实例读不同库，缓存/DataProtection 密钥对不上，登录态失效。
     //   abortConnect     锁/DataProtection 共用的 SharedRedisConnection 无条件强制
-    //                    AbortOnConnectFail=true（防「带病运行」：Redis 不可达时连接直接失败，
-    //                    启动探针早于接客，启动即失败而非静默降级），串内写 false 对该连接无效；
-    //                    缓存模块自建连接按串内值生效（false 时首用报错、SE.Redis 自动重连自愈）。
+    //                    AbortOnConnectFail=true（防「带病运行」），串内写 false 对该连接无效；
+    //                    缓存模块自建连接按串内值生效（false 时首用报错、自动重连自愈）。
     //                    运行期断线自愈两条路径都由 SE.Redis 的自动重连承担，不依赖该开关。
     // 覆盖：Redis__Configuration（整串）。
     "Configuration": "127.0.0.1:6379,defaultDatabase=0,abortConnect=false"

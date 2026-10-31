@@ -24,11 +24,10 @@ namespace AbpAdmin.Collection.Withdrawals;
 /// 提现广播轮次逻辑（M3）：卡单恢复 → 小额自动审 → 广播队列。
 /// 与 SweepManager 同款纪律：AsNoTracking 读 + 守卫式 ExecuteUpdate 写、一动作一事务。
 /// 广播失败语义（全自动 nonce 仲裁，无人工）：
-///  · Broadcasting 超时且有哈希 → 查回执：成功完结 / 失败重试（超限自动退款 Rejected）
-///  · Broadcasting 超时且无哈希 → nonce 仲裁（202 行）：pending nonce ≤ NonceUsed =
-///    可证未出款 → 自动重播 / 超限自动退款；pending nonce 已越过 NonceUsed =
-///    可能已上链 → BroadcastFailed 等人工核查——绝不盲目重播（双花防线）
-///  · 签名/发送抛异常 → 保持 Broadcasting（无哈希），交由下一轮 nonce 仲裁自动处置
+///  · 超时且有哈希 → 查回执：成功完结 / 失败重试（超限自动退款 Rejected）
+///  · 超时且无哈希 → nonce 仲裁：pending nonce ≤ NonceUsed = 可证未出款 → 自动重播 /
+///    超限自动退款；已越过 NonceUsed = 可能已上链 → BroadcastFailed 等人工核查
+///  · 签名/发送抛异常 → 保持 Broadcasting（无哈希），下一轮仲裁自动处置
 /// nonce 每次广播取热钱包 pending nonce（不缓存复用），杜绝替换重签双花。
 /// </summary>
 public class WithdrawBroadcastManager : DomainService

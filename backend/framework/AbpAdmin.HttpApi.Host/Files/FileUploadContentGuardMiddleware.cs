@@ -24,15 +24,12 @@ namespace AbpAdmin.Files;
 /// EnableBuffering 回卷请求体，后续管道照常解析。扩展名不在清单内的文件
 /// （txt/pdf 等普通文档）放行，交由下载侧 Content-Disposition: attachment 兜底。
 ///
-/// 受理面两条通道都要扫（EasyAbp 5.12.0 FileController 基路由 /api/file-management/file）：
-/// ① multipart 文件段（''、many、with-stream、many/with-stream 4 条路由）；
-/// ② JSON 字节通道（with-bytes/many/with-bytes：content/fileContents 以 base64 进 JSON，
-///    fileName 可控——sectest 加压轮实证该通道可把 MZ 改名文件直送 blob 存储绕过
-///    multipart-only 门）。两条通道都只对「基路由自身或其子路径」前缀收口：
-///    POST /api/file-management/file[/{anything}] 一律进扫描，包升级新增路由自动覆盖。
-///    下载路由（{id}/download/...）是 GET，不受 POST 门影响。
-/// multipart 解析失败仅当请求未中止时才放行给后续模型绑定；客户端断开导致的
-/// 取消异常原样上抛，交由服务器按「连接已中止」正常收尾。
+/// 受理面两条通道都要扫，按「基路由自身或其子路径」前缀收口（EasyAbp 5.12.0 FileController
+/// 基路由 /api/file-management/file，包升级新增路由自动覆盖；下载路由是 GET 不受影响）：
+/// ① multipart 文件段（''、many、with-stream、many/with-stream）；
+/// ② JSON 字节通道（with-bytes/many/with-bytes：content/fileContents 以 base64 进 JSON、
+///    fileName 可控——加压轮实证可绕过 multipart-only 门直送 blob 存储）。
+/// 解析失败仅当请求未中止时放行给后续模型绑定；客户端断开导致的取消异常原样上抛。
 /// </summary>
 public class FileUploadContentGuardMiddleware
 {
@@ -66,10 +63,8 @@ public class FileUploadContentGuardMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // 受理端是 MVC 路由（默认容忍尾斜杠）——门限须与受理同口径。门限按
-        // 「基路由自身或其子路径」前缀收口：POST /api/file-management/file[/{anything}]
-        // 一律进扫描（逐条枚举会被包升级新增路由绕过，sectest b02 / 审计 NV-08 残余）。
-        // 大小写不敏感 + 尾斜杠归一，与 MVC 路由同口径。
+        // 门限与受理同口径：基路由自身或其子路径前缀收口（逐条枚举会被包升级新增路由绕过），
+        // 大小写不敏感 + 尾斜杠归一。
         var path = (context.Request.Path.Value ?? string.Empty).TrimEnd('/');
         var isFileUpload = HttpMethods.IsPost(context.Request.Method) &&
                            path.StartsWith("/api/file-management/file", StringComparison.OrdinalIgnoreCase) &&

@@ -26,9 +26,10 @@ namespace AbpAdmin.Collection.Chain;
 /// 地址级抢占——同址已有 Fueling/Sweeping 时另一币不能再占，部分唯一索引兜底）→ 打油/广播 →
 /// 确认数达标同事务标 Swept + 按进款单逐笔入账（IdempotencyKey = 进款单 id）+ 提交后发
 /// BalanceCreditedEto。确认数不够保持 Sweeping 和原哈希不重签；宽限后无回执才重签（同 nonce 替换）。
-/// 写入纪律：列表全部 AsNoTracking，状态写入走带状态守卫的 ExecuteUpdate——跟踪实体与原子更新
-/// 混用会让轮末 SaveChanges 用陈旧值覆盖回列（冷却拉回的任务停在 Queued、TxHash 丢失）；
-/// 唯一例外是确认入账块（跟踪实体直改单据状态 + SaveChanges，在同一工作单元内收口）。
+/// 写入纪律：列表全部 AsNoTracking，状态写入走带状态守卫的 ExecuteUpdate——跟踪实体与
+/// 原子更新混用会让轮末 SaveChanges 用陈旧值覆盖回列（冷却拉回的任务停在 Queued、TxHash
+/// 丢失）。例外两处：确认入账块（独立事务 UoW 内跟踪实体直改，CompleteAsync 收口隐式保存）
+/// 与轮末的 network 告警冷却戳（本工作单元 SaveChanges）。
 /// 金库地址取自 ColToken；金库私钥系统不保存；用户地址私钥按助记词现推、不落日志。
 /// </summary>
 public class SweepManager : DomainService
