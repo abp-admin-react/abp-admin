@@ -87,6 +87,24 @@ public class FileUploadContentGuardTests
         reached.ShouldBeFalse();
     }
 
+    [Theory]
+    [InlineData("/api/file-management/file/many")]
+    [InlineData("/api/file-management/file/with-stream")]
+    [InlineData("/api/file-management/file/many/with-stream")]
+    [InlineData("/api/file-management/file/with-bytes")]
+    [InlineData("/api/file-management/file/many/with-bytes")]
+    [InlineData("/api/file-management/file/some-future-route")]
+    public async Task Sibling_upload_routes_are_also_guarded(string path)
+    {
+        // sectest b02 / 审计 NV-08 残余：EasyAbp 5.12.0 FileController 有 5 条内容接收路由，
+        // 逐条枚举会被包升级新增路由绕过——门限按「基路由 + 子路径」前缀收口后，
+        // 任何 POST 子路径（含未来新增）一律进内容扫描。
+        var body = MultipartBody("shell.jpg", "MZ"u8.ToArray());
+        var (status, reached) = await InvokeAsync(path, body.Length, body);
+        status.ShouldBe(400, $"{path} 必须进内容防线（前缀收口，包升级新增路由不再成为绕过面）");
+        reached.ShouldBeFalse();
+    }
+
     [Fact]
     public async Task Non_upload_paths_are_not_scanned()
     {
@@ -94,6 +112,113 @@ public class FileUploadContentGuardTests
         var (status, reached) = await InvokeAsync("/api/other/upload", body.Length, body);
         status.ShouldBe(200);
         reached.ShouldBeTrue("非守卫路径不拦截（400 语义归各端点）");
+    }
+
+    // ---- JSON 字节通道（with-bytes / many/with-bytes）：content/fileContents 以 base64 进 JSON，
+    // ---- sectest 加压轮实证可把 MZ 改名文件直送 blob 存储绕过 multipart-only 门——与 multipart 同扫。
+
+    private static async Task<(int Status, bool ReachedNext)> InvokeJsonAsync(
+        string path, byte[] body, string? contentType = "application/json")
+    {
+        var reachedNext = false;
+        var context = new DefaultHttpContext();
+        context.Request.Method = "POST";
+        context.Request.Path = path;
+        if (contentType != null)
+        {
+            context.Request.ContentType = contentType;
+        }
+        context.Request.Body = new MemoryStream(body);
+        context.Request.ContentLength = body.Length;
+
+        var mw = new FileUploadContentGuardMiddleware(_ =>
+        {
+            reachedNext = true;
+            return Task.CompletedTask;
+        }, new NullLogger());
+        await mw.InvokeAsync(context);
+        return (context.Response.StatusCode, reachedNext);
+    }
+
+    private static byte[] JsonBody(string json) => Encoding.UTF8.GetBytes(json);
+
+    private static string B64(string content) => Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+
+    [Fact]
+    public async Task With_bytes_json_mz_as_jpg_is_rejected()
+    {
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"fileName\":\"shell.jpg\",\"content\":\"{B64("MZ")}\"}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "JSON 字节通道的 MZ 改名文件必须与 multipart 同口径被拦");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Many_with_bytes_json_array_is_rejected()
+    {
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"generateUniqueFileName\":false," +
+            $"\"fileName\":[\"a.png\",\"shell.jpg\"],\"fileContents\":[\"{B64("MZ")}\"]}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/many/with-bytes", body);
+        status.ShouldBe(400, "数组形态的 fileContents 同样进内容扫描");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task With_bytes_json_legit_png_passes()
+    {
+        var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"fileName\":\"pic.png\",\"content\":\"{png}\"}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(200);
+        reached.ShouldBeTrue("合法 PNG 走 JSON 通道放行（后续模型绑定照常）");
+    }
+
+    [Fact]
+    public async Task With_bytes_json_scriptable_svg_is_rejected()
+    {
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"fileName\":\"x.svg\",\"content\":\"{B64("<script>alert(1)</script>")}\"}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "JSON 通道的含脚本 SVG 与 multipart 同口径被拦");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Json_invalid_body_falls_through()
+    {
+        var body = JsonBody("this is not json");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(200);
+        reached.ShouldBeTrue("非法 JSON 交由后续模型绑定报错，守卫不拦截");
+    }
+
+    [Fact]
+    public async Task Json_non_upload_content_type_is_not_scanned()
+    {
+        // 守卫只覆盖「能承载文件内容」的两条通道（multipart 文件段 / JSON 字节），
+        // 其余 Content-Type 不进扫描——受理/415 语义归端点，与 multipart 门同口径。
+        var body = JsonBody("{\"fileName\":\"shell.jpg\",\"content\":\"" + B64("MZ") + "\"}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body,
+            contentType: "text/plain");
+        status.ShouldBe(200);
+        reached.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Json_zero_byte_content_with_extension_is_rejected()
+    {
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            "\"fileName\":\"empty.jpg\",\"content\":\"\"}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "零字节内容与 multipart 口径一致被拦");
+        reached.ShouldBeFalse();
     }
 
     private sealed class NullLogger : Microsoft.Extensions.Logging.ILogger<FileUploadContentGuardMiddleware>

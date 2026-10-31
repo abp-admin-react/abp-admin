@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -16,12 +17,20 @@ namespace AbpAdmin.Files;
 /// 「exe 改名 .png / SVG 含脚本改 .png / 0 字节文件」均可入库（magic-bytes 校验仅覆盖
 /// 头像 ProfileAvatarAppService）。
 ///
-/// 在 MVC 模型绑定之前用 FormFeature 解析 multipart，校验每个文件段：
+/// 在 MVC 模型绑定之前解析请求体，校验每个文件内容：
 /// 图片扩展名必须匹配文件签名（magic bytes），.svg/.html 文本段禁止内嵌脚本；
 /// 不匹配直接 400 短路（ABP 错误格式 JSON，错误码 AbpAdmin:Files:ContentMismatch），
 /// 请求不再进入端点，且每次拒绝打 Warning 日志（含文件名与拒绝原因，便于审计回溯）。
 /// EnableBuffering 回卷请求体，后续管道照常解析。扩展名不在清单内的文件
 /// （txt/pdf 等普通文档）放行，交由下载侧 Content-Disposition: attachment 兜底。
+///
+/// 受理面两条通道都要扫（EasyAbp 5.12.0 FileController 基路由 /api/file-management/file）：
+/// ① multipart 文件段（''、many、with-stream、many/with-stream 4 条路由）；
+/// ② JSON 字节通道（with-bytes/many/with-bytes：content/fileContents 以 base64 进 JSON，
+///    fileName 可控——sectest 加压轮实证该通道可把 MZ 改名文件直送 blob 存储绕过
+///    multipart-only 门）。两条通道都只对「基路由自身或其子路径」前缀收口：
+///    POST /api/file-management/file[/{anything}] 一律进扫描，包升级新增路由自动覆盖。
+///    下载路由（{id}/download/...）是 GET，不受 POST 门影响。
 /// multipart 解析失败仅当请求未中止时才放行给后续模型绑定；客户端断开导致的
 /// 取消异常原样上抛，交由服务器按「连接已中止」正常收尾。
 /// </summary>
@@ -57,20 +66,25 @@ public class FileUploadContentGuardMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // 受理端是 MVC 路由（默认容忍尾斜杠）——门限须与受理同口径，否则
-        // /api/file-management/file/ 绕过魔数/脚本扫描直达模型绑定。
+        // 受理端是 MVC 路由（默认容忍尾斜杠）——门限须与受理同口径。门限按
+        // 「基路由自身或其子路径」前缀收口：POST /api/file-management/file[/{anything}]
+        // 一律进扫描（逐条枚举会被包升级新增路由绕过，sectest b02 / 审计 NV-08 残余）。
+        // 大小写不敏感 + 尾斜杠归一，与 MVC 路由同口径。
         var path = (context.Request.Path.Value ?? string.Empty).TrimEnd('/');
         var isFileUpload = HttpMethods.IsPost(context.Request.Method) &&
-                           (path.Equals("/api/file-management/file", StringComparison.OrdinalIgnoreCase) ||
-                            path.Equals("/api/file-management/file/many", StringComparison.OrdinalIgnoreCase));
+                           path.StartsWith("/api/file-management/file", StringComparison.OrdinalIgnoreCase) &&
+                           (path.Length == "/api/file-management/file".Length ||
+                            path["/api/file-management/file".Length] == '/');
 
         // chunked（ContentLength=null）同样要扫，否则分块传输可把改名文件直送模型绑定
         // （无体请求 ContentLength==0 跳过；解析本身受 Kestrel/FormOptions 上限约束不变）。
         var hasBody = context.Request.ContentLength is null || context.Request.ContentLength.Value > 0;
-        if (isFileUpload &&
-            context.Request.ContentType != null &&
-            context.Request.ContentType.Contains("multipart/form-data", StringComparison.OrdinalIgnoreCase) &&
-            hasBody)
+        var contentType = context.Request.ContentType;
+        var isMultipart = contentType != null &&
+                          contentType.Contains("multipart/form-data", StringComparison.OrdinalIgnoreCase);
+        var isJson = contentType != null &&
+                     contentType.Contains("application/json", StringComparison.OrdinalIgnoreCase);
+        if (isFileUpload && hasBody && isMultipart)
         {
             context.Request.EnableBuffering();
             IFormCollection form;
@@ -93,24 +107,7 @@ public class FileUploadContentGuardMiddleware
                 var reason = await FindRejectionReasonAsync(file);
                 if (reason != null)
                 {
-                    // 拒绝必须留痕：文件名、扩展名、拒绝原因、来源路径，与 400 响应一一对应
-                    _logger.LogWarning(
-                        "上传被内容防线拒绝：{FileName}（扩展名 {Extension}，原因 {Reason}），路径 {Path}",
-                        file.FileName, Path.GetExtension(file.FileName), reason, path);
-
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    context.Response.ContentType = "application/json; charset=utf-8";
-                    await context.Response.WriteAsJsonAsync(new
-                    {
-                        error = new
-                        {
-                            code = "AbpAdmin:Files:ContentMismatch",
-                            message = "上传被拒绝：文件内容与其扩展名不匹配，或包含不允许的脚本内容。",
-                            details = (string?)null,
-                            data = new { fileName = file.FileName, reason },
-                            validationErrors = Array.Empty<object>(),
-                        },
-                    });
+                    await RejectAsync(context, file.FileName, reason, path);
                     return;
                 }
             }
@@ -118,8 +115,180 @@ public class FileUploadContentGuardMiddleware
             // 回卷请求体，让 MVC 端点重新解析
             context.Request.Body.Position = 0;
         }
+        else if (isFileUpload && hasBody && isJson)
+        {
+            if (await ScanJsonUploadAndRejectIfNeededAsync(context, path))
+            {
+                return;
+            }
+        }
 
         await _next(context);
+    }
+
+    /// <summary>
+    /// JSON 字节通道（with-bytes / many/with-bytes）的内容扫描。DTO 的 content/fileContents
+    /// 字段是 base64 字节（System.Text.Json 原生绑定 byte[]），fileName 是扩展名权威——
+    /// 与 multipart 走同一套签名/脚本判定。返回 true 表示请求已被拒绝（响应已写出）。
+    /// </summary>
+    private async Task<bool> ScanJsonUploadAndRejectIfNeededAsync(HttpContext context, string path)
+    {
+        context.Request.EnableBuffering();
+
+        // 有界读入：JSON DOM 对大体的内存放大显著（约 2-3 倍），且本守卫位于认证之前、
+        // 匿名并发放大；超上限直接拒绝（fail-closed），既防放大也不给超大 JSON 留绕过面。
+        // SPA 与管理端只用 multipart 通道，JSON 通道面向程序化小文件上传，64MiB 足够。
+        const int MaxJsonScanBytes = 64 * 1024 * 1024;
+        var buffered = new MemoryStream();
+        var buffer = new byte[81920];
+        try
+        {
+            while (true)
+            {
+                var read = await context.Request.Body.ReadAsync(buffer, context.RequestAborted);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                buffered.Write(buffer, 0, read);
+                if (buffered.Length > MaxJsonScanBytes)
+                {
+                    await RejectAsync(context, "(json body)", "JSON 上传通道超出大小上限", path);
+                    return true;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+
+        JsonDocument? doc;
+        try
+        {
+            doc = JsonDocument.Parse(buffered.ToArray());
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException &&
+                                   !context.RequestAborted.IsCancellationRequested)
+        {
+            // 非法 JSON 交由后续模型绑定报错
+            context.Request.Body.Position = 0;
+            await _next(context);
+            return true;
+        }
+
+        using (doc)
+        {
+            var contents = new List<byte[]>();
+            var names = new List<string>();
+            CollectByteArrays(doc.RootElement, "content", contents);
+            CollectByteArrays(doc.RootElement, "fileContents", contents);
+            CollectStrings(doc.RootElement, "fileName", names);
+            CollectStrings(doc.RootElement, "fileNames", names);
+
+            for (var i = 0; i < contents.Count; i++)
+            {
+                var fileName = names.Count > 0 ? names[Math.Min(i, names.Count - 1)] : string.Empty;
+                var reason = FindRejectionReason(Path.GetExtension(fileName), contents[i].LongLength, contents[i],
+                    contents[i].Length);
+                if (reason != null)
+                {
+                    await RejectAsync(context, fileName, reason, path);
+                    return true;
+                }
+            }
+        }
+
+        // 回卷请求体，让 MVC 端点重新解析
+        context.Request.Body.Position = 0;
+        return false;
+    }
+
+    private async Task RejectAsync(HttpContext context, string fileName, string reason, string path)
+    {
+        // 拒绝必须留痕：文件名、扩展名、拒绝原因、来源路径，与 400 响应一一对应
+        _logger.LogWarning(
+            "上传被内容防线拒绝：{FileName}（扩展名 {Extension}，原因 {Reason}），路径 {Path}",
+            fileName, Path.GetExtension(fileName), reason, path);
+
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        context.Response.ContentType = "application/json; charset=utf-8";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = new
+            {
+                code = "AbpAdmin:Files:ContentMismatch",
+                message = "上传被拒绝：文件内容与其扩展名不匹配，或包含不允许的脚本内容。",
+                details = (string?)null,
+                data = new { fileName, reason },
+                validationErrors = Array.Empty<object>(),
+            },
+        });
+    }
+
+    /// <summary>从 JSON 元素收集指定属性的字节数组值（byte[] 以 base64 字符串进 JSON，可单值或数组）。</summary>
+    private static void CollectByteArrays(JsonElement element, string propertyName, List<byte[]> into)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var prop))
+        {
+            return;
+        }
+
+        if (prop.ValueKind == JsonValueKind.String)
+        {
+            try
+            {
+                into.Add(prop.GetBytesFromBase64());
+            }
+            catch (FormatException)
+            {
+                // 非 base64 串交由后续模型绑定报错
+            }
+        }
+        else if (prop.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in prop.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    try
+                    {
+                        into.Add(item.GetBytesFromBase64());
+                    }
+                    catch (FormatException)
+                    {
+                        // 同上
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>从 JSON 元素收集指定属性的字符串值（可单值或数组）。</summary>
+    private static void CollectStrings(JsonElement element, string propertyName, List<string> into)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var prop))
+        {
+            return;
+        }
+
+        if (prop.ValueKind == JsonValueKind.String)
+        {
+            into.Add(prop.GetString() ?? string.Empty);
+        }
+        else if (prop.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in prop.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    into.Add(item.GetString() ?? string.Empty);
+                }
+            }
+        }
     }
 
     /// <summary>返回拒绝原因；null 表示放行。原因文案同时进入 Warning 日志与响应 data.reason。</summary>
@@ -147,7 +316,18 @@ public class FileUploadContentGuardMiddleware
             }
         }
 
-        if (file.Length == 0)
+        return FindRejectionReason(extension, file.Length, head, total);
+    }
+
+    /// <summary>签名/脚本判定核心（multipart 文件段与 JSON 字节通道共用）。null=放行。</summary>
+    private static string? FindRejectionReason(string extension, long length, byte[] head, int totalRead)
+    {
+        if (string.IsNullOrEmpty(extension))
+        {
+            return null;
+        }
+
+        if (length == 0)
         {
             return "零字节文件";
         }
@@ -155,7 +335,7 @@ public class FileUploadContentGuardMiddleware
         if (ImageSignatures.TryGetValue(extension, out var signatures))
         {
             var matches = signatures.Any(sig =>
-                head.Length >= sig.Length && sig.SequenceEqual(head.Take(sig.Length)));
+                totalRead >= sig.Length && sig.SequenceEqual(head.Take(sig.Length)));
             if (!matches)
             {
                 return "图片签名与扩展名不匹配（疑似改名文件）";
@@ -165,7 +345,7 @@ public class FileUploadContentGuardMiddleware
         if (ScriptableTextExtensions.TryGetValue(extension, out var markers))
         {
             // 只扫文本头部 8KB，足够覆盖典型脚本注入
-            var sample = Encoding.UTF8.GetString(head, 0, Math.Min(head.Length, 8192));
+            var sample = Encoding.UTF8.GetString(head, 0, Math.Min(totalRead, 8192));
             if (markers.Any(m => sample.Contains(m, StringComparison.OrdinalIgnoreCase)))
             {
                 return "文本内容包含不允许的脚本标记";
