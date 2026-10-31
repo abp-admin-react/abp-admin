@@ -336,7 +336,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     /// <summary>
     /// 热钱包状态卡（余额/门槛/熔断；无密钥信息）。只读展示面：全新环境 RPC/key 池
     /// 未配置时降级为 Configured=false（页面显示「未配置」），不抛 500——资金路径
-        ///（审批/广播/重试）不走此降级，仍经网关工厂 fail-closed。
+    ///（审批/广播/重试）不走此降级，仍经网关工厂 fail-closed。
     /// </summary>
     public virtual async Task<AbpAdmin.Collection.Withdrawals.WithdrawHotWalletStatusDto> GetHotWalletAsync()
     {
@@ -479,8 +479,8 @@ public class CollectionWithdrawAdminAppService : ApplicationService
 
     /// <summary>
     /// 提现总开关（资金面高危杠杆：开启后广播 worker 才会从热钱包付币）：写入设置库，
-        /// 提交闸与广播 worker 每轮热读（下一轮生效免重启）。挂在 WithdrawAdmin 权限位——
-        /// 资金开关不交给通用设置更新权限（权限错位）。
+    /// 提交闸与广播 worker 每轮热读（下一轮生效免重启）。挂在 WithdrawAdmin 权限位——
+    /// 资金开关不交给通用设置更新权限（权限错位）。
     /// </summary>
     public virtual async Task SetWithdrawEnabledAsync(bool enabled)
     {
@@ -494,8 +494,8 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     /// <summary>
     /// 提现总闸（Halt=紧急停机：拒绝新提交 + 阻断全部审批；广播中订单仍走卡单恢复处置）。
     /// 与 Enabled 同拦一条付币管线，同走 WithdrawAdmin 权限位与确认弹窗——
-        /// Halt 不留在通用设置页——Text 控件 + 通用更新权限下，低权限者可松闸恢复付币，
-        /// 且文本框敲 "True" 会静默不拉闸（fail-open 于停机语义）。
+    /// Halt 不留在通用设置页——Text 控件 + 通用更新权限下，低权限者可松闸恢复付币，
+    /// 且文本框敲 "True" 会静默不拉闸（fail-open 于停机语义）。
     /// 读侧 SubmitAsync/WithdrawBroadcastManager 照旧热读同一设置键。
     /// </summary>
     public virtual async Task SetWithdrawHaltAsync(bool halt)

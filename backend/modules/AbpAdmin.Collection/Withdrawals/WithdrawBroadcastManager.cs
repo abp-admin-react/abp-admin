@@ -747,7 +747,7 @@ public class WithdrawBroadcastManager : DomainService
             return;
         }
 
-                // 无哈希：nonce 仲裁——与 RefundAsync 对同一「BroadcastFailed 无哈希」状态
+        // 无哈希：nonce 仲裁——与 RefundAsync 对同一「BroadcastFailed 无哈希」状态
         // 的裁决口径对齐：账面记录的 NonceUsed 仍在途（pending nonce 已越过它）说明原交易
         // 可能已进 mempool/已挖，此时回队重播会以新 nonce 二次转账 ActualAmount = 双付。
         // 必须在 RequeueToProcessingAsync 清掉 NonceUsed 证据之前裁决。

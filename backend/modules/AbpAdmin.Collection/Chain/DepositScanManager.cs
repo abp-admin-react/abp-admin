@@ -31,8 +31,8 @@ public class DepositScanManager : DomainService
     private readonly Volo.Abp.Guids.IGuidGenerator _guidGenerator;
     private readonly Contracts.IChainPushNotifier? _pushNotifier;
 
-        // 进程内告警冷却（static：管理器是 transient，每轮新实例——实例字典冷却永不跨轮生效。
-        // 多实例各有一份，重复告警有限度可接受）
+    // 进程内告警冷却（static：管理器是 transient，每轮新实例——实例字典冷却永不跨轮生效。
+    // 多实例各有一份，重复告警有限度可接受）
     private static readonly Dictionary<Guid, DateTime> SkipRatioAlertedAt = new();
     private static readonly Dictionary<Guid, DateTime> FallbackAlertedAt = new();
 
@@ -64,7 +64,7 @@ public class DepositScanManager : DomainService
         var now = _clock.Now;
 
         // network/token 由 worker 在自己的工作单元加载——跨工作单元是分离实体，直接改会被静默丢弃
-                //（否则游标/心跳不会落库）。管理器在本工作单元重读，参数仅当身份/配置用。
+        //（否则游标/心跳不会落库）。管理器在本工作单元重读，参数仅当身份/配置用。
         network = await dbContext.Networks.SingleAsync(n => n.Id == network.Id, ct);
         token = await dbContext.Tokens.SingleAsync(t => t.Id == token.Id, ct);
 
@@ -92,9 +92,9 @@ public class DepositScanManager : DomainService
         }
         else if (token.LastScannedBlock == null)
         {
-                        // 首轮窗口为空（游标=链头-确认数，按定义无可扫区间）：游标无条件落位到 target
-        //（落位不依赖看管地址数——cursor 与 target 每轮都由当前链头重算、恒等）。
-        // 落位即「扫链已跑过一轮」，历史转入按计划口径不补扫。
+            // 首轮窗口为空（游标=链头-确认数，按定义无可扫区间）：游标无条件落位到 target
+            //（落位不依赖看管地址数——cursor 与 target 每轮都由当前链头重算、恒等）。
+            // 落位即「扫链已跑过一轮」，历史转入按计划口径不补扫。
             token.LastScannedBlock = target;
         }
 
@@ -301,7 +301,7 @@ public class DepositScanManager : DomainService
             .GroupBy(t => t.AddressId)
             .ToDictionary(g => g.Key, g => g.First());
 
-                // 地址行补载（AddressIndex 是归集签名的必需品：缺它=用 index-0 错误密钥签名）
+        // 地址行补载（AddressIndex 是归集签名的必需品：缺它=用 index-0 错误密钥签名）
         var addressIndexes = await dbContext.DepositAddresses
             .Where(a => addressIds.Contains(a.Id))
             .ToDictionaryAsync(a => a.Id, a => (int?)a.AddressIndex, ct);
@@ -318,8 +318,8 @@ public class DepositScanManager : DomainService
             // 大额放行门（线上 AutoCreditMaxAmount 同款）：毛额超过自动额度的单停在 Confirmed
             // 不挂归集任务，等管理端放行（放行只入队，入账仍走归集确认的净额路径）。
             // 复扫谓词会每轮重选这些单——每轮重判一次门槛，放行前幂等跳过。
-                        // 负值钳为 0（实体文档口径「负值视为 0」＝全部等放行）——不得把负值当
-        // fail-closed 前置条件关闭整个门（对停机语义是 fail-open）
+            // 负值钳为 0（实体文档口径「负值视为 0」＝全部等放行）——不得把负值当
+            // fail-closed 前置条件关闭整个门（对停机语义是 fail-open）
             var gross = order.Amount ?? 0m;
             var autoMax = Math.Max(0m, network.AutoCreditMaxAmount);
             if (gross > autoMax)
