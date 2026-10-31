@@ -75,21 +75,28 @@ public class ImpersonationManager : DomainService
 
         // 租户边界（安全）：Impersonation.User 权限对租户侧同样可授予，若不校验，
         // 租户 A 管理员可传入宿主/租户 B 用户 Id 直接签发其令牌（提权）。
+        // 基准必须是【令牌租户声明】而非请求解析租户：/connect/token 的 QueryString/Header
+        // 解析器排在 CurrentUser 之前且失配守卫不覆盖 token 端点，请求携带 __tenant=B 即可
+        // 把 CurrentTenant.Id 稳到 B、让 A→B 的校验形同虚设（sectest b04 三种姿势全过）。
+        // 宿主主体（令牌无租户声明）保持可进入任意租户用户——与 ABP Pro 宿主运维语义一致。
         // 统一抛 NotFound 而非越权专用错误码，避免探测其他租户用户是否存在。
-        if (CurrentTenant.Id != null && targetUser.TenantId != CurrentTenant.Id)
+        if (_currentUser.TenantId != null && targetUser.TenantId != _currentUser.TenantId)
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.Account.ImpersonationTargetUserNotFound);
         }
 
-        // 停用账户不可被模拟（fail closed，与租户模拟路径的 u.IsActive 过滤对齐）：
-        // 管理员停用某账户后，持有 Impersonation.User 权限者不应仍能以该账户身份操作。
-        // 同样抛 NotFound，不暴露「存在但停用」与「不存在」的区别。
-        if (!targetUser.IsActive)
+        // 账户可用性（fail closed，与委托/回切路径的 IsAccountUsable 同一不变式）：
+        // 停用或锁定未到期的账户都不可被模拟——管理员锁定是事件响应动作，持有
+        // Impersonation.User 权限者不应仍能以该账户身份操作（sectest b01：原先只查
+        // IsActive，锁定 100 年的账户照样签出令牌）。同样抛 NotFound，不暴露状态差异。
+        if (!IsAccountUsable(targetUser))
         {
             throw new BusinessException(AbpAdminDomainErrorCodes.Account.ImpersonationTargetUserNotFound);
         }
 
-        return new ImpersonationTarget(targetUser, BuildImpersonatorClaims(_currentUser.Id, CurrentTenant.Id));
+        // 模拟者 claims 同样以令牌声明为基准（CurrentTenant.Id 可被 __tenant 稳定，
+        // 审计日志的 ImpersonatorTenantId 会记下伪造租户，掩盖真实来源——sectest b04）。
+        return new ImpersonationTarget(targetUser, BuildImpersonatorClaims(_currentUser.Id, _currentUser.TenantId));
     }
 
     /// <summary>
@@ -121,12 +128,13 @@ public class ImpersonationManager : DomainService
             var targetUser = await AsyncExecuter.FirstOrDefaultAsync(
                 userQueryable.Where(u => u.TenantId == targetTenantId && u.IsActive &&
                                          u.Roles.Any(ur => ur.RoleId == adminRole.Id)));
-            if (targetUser == null)
+            if (targetUser == null || !IsAccountUsable(targetUser))
             {
                 throw new BusinessException(AbpAdminDomainErrorCodes.Account.ImpersonationTenantAdminNotFound);
             }
 
-            return new ImpersonationTarget(targetUser, BuildImpersonatorClaims(_currentUser.Id, CurrentTenant.Id));
+            // 模拟者 claims 以令牌声明为基准（与用户模拟路径同口径，防 __tenant 稳定审计字段）。
+            return new ImpersonationTarget(targetUser, BuildImpersonatorClaims(_currentUser.Id, _currentUser.TenantId));
         }
     }
 

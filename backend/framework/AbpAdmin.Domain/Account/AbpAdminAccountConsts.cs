@@ -3,7 +3,7 @@ namespace AbpAdmin.Account;
 /// <summary>
 /// 账户相关安全/行为参数的集中定义（重构报告问题 22）：
 /// 防枚举延迟区间、错误展示上限、锁定年限、恢复码数量、无密码登录令牌有效期边界、默认委托时长。
- /// 散落的魔法数字统一收口到此处，便于调整与文档化。
+/// 散落的魔法数字统一收口到此处，便于调整与文档化。
 /// </summary>
 public static class AbpAdminAccountConsts
 {
