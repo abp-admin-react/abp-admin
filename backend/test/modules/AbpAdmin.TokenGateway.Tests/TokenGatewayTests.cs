@@ -288,6 +288,27 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     }
 
     [Fact]
+    public async Task Rotate_issues_new_key_and_invalidates_old_one()
+    {
+        // 回归锁（run-2 C-4）：hb- 无到期、登录永远复用同一把钥匙、RevokeKeyAsync 曾无生产
+        // 调用方——凭证外泄后受害者无处吊销。WalletController keys/rotate 端点的组合语义在此
+        // 钉住：吊销旧行 → 旧 key 立即 401 → 再签发得到全新 key（非复用）→ 新 key 可用；
+        // 端点本体只收 hb-（allowSession:false），存量会话不受轮换影响（独立表，自然过期）。
+        var keys = NewKeys();
+        var oldKey = await keys.IssueOrReuseKeyAsync(U);
+        var (session, _) = await keys.IssueSessionAsync(U);
+
+        await keys.RevokeKeyAsync(U);
+        await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(oldKey, false));
+
+        var newKey = await keys.IssueOrReuseKeyAsync(U);
+        newKey.ShouldStartWith("hb-");
+        newKey.ShouldNotBe(oldKey);
+        (await keys.ResolveAsync(newKey, false)).ShouldBe(U);
+        (await keys.ResolveAsync(session, true)).ShouldBe(U); // 存量会话照常
+    }
+
+    [Fact]
     public async Task Deactivated_identity_rejects_existing_key_and_session_at_use_time()
     {
         // 回归锁：凭证签发时刻查过 IsActive 不代表此刻有效——hb- 无到期、hbs- 最长一周，

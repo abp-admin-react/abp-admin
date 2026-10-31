@@ -111,6 +111,21 @@ public class WalletController(
         });
     }, log);
 
+    /// <summary>
+    /// 轮换 hb- 长期凭证（安全审计 run-2 C-4）：删除旧 TgApiKeys 行（旧 key 立即 401）并签发
+    /// 新 key，明文只在本次响应返回一次。hb- 无到期、IssueOrReuseKeyAsync 每次登录复用同一把
+    /// 钥匙、RevokeKeyAsync 原先无任何生产调用方——凭证一旦外泄，受害者除了销户无处吊销。
+    /// 轮换入口必须持有效 hb- 本体（allowSession:false）：hbs- 会话最长一周，用会话轮换等于
+    /// 允许"只偷到会话"的攻击者顺手把受害者的长期钥匙换成自己的。会话不受轮换影响（独立表）。
+    /// </summary>
+    [HttpPost("keys/rotate")]
+    public Task<IActionResult> RotateKey() => Run(async () =>
+    {
+        var me = await keys.ResolveAsync(Bearer(), allowSession: false);
+        await keys.RevokeKeyAsync(me);
+        return Ok(new { apiKey = await keys.IssueOrReuseKeyAsync(me) });
+    }, log);
+
     private object View(TgOrder o)
     {
         var method = o.Method == PayMethod.Wechat ? "wechat" : "alipay";
