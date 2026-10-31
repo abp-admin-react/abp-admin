@@ -75,9 +75,11 @@ public class AbpAdminTencentCloudSmsSender : ISmsSender, ITransientDependency
         // SSRF 防线：EndPoint 是管理员可改设置项（默认 sms.tencentcloudapi.com），
         // 被改成内网/保留地址（如 169.254.169.254）时本服务即成出站跳板。与 Webhook/探活
         // 同一防线（SafeHttpUrl：IP 字面量直查网段表、域名 DNS 解析后逐个检查）；放行开关
-        // Sms:AllowIntranetTargets 显式 true 才豁免（内网中转网关场景）。EasyAbp requester
-        // 用裸 HttpClient（无禁重定向），端点侧校验是本仓库能加的闸口；发送前逐次校验，
-        // DNS rebinding 残余与 Webhook 同口径（见 SafeHttpUrl 类注释）。
+        // Sms:AllowIntranetTargets 显式 true 才豁免（内网中转网关场景）。双层防线：端点侧
+        // 逐次校验（发送前）+ 传输侧禁重定向——EasyAbp requester 走命名客户端
+        // "DefaultTencentCloud"（包模块自注册），AbpAdminDomainModule 已对其挂
+        // SafeHttpUrl.CreateNoRedirectPrimaryHandler，入口校验放过的 3xx 不会被跟随
+        //（run-2 C-5 修复，DNS rebinding 残余与 Webhook 同口径，见 SafeHttpUrl 类注释）。
         // 十进制(2130706433)/十六进制(0x7f.0.0.1)/userinfo 伪装（域名@169.254.169.254）/
         // v4-mapped([::ffff:127.0.0.1]) 四类绕过变体全部被拦
         //（IPAddress.TryParse/IsIPv4MappedToIPv6 归一后命中网段表）。

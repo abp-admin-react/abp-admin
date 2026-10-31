@@ -111,6 +111,15 @@ public class AbpAdminDomainModule : AbpModule
         services.ConfigureSmsResolvers();                            // ISmsSender → SmsSenderResolver
         services.ConfigureOutboundHttpRemote();                      // 出站 HTTP（HttpAgent）基础设施 + Domain 层声明式接口
 
+        // 腾讯云 SMS 命名客户端关闭自动重定向（安全审计 run-2 C-5）：EasyAbp requester 走
+        // CreateClient("DefaultTencentCloud")（包模块自注册、无任何处理器配置），不是无名默认
+        // 客户端——Application 侧挂在空名客户端上的禁重定向覆盖不到它。EndPoint 是管理员可改
+        // 设置，SafeHttpUrl 只校验入口 URL，跟 3xx 会把签名请求原样重放到内网目标（SSRF 防线
+        // 整体失效）。本模块晚于 AbpTencentCloudSmsModule（依赖序）执行，后注册的
+        // ConfigurePrimaryHttpMessageHandler 动作最后执行、覆盖包注册的主处理器。
+        services.AddHttpClient("DefaultTencentCloud")
+            .ConfigurePrimaryHttpMessageHandler(() => Http.SafeHttpUrl.CreateNoRedirectPrimaryHandler());
+
         // Quartz 集群跨节点回退（背景与原理见装饰器注释）：框架默认 registry 是进程内的，
         // 持久化 store 里的 Quartz 作业被分到未注册该委托的节点会被静默丢弃。
         // 本模块的 ConfigureServices 晚于 Volo.Abp.BackgroundWorkers 模块的常规注册执行，
