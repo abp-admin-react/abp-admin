@@ -11,7 +11,8 @@ namespace AbpAdmin.RateLimiting;
 /// <summary>
 /// 操作限流目标解析器（问题5 修复）：
 /// 早期设计中 MVC Filter 与 DI 拦截器各维护一套「取特性 + 解析分区参数」逻辑（约 70 行/套），
-/// 任何一处修 bug 另一处必漏——本类是唯一实现（MVC Filter 侧已删除，现存消费方为 Checker 直调与拦截器）。
+/// 任何一处修 bug 另一处必漏——本类是唯一实现。MVC Filter 侧已删除，现存唯一消费方为
+/// DI 拦截器（Checker 的分区键解析走自己的 ResolvePartitionKeyAsync，不经本类）。
 /// </summary>
 public class OperationRateLimitingTargetResolver : ITransientDependency
 {

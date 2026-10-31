@@ -118,7 +118,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
             }
         }
 
-        // ── Paid（7 天内、无异常明细）：第二笔到账兜底 ───────────────────────────────────
+        // ── Paid（7 天内、无异常标志位、已归因 CollectionId）：第二笔到账兜底 ────────────────
         var paidOrders = await QueryOrdersAsync(o =>
             o.Status == OrderStatus.Paid &&
             !o.PaymentAnomaly &&
@@ -158,7 +158,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
             }
         }
 
-        // ── Closed（7 天内、无异常明细）：匹配到账的复活 / 告警 ──────────────────────────
+        // ── Closed（7 天内、无异常标志位）：匹配到账的复活 / 告警 ──────────────────────────
         var closedOrders = await QueryOrdersAsync(o =>
             o.Status == OrderStatus.Closed &&
             !o.PaymentAnomaly &&
@@ -216,7 +216,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
     /// <summary>
     /// 「已扣未标支付」：扣款和标支付本应同事务原子提交，这一步是为跨模块旁路留下的兜底——
     /// PendingPayment 且有金额币种一致的未回冲扣款 → 补标 Paid（写 BalanceTxnId、PaidAt）；
-    /// Closed(Expired)、无异常明细、金额一致 → 标回 Paid 并写归因；
+    /// Closed(Expired)、无异常标志位、金额一致 → 标回 Paid 并写归因；
     /// Closed(UserCancel) 且扣款未回冲 → 回冲扣款并追加异常明细（不复活，计划第 3.3 节）。
     /// </summary>
     private async Task ReconcileUnmarkedDebitsAsync(DateTime now)
