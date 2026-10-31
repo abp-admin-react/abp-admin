@@ -302,7 +302,7 @@ export default [
   },
   {
     // 业务模块数据权限示例：同一能力的自包含模块落地（AbpAdmin.Biz.Template），
-    // 框架 data-scope-demo 退役后由本页承接演示职责
+    // 与框架 data-scope-demo 并存（后者退役后由本页承接演示职责）
     path: '/biz-template/data-scope',
     name: 'biz-template-data-scope',
     icon: 'apartment',
@@ -370,8 +370,8 @@ export default [
   },
   {
     // 收付款域（AbpAdmin.Ordering + AbpAdmin.Collection）：只给 Host 用户，后端有 Host 守卫。
-    // 整域一个父组，子项按使用频率排：订单（用户侧最高频）→ 充值/归集/金库（运营监控）
-    // → 链网配置（高危运维，独立权限）。父组入口默认落在订单。
+    // 整域一个父组，子项按使用频率排：资金看板（默认落地）→ 订单 → 充值/归集/金库（运营监控）
+    // → 链网配置（高危运维，独立权限）。父组入口默认落在资金看板。
     path: '/collection',
     name: 'collection',
     icon: 'payCircle',

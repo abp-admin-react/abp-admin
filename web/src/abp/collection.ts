@@ -9,8 +9,8 @@ import { request } from '@umijs/max';
 /**
  * 收款模块（AbpAdmin.Collection）的 API 镜像——M1 骨架 + M2 用户侧余额接口。
  * 金额字段一律十进制字符串（最多 18 位小数）。
- * 管理端收款单/余额流水/渠道设置/链上监控的端点随 M3–M5 里程碑落地时在此补齐
- *（计划第 5.7 节）。
+ * 管理端收款单/余额流水/渠道设置/链上监控的端点已按域拆分镜像：
+ * 见 src/abp/collectionAdmin.ts、src/abp/chainAdmin.ts、src/abp/withdrawal.ts。
  */
 
 /** 收款渠道（与后端 CollectionChannel 对齐；余额只走扣款不是渠道） */

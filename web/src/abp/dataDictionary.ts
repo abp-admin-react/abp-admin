@@ -11,8 +11,8 @@ import {
  * 端点收口说明：EasyAbp 模块端点（/api/data-dictionary/*，UpdateAsync 全量替换、
  * 无静态结构锁）已随模块 HttpApi 依赖下线，字典的列表/创建/删除改走自建
  * /api/app/data-dictionary-view/*；列表/创建/删除暂为手写 request——
- * 待后端重启后 pnpm openapi 再生成，生成客户端出现同名端点后换成包装生成函数
- * （ getDataDictionaryByCode / saveDataDictionaryItems 已是生成函数形态）。
+ * openapi 生成器已冻结不再重生成（见 web/AGENTS.md 约定），该域改动时按约定
+ * 手写镜像收口进 src/abp（ getDataDictionaryByCode / saveDataDictionaryItems 已是生成函数形态）。
  */
 
 /** 字典列表项（管理页左列；不含 Items）。 */

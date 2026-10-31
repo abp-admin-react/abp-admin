@@ -141,9 +141,10 @@ const ScheduledJobsPage: React.FC = () => {
                 description="不影响原有 cron 计划"
                 onConfirm={async () => {
                   await triggerJob(record.id);
-                  // 结果由 SignalR（ReceiveJobCompleted）推送，这里只确认已提交
+                  // 前端未订阅 ReceiveJobCompleted 推送（SignalR 已注册事件清单里没有它）：
+                  // 触发结果以列表「上次执行/上次结果」列为准，手动刷新可见
                   message.loading({
-                    content: '已提交，完成后会通知',
+                    content: '已提交触发，结果以列表为准',
                     key: record.id,
                     duration: 2,
                   });

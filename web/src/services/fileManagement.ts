@@ -1,9 +1,8 @@
 /**
  * EasyAbp.FileManagement 语义化 API 封装。
  *
- * 类型全部复用 pnpm openapi 生成的 typings（API.FileInfoDto 等），
- * 页面不直接依赖生成产物；本模块按生成代码相同的 URL/契约直接用 request 实现
- * （生成桶文件 src/services/abpadmin/index.ts 已在 tsconfig 中排除）。
+ * 类型全部复用历史 openapi 生成物的 typings（API.FileInfoDto 等；生成器已冻结不再重生成），
+ * 页面不直接依赖生成产物；本模块按生成代码相同的 URL/契约直接用 request 实现。
  */
 import { request } from '@umijs/max';
 

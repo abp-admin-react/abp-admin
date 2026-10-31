@@ -38,7 +38,7 @@ type IconPickerProps = {
 };
 
 /** 图标选择器（借鉴 Admin.NET IconSelector）：面板网格平铺纯图标（8 列 × 32px，
- * 22 个图标 3 行放完），悬停 tooltip 显示名称，点选选中、再点同一个取消。
+ * 图标全集见 abp/menuIcons.ts，8 列排满自动换行），悬停 tooltip 显示名称，点选选中、再点同一个取消。
  * 作为受控组件接入 Form.Item（value/onChange 约定），与 ProForm 字段同数据流。 */
 function IconPicker({ value, onChange }: IconPickerProps) {
   const [open, setOpen] = useState(false);

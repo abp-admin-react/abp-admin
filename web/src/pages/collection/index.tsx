@@ -3,9 +3,10 @@ import { Card, Timeline } from 'antd';
 import React from 'react';
 
 /**
- * 收款页（/collection，计划第 5.7 节）：收款单、余额流水、渠道设置、链上监控。
- * M1 骨架——这些面板随里程碑落地（M2 余额与流水、M3 微信/支付宝、M4 Stripe、M5 链上），
- * 每块就绪后在此页接入对应端点（镜像见 src/abp/collection.ts）。
+ * 收款域路线图入口页（/collection，计划第 5.7 节）。
+ * 各面板已拆分为 /collection/* 子页（dashboard/orders/deposits/sweeps/vault/
+ * member-funds/withdrawals/hot-wallet/network，见 routes.ts），本页保留里程碑路线图卡片
+ * （镜像见 src/abp/collection.ts）。
  * 本页与订单页都只给 Host 用户，后端应用服务有 Host 守卫。
  */
 export default function CollectionPage() {

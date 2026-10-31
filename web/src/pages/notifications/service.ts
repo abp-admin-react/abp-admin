@@ -1,5 +1,5 @@
 /**
- * 通知管理 API（T3.5）。包装 pnpm openapi 生成客户端，页面只调本文件。
+ * 通知管理 API（T3.5）。包装冻结的历史 openapi 生成物，页面只调本文件。
  * 管理侧走 INotificationManagementAppService（要 Manage 权限）；
  * 模块自带的只读端点（/api/notification-service/notification）不在页面使用。
  */

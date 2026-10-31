@@ -40,7 +40,7 @@ import {
 const { Text } = Typography;
 
 /**
- * 提现管理页（/collection/withdrawals，提现 M3/M4）：
+ * 提现管理页（/collection/withdrawals，提现 M2/M3）：
  * 状态卡（开关/总闸/限额 + 热钱包余额/熔断）+ 列表（默认待审）；
  * 审批/拒绝/重试/人工完结/退款拒绝 + 批量通过/批量拒绝（串行逐单、偿付护栏逐单检查）；
  * 写动作错误就地提示（skipErrorHandler 语义）。

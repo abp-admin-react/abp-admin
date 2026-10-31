@@ -27,7 +27,7 @@ export async function getAuditLogs(params: {
   /** 仅未处理错误（错误口径：状态码≥400 或有异常；已标记处理的排除） */
   unhandledErrorOnly?: boolean;
 }) {
-  // 走 openapi 生成客户端（生成物随批次重生成，参数契约由 tsc 把关——web/AGENTS.md 约定）
+  // 走冻结的历史 openapi 生成物（不再新增/重生成——web/AGENTS.md 约定；改动时整域迁入 src/abp）
   return getApiAppAuditLog({
     SkipCount: ((params.current ?? 1) - 1) * (params.pageSize ?? 10),
     MaxResultCount: params.pageSize ?? 10,

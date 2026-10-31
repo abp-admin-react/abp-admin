@@ -1,7 +1,7 @@
 # cloudflare-worker（模板遗留 · demo）
 
-ant-design-pro 上游模板自带的演示 mock API（wrangler 名 `pro-api`，静态 serving
-`/api/dashboard`、`/api/table` 等演示数据，CORS 兜底 `https://preview.pro.ant.design`）。
+ant-design-pro 上游模板自带的演示 mock API（wrangler 名 `pro-api`，以硬编码数据
+返回 `/api/dashboard`、`/api/table` 等演示端点，CORS 兜底 `https://preview.pro.ant.design`）。
 
 **本仓库前端（web/src）没有任何地方调用它**；后端 Turnstile 人机验证集成在
 `backend/framework/AbpAdmin.Domain/Captcha/TurnstileCaptchaValidator.cs`，与本目录无关。

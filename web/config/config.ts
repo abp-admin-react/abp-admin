@@ -188,7 +188,7 @@ export default defineConfig({
    * T3.4：插件保持关闭。它自带的 QueryClientProvider 不导出 client 实例，
    * 而 dictionaryValueEnum 等工具函数必须拿到全局单例（web/src/queryClient.ts），
    * 所以 Provider 统一在 app.tsx 的 rootContainer 里用同一个实例挂载。
-   * table-list 等页面的 useQueryClient 走 context，拿到的就是那个单例。
+   * 页面内的 useQueryClient（如通知铃铛）走 context，拿到的就是那个单例。
    */
   reactQuery: false,
   /**
