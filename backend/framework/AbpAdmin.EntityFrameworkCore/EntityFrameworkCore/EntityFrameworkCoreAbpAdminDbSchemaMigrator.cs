@@ -13,7 +13,7 @@ using Volo.Abp.MultiTenancy;
 namespace AbpAdmin.EntityFrameworkCore;
 
 /// <summary>
-/// 框架库 schema 迁移器（IAbpAdminDbSchemaMigrator 实现，被迁移循环自动枚举）。三步：
+/// 框架库 schema 迁移器（IAbpAdminDbSchemaMigrator 实现，被迁移循环自动枚举）。四步：
 /// ① PostgresStartupPreflight.EnsureConnectableAsync——启动预检：占位串/连不上/库不存在
 ///    都在此拒绝启动并给出可行动指引（本系统不自动建库，建库是部署侧一次性动作）；
 /// ② EfCoreLegacySchemaBaseliner.StampIfNeededAsync——存量库自举：脚本时代（迁移机制

@@ -17,8 +17,11 @@
 
   "Redis": {
     // 是否启用 Redis（分布式缓存 + 分布式锁 + DataProtection 密钥环）。
-    // 取值：true | false；默认 false = 进程内缓存，仅适合单实例开发。生产多实例必须 true。
-    // 改错：多实例却 false → 各实例缓存不一致、令牌互验失败；true 但 Redis 连不上 → 启动/登录失败。
+    // 代码口径（AbpAdminHttpApiHostModule.ConfigureRedis）：键缺失/为空 = 启用（由
+    // Redis:Configuration 是否配置决定），仅显式 false 才关闭——本文件随库值 false =
+    // 进程内缓存（含进程内锁），仅适合单实例开发，生产多实例必须 true。
+    // 改错：多实例却 false → 各实例缓存不一致、令牌互验失败、分布式锁形同虚设；
+    // true 但 Redis 连不上 → 启动探针直接失败（fail-fast，见下 abortConnect 说明）。
     // 覆盖：Redis__IsEnabled
     "IsEnabled": false,
 
@@ -27,8 +30,11 @@
     //   defaultDatabase  库号 0–15（服务器 databases 上限内）；本项目固定用 0：独占库最简单，
     //                    多项目共用同一 Redis 时靠 KeyPrefix 隔离；若要换库须所有实例一起改，
     //                    改错 → 各实例读不同库，缓存/DataProtection 密钥对不上，登录态失效。
-    //   abortConnect     true | false；默认基线 false = 启动时 Redis 未就绪也不让进程崩溃，后台重连；
-    //                    设 true 且 Redis 晚起 → Host 启动直接失败。
+    //   abortConnect     锁/DataProtection 共用的 SharedRedisConnection 无条件强制
+    //                    AbortOnConnectFail=true（防「带病运行」：Redis 不可达时连接直接失败，
+    //                    启动探针早于接客，启动即失败而非静默降级），串内写 false 对该连接无效；
+    //                    缓存模块自建连接按串内值生效（false 时首用报错、SE.Redis 自动重连自愈）。
+    //                    运行期断线自愈两条路径都由 SE.Redis 的自动重连承担，不依赖该开关。
     // 覆盖：Redis__Configuration（整串）。
     "Configuration": "127.0.0.1:6379,defaultDatabase=0,abortConnect=false"
   },

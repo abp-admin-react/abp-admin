@@ -21,7 +21,7 @@ public static class AbpAdminEfCoreEntityExtensionMappings
         OneTimeRunner.Run(() =>
         {
             // 将租户扩展属性映射为 AbpTenants 表的真实列
-            // 已验证：MapEfCoreProperty 扩展方法在 Volo.Abp.ObjectExtending 10.6 存在
+            // 已验证：MapEfCoreProperty 扩展方法在 Volo.Abp.ObjectExtending 存在（10.6 实证，10.7.0 沿用）
             ObjectExtensionManager.Instance
                 .MapEfCoreProperty<Tenant, byte>(
                     AbpAdminTenantConsts.ActivationStatePropertyName,

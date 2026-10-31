@@ -13,7 +13,7 @@ namespace AbpAdmin.EntityFrameworkCore;
 /// DbMigrator 与宿主自迁移（Database:AutoMigrateOnStartup）两条路径都会经过。
 /// DDL 与 Quartz 官方 tables_postgres.sql 同构，全部 IF NOT EXISTS——重复执行零副作用，
 /// Quartz 的 performSchemaValidation 直接放行。版本锚点：本 DDL 镜像自 ABP 10.6.1
-/// （Directory.Packages.props 的 AbpVersion）传递引用的 Quartz 3.x 系列的
+/// （写入时的 AbpVersion，现为 10.7.0）传递引用的 Quartz 3.x 系列的
 /// tables_postgres.sql——升级 ABP/Quartz 后若 store schema 有变，需对照上游脚本复核本文件；
 /// 真库锚由 AbpAdmin.EntityFrameworkCore.Tests 的 QuartzTablesEnsurerTests 钉住
 /// （幂等 ×2 + 11 表 information_schema 断言，无凭证自动跳过）。

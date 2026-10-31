@@ -29,10 +29,11 @@ using SignInResult = Microsoft.AspNetCore.Mvc.SignInResult;
 namespace AbpAdmin.ExtensionGrants;
 
 /// <summary>
-/// 模拟登录扩展授权：支持租户模拟与用户模拟。
+/// 模拟登录扩展授权：支持租户模拟、用户模拟与委托进入。
 /// grant_type = "impersonation"，参数：
 ///   - 租户模拟：tenant_id（以目标租户 admin 用户身份进入，需 AbpAdmin.Impersonation.Tenant 权限）
 ///   - 用户模拟：user_id（需 AbpAdmin.Impersonation.User 权限）
+///   - 委托进入：delegation_id（以委托 TargetUserId 身份签入 SourceUserId，须持有效委托关系）
 ///   - 返回原身份：无额外参数，但当前令牌必须带有 impersonator claim
 /// 目标解析、权限复查与 impersonator claim（AbpClaimTypes.ImpersonatorUserId/TenantId）
 /// 由 Domain 层的 ImpersonationManager 完成，审计日志的 ImpersonatorUserId 列即从该 claim 取值。

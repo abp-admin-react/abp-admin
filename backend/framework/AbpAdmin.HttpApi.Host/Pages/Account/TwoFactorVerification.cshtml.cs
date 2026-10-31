@@ -16,7 +16,8 @@ using IdentityUser = Volo.Abp.Identity.IdentityUser;
 namespace AbpAdmin.Pages.Account;
 
 /// <summary>
-/// 双因素第二步；支持 Authenticator 作为 Provider。
+/// 双因素第二步；Provider 按 GetValidTwoFactorProvidersAsync 动态取自用户可用集合
+/// （Email/短信/Authenticator，LoadProvidersAsync 回退），页面默认选中 Email。
 /// </summary>
 public class TwoFactorVerificationModel : AccountPageModel
 {

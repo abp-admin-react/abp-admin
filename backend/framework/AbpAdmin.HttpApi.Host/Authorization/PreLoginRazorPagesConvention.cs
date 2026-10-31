@@ -7,7 +7,7 @@ namespace AbpAdmin.Authorization;
 
 /// <summary>
 /// 给登录链路的 Account Razor Pages 补匿名元数据。
-/// 问题：ABP 10.6.1 的 Account 模块页面模型（LoginModel/ForgotPasswordModel/RegisterModel/
+/// 问题：ABP 10.7.0 的 Account 模块页面模型（LoginModel/ForgotPasswordModel/RegisterModel/
 /// LockoutModel…）与本宿主替换的页面模型（AbpAdminLoginModel/TwoFactorVerificationModel/
 /// LinkLoginModel）都既没有 [Authorize] 也没有 [AllowAnonymous]，模块只给 /Account/Manage
 /// 注册过 AuthorizePage——其余页面在宿主 FallbackPolicy（默认拒绝）下会被要求已认证，

@@ -1196,9 +1196,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
     ///   （上游控制器无任何授权标注，不豁免则登录/登出自身被拦；SPA 的 end_session_endpoint
     ///   就是 /connect/endsession）
     /// - /Account/Login 等登录链路 Razor Pages：PreLoginRazorPagesConvention
-    ///   （10.6.1 页面模型无授权标注，不豁免则匿名访客打不开登录页；/Account/Manage 不在豁免列）
-    /// - /api/abp/application-configuration(+localization)：PreLoginApiEndpointsConvention
-    ///   （前端登录页拉取基础配置/本地化必需，10.6.1 控制器无授权标注——否则 401）
+    ///   （10.7.0 页面模型无授权标注，不豁免则匿名访客打不开登录页；/Account/Manage 不在豁免列）
+    /// - /api/abp/application-configuration(+localization)、/api/abp/multi-tenancy/tenants/by-name|by-id、
+    ///   /Abp/*Script 三个脚本端点：PreLoginApiEndpointsConvention
+    ///   （前端登录页拉取基础配置/本地化、子域名租户解析与 LeptonXLite SSR 页脚本引用必需，
+    ///   10.7.0 控制器均无授权标注——否则 401 或脚本被 302 后浏览器按 MIME 拒执行）
     /// - /health-status：探针端点匿名是既有语义（NoExceptionDetails 已防回显；UI 面板
     ///   /health-ui、/health-api 已回归要求登录，见 HealthChecksBuilderExtensions）
     /// - wwwroot 静态资源：不含运行时数据，业界默认公开

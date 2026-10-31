@@ -6,7 +6,7 @@ namespace AbpAdmin.Authorization;
 
 /// <summary>
 /// 给登录链路必需的 ABP 框架 API 控制器补匿名元数据（<see cref="EndpointAllowAnonymousMarker"/>）。
-/// 问题：ABP 10.6.1 的 <c>AbpApplicationConfigurationController</c>（/api/abp/application-configuration）、
+/// 问题：ABP 10.7.0 的 <c>AbpApplicationConfigurationController</c>（/api/abp/application-configuration）、
 /// <c>AbpApplicationLocalizationController</c>（/api/abp/application-configuration/localization）与
 /// <c>AbpTenantController</c>（/api/abp/multi-tenancy/tenants/by-name|by-id）
 /// 类上没有任何授权标注（包内元数据核实；后者命名空间是 Pages.Abp.MultiTenancy 而非

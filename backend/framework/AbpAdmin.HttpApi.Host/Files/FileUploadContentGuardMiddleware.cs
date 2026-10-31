@@ -129,13 +129,14 @@ public class FileUploadContentGuardMiddleware
     /// <summary>
     /// JSON 字节通道（with-bytes / many/with-bytes）的内容扫描。DTO 的 content/fileContents
     /// 字段是 base64 字节（System.Text.Json 原生绑定 byte[]），fileName 是扩展名权威——
-    /// 与 multipart 走同一套签名/脚本判定。返回 true 表示请求已被拒绝（响应已写出）。
+    /// 与 multipart 走同一套签名/脚本判定。返回 true 表示本通道已收口（拒绝短路，或非法
+    /// JSON 已交由后续模型绑定处理），调用方不得再进管道；返回 false 表示扫描通过。
     /// </summary>
     private async Task<bool> ScanJsonUploadAndRejectIfNeededAsync(HttpContext context, string path)
     {
         context.Request.EnableBuffering();
 
-        // 有界读入：JSON DOM 对大体的内存放大显著（约 2-3 倍），且本守卫位于认证之前、
+        // 有界读入：JSON DOM 对大体量请求体的内存放大显著（约 2-3 倍），且本守卫位于认证之前、
         // 匿名并发放大；超上限直接拒绝（fail-closed），既防放大也不给超大 JSON 留绕过面。
         // SPA 与管理端只用 multipart 通道，JSON 通道面向程序化小文件上传，64MiB 足够。
         const int MaxJsonScanBytes = 64 * 1024 * 1024;
