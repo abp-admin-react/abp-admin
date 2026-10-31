@@ -1,7 +1,7 @@
 namespace AbpAdmin.RateLimiting;
 
 /// <summary>
-/// 操作限流策略名常量（全量 12 个，与 RateLimitingConfigurator 的 AddPolicy 一一对应）。
+/// 操作限流策略名常量（全量 13 个，与 RateLimitingConfigurator 的 AddPolicy 一一对应）。
 /// 收敛动机：策略名若以裸字符串散落在 Configurator、[OperationRateLimiting] 特性
 /// 与 CheckAsync/ResetAsync 直调点三处，改名时极易漏改导致 CheckAsync 抛「策略未注册」或特性静默失效。
 /// 注册处（RateLimitingConfigurator）与消费点必须都引用本类；新增策略时先加常量再注册。

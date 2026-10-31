@@ -17,7 +17,7 @@ namespace AbpAdmin.AuditLogs;
 
 /// <summary>
 /// 过期审计日志清理。
-/// 由 的 ExpiredAuditLogDeleterWorker（固定间隔 worker）迁移而来，业务逻辑不变：
+/// 由原 HttpApi.Host 的 ExpiredAuditLogDeleterWorker（固定间隔 worker）迁移而来，业务逻辑不变：
 /// 两层开关——host 侧总开关 + 租户侧保留天数设置。
 /// host 级作业（TenantId 为 null）保持原 worker 语义：遍历所有租户 + host 各自清理；
 /// 租户级作业只清理本租户。

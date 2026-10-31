@@ -74,8 +74,7 @@ public class DbLocalizationResourceContributor : ILocalizationResourceContributo
 
     public async Task<IEnumerable<string>> GetSupportedCulturesAsync()
     {
-        // 返回所有已启用语言的文化名称
-        // 这里简化处理，返回空列表表示支持所有文化
+        // 返回空列表 = 支持所有文化（语言开关由 Language 表驱动，不在此处收窄）
         return await Task.FromResult(new List<string>());
     }
 }

@@ -35,7 +35,7 @@ internal static class NotificationConfigurator
         });
 
         // 邮件发送开关：运行期配置（替代原编译期 DEBUG 开关——Debug 构建部署到测试环境会
-        // 静默吞掉所有邮件且无任何日志）。默认真发；显式设 false 时用 NullEmailSender 并打 Warning。
+        // 静默吞掉所有邮件且无任何日志）。默认真发；显式设 false 时用 FileEmlEmailSender 落盘 .eml 并打 Warning。
         // MailKitSmtpEmailSender 带 ReplaceServices（10.6.0 反编译核实），这里再 Replace 一次覆盖它。
         if (!configuration.GetValue<bool>("Mailing:UseRealSender", true))
         {

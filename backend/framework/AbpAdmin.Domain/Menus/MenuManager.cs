@@ -32,9 +32,9 @@ public record MenuDefinition(
 
 /// <summary>
 /// 菜单域服务：Host 模板播种与租户懒拷贝。全局模板的节点定义（纯数据）抽在
-/// <see cref="MenuTemplateDefinition"/>，与本域行为分离。模板镜像前端 config/routes.ts 的
-/// 菜单层级（ABP 官方模板顺序：Saas → Identity → … → Settings），权限绑定与 src/access.ts 的
-/// grantedPolicies 映射一致。Domain 层不引用 Application.Contracts，权限名用字面量
+/// <see cref="MenuTemplateDefinition"/>，与本域行为分离。模板层级对齐 ABP Pro 官方口径
+/// （首页打头 → 业务域 → 管理治理 → SaaS → 系统，见 MenuTemplateDefinition），权限绑定与前端
+/// access.ts 的 grantedPolicies 映射一致。Domain 层不引用 Application.Contracts，权限名用字面量
 /// （与各模块 PermissionDefinitionProvider 注册名一致，稳定不变）。
 /// </summary>
 public class MenuManager : DomainService, ITransientDependency

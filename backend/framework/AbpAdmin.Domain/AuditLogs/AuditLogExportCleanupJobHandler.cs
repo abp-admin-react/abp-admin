@@ -16,8 +16,9 @@ namespace AbpAdmin.AuditLogs;
 /// <summary>
 /// 审计导出文件清理。
 /// 删除超过保留期的导出记录（AbpAuditLogExcelFiles）及其 blob。
-/// 只认 audit-logs- 前缀的文件名：AuditLogExcelFile 表同时被用户导出（UserExportJob，
-/// blob 在另一个容器）复用，靠文件名前缀区分归属，避免删错行、清错容器。
+/// 只认 audit-logs- 前缀的文件名：历史上用户导出（UserExportJob）曾复用 AuditLogExcelFile 表
+/// （blob 在另一个容器），靠文件名前缀区分归属；现用户导出已迁 UserExcelFile + UserExportBlobContainer，
+/// 前缀过滤仅作存量行兜底，避免清错容器。
 /// </summary>
 [ExposeServices(typeof(IScheduledJobHandler))]
 public class AuditLogExportCleanupJobHandler : IScheduledJobHandler, ITransientDependency

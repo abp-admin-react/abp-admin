@@ -150,7 +150,7 @@ internal static class RateLimitingConfigurator
         // 注册走 ITransientDependency 约定扫描即可（类上已标），不再显式 AddTransient——
         // 双重注册虽无害（Transient），但与其余服务的注册风格不一致。
 
-        // 注册七种分区解析器
+        // 注册六种内置分区解析器（Custom 不在此列：启动期按名解析）
         services.AddTransient<RateLimiting.PartitionKeyResolvers.ParameterOperationRateLimitingPartitionKeyResolver>();
         services.AddTransient<RateLimiting.PartitionKeyResolvers.CurrentUserOperationRateLimitingPartitionKeyResolver>();
         services.AddTransient<RateLimiting.PartitionKeyResolvers.CurrentTenantOperationRateLimitingPartitionKeyResolver>();

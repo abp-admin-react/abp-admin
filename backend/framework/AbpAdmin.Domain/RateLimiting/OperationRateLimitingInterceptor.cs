@@ -34,7 +34,7 @@ public class OperationRateLimitingInterceptor : AbpInterceptor, ITransientDepend
             return;
         }
 
-        // 问题5 修复：参数解析收敛到 OperationRateLimitingTargetResolver（与 MVC Filter 共用同一实现）。
+        // 问题5 修复：参数解析收敛到 OperationRateLimitingTargetResolver（Checker 直调与本拦截器共用同一实现）。
         // 拦截器实参是位置数组，按参数名转字典后交给解析器。
         var argumentsByName = new Dictionary<string, object?>(StringComparer.Ordinal);
         var parameters = invocation.Method.GetParameters();

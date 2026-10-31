@@ -128,7 +128,7 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
             // 与 AbpAdminDbMigrationService 对默认 admin 口令的告警同姿态：生产/预发显式打开
             // 演示种子，会落地口令为源码公开常量的可登录账号集，必须留痕。
             Logger.LogWarning(
-                "App:SeedDemoData=true 在非 Development 环境生效：即将创建演示账号（口令为源码公开常量 1q2w3E*：宿主 fin-viewer 与 demo 租户 admin/fin-ops/fin-boss）——仅限演示/预发，生产误配请关闭并停用这些账号");
+                "App:SeedDemoData=true 在非 Development 环境生效：即将创建演示账号（口令为源码公开常量 1q2w3E*：宿主 fin-viewer 与 demo 租户 admin/fin-ops/fin-boss，及组织组合演示账号 zhang.cto/li.dev/wang.fm/zhao.mkt）——仅限演示/预发，生产误配请关闭并停用这些账号");
         }
 
         // Host 侧财务角色 + 只读查看账号

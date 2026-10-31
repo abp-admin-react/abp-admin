@@ -106,7 +106,7 @@ public class AbpAdminDomainModule : AbpModule
         services.ConfigureDomainServiceReplacements();              // DbLanguageProvider/数据范围缓存
         services.ConfigureTextTemplatesAndGdpr(configuration);      // 模板 contributor/GDPR/CookieConsent
         services.ConfigureImaging(configuration);                   // SkiaSharp 压缩/缩放
-        services.ConfigureOperationRateLimiting(configuration);     // 10 策略（强类型设置，含 GdprDownload）+ 核心服务
+        services.ConfigureOperationRateLimiting(configuration);     // 13 策略（强类型设置，含 GdprDownload/CaptchaImage）+ 核心服务
         services.ConfigureNotificationChannels(configuration);      // 站内信/MailKit/邮件开关
         services.ConfigureSmsResolvers();                            // ISmsSender → SmsSenderResolver
         services.ConfigureOutboundHttpRemote();                      // 出站 HTTP（HttpAgent）基础设施 + Domain 层声明式接口

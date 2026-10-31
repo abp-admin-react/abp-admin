@@ -10,7 +10,7 @@ namespace AbpAdmin.Captcha;
 /// </summary>
 public class CaptchaImageGenerator : Volo.Abp.Domain.Services.DomainService
 {
-    /// <summary>无歧义字符集：去掉 0/O、1/I/l、易混淆的 Z/2、S/5 等。</summary>
+    /// <summary>无歧义字符集：去掉 0/O、1/I/l 等最易混淆的形近字符（2/Z、5/S 保留）。</summary>
     public const string Alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
     private const int Width = 120;

@@ -18,7 +18,7 @@ namespace AbpAdmin.Files;
 
 /// <summary>
 /// 缩略图回填：扫 State == Pending 的映射行与「还没有映射行的图片文件」，批量入队。
-/// 的 ScheduledJobHandler（ThumbnailBackfillJobHandler）调本管理器做周期回填；
+/// 定时作业 ThumbnailBackfillJobHandler 调本管理器做周期回填；
 /// 也可以被管理端手动触发。
 ///
 /// 注意 Failed 不在自动回填范围：失败是永久留痕（如像素超限），自动重试会形成无限循环，

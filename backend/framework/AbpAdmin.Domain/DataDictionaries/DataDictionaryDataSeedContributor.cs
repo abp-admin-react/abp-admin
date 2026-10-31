@@ -149,7 +149,7 @@ public class DataDictionaryDataSeedContributor : IDataSeedContributor, ITransien
             new("false", "失败", TagType: DataDictionaryTagTypes.Error)
         ]),
 
-        // 翻译表：的状态由 ReadyTime 推导（无独立状态字段），Pending = 准备中，Ready = 已就绪
+        // 翻译表：GDPR 请求的状态由 ReadyTime 推导（无独立状态字段），Pending = 准备中，Ready = 已就绪
         new(AbpAdminDictionaryCodes.GdprRequestState, "GDPR 请求状态", "翻译表（T2.4 由 ReadyTime 推导）",
         [
             new("Pending", "准备中", TagType: DataDictionaryTagTypes.Processing),

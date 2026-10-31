@@ -161,7 +161,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     /// 本方法不硬编码任何端口。CreateOrUpdate 对已有客户端的 URI 集合更新在部分路径上不可靠，
     /// 这里用 Populate + 清空 + 再写入，保证 compose 改 WEB_PUBLIC_URL 后重跑种子立即生效。
     /// 库内值与配置完全一致时跳过本方法的整只更新——消掉种子路径上的重复二次写——
-    /// 否则每次种子都无条件重写）。整只级别的零写放大由本类覆写的 CreateOrUpdateApplicationAsync
+    /// 否则每次种子都无条件重写。整只级别的零写放大由本类覆写的 CreateOrUpdateApplicationAsync
     /// 保证（对已存在应用逐域比对，全等直接跳过基类的无条件 UpdateAsync）；本方法只在其
     /// 判定出回调集合有差异时才会被走到，是差异路径里的二次兜底。
     /// </summary>
@@ -244,7 +244,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
         var configurationSection = Configuration.GetSection("OpenIddict:Applications");
 
 
-        // Console Test / Angular Client
+        // 主 SPA 客户端（AbpAdmin_App）——ABP 模板的 Console Test / Angular Client 双客户端已收口为一个
 
         var appClientId = configurationSection["AbpAdmin_App:ClientId"];
         if (!appClientId.IsNullOrWhiteSpace())

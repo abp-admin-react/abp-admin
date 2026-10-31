@@ -15,7 +15,7 @@ public class AbpAdminImagingOptions
     /// <summary>
     /// 头像允许的扩展名（小写，含点）。双向约束：每个扩展名必须能被
     /// FileSignaturesImageContentValidator 的格式映射识别，启动期校验不通过则 AbpInitializationException。
-    /// 刻意不含 .svg（XXE / 内联脚本 / SSRF 攻击面，见规格 ）。
+    /// 刻意不含 .svg（XXE / 内联脚本 / SSRF 攻击面）。
     /// </summary>
     public List<string> AvatarAllowedExtensions { get; set; } = [".jpg", ".jpeg", ".png"];
 

@@ -6,7 +6,7 @@ namespace AbpAdmin.Files;
 
 /// <summary>
 /// 缩略图回填。
-/// 业务逻辑在 交付的 <see cref="FileThumbnailBackfillManager"/>，这里只是调度挂接：
+/// 业务逻辑在 <see cref="FileThumbnailBackfillManager"/>，这里只是调度挂接：
 /// 扫 Pending 映射行与缺失映射行的图片文件，批量入队一次性缩略图作业。
 /// </summary>
 [ExposeServices(typeof(IScheduledJobHandler))]

@@ -5,7 +5,7 @@ namespace AbpAdmin.Localization;
 
 /// <summary>
 /// 语言定义实体。全局资产（host 维护），所有租户共用。
-/// 不实现 IMultiTenant，不有 TenantId 列。
+/// 不实现 IMultiTenant，不设 TenantId 列。
 /// </summary>
 public class Language : AuditedAggregateRoot<Guid>
 {

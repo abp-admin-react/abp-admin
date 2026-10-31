@@ -31,7 +31,7 @@ namespace AbpAdmin.Data;
 /// ② IdentityDataSeedContributor 建租户 admin 用户触发的 UserEto 事件会让 FileManagement 的
 ///    FileUser 同步器重复插入（EasyAbpFileManagementUsers 主键）。
 /// 这些都不是字典该修的。租户 admin 用户由 TenantAppService 建租户时自己创建；
-/// 其余按租户的种子（定时作业等）仍是 DbMigrator 的职责，与 之前一致、无回退。
+/// 其余按租户的种子（定时作业等）仍是 DbMigrator 的职责，与拆分前一致、无回退。
 ///
 /// [UnitOfWork(IsDisabled = true)]：事件处理器会被 UoW 拦截器包住（建租户请求路径下还会并入
 /// 正在完成的请求 UoW）。禁掉后两个贡献者各自的 [UnitOfWork] 独立开 UoW、随做随提交。

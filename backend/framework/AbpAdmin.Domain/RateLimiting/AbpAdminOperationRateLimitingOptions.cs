@@ -9,7 +9,7 @@ namespace AbpAdmin.RateLimiting;
 /// </summary>
 public class AbpAdminOperationRateLimitingOptions
 {
-    /// <summary>全局开关。Development 环境自动 false。</summary>
+    /// <summary>全局开关。默认 true，经 "OperationRateLimiting:IsEnabled" 配置关闭（无环境自动关闭逻辑）。</summary>
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>分布式锁超时时间。超时抛 AbpException（500），不得转 429。</summary>

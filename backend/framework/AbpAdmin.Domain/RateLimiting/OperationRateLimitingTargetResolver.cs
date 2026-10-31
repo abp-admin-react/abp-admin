@@ -10,8 +10,8 @@ namespace AbpAdmin.RateLimiting;
 
 /// <summary>
 /// 操作限流目标解析器（问题5 修复）：
-/// MVC Filter 与 DI 拦截器若各维护一套近乎相同的「取特性 + 解析分区参数」逻辑（约 70 行/套），
-/// 任何一处修 bug 另一处必漏。本类是唯一实现，两处适配层只做各自的元数据适配。
+/// 早期设计中 MVC Filter 与 DI 拦截器各维护一套「取特性 + 解析分区参数」逻辑（约 70 行/套），
+/// 任何一处修 bug 另一处必漏——本类是唯一实现（MVC Filter 侧已删除，现存消费方为 Checker 直调与拦截器）。
 /// </summary>
 public class OperationRateLimitingTargetResolver : ITransientDependency
 {
@@ -24,7 +24,7 @@ public class OperationRateLimitingTargetResolver : ITransientDependency
 
     /// <summary>
     /// 取 [OperationRateLimiting] 特性：方法级优先于类级。
-    /// 注意：MVC Filter 侧优先走 EndpointMetadata（含 Razor Pages 约定特性），本方法作为拦截器/回退路径。
+    /// 注意：拦截器走反射读取（历史 MVC Filter 侧曾优先走 EndpointMetadata，该侧已删除）。
     /// </summary>
     public virtual OperationRateLimitingAttribute? GetAttribute(MethodInfo? method)
     {
