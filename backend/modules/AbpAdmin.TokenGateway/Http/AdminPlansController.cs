@@ -17,9 +17,8 @@ public class AdminPlansController(PlanCatalog plans, ICurrentTenant currentTenan
 {
     /// <summary>
     /// Host 专属资源的侧界守卫（对齐 AbpAdminAppService.EnsureHostSide 双保险口径）。TgPlans 是
-    /// 无租户列的全局表，权限位锁 MultiTenancySides.Host（两侧可授时，
-    /// 两侧可授，建租户种子会把缺省侧权限授给租户 admin——已由反编译 Volo.Abp.PermissionManagement
-    /// 10.7.0 实证）——但存量库的租户授权行不会因定义收窄而消失，控制器侧显式拒绝兜底存量误授。
+    /// 无租户列的全局表，权限位锁 MultiTenancySides.Host（两侧可授时，建租户种子会把缺省侧权限
+    /// 授给租户 admin——已由反编译 Volo.Abp.PermissionManagement 10.7.0 实证）——但存量库的租户授权行不会因定义收窄而消失，控制器侧显式拒绝兜底存量误授。
     /// </summary>
     private void EnsureHostSide()
     {

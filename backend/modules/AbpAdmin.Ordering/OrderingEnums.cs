@@ -18,7 +18,7 @@ public enum OrderStatus
     Fulfilled = 3,
 }
 
-/// <summary>关闭原因。只有 Expired 且没有任何异常明细时，才可以被匹配的到账标回 Paid。</summary>
+/// <summary>关闭原因。只有 Expired 且无异常标志位（PaymentAnomaly=false）时，才可以被匹配的到账标回 Paid。</summary>
 public enum OrderCloseReason
 {
     UserCancel = 1,

@@ -143,8 +143,8 @@ public class OrderAdminAppService : ApplicationService
         OrderServiceHelpers.ThrowIfNotHost(CurrentTenant.Id);
     }
 
-    /// <summary>备注写入列的长度预算：512 上限减去固定前缀（防 varchar 溢出变 500）。</summary>
-    private const int MaxManualRefundNoteLength = 489; // OrderingConsts.MaxNoteLength(512) - len("Manual refund record: ")
+    /// <summary>备注写入列的长度预算：512 上限减去固定前缀（防 varchar 溢出）。</summary>
+    private const int MaxManualRefundNoteLength = 490; // OrderingConsts.MaxNoteLength(512) - len("Manual refund record: ")(22)
 
     private async Task<OrdOrder> LoadAsync(Guid id)
     {

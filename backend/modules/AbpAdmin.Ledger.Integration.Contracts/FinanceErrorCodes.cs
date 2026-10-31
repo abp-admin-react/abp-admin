@@ -66,7 +66,7 @@ public static class FinanceErrorCodes
     /// <summary>模板要求 AgentId（佣金类）而事件未带。HTTP 400。</summary>
     public const string AgentIdRequired = Namespace + ":AgentIdRequired";
 
-    /// <summary>科目不存在（含非法 ParentId / 父链成环时复用）。HTTP 400/404 视调用点。</summary>
+    /// <summary>科目不存在（含非法 ParentId / 父链成环时复用）。HTTP 400（AbpAdminLedgerModule 统一映射）。</summary>
     public const string AccountNotFound = Namespace + ":AccountNotFound";
     /// <summary>系统种子科目只读（不可改/删/启停）。HTTP 403。</summary>
     public const string AccountSystemReadOnly = Namespace + ":Account:SystemReadOnly";

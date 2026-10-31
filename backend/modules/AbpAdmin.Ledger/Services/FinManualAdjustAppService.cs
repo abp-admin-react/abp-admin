@@ -211,7 +211,8 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
 
     /// <summary>
     /// Posted → Reversed：红冲调账凭证（Finance.Adjust.Reverse）。有意不走 LoadForAuditAsync 的
-    /// 自批闸门：冲销与审批是两个独立权限（fin_boss 可冲销自己批过的单），设计见定稿 §5.2。
+    /// 自批闸门：冲销与审批是两个独立权限（默认授权下 fin_accountant 同时持 Approve+Reverse，
+    /// 可冲销自己批过的单；fin_boss 仅 Approve+Reject），设计见定稿 §5.2。
     /// </summary>
     public virtual async Task<FinManualAdjustDto> ReverseAsync(Guid id)
     {

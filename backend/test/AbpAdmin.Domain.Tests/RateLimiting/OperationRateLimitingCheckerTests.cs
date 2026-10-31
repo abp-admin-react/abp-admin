@@ -422,35 +422,22 @@ public abstract class OperationRateLimitingCheckerTests<TStartupModule> : AbpAdm
                 _checker.CheckAsync(policy, "ip-x"));
         }
 
-        // 换一个新用户，IP 规则计数应只有 1（不是 3）
+        // 换新用户：UserRule 按用户计数，新用户有全新 1 次窗口——若实现把 UserRule
+        // 误做成按 IP 计数，这里会被前序用量限流抛异常，用例即红
         using (ChangeCurrentUser(Guid.NewGuid(), "nr-user-2"))
         {
-            var status = await _checker.GetStatusAsync(policy, "ip-x");
-            // 最严格规则是 UserRule（新用户 RemainingCount=1），
-            // 但 IP 规则的 CurrentCount 可以通过整体状态间接验证：
-            // 如果 IP 规则被递增了 3 次，RemainingCount 会是 97；
-            // 只递增 1 次的话 RemainingCount 是 99。
-            // 由于 GetStatusAsync 聚合取最严格（UserRule 更严格），
-            // 我们直接验证新用户可以调用 1 次（UserRule 允许），
-            // 且调用后 IP 规则计数为 2。
             await _checker.CheckAsync(policy, "ip-x");
         }
 
-        // 再换一个新用户验证 IP 规则计数 = 2
+        // 再换一个新用户：同上，验证 UserRule 按用户窗口的独立性
         using (ChangeCurrentUser(Guid.NewGuid(), "nr-user-3"))
         {
-            // UserRule 允许 1 次，调用后 IP 规则计数 = 3
             await _checker.CheckAsync(policy, "ip-x");
         }
 
-        // IP 规则上限 100 远未到，用单规则策略直接验证计数
-        var ipOnlyPolicy = AddTestPolicy(p => p
-            .AddRule(r => r.PartitionByParameter()
-                .WithFixedWindow(TimeSpan.FromMinutes(10), 100)
-                .WithName("IpRule")));
-        // 注意：命名规则 "IpRule" 的缓存 key 与上面策略的 IP 规则相同（key 含策略名，所以实际不同）。
-        // 这里改为直接验证：被拒绝的 2 次调用没有递增 IP 计数。
-        // 通过新用户成功调用 2 次（每次 UserRule 允许 1 次）间接证明 IP 计数只增了成功调用的次数。
+        // 口径说明：被拒调用是否递增 IP 计数，本用例没有直接断言——GetStatusAsync
+        // 聚合只反映最严格规则（UserRule），读不出 IP 规则计数，且 IP 上限 100 远未触发；
+        // 上面序列仅能间接佐证「拒绝未封死后续用户」，不能证明 IP 计数纪律本身。
     }
 
     // ========== 5. 命名与不命名的 key 派生差异 ==========

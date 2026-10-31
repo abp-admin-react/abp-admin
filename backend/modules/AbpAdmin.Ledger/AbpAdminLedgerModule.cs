@@ -21,7 +21,7 @@ namespace AbpAdmin.Ledger;
 
 /// <summary>
 /// 瘦 Ledger 模块：表骨架 + 权限 + 种子；过账引擎（幂等/锁/红冲）、调账五态、Prepayment 停写。
-/// 规则 Provider 外置 / ETO；薄 Payment 门面。
+/// 规则 Provider 外置 / ETO；进程内集成门面（LedgerIntegrationService）。
 /// </summary>
 [DependsOn(
     typeof(AbpAdminEntityFrameworkCoreModule),

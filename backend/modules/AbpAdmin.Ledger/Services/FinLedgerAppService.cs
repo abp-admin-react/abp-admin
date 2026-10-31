@@ -104,7 +104,7 @@ public class FinLedgerAppService : FinanceAppServiceBase
     }
 
     /// <summary>试算平衡：按科目×币种汇总分录借贷。Scope.Agent 调用方只汇总自己名下子户
-    /// 的分录（，与余额路径同边界）。</summary>
+    /// 的分录（与余额路径同边界）。</summary>
     [Authorize(FinancePermissions.Ledger.View)]
     public virtual async Task<FinTrialBalanceDto> GetTrialBalanceAsync(FinTrialBalanceInput input)
     {

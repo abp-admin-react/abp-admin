@@ -1,8 +1,9 @@
 namespace AbpAdmin.Ordering.Settings;
 
 /// <summary>
-/// 订单模块运行期参数名（第③层：设置页可调、免重启）。报价费率 S/F/f/r 全部来自配置，
-/// 不写死 0.971 或 0.029（计划第 4.2 节）。设置项后改，已生成的报价不变。
+/// 订单模块运行期参数名（第③层：设置页可调、免重启）。报价费率 S/F/f/r 的业务逻辑不写死
+/// 0.971/0.029（默认值单源在本文件 Defaults，可被设置项覆盖；计划第 4.2 节）。设置项后改，
+/// 已生成的报价不变。
 /// </summary>
 public static class OrderingSettings
 {

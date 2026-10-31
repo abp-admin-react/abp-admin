@@ -58,11 +58,6 @@ public abstract class PaymentAdminAppServiceRefundTests<TStartupModule> : AbpAdm
     }
 
     /// <summary>
-    /// 创建一笔已支付完成的 Prepayment 支付单（行项金额 <paramref name="itemAmounts"/>，至少一项）。
-    /// 返回（支付单 Id, 行项 ItemKey 数组——与传入金额同序, 扣款账户 Id）：ItemKey 全局唯一，
-    /// 供从共享测试库里精确找回本单；账户 Id 供断言退款后的余额回流。
-    /// </summary>
-    /// <summary>
     /// 与产品侧同规则的分配 oracle：按 ItemKey 升序贪心，前项退满才动下一项。
     /// 期望值动态推导而非硬编码，使断言对任意 ItemKey 随机序都稳定。
     /// </summary>
@@ -85,6 +80,11 @@ public abstract class PaymentAdminAppServiceRefundTests<TStartupModule> : AbpAdm
         return expected;
     }
 
+    /// <summary>
+    /// 创建一笔已支付完成的 Prepayment 支付单（行项金额 <paramref name="itemAmounts"/>，至少一项）。
+    /// 返回（支付单 Id, 行项 ItemKey 数组——与传入金额同序, 扣款账户 Id）：ItemKey 全局唯一，
+    /// 供从共享测试库里精确找回本单；账户 Id 供断言退款后的余额回流。
+    /// </summary>
     private async Task<(Guid PaymentId, string[] ItemKeys, Guid AccountId)> CreatePaidPaymentAsync(params decimal[] itemAmounts)
     {
         if (itemAmounts.Length == 0)

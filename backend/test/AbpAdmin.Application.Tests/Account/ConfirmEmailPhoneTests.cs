@@ -12,9 +12,9 @@ namespace AbpAdmin.Account;
  * 这两个匿名端点是可暴力猜码的验证面，且 刚补过防枚举延时——必须锚定：
  * 1. 未知邮箱/手机号与错误验证码返回同一个错误码（响应形状一致，不可枚举已注册账户）
  * 2. 错误验证码不翻转 EmailConfirmed / PhoneNumberConfirmed
- * 3. 正确验证码走通（邮箱：6 位码缓存机制，从录制邮件提取，与真实用户视角一致；手机：Identity SetPhoneNumberConfirmed(true) 落库）
- * 验证码直接用 IdentityUserManager 的 token 生成器产出（与 SendEmailConfirmationCodeAsync
- * 邮件内容同源），不解析邮件正文。
+ * 3. 正确验证码走通（邮箱：6 位码缓存机制，从录制邮件正文提取，与真实用户视角一致；
+ *    手机：验证码直接用 IdentityUserManager 的 token 生成器产出——与 SendEmailConfirmationCodeAsync
+ *    邮件内容同源，不解析正文）
  */
 public abstract class ConfirmEmailPhoneTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
     where TStartupModule : IAbpModule

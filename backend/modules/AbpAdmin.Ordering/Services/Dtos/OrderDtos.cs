@@ -107,7 +107,7 @@ public class OrderListFilterDto
     /// <summary>PendingPayment / Paid / Closed / Fulfilled；空 = 全部。</summary>
     public string? Status { get; set; }
 
-    /// <summary>只看有异常明细的订单（管理端「有异常」预置过滤）。</summary>
+    /// <summary>只看有异常标志位（PaymentAnomaly）的订单（管理端「有异常」预置过滤）。</summary>
     public bool? HasAnomaly { get; set; }
 
     /// <summary>只看该用户的订单（管理端按用户排查）。</summary>

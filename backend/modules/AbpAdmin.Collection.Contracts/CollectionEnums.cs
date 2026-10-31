@@ -31,7 +31,7 @@ public enum CollectionStatus
 /// <summary>
 /// 业务单类型（字符串，避免契约工程反向引用订单模块）。
 /// 充值事件的 BusinessType 固定为 TopUp，BusinessId 等于 BalanceTxnId。
-/// 订单模块使用自己的常量（OrdOrderBusinessTypes.Order），收款不解释其含义。
+/// 订单模块使用自己的常量（OrderingConsts.OrderBusinessType = "Order"），收款不解释其含义。
 /// </summary>
 public static class CollectionBusinessTypes
 {

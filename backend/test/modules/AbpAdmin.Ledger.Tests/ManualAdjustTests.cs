@@ -360,7 +360,7 @@ public class ManualAdjustTests : LedgerScenarioTestBase
     }
 
     [Fact]
-    public async Task Boss_Cannot_Create_Accountant_Without_Approve_Cannot_Approve()
+    public async Task Boss_Cannot_Create_Nobody_Cannot_Approve()
     {
         using (As(TestUsers.Boss))
         {
@@ -368,7 +368,8 @@ public class ManualAdjustTests : LedgerScenarioTestBase
                 .ShouldBe(FinanceErrorCodes.AdjustCreateDenied);
         }
 
-        // 只有 Create、没有 Approve 的角色：用 Nobody 验证 ApproveDenied；老板有 Approve 会过
+        // 单据由会计（Create+Approve 双权）创建并提交；用 Nobody（零权限）验证 Approve
+        // 拒绝码——任何缺 Approve 权限的主体同码拒绝；老板（无 Create）的建单拒绝已在前半段
         Guid id;
         using (As(TestUsers.AccountantA))
         {

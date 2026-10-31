@@ -15,7 +15,7 @@ public static class FinanceBizTypes
     /// <summary>链上充值入账（归集确认后入账，借 1001 / 贷 2201）。</summary>
     public const string Deposit = "deposit";
 
-    /// <summary>链上提现（freeze/unfreeze/approve/fee-take/payout/refund 六个 phase，见提现过账表）。</summary>
+    /// <summary>链上提现（freeze/unfreeze/approve/fee-take/payout/refund/fee-refund 七个 phase，见提现过账表）。</summary>
     public const string Withdraw = "withdraw";
 
     public static class Phases

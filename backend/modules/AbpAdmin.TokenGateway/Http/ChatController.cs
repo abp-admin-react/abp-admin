@@ -132,8 +132,8 @@ public class ChatController(KeyStore keys, ChatBilling billing, IUpstream upstre
             {
                 try
                 {
-                    // 流式中客户端断开——已 flush 到线上的帧真实消耗了上游计费，无条件
-                    // 无条件全额解冻 = 已交付内容零计费。有交付时按「输入粗估 + 已见输出字符
+                    // 流式中客户端断开——已 flush 到线上的帧真实消耗了上游计费，全额解冻
+                    // = 已交付内容零计费（不可取）。有交付时按「输入粗估 + 已见输出字符
                     // 折算」结算（clamp 到预占额），用量行记 success=false 区分正常完成；
                     // 未开始流式或零交付（首帧前断开）仍走全额解冻。
                     if (started && seenChars > 0)

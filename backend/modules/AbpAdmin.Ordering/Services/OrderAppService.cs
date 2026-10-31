@@ -120,7 +120,7 @@ public class OrderAppService : ApplicationService
         query = OrderServiceHelpers.ApplyFilter(query, filter);
 
         var total = await query.CountAsync();
-        // 真分页（硬顶 50 无 Skip 会让第 51 笔起永远取不到）
+        // 真分页（硬顶 100，无 Skip 的首页只看最新 100 笔，更早的用管理端过滤查）
         var (skip, take) = OrderServiceHelpers.NormalizePaging(filter, def: 20, cap: 100);
         var items = await query
             .OrderByDescending(o => o.CreationTime)

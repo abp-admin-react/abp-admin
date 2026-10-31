@@ -89,7 +89,7 @@ public abstract class BroadcastNotificationJobTests<TStartupModule> : AbpAdminAp
         var broadcast = await RunUntilCompleteAsync(broadcastId);
 
         broadcast.State.ShouldBe(NotificationBroadcastStates.Completed);
-        broadcast.TotalCount.ShouldBeGreaterThanOrEqualTo(2); // user1 + user2（测试库未播种 admin 用户行）
+        broadcast.TotalCount.ShouldBeGreaterThanOrEqualTo(2); // user1 + user2 起底（另有种子 admin/ut.principal 行，故用下限断言）
         broadcast.SentCount.ShouldBe(broadcast.TotalCount);
 
         await WithUnitOfWorkAsync(async () =>

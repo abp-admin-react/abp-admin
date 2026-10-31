@@ -70,7 +70,7 @@ public class OrdOrder : BasicAggregateRoot<Guid>
 
     public OrderCloseReason? CloseReason { get; set; }
 
-    /// <summary>可空标记。有异常时写入一次，不覆盖；明细在 OrdPaymentAnomalyLines（只追加）。</summary>
+    /// <summary>异常标志位。首条到账类异常明细写入时置位一次，不覆盖；明细在 OrdPaymentAnomalyLines（只追加）。</summary>
     public bool PaymentAnomaly { get; set; }
 
     /// <summary>致付收款的渠道单号（微信/支付宝交易号、Stripe PaymentIntent/Session id）。
@@ -133,7 +133,8 @@ public class OrdQuote : BasicAggregateRoot<Guid>
 
 /// <summary>
 /// 支付异常明细（OrdPaymentAnomalyLines）：时间、金额、币种、渠道单号、说明。只追加，不更新；
-/// 人工退款也记在明细上（不改订单 Status）。订单的 PaymentAnomaly 标记在第一条明细写入时置位一次。
+/// 人工退款也记在明细上（不改订单 Status，不置位异常标志）。订单的 PaymentAnomaly 标记在
+/// 第一条到账类异常明细写入时置位一次。
 /// </summary>
 public class OrdPaymentAnomalyLine : Entity<Guid>
 {

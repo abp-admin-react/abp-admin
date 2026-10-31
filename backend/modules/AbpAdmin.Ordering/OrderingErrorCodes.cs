@@ -16,7 +16,7 @@ public static class OrderingErrorCodes
     /// <summary>只有业务单可以标记履约（充值订单停在 Paid）。</summary>
     public const string NotAFulfillableOrder = Namespace + ":NotAFulfillableOrder";
 
-    /// <summary>该支付方式不可用（如 Stripe 报价剩余不足 30 分钟、余额记账未开放）。</summary>
+    /// <summary>该支付方式不可用（方式名不在已支持清单内，ParsePayMethod 解析失败时抛出）。</summary>
     public const string PayMethodUnavailable = Namespace + ":PayMethodUnavailable";
 
     /// <summary>金额低于该支付方式的下限（X_min）。</summary>

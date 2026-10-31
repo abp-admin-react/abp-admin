@@ -7,7 +7,7 @@ using Xunit;
 namespace AbpAdmin.EntityFrameworkCore;
 
 /// <summary>
-/// QuartzTablesEnsurer 的真库锚（无凭证自动跳过，CI 的 postgres 服务容器真跑）：
+/// QuartzTablesEnsurer 的真库锚（测试库连不上自动跳过，随进程 Testcontainers 容器真跑）：
 /// 幂等性（连跑两遍零异常）+ 建出的 11 张 qrtz_* 表能被 information_schema 查到——
 /// 手工翻译的 DDL 与 Quartz StdAdoDelegate 的 performSchemaValidation 期望之间的
 /// 漂移（列类型/缺表/缺外键）只在 Production 启动时爆炸，必须在测试期钉住。

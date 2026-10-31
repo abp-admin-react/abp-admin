@@ -21,7 +21,8 @@ namespace AbpAdmin.Biz.Template.Data;
 /// 接入框架同款的数据范围全局筛选器与写入侧自动填充——筛选器覆写是 DbContext 级的，
 /// 框架 AbpAdminDbContext 的覆写管不到本上下文，模块必须自带一份（自包含样板的取舍：
 /// 复制模块即带走数据权限能力，不依赖框架仓库改动）。语义与框架实现逐条对齐：
-/// null OU 只对 All 可见（fail-closed）、SelfOnly 与机构范围「或」、显式赋值不覆盖、
+/// null OU 的行仅 All 分支、或 SelfOnly 分支命中本人创建时可见（Contains 不命中 null，
+/// 同样 fail-closed）、SelfOnly 与机构范围「或」、显式赋值不覆盖、
 /// 算不出组织抛业务异常。
 /// </summary>
 [ConnectionStringName(BizTemplateConsts.ConnectionStringName)]

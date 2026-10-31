@@ -39,7 +39,7 @@ public class FinReconcileAppService : FinanceAppServiceBase
         // 代理切片 fail closed（sectest b05 / 审计 NV-02 残余）：对账结果是租户级全量汇总
         //（DiffJson 含平台借贷合计与各代理子账户投影差），Finance.Scope.Agent 持有者没有
         // 有效的切片形态——与 FinOverviewAppService.GetAsync 同口径直接拒绝，而不是回退全量。
-        // run 侧已由 Reconcile.Run 权限单独把门（切片持有者不授予）。
+        // run 侧另有 Reconcile.Run 权限门 + RunAsync 顶部的同款切片 fail-closed 兜底。
         if (await ResolveAgentScopeAsync() != null)
         {
             throw new AbpAuthorizationException(code: AbpAuthorizationErrorCodes.GivenPolicyHasNotGranted);

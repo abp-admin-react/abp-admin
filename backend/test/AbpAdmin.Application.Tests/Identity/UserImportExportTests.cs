@@ -718,7 +718,7 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
     }
 
     /// <summary>
-    /// OU 列回归 修复）：用户查询改 includeDetails:false 后，
+    /// OU 列回归（bug 修复）：用户查询改 includeDetails:false 后，
     /// OU 列由 IdentityUserOrganizationUnit 连接表批量查询提供——导出必须仍带出 OU 显示名。
     /// </summary>
     [Fact]

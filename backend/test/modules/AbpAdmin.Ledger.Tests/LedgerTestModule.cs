@@ -84,7 +84,7 @@ public class LedgerTestModule : AbpModule
 /// <summary>测试用户与定稿 §5.2 角色权限。</summary>
 public static class TestUsers
 {
-    /// <summary>TestBase FakeCurrentPrincipalAccessor 的默认用户：全权限（种子/工具场景）。</summary>
+    /// <summary>TestBase FakeCurrentPrincipalAccessor 的默认用户：除 Scope.Agent / Adjust.ApproveOwn 外全权限（种子/工具场景）。</summary>
     public static readonly Guid Admin = Guid.Parse("2e701e62-0953-4dd3-910b-dc6cc93ccb0d");
     public static readonly Guid AccountantA = Guid.Parse("a0000000-0000-0000-0000-00000000000a");
     public static readonly Guid AccountantB = Guid.Parse("b0000000-0000-0000-0000-00000000000b");
@@ -100,7 +100,7 @@ public static class TestUsers
     /// <summary>切片 + Reconcile.Run：验证 Run 面对切片持有者 fail-closed（NV-02 残余收口）。</summary>
     public static readonly Guid AgentWithRun = Guid.Parse("d3000000-0000-0000-0000-0000000000d3");
 
-    /// <summary>：读路径切片受测权限组 = 会计的 Ledger.View + 代理的 Scope.Agent。</summary>
+    /// <summary>读路径切片受测权限组 = 会计的 Ledger.View + 代理的 Scope.Agent。</summary>
     public static readonly string[] AgentWithLedgerViewPerms =
     {
         FinancePermissions.Ledger.View, FinancePermissions.Scope.Agent,

@@ -17,8 +17,8 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
     /// 选别名（未知/缺省 → DefaultAlias）→ 限并发 → 按「输入粗估 + max_tokens」预占（至少 1）→ 生成上游请求体：
     /// model 换成内部模型、去掉 user、流式强制 include_usage。返回的 ResponseId 是本次固定的 hb- id。
     /// 上游体构造与入参解析全部放在预占之前（不会留下「已预占未释放」的孤儿单）。
-    /// 入参类型从严：max_tokens/stream 键存在但类型非法时直接 400（TryGetValue
-    /// 失败静默回落默认值/按非流式处理，客户端误用无感且注释与行为不符）。
+    /// 入参类型从严：max_tokens/stream 键存在但类型非法时直接 400——若 TryGetValue
+    /// 失败静默回落默认值/按非流式处理，客户端误用无感且注释与行为不符。
     /// </summary>
     public async Task<ChatTicket> BeginAsync(Guid user, JsonObject request, string? bot)
     {

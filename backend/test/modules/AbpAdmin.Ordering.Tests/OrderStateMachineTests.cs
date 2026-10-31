@@ -374,8 +374,8 @@ public class OrderStateMachineTests : OrderingStubTestBase
     public async Task Concurrent_Balance_Pay_Marks_Paid_Exactly_Once()
     {
         // 计划第 8 节第一条：同一订单并发支付只有一次成功。条件更新 WHERE Status =
-        /// PendingPayment 在行锁上串行化两个并发扣款：先到者标 Paid，后到者 0 行回滚并
-        ///按「已 Paid 且归因相同」当作成功——库里只有一次 Paid、一条扣款归因、零异常
+        // PendingPayment 在行锁上串行化两个并发扣款：先到者标 Paid，后到者 0 行回滚并
+        // 按「已 Paid 且归因相同」当作成功——库里只有一次 Paid、一条扣款归因、零异常
         var order = await UowAsync(() => CreateBusinessOrderAsync());
         var manager = GetRequiredService<OrderPaymentManager>();
         var quote = await UowAsync(() => GetRequiredService<Quotes.QuoteManager>()

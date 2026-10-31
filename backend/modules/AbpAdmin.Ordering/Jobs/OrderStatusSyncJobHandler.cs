@@ -19,9 +19,9 @@ namespace AbpAdmin.Ordering.Jobs;
 /// <summary>
 /// 订单补状态作业（计划第 3.3 节）：只调用集成服务和自己的表。Host 专用定时作业
 ///（IScheduledJobHandler + [ExposeServices]，实例字段不跨调用保存状态）。
-/// 扫描范围：仍为 PendingPayment 的订单；Paid 且没有任何异常明细、PaidAt 在最近 7 天内的订单；
-/// Closed、没有任何异常明细、ExpiresAt 在最近 7 天内的订单。更早的关闭单用管理端列表的预置
-/// 过滤查看，不每轮全表扫描，也不另建清单表。
+/// 扫描范围：仍为 PendingPayment 的订单；Paid（含 CollectionId 归因）且无异常标志位、PaidAt
+/// 在最近 7 天内的订单；Closed、无异常标志位、ExpiresAt 在最近 7 天内的订单。更早的关闭单用
+/// 管理端列表的预置过滤查看，不每轮全表扫描，也不另建清单表。
 /// M2 起补两步（计划第 3.3 节）：「已扣未标支付」（GetDebitAsync 核对金额币种后补支付/复活/
 /// 回冲）与「充值流水补插」（ListCreditedTxnsAsync 序号游标 + 7 天重扫，跳过计数告警）。
 /// </summary>

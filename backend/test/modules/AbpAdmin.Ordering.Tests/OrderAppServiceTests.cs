@@ -139,7 +139,8 @@ public class OrderAppServiceTests : OrderingStubTestBase
         var page2 = await service.GetListAsync(new Services.Dtos.OrderListFilterDto { SkipCount = 2, MaxResultCount = 2 });
         page2.Items.Count.ShouldBe(1);
 
-        // 页大小超上限钳到 100；<=0 用缺省 20
+        // MaxResultCount=9999：返回现有全部 3 行（页大小钳制在实现侧，钳制值本身不在本用例断言范围）；
+        // SkipCount=-5 → 钳 0，取第 1 页 2 行
         var clamped = await service.GetListAsync(new Services.Dtos.OrderListFilterDto { MaxResultCount = 9999 });
         clamped.Items.Count.ShouldBe(3);
         var negativeSkip = await service.GetListAsync(new Services.Dtos.OrderListFilterDto { SkipCount = -5, MaxResultCount = 2 });
