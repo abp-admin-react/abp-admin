@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <!-- EF/Npgsql 基建 + IAbpAdminDbSchemaMigrator 约定（同 Biz.Template） -->
-    <ProjectReference Include="..\..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\framework-app\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

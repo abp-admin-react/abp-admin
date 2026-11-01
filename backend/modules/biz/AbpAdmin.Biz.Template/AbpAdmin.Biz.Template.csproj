@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\common.props" />
+  <Import Project="..\..\..\common.props" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -14,7 +14,7 @@
 
   <ItemGroup>
     <!-- 只依赖框架应用的 EF 基建工程（连带 Domain/EFCore/迁移约定接口），业务归业务 -->
-    <ProjectReference Include="..\..\framework-app\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\framework-app\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

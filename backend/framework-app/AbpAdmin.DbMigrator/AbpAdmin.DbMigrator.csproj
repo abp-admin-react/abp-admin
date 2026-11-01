@@ -21,12 +21,12 @@
     <ProjectReference Include="..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\AbpAdmin.Application.Contracts\AbpAdmin.Application.Contracts.csproj" />
     <!-- 业务模块（modules/ 业务板块区）：引用后其 IAbpAdminDbSchemaMigrator 实现进入容器，被迁移循环自动枚举 -->
-    <ProjectReference Include="..\..\modules\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
-    <ProjectReference Include="..\modules\AbpAdmin.TokenGateway\AbpAdmin.TokenGateway.csproj" />
-    <ProjectReference Include="..\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
-    <ProjectReference Include="..\modules\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
-    <ProjectReference Include="..\modules\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
-    <ProjectReference Include="..\modules\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
+    <ProjectReference Include="..\..\modules\biz\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.TokenGateway\AbpAdmin.TokenGateway.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
   </ItemGroup>
 
   <ItemGroup>

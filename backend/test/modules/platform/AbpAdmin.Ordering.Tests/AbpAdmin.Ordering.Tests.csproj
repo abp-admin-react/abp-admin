@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\..\common.props" />
+  <Import Project="..\..\..\..\common.props" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -12,11 +12,11 @@
   <ItemGroup>
     <!-- 被测模块 + 共享事务测试需要真实收款模块（两个 DbContext 同一工作单元）；
          订单实现工程本身仍只依赖 Collection.Contracts（架构测试钉住直接引用） -->
-    <ProjectReference Include="..\..\..\framework-app\modules\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
-    <ProjectReference Include="..\..\..\framework-app\modules\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
+    <ProjectReference Include="..\..\..\..\modules\platform\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
+    <ProjectReference Include="..\..\..\..\modules\platform\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
     <!-- HostOnlyScheduledJobTypes 在 Application 层（守卫集合断言要用） -->
-    <ProjectReference Include="..\..\..\framework-app\AbpAdmin.Application\AbpAdmin.Application.csproj" />
-    <ProjectReference Include="..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
+    <ProjectReference Include="..\..\..\..\framework-app\AbpAdmin.Application\AbpAdmin.Application.csproj" />
+    <ProjectReference Include="..\..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
   </ItemGroup>
 
   <ItemGroup>

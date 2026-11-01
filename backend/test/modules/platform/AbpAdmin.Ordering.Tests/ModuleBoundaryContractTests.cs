@@ -39,7 +39,7 @@ public class ModuleBoundaryContractTests
     [Fact]
     public void Ordering_Direct_References_Contain_No_Collection_Implementation()
     {
-        var document = XDocument.Load(FindCsproj("AbpAdmin.Ordering", "framework-app/modules"));
+        var document = XDocument.Load(FindCsproj("AbpAdmin.Ordering", "modules/platform"));
 
         // 直接引用 = ProjectReference + PackageReference 两类都要查（只扫工程引用会漏掉
         // 直接引的 EasyAbp 包——防这种漏网）
@@ -67,7 +67,7 @@ public class ModuleBoundaryContractTests
         // Collection → Ledger 接线边界（Cursor 计划补锁）：只允许引用纯契约工程
         // AbpAdmin.Ledger.Integration.Contracts（ILedgerIntegrationService/ILedgerSeedProvider），
         // 不得引用 Ledger 实现（AbpAdmin.Ledger）——否则模块反向耦合总账实现。
-        var collectionProject = FindCsproj("AbpAdmin.Collection", "framework-app/modules");
+        var collectionProject = FindCsproj("AbpAdmin.Collection", "modules/platform");
         var collectionRefs = System.Xml.Linq.XDocument.Load(collectionProject)
             .Descendants("ProjectReference")
             .Select(e => (string)e.Attribute("Include")!)

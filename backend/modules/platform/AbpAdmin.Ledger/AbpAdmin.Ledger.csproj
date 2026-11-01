@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\framework-app\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\AbpAdmin.Ledger.Integration.Contracts\AbpAdmin.Ledger.Integration.Contracts.csproj" />
   </ItemGroup>
 

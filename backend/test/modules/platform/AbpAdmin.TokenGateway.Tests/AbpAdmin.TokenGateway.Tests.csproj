@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\..\common.props" />
+  <Import Project="..\..\..\..\common.props" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -11,9 +11,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\framework-app\modules\AbpAdmin.TokenGateway\AbpAdmin.TokenGateway.csproj" />
+    <ProjectReference Include="..\..\..\..\modules\platform\AbpAdmin.TokenGateway\AbpAdmin.TokenGateway.csproj" />
     <!-- 共享 Testcontainers PG（postgres:16）；xunit/Shouldly 由 TestBase 传递 -->
-    <ProjectReference Include="..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
+    <ProjectReference Include="..\..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,6 @@
 # HarnessBot 路线 C · TokenGateway 联调说明
 
-模块：`backend/framework-app/modules/AbpAdmin.TokenGateway`（挂在 HttpApi.Host）。测试：`backend/test/framework-app/AbpAdmin.TokenGateway.Tests`。
+模块：`backend/modules/platform/AbpAdmin.TokenGateway`（挂在 HttpApi.Host）。测试：`backend/test/modules/platform/AbpAdmin.TokenGateway.Tests`。
 
 > 第二批起全部落库（默认连接串 Default，独立迁移 History 表 `__TokenGateway_EFMigrationsHistory`，宿主 AutoMigrateOnStartup 自动建表）。
 > 表：TgWallets / TgLedgerEntries / TgReservations / TgApiKeys / TgSessions / TgOrders / TgUsage / TgPlans（种子四档）。

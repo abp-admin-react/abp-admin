@@ -20,14 +20,14 @@ COPY framework-app/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts
 COPY framework-app/AbpAdmin.Application/AbpAdmin.Application.csproj framework-app/AbpAdmin.Application/
 COPY framework-app/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj framework-app/AbpAdmin.HttpApi/
 COPY framework-app/AbpAdmin.HttpApi.Client/AbpAdmin.HttpApi.Client.csproj framework-app/AbpAdmin.HttpApi.Client/
-COPY framework-app/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj framework-app/AbpAdmin.Webhooks/
-COPY modules/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj modules/AbpAdmin.Biz.Template/
-COPY framework-app/modules/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj framework-app/modules/AbpAdmin.Collection.Contracts/
-COPY framework-app/modules/AbpAdmin.Collection/AbpAdmin.Collection.csproj framework-app/modules/AbpAdmin.Collection/
-COPY framework-app/modules/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj framework-app/modules/AbpAdmin.Ordering/
-COPY framework-app/modules/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj framework-app/modules/AbpAdmin.Ledger.Integration.Contracts/
-COPY framework-app/modules/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj framework-app/modules/AbpAdmin.Ledger/
-COPY framework-app/modules/AbpAdmin.TokenGateway/AbpAdmin.TokenGateway.csproj framework-app/modules/AbpAdmin.TokenGateway/
+COPY modules/platform/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj modules/platform/AbpAdmin.Webhooks/
+COPY modules/biz/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj modules/biz/AbpAdmin.Biz.Template/
+COPY modules/platform/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj modules/platform/AbpAdmin.Collection.Contracts/
+COPY modules/platform/AbpAdmin.Collection/AbpAdmin.Collection.csproj modules/platform/AbpAdmin.Collection/
+COPY modules/platform/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj modules/platform/AbpAdmin.Ordering/
+COPY modules/platform/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj modules/platform/AbpAdmin.Ledger.Integration.Contracts/
+COPY modules/platform/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj modules/platform/AbpAdmin.Ledger/
+COPY modules/platform/AbpAdmin.TokenGateway/AbpAdmin.TokenGateway.csproj modules/platform/AbpAdmin.TokenGateway/
 COPY framework-app/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj framework-app/AbpAdmin.DbMigrator/
 RUN dotnet restore framework-app/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj
 

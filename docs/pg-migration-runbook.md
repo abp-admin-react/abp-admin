@@ -27,7 +27,7 @@
     --startup-project backend/framework-app/AbpAdmin.DbMigrator \
     --context AbpAdminDbContext
   ```
-  业务模块同法（`--project backend/modules/AbpAdmin.Biz.Template --context BizTemplateDbContext`）。
+  业务模块同法（`--project backend/modules/biz/AbpAdmin.Biz.Template --context BizTemplateDbContext`）。
   设计期连接串由各工程的 `*DbContextFactory` 从 Host appsettings 分层读取，无需启动宿主。
 - **已有旧 schema 的库**（SQL 脚本时代建表、`__EFMigrationsHistory` 里没有 EF 迁移记录）：
   启动时自动打戳 baseline（`EfCoreLegacySchemaBaseliner`：哨兵表在而 History 无 Initial 记账 →

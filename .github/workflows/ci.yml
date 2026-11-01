@@ -43,8 +43,8 @@ jobs:
         run: dotnet tool restore
       - name: EF model drift check
         # 实体/配置改了但没 dotnet ef migrations add 时必红——七本迁移账各查一遍。
-        # -p 覆盖 framework-app（宿主/通用模块 + framework-app/modules/ 平台功能模块）与
-        # modules（业务模块）两区全部建账工程；framework/ 是无 DbContext 的基础库，不建账。
+        # -p 覆盖 framework-app（宿主分层）与 modules/{platform,biz}（平台功能/业务模块）两区
+        # 全部建账工程；framework/ 是无 DbContext 的基础库，不建账。
         # startup 统一走 DbMigrator。连接串占位由 env 注入：设计时建模不拨号，但工厂解析不到串会直接抛
         # （全新克隆无 Database.json/secrets，OCR R2 修复）
         env:
@@ -53,17 +53,17 @@ jobs:
           dotnet ef migrations has-pending-model-changes \
             -p backend/framework-app/AbpAdmin.EntityFrameworkCore -s backend/framework-app/AbpAdmin.DbMigrator -c AbpAdminDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/modules/AbpAdmin.Biz.Template -s backend/framework-app/AbpAdmin.DbMigrator -c BizTemplateDbContext
+            -p backend/modules/biz/AbpAdmin.Biz.Template -s backend/framework-app/AbpAdmin.DbMigrator -c BizTemplateDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/framework-app/AbpAdmin.Webhooks -s backend/framework-app/AbpAdmin.DbMigrator -c WebhooksDbContext
+            -p backend/modules/platform/AbpAdmin.Webhooks -s backend/framework-app/AbpAdmin.DbMigrator -c WebhooksDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/framework-app/modules/AbpAdmin.Collection -s backend/framework-app/AbpAdmin.DbMigrator -c CollectionDbContext
+            -p backend/modules/platform/AbpAdmin.Collection -s backend/framework-app/AbpAdmin.DbMigrator -c CollectionDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/framework-app/modules/AbpAdmin.Ordering -s backend/framework-app/AbpAdmin.DbMigrator -c OrderingDbContext
+            -p backend/modules/platform/AbpAdmin.Ordering -s backend/framework-app/AbpAdmin.DbMigrator -c OrderingDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/framework-app/modules/AbpAdmin.Ledger -s backend/framework-app/AbpAdmin.DbMigrator -c LedgerDbContext
+            -p backend/modules/platform/AbpAdmin.Ledger -s backend/framework-app/AbpAdmin.DbMigrator -c LedgerDbContext
           dotnet ef migrations has-pending-model-changes \
-            -p backend/framework-app/modules/AbpAdmin.TokenGateway -s backend/framework-app/AbpAdmin.DbMigrator -c TokenGatewayDbContext
+            -p backend/modules/platform/AbpAdmin.TokenGateway -s backend/framework-app/AbpAdmin.DbMigrator -c TokenGatewayDbContext
       - name: Test
         # 数据库由测试自起：Testcontainers 拉起 postgres:16（每测试进程一个容器，随进程回收），
         # runner 自带 Docker，无需服务容器。含 FrontendContractSnapshotTests（DTO 形状快照）、

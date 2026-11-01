@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\..\common.props" />
+  <Import Project="..\..\..\..\common.props" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -11,8 +11,8 @@
   <ItemGroup>
     <!-- 被测模块本体：modules/AbpAdmin.Biz.Template。测试随模块走——下游复制模块时，
          modules/<X> 与 test/modules/<X.Tests> 两处一并复制改名，即可继承全部用例 -->
-    <ProjectReference Include="..\..\..\modules\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
-    <ProjectReference Include="..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
+    <ProjectReference Include="..\..\..\..\modules\biz\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
+    <ProjectReference Include="..\..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
   </ItemGroup>
 
   <ItemGroup>

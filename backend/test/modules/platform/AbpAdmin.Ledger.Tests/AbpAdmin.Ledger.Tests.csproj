@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\..\common.props" />
+  <Import Project="..\..\..\..\common.props" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -10,8 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\framework-app\modules\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
-    <ProjectReference Include="..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
+    <ProjectReference Include="..\..\..\..\modules\platform\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
+    <ProjectReference Include="..\..\..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
   </ItemGroup>
 
   <ItemGroup>

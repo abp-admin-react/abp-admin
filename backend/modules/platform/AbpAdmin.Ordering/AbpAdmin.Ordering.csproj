@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\framework-app\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\AbpAdmin.Collection.Contracts\AbpAdmin.Collection.Contracts.csproj" />
   </ItemGroup>
 

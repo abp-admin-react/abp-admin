@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\framework-app\AbpAdmin.EntityFrameworkCore\AbpAdmin.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="..\..\framework-app\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
     <ProjectReference Include="..\AbpAdmin.Application.Tests\AbpAdmin.Application.Tests.csproj" />
   </ItemGroup>
 

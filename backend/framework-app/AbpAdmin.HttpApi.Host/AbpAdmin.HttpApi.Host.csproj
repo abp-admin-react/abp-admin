@@ -68,13 +68,13 @@
     <!-- T5：ES 辅助存储模块（宿主级基础设施，DbMigrator 不感知） -->
     <ProjectReference Include="..\..\framework\AbpAdmin.Elasticsearch\AbpAdmin.Elasticsearch.csproj" />
     <!-- 自包含业务模块样板（modules/ 业务板块区）。新增业务模块：加这一行引用 + AbpAdminHttpApiHostModule 的 DependsOn 一行 -->
-    <ProjectReference Include="..\..\modules\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
+    <ProjectReference Include="..\..\modules\biz\AbpAdmin.Biz.Template\AbpAdmin.Biz.Template.csproj" />
     <!-- Webhook 模块（自包含：订阅/投递/发送记录，独立 History 表） -->
-    <ProjectReference Include="..\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
-    <ProjectReference Include="..\modules\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
-    <ProjectReference Include="..\modules\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
-    <ProjectReference Include="..\modules\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
-    <ProjectReference Include="..\modules\AbpAdmin.TokenGateway\AbpAdmin.TokenGateway.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Webhooks\AbpAdmin.Webhooks.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Ordering\AbpAdmin.Ordering.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.TokenGateway\AbpAdmin.TokenGateway.csproj" />
   </ItemGroup>
 
   <ItemGroup>

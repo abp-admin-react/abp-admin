@@ -6,13 +6,13 @@ Quartz 承载后台作业与定时调度。Cursor rules：`../.cursor/rules/fram
 
 ## 工程分区
 
-三分区（ABP 官方框架/应用模块两分概念的细化，官方仓库只有 framework/ 与 modules/ 两区）：
-`framework/` 框架基础库（无业务、可独立复用：DynamicQueryable、Elasticsearch）；
-`framework-app/` 框架应用——宿主分层工程（Domain/Application/EFCore/Host 等）+ 自包含通用模块（Webhooks）
-+ `framework-app/modules/` 平台功能模块（收款/台账/订单/代币网关，随平台发布的自包含模块）；
-`modules/` 普通应用——真实业务模块（自带迁移/本地化/设置）。
-测试对称：框架与应用级在 `test/`，平台功能模块在 `test/framework-app/`，业务模块在 `test/modules/`。
-新增业务模块 = 复制 `modules/AbpAdmin.Biz.Template` 改名 + 测试工程一并复制进 `test/modules/`，
+三分区（对齐 ABP 官方 framework/ + templates/ + modules/ 与 RuoYi framework/ + module-* 的口径）：
+`framework/` 框架基础库——零 ProjectReference 裸类库，可独立复用（DynamicQueryable、Elasticsearch 引擎接入层）；
+`framework-app/` 框架应用——宿主分层骨架（Domain/Application/EFCore/HttpApi/Host/DbMigrator，即 ABP app 模板那套）；
+`modules/platform/` 平台功能模块——平台自带能力的自包含模块（收款/台账/订单/代币网关/Webhooks，自带迁移/本地化/设置）；
+`modules/biz/` 业务模块——真实业务（自带迁移/本地化/设置）。
+测试对称：宿主级在 `test/`，平台功能模块在 `test/modules/platform/`，业务模块在 `test/modules/biz/`。
+新增业务模块 = 复制 `modules/biz/AbpAdmin.Biz.Template` 改名 + 测试工程一并复制进 `test/modules/biz/`，
 规约见 `.cursor/rules/framework/common/biz-module.mdc`。
 
 ## 出站 HTTP（HttpAgent）
@@ -34,5 +34,5 @@ Quartz 承载后台作业与定时调度。Cursor rules：`../.cursor/rules/fram
 
 ```bash
 dotnet build backend/AbpAdmin.slnx
-dotnet test backend/test/AbpAdmin.Application.Tests   # 框架/应用级测试在 backend/test/，平台功能模块测试在 backend/test/framework-app/，业务模块测试在 backend/test/modules/
+dotnet test backend/test/AbpAdmin.Application.Tests   # 宿主级测试在 backend/test/，平台功能模块测试在 backend/test/modules/platform/，业务模块测试在 backend/test/modules/biz/
 ```

@@ -2,23 +2,18 @@
     <Configurations>
         <Platform Name="Any CPU" />
     </Configurations>
-    <!-- 三分区：framework/ 框架基础库（无业务，对应 ABP 官方 framework modules 概念）；
-         framework-app/ 框架应用（宿主分层 + 通用后台功能 + 平台功能模块）；
-         modules/ 普通应用（真实业务模块，从 Biz.Template 复制创建）。 -->
-    <!-- 框架基础库区：裸类库（仅 Module/Options，零 ProjectReference、无实体无页面，可独立复用）。
-         注意 ES 页面/检索接口不在此——那部分在框架应用（Application/HttpApi/前端）；
-         本工程只是 ES 引擎接入层（同官方 Volo.Abp.Elasticsearch 放 framework 的口径）。 -->
+    <!-- 三分区：framework/ 框架基础库（零 ProjectReference 裸类库，对应 ABP 官方 framework modules 概念）；
+         framework-app/ 框架应用（宿主分层骨架，对应 ABP 官方 app 模板概念）；
+         modules/ 自包含模块——platform/ 平台功能模块（平台自带能力，随上游升级）与
+         biz/ 业务模块（下游从 Biz.Template 复制创建），同 ABP modules/ 与 RuoYi module-* 平铺口径。 -->
     <Folder Name="/framework/">
         <!-- 动态查询库 -->
         <Project Path="framework/AbpAdmin.DynamicQueryable/AbpAdmin.DynamicQueryable.csproj" />
-        <!-- T5：ES 辅助存储 -->
+        <!-- T5：ES 辅助存储（引擎接入层；ES 页面/检索接口在框架应用侧） -->
         <Project Path="framework/AbpAdmin.Elasticsearch/AbpAdmin.Elasticsearch.csproj" />
     </Folder>
-    <!-- 框架应用区：ABP 分层骨架宿主 + Webhooks。
-         分区判据（不是按"是否新功能"）：framework/ 只收零 ProjectReference、可独立复用的裸类库；
-         引用宿主工程或自带实体/迁移/页面的，一律属框架应用侧。
-         Webhooks 虽是平台自带能力，但它引用宿主 EFCore 且自带 Migrations/Permissions/Localization，
-         属自包含模块形态，故在框架应用区而非 framework/。 -->
+    <!-- 框架应用区：ABP 分层骨架宿主。分区判据：引用宿主工程或自带实体/迁移/页面的，
+         一律属框架应用侧；framework/ 只收零 ProjectReference 裸类库。 -->
     <Folder Name="/framework-app/">
         <Project Path="framework-app/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj" />
         <Project Path="framework-app/AbpAdmin.Domain/AbpAdmin.Domain.csproj" />
@@ -29,24 +24,24 @@
         <Project Path="framework-app/AbpAdmin.HttpApi.Client/AbpAdmin.HttpApi.Client.csproj" />
         <Project Path="framework-app/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj" />
         <Project Path="framework-app/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj" />
-        <Project Path="framework-app/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj" />
     </Folder>
-    <!-- 平台功能模块区：自包含模块（收款/台账/订单/代币网关），工程自带迁移/本地化/设置；
-         属平台自带能力，随框架一起发布，不是具体项目的业务 -->
-    <Folder Name="/framework-app/modules/">
-        <Project Path="framework-app/modules/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj" />
-        <Project Path="framework-app/modules/AbpAdmin.Collection/AbpAdmin.Collection.csproj" />
-        <Project Path="framework-app/modules/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj" />
-        <Project Path="framework-app/modules/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj" />
-        <Project Path="framework-app/modules/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj" />
-        <Project Path="framework-app/modules/AbpAdmin.TokenGateway/AbpAdmin.TokenGateway.csproj" />
+    <!-- 平台功能模块区：平台自带能力的自包含模块（收款/台账/订单/代币网关/Webhooks），
+         工程自带迁移/本地化/设置，随框架一起发布，不是具体项目的业务 -->
+    <Folder Name="/modules/platform/">
+        <Project Path="modules/platform/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj" />
+        <Project Path="modules/platform/AbpAdmin.Collection/AbpAdmin.Collection.csproj" />
+        <Project Path="modules/platform/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj" />
+        <Project Path="modules/platform/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj" />
+        <Project Path="modules/platform/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj" />
+        <Project Path="modules/platform/AbpAdmin.TokenGateway/AbpAdmin.TokenGateway.csproj" />
+        <Project Path="modules/platform/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj" />
     </Folder>
-    <!-- 普通应用区：真实业务模块（自包含，自带迁移/本地化/设置）；新增业务模块复制 modules/AbpAdmin.Biz.Template -->
-    <Folder Name="/modules/">
+    <!-- 业务模块区：真实业务模块（自包含，自带迁移/本地化/设置）；新增业务模块复制 biz/AbpAdmin.Biz.Template -->
+    <Folder Name="/modules/biz/">
         <!-- 自包含业务模块样板：一个工程，建表走模块内 EF 迁移（独立 History 表） -->
-        <Project Path="modules/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj" />
+        <Project Path="modules/biz/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj" />
     </Folder>
-    <!-- 框架与框架应用（宿主级）测试；模块测试对称：平台功能模块在 /test/framework-app/，业务模块在 /test/modules/ -->
+    <!-- 框架与框架应用（宿主级）测试 -->
     <Folder Name="/test/">
         <Project Path="test/AbpAdmin.DynamicQueryable.Tests/AbpAdmin.DynamicQueryable.Tests.csproj" />
         <Project Path="test/AbpAdmin.Application.Tests/AbpAdmin.Application.Tests.csproj" />
@@ -58,15 +53,15 @@
         <!-- T5：存储基础设施测试(单测 + 真库集成) -->
         <Project Path="test/AbpAdmin.Storage.Tests/AbpAdmin.Storage.Tests.csproj" />
     </Folder>
-    <!-- 平台功能模块的测试（与 /framework-app/modules/ 分区对称，Testcontainers PG，程序集串行） -->
-    <Folder Name="/test/framework-app/">
-        <Project Path="test/framework-app/AbpAdmin.Collection.Tests/AbpAdmin.Collection.Tests.csproj" />
-        <Project Path="test/framework-app/AbpAdmin.Ordering.Tests/AbpAdmin.Ordering.Tests.csproj" />
-        <Project Path="test/framework-app/AbpAdmin.Ledger.Tests/AbpAdmin.Ledger.Tests.csproj" />
-        <Project Path="test/framework-app/AbpAdmin.TokenGateway.Tests/AbpAdmin.TokenGateway.Tests.csproj" />
+    <!-- 模块测试（与 modules/ 分区对称）：platform 平台功能模块测试（Testcontainers PG，程序集串行） -->
+    <Folder Name="/test/modules/platform/">
+        <Project Path="test/modules/platform/AbpAdmin.Collection.Tests/AbpAdmin.Collection.Tests.csproj" />
+        <Project Path="test/modules/platform/AbpAdmin.Ordering.Tests/AbpAdmin.Ordering.Tests.csproj" />
+        <Project Path="test/modules/platform/AbpAdmin.Ledger.Tests/AbpAdmin.Ledger.Tests.csproj" />
+        <Project Path="test/modules/platform/AbpAdmin.TokenGateway.Tests/AbpAdmin.TokenGateway.Tests.csproj" />
     </Folder>
-    <!-- 普通业务模块的测试（与 /modules/ 分区对称）：随模块复制，下游改名后继承全部用例 -->
-    <Folder Name="/test/modules/">
-        <Project Path="test/modules/AbpAdmin.Biz.Template.Tests/AbpAdmin.Biz.Template.Tests.csproj" />
+    <!-- 业务模块测试（与 modules/biz 对称）：随模块复制，下游改名后继承全部用例 -->
+    <Folder Name="/test/modules/biz/">
+        <Project Path="test/modules/biz/AbpAdmin.Biz.Template.Tests/AbpAdmin.Biz.Template.Tests.csproj" />
     </Folder>
 </Solution>
