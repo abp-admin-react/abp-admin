@@ -11,6 +11,7 @@ import { App, Button, Popconfirm, Tag } from 'antd';
 import React, { useRef, useState } from 'react';
 import { applyTenantPackage } from '@/abp/tenantPackages';
 import { createTenant, deleteTenant, getTenants } from '@/abp/tenants';
+import { getAllEditions } from '@/abp/proModules';
 import type { CreateTenantInput, TenantDto } from '@/abp/types';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import FeatureModal from '@/components/FeatureModal';
@@ -104,6 +105,22 @@ const TenantsPage: React.FC = () => {
 
   const reload = () => actionRef.current?.reload();
 
+  // 版本列的 Id→名称映射（lookup 需要 AbpAdmin.Editions 权限，无权限时回退显示原始 Id）
+  const [editionNames, setEditionNames] = useState<Record<string, string>>(
+    {},
+  );
+  React.useEffect(() => {
+    getAllEditions()
+      .then((res) =>
+        setEditionNames(
+          Object.fromEntries(
+            (res.items ?? []).map((e) => [e.id, e.displayName]),
+          ),
+        ),
+      )
+      .catch(() => setEditionNames({}));
+  }, []);
+
   // 设置项为 false 时整个连接字符串入口不渲染（默认 true）
   const connectionStringEnabled =
     initialState?.settingValues?.[CONNECTION_STRING_MANAGEMENT_SETTING] !==
@@ -134,8 +151,11 @@ const TenantsPage: React.FC = () => {
     {
       title: '版本',
       search: false,
-      render: (_, record) =>
-        record.extraProperties?.[TENANT_PROP.EditionId] || '-',
+      render: (_, record) => {
+        const editionId = record.extraProperties?.[TENANT_PROP.EditionId];
+        if (!editionId) return '-';
+        return editionNames[String(editionId)] ?? String(editionId);
+      },
     },
     {
       title: '激活状态',

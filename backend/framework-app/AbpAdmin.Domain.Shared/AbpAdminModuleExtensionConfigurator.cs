@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using AbpAdmin.Editions;
 using AbpAdmin.Tenants;
 using Volo.Abp.Identity;
 using Volo.Abp.ObjectExtending;
@@ -65,6 +66,13 @@ public static class AbpAdminModuleExtensionConfigurator
 
                     tenant.AddOrUpdateProperty<DateTime?>(
                         AbpAdminTenantConsts.EditionEndDateUtcPropertyName);
+
+                    // 版本分配（EditionId）同为租户扩展属性：不注册则 DTO 的 extraProperties
+                    // 序列化会剥掉它——set-tenant-edition 写进实体后，租户列表"版本"列与
+                    // TenantEditionForm 回显永远为空（实测缺陷，SAAS 测试计划 A-TN-04）。
+                    // 常量即 EditionConsts.TenantEditionPropertyName（值 "EditionId"）。
+                    tenant.AddOrUpdateProperty<Guid?>(
+                        EditionConsts.TenantEditionPropertyName);
                 });
             });
     }
