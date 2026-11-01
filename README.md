@@ -19,7 +19,7 @@
 | 前端 | React 19 · antd 6 · Ant Design Pro v6 · Umi Max 4 · pnpm 10 · Vitest · Biome |
 | 认证 | OpenIddict(OIDC,前后端分离,SPA 独立部署) |
 
-默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库 PostgreSQL(连接串在 `backend/framework/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 开发样本中指向本地默认库,本机真实凭据直接改该文件并用 skip-worktree 屏蔽,见文件头注释)。默认管理员 `admin` / `1q2w3E*`。
+默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库 PostgreSQL(连接串在 `backend/framework-app/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 开发样本中指向本地默认库,本机真实凭据直接改该文件并用 skip-worktree 屏蔽,见文件头注释)。默认管理员 `admin` / `1q2w3E*`。
 
 ## 内置能力
 
@@ -63,8 +63,8 @@ ABP 官方 Layered 模板的 **Host + 独立 SPA 变体**(以 `HttpApi.Host` 承
 # 1) 后端(backend/ 为解决方案根目录)
 cd backend
 dotnet build
-cd framework/AbpAdmin.DbMigrator && dotnet run && cd ../..   # 迁移 + 种子（库需已存在，见 docs/pg-migration-runbook.md）
-cd framework/AbpAdmin.HttpApi.Host && dotnet run             # API: https://localhost:44395/swagger
+cd framework-app/AbpAdmin.DbMigrator && dotnet run && cd ../..   # 迁移 + 种子（库需已存在，见 docs/pg-migration-runbook.md）
+cd framework-app/AbpAdmin.HttpApi.Host && dotnet run             # API: https://localhost:44395/swagger
 
 # 2) 前端
 cd web
@@ -97,7 +97,7 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 
 ### 配置单一来源
 
-`Database:Provider` 与 `ConnectionStrings:Default` 只维护在 `backend/framework/AbpAdmin.HttpApi.Host/appsettings.json`(真实凭证放同目录 `appsettings.secrets.json`:入库的是公开安全的开发样本,本机真实凭据改同文件后 `git update-index --skip-worktree` 屏蔽);DbMigrator 与 EF 设计时工具自动跟随读取。生效顺序(后者覆盖前者):
+`Database:Provider` 与 `ConnectionStrings:Default` 只维护在 `backend/framework-app/AbpAdmin.HttpApi.Host/appsettings.json`(真实凭证放同目录 `appsettings.secrets.json`:入库的是公开安全的开发样本,本机真实凭据改同文件后 `git update-index --skip-worktree` 屏蔽);DbMigrator 与 EF 设计时工具自动跟随读取。生效顺序(后者覆盖前者):
 
 1. `HttpApi.Host/appsettings.json`(共享基座)
 2. `HttpApi.Host/appsettings.secrets.json`(共享凭证)
@@ -110,9 +110,9 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 
 | 要改什么 | 文件 |
 | --- | --- |
-| 端口、CORS、连接串、Redis、OpenIddict 客户端回调 | `backend/framework/AbpAdmin.HttpApi.Host/appsettings.json` |
-| 后端启动 URL | `backend/framework/AbpAdmin.HttpApi.Host/Properties/launchSettings.json` |
-| 管理员默认密码 | `backend/framework/AbpAdmin.Domain/AbpAdminConsts.cs`(改后需重跑 Migrator) |
+| 端口、CORS、连接串、Redis、OpenIddict 客户端回调 | `backend/framework-app/AbpAdmin.HttpApi.Host/appsettings.json` |
+| 后端启动 URL | `backend/framework-app/AbpAdmin.HttpApi.Host/Properties/launchSettings.json` |
+| 管理员默认密码 | `backend/framework-app/AbpAdmin.Domain/AbpAdminConsts.cs`(改后需重跑 Migrator) |
 | 前端开发代理目标 | `web/config/proxy.ts` |
 | OIDC 授权地址 / ClientId / Scope | `web/src/abp/env.ts`(ClientId 须与 Host `OpenIddict` 节一致) |
 | 路由 / 菜单、布局主题 | `web/config/routes.ts`、`web/config/defaultSettings.ts` |
@@ -183,7 +183,7 @@ git fetch upstream && git merge upstream/main
 ```bash
 # 后端(backend/)
 dotnet build && dotnet test
-dotnet publish backend/framework/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj -c Release -o ./publish/host
+dotnet publish backend/framework-app/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj -c Release -o ./publish/host
 
 # 前端(web/)
 pnpm build      # 产物 web/dist

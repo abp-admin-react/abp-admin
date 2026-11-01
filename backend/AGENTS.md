@@ -6,8 +6,12 @@ Quartz 承载后台作业与定时调度。Cursor rules：`../.cursor/rules/fram
 
 ## 工程分区
 
-`framework/` 放框架级工程（分层/宿主/基础设施），`modules/` 放业务板块（自包含业务模块，自带迁移/本地化/设置；
-ABP 官方仓库 framework/ vs modules/ 的同款分区）。测试对称：框架级在 `test/`，业务模块在 `test/modules/`。
+三分区（ABP 官方框架/应用模块两分概念的细化，官方仓库只有 framework/ 与 modules/ 两区）：
+`framework/` 框架基础库（无业务、可独立复用：DynamicQueryable、Elasticsearch）；
+`framework-app/` 框架应用——宿主分层工程（Domain/Application/EFCore/Host 等）+ 自包含通用模块（Webhooks）
++ `framework-app/modules/` 框架业务模块（收款/台账/订单/代币网关，随平台发布的自包含模块）；
+`modules/` 普通应用——真实业务模块（自带迁移/本地化/设置）。
+测试对称：框架与应用级在 `test/`，框架业务模块在 `test/framework-app/`，业务模块在 `test/modules/`。
 新增业务模块 = 复制 `modules/AbpAdmin.Biz.Template` 改名 + 测试工程一并复制进 `test/modules/`，
 规约见 `.cursor/rules/framework/common/biz-module.mdc`。
 
@@ -20,7 +24,7 @@ ABP 官方仓库 framework/ vs modules/ 的同款分区）。测试对称：框�
 
 - 文档索引：https://http.furion.net/llms.txt ；官方文档更新后刷新本地副本：
   `curl https://http.furion.net/llms-full.txt -o docs/httpagent-llms-full.txt`
-- 项目内范式：`framework/AbpAdmin.Domain/ModuleConfigurators/HttpRemoteConfigurator.cs`——
+- 项目内范式：`framework-app/AbpAdmin.Domain/ModuleConfigurators/HttpRemoteConfigurator.cs`——
   声明式接口（`IHttpDeclarative` + `[HttpClientName]`）绑定命名 HttpClient，**注册跟随消费方所在模块**；
   第三方 5xx 非 JSON 体的容错解析参照 `TolerantJsonContentConverter`（fail-closed，不炸穿）。
 - 调试：`HttpRemote:Profiler=true` 时**全部**出站客户端控制台直出完整报文（经
@@ -30,5 +34,5 @@ ABP 官方仓库 framework/ vs modules/ 的同款分区）。测试对称：框�
 
 ```bash
 dotnet build backend/AbpAdmin.slnx
-dotnet test backend/test/AbpAdmin.Application.Tests   # 框架级测试在 backend/test/，业务模块测试在 backend/test/modules/
+dotnet test backend/test/AbpAdmin.Application.Tests   # 框架/应用级测试在 backend/test/，框架业务模块测试在 backend/test/framework-app/，业务模块测试在 backend/test/modules/
 ```

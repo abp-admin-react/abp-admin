@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\framework\AbpAdmin.HttpApi.Client\AbpAdmin.HttpApi.Client.csproj" />
+    <ProjectReference Include="..\..\framework-app\AbpAdmin.HttpApi.Client\AbpAdmin.HttpApi.Client.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -277,7 +277,7 @@ tempkey.jwk
 
 # 本地密钥文件：真实口令只放这里或环境变量，不入库
 **/appsettings.secrets.json
-# Host 的 appsettings.secrets.json 也不入库（实际路径 backend/framework/，旧例外误写 backend/src/）
+# Host 的 appsettings.secrets.json 也不入库（路径无关写法，宿主先后迁过 backend/src、framework/、framework-app/）
 
 # 本地调试脚本与临时产物（不入库）
 check_*.py
@@ -331,5 +331,6 @@ coverage/
 !.env.example
 
 # Host Configuration secret-bearing files (templates: *.json.example)
-backend/framework/AbpAdmin.HttpApi.Host/Configuration/Database.json
-backend/framework/AbpAdmin.HttpApi.Host/Configuration/Security.json
+# 路径无关写法——字面量路径在分区迁移时必失效（本文件 run-2 C-6 事故同类），宿主已迁至 framework-app/
+**/AbpAdmin.HttpApi.Host/Configuration/Database.json
+**/AbpAdmin.HttpApi.Host/Configuration/Security.json

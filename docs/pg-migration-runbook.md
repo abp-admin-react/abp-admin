@@ -23,8 +23,8 @@
 - **改框架表**：改 `AbpAdminDbContext`（或实体扩展）后，在仓库根执行
   ```bash
   dotnet ef migrations add <Name> \
-    --project backend/framework/AbpAdmin.EntityFrameworkCore \
-    --startup-project backend/framework/AbpAdmin.DbMigrator \
+    --project backend/framework-app/AbpAdmin.EntityFrameworkCore \
+    --startup-project backend/framework-app/AbpAdmin.DbMigrator \
     --context AbpAdminDbContext
   ```
   业务模块同法（`--project backend/modules/AbpAdmin.Biz.Template --context BizTemplateDbContext`）。
@@ -38,7 +38,7 @@
 
 ## 2. 本机/测试环境运行手册（192.168.10.250 实例）
 
-1. **凭据**：只放 `framework/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 的
+1. **凭据**：只放 `framework-app/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 的
    `ConnectionStrings:Default`（入库的是开发样本；本机真实凭据改同文件后
    `git update-index --skip-worktree` 屏蔽）。基底 appsettings.json 的 Default 已无意义，
    会被 secrets 覆盖。
@@ -46,8 +46,8 @@
    ```bash
    # 一次性：CREATE SCHEMA IF NOT EXISTS abp_admin_efm
    export ConnectionStrings__Default="Host=...;Port=5432;Database=abp_test2;Username=...;Password=...;SearchPath=abp_admin_efm"
-   cd backend/framework/AbpAdmin.DbMigrator && dotnet run   # 建表+种子（幂等）
-   cd backend/framework/AbpAdmin.HttpApi.Host && dotnet run
+   cd backend/framework-app/AbpAdmin.DbMigrator && dotnet run   # 建表+种子（幂等）
+   cd backend/framework-app/AbpAdmin.HttpApi.Host && dotnet run
    ```
 3. **pg_hba 注意**：实例只放行 `abp_test2` 库给当前用户——**新建租户库/换库名会被
    `no pg_hba.conf entry` 拒绝**。要多库租户（独立库模式），需服务器侧为用户加放行条目。

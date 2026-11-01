@@ -67,7 +67,7 @@ services:
   migrator:
     build:
       context: ./backend
-      dockerfile: framework/AbpAdmin.DbMigrator/Dockerfile
+      dockerfile: framework-app/AbpAdmin.DbMigrator/Dockerfile
     environment:
       ConnectionStrings__Default: "Host=db;Port=5432;Database=${POSTGRES_DB:-abpadmin};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
       # 连同一 Redis：种子写设置（Bootstrap 开关等）的缓存失效才能作用到 Host 读的共享缓存——
@@ -99,7 +99,7 @@ services:
   host:
     build:
       context: ./backend
-      dockerfile: framework/AbpAdmin.HttpApi.Host/Dockerfile
+      dockerfile: framework-app/AbpAdmin.HttpApi.Host/Dockerfile
       args:
         CERT_PASSPHRASE: ${OPENIDDICT_CERT_PASSPHRASE:-dev-only-change-me}
     environment:

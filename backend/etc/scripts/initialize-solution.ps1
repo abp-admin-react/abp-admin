@@ -25,8 +25,7 @@ $jobs += Start-Job -Name "InstallLibs" -ScriptBlock {
 
 $jobs += Start-Job -Name "DbMigrator" -ScriptBlock {
     $ErrorActionPreference = "Stop"
-    Set-Location (Join-Path $using:scriptRoot "../../framework/AbpAdmin.DbMigrator")
-    dotnet run
+    Set-Location (Join-Path $using:scriptRoot "../../framework-app/AbpAdmin.DbMigrator")
     dotnet run
 
     if ($LASTEXITCODE -ne 0) {

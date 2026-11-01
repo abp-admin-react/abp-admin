@@ -5,9 +5,9 @@ $ErrorActionPreference = 'Stop'
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 Push-Location (Join-Path $PSScriptRoot '..\backend')
 try {
-  docker build -f framework/AbpAdmin.HttpApi.Host/Dockerfile -t abp-admin-host .
+  docker build -f framework-app/AbpAdmin.HttpApi.Host/Dockerfile -t abp-admin-host .
   if ($LASTEXITCODE) { throw 'docker build host failed' }
-  docker build -f framework/AbpAdmin.DbMigrator/Dockerfile -t abp-admin-migrator .
+  docker build -f framework-app/AbpAdmin.DbMigrator/Dockerfile -t abp-admin-migrator .
   if ($LASTEXITCODE) { throw 'docker build migrator failed' }
 } finally { Pop-Location }
 Write-Host 'OK: both backend images built.'

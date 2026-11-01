@@ -31,7 +31,7 @@ internal static class HostTestBed
         var baseConn = RequiresHostDatabaseFactAttribute.TryResolveOverride()
                        ?? throw new InvalidOperationException(
                            "完整宿主测试需要 PostgreSQL 连接串（宿主已 PG-only）。" +
-                           "请在 framework/AbpAdmin.HttpApi.Host/appsettings.secrets.json 配置 ConnectionStrings:Default（含凭据）。");
+                           "请在 framework-app/AbpAdmin.HttpApi.Host/appsettings.secrets.json 配置 ConnectionStrings:Default（含凭据）。");
         var connString = await EnsureIsolatedSchemaAsync(baseConn, "abp_admin_hosttest");
 
         var builder = await HostUnderTest.CreateBuilderAsync(

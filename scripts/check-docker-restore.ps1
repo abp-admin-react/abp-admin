@@ -5,8 +5,8 @@ $ErrorActionPreference = 'Stop'
 $backend = (Resolve-Path (Join-Path $PSScriptRoot '..\backend')).Path
 
 $targets = @(
-  @{ Dockerfile = 'framework/AbpAdmin.HttpApi.Host/Dockerfile'; Entry = 'framework/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj' },
-  @{ Dockerfile = 'framework/AbpAdmin.DbMigrator/Dockerfile';   Entry = 'framework/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj' }
+  @{ Dockerfile = 'framework-app/AbpAdmin.HttpApi.Host/Dockerfile'; Entry = 'framework-app/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj' },
+  @{ Dockerfile = 'framework-app/AbpAdmin.DbMigrator/Dockerfile';   Entry = 'framework-app/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj' }
 )
 
 function Get-Rel([string]$full) { $full.Substring($backend.Length).TrimStart('\', '/').Replace('\', '/') }

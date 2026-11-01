@@ -85,7 +85,7 @@ public class RedisStartupPostureTests
 
         dir.ShouldNotBeNull("未能定位 backend 根（AbpAdmin.slnx）");
         var cacheJson = File.ReadAllText(Path.Combine(
-            dir.FullName, "framework", "AbpAdmin.HttpApi.Host", "Configuration", "Cache.json"));
+            dir.FullName, "framework-app", "AbpAdmin.HttpApi.Host", "Configuration", "Cache.json"));
         cacheJson.ShouldContain(AbpAdminHttpApiHostModule.ShippedTemplateRedisConfiguration,
             Case.Insensitive,
             "Cache.json 随库基线与宿主告警常量漂移——同步两处（及本文件 InlineData）后重跑");
@@ -214,7 +214,7 @@ public class RedisStartupPostureTests
         directory.ShouldNotBeNull("测试程序集应位于仓库内，向上能找到 AbpAdmin.slnx");
 
         var productionJson = Path.Combine(
-            directory.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.Production.json");
+            directory.FullName, "framework-app", "AbpAdmin.HttpApi.Host", "appsettings.Production.json");
         File.Exists(productionJson).ShouldBeTrue();
 
         var configuration = new ConfigurationBuilder()

@@ -17,7 +17,7 @@ namespace AbpAdmin.Biz.Template.Data;
 /// <code>
 /// dotnet ef migrations add Initial
 ///   --project backend/modules/AbpAdmin.Biz.Template
-///   --startup-project backend/framework/AbpAdmin.DbMigrator
+///   --startup-project backend/framework-app/AbpAdmin.DbMigrator
 ///   --context BizTemplateDbContext
 /// </code>
 /// </summary>
@@ -50,16 +50,16 @@ public class BizTemplateDbContextFactory : IDesignTimeDbContextFactory<BizTempla
 
         return new ConfigurationBuilder()
             .AddJsonFile(
-                Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.json"),
+                Path.Combine(repoRoot.FullName, "framework-app", "AbpAdmin.HttpApi.Host", "appsettings.json"),
                 optional: false, reloadOnChange: false)
             .AddJsonFile(
-                Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "Configuration", "Database.json"),
+                Path.Combine(repoRoot.FullName, "framework-app", "AbpAdmin.HttpApi.Host", "Configuration", "Database.json"),
                 optional: true, reloadOnChange: false)
             .AddJsonFile(
-                Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.HttpApi.Host", "appsettings.secrets.json"),
+                Path.Combine(repoRoot.FullName, "framework-app", "AbpAdmin.HttpApi.Host", "appsettings.secrets.json"),
                 optional: true, reloadOnChange: false)
             .AddJsonFile(
-                Path.Combine(repoRoot.FullName, "framework", "AbpAdmin.DbMigrator", "appsettings.json"),
+                Path.Combine(repoRoot.FullName, "framework-app", "AbpAdmin.DbMigrator", "appsettings.json"),
                 optional: true, reloadOnChange: false)
             .AddEnvironmentVariables()
             .Build();

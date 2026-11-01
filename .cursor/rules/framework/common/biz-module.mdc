@@ -8,12 +8,12 @@ alwaysApply: false
 
 # 业务模块规约(自包含模块样板)
 
-> 样板:`backend/modules/AbpAdmin.Biz.Template` —— 新增子系统级业务 = 复制一个工程改名（业务模块统一放 `backend/modules/`，测试随复制进 `backend/test/modules/`）。
+> 样板:`backend/modules/AbpAdmin.Biz.Template` —— 新增子系统级业务 = 复制一个工程改名（业务模块统一放 `backend/modules/`，测试随复制进 `backend/test/modules/`）。框架业务模块(收款/台账/订单/代币网关等平台自带能力)同构但归属框架应用:`backend/framework-app/modules/`,测试在 `backend/test/framework-app/`。
 > **改名清单(全部词根一个不落,漏一处即静默冲突)**:① `BizTemplate`——模块/类/资源/SectionName/History 表 `__BizTemplateMigrations`;② `Biz`——表前缀(`XxxConsts.DbTablePrefix`);③ `BizProject(s)`——实体/表名/本地化键 `Menu:BizProjects`。
 
 ## 边界(升级顺滑的前提)
 
-- 业务代码只进模块工程,禁止散装修改框架层(Domain/Application/EFCore/Host 的框架部分)
+- 业务代码只进模块工程,禁止散装修改框架应用层(framework-app/ 下 Domain/Application/EFCore/Host 的框架部分)
 - 框架修复回上游主仓库提交,派生项目 merge upstream 跟随
 - 小功能(几张表、无独立生命周期)可走"轻模块":按层追加(Domain/Xxx、Domain.Shared/Xxx、EFCore/Configs/Xxx、Sql 脚本追加),保持追加式改动
 
