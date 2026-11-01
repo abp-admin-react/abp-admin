@@ -43,7 +43,7 @@ jobs:
         run: dotnet tool restore
       - name: EF model drift check
         # 实体/配置改了但没 dotnet ef migrations add 时必红——七本迁移账各查一遍。
-        # -p 覆盖 framework-app（宿主/通用模块 + framework-app/modules/ 框架业务模块）与
+        # -p 覆盖 framework-app（宿主/通用模块 + framework-app/modules/ 平台功能模块）与
         # modules（业务模块）两区全部建账工程；framework/ 是无 DbContext 的基础库，不建账。
         # startup 统一走 DbMigrator。连接串占位由 env 注入：设计时建模不拨号，但工厂解析不到串会直接抛
         # （全新克隆无 Database.json/secrets，OCR R2 修复）
