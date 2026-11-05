@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
@@ -51,8 +52,12 @@ public class ErrorResponseProducerInventoryTests
         }
 
         var json = File.ReadAllText(SnapshotPath);
-        var snapshot = JsonSerializer.Deserialize<ErrorResponseProducerSnapshot>(json,
-            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new JsonStringEnumConverter() }
+        };
+        var snapshot = JsonSerializer.Deserialize<ErrorResponseProducerSnapshot>(json, options);
 
         return snapshot ?? throw new InvalidOperationException("快照反序列化失败：根对象为 null。");
     }
