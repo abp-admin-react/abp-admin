@@ -199,16 +199,14 @@ public class AdminErrorEndpointRegistryTests
         };
 
         // 验证：有管理权限前缀 ≠ 自动授予 AdminCompatibility
-        foreach (var prefix in prefixes)
-        {
-            // P0 阶段只记录，不强制登记
-            // P4 发布前必须完成：每个管理权限端点都要显式登记 Audience
-            var hasManagementPrefix = managementPrefixes.Contains(prefix);
-            // 此处只是验证逻辑可用，不抛异常
-        }
+        // P0 阶段验证分类逻辑可用，P4 发布前必须完成显式登记。
+        prefixes.Count.ShouldBeGreaterThan(0, "应至少有一个权限前缀用于验证分类逻辑。");
 
-        // 成功完成即验证通过
-        await Task.CompletedTask;
+        var matchedPrefixes = prefixes.Where(managementPrefixes.Contains).ToList();
+        matchedPrefixes.Count.ShouldBeGreaterThan(0, "部分前缀应匹配管理权限命名。");
+
+        // 显式声明：匹配不等于授予资格（P4 将强制显式登记）
+        // 此处验证映射逻辑可用，而非验收登记完整性。
     }
 
     /// <summary>

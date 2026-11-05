@@ -116,6 +116,10 @@ public static class ClientErrorKindMapping
     /// 验证基础码映射一致性。
     /// 启动时调用，防止模块重复定义基础码 kind。
     /// </summary>
+    /// <remarks>
+    /// P0 阶段只验证静态映射完整性（字典键非空）。
+    /// P1/P4 将增加跨模块重复定义检测，需要运行时注册表。
+    /// </remarks>
     public static void Validate()
     {
         foreach (var (code, kind) in CodeToKind)
@@ -136,6 +140,16 @@ public static class ClientErrorKindMapping
 /// 管理兼容数据白名单。
 /// P0 阶段记录已批准字段，P1 实现过滤。
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Case Sensitivity Rules</b>:
+/// </para>
+/// <list type="bullet">
+///   <item><description>Management responses use <b>PascalCase</b> for historical fields (e.g., <c>RetryAfterSeconds</c>).</description></item>
+///   <item><description>Client responses use <b>lowerCamelCase</b> for all new fields (e.g., <c>retryAfterSeconds</c>).</description></item>
+///   <item><description>P1 filtering will need case-aware matching to preserve management compatibility while normalizing client output.</description></item>
+/// </list>
+/// </remarks>
 public static class ManagementCompatibilityDataWhitelist
 {
     /// <summary>

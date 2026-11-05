@@ -162,6 +162,16 @@ public enum ErrorProtocol
 /// <summary>
 /// 管理端错误端点登记表（P0 只读访问）。
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Layering Notice</b>: This static mutable registry is in Domain.Shared for P0 contract definition.
+/// P1 will move it to Domain or Application layer with proper DI-based singleton lifecycle.
+/// </para>
+/// <para>
+/// <b>Thread Safety</b>: Not thread-safe. Registration must complete before any concurrent reads.
+/// In P0, this is guaranteed by test-only usage. P1 will use ConcurrentDictionary or lock-based sync.
+/// </para>
+/// </remarks>
 public static class AdminErrorEndpointRegistry
 {
     private static readonly Dictionary<string, AdminErrorEndpointRegistration> Registrations = new();

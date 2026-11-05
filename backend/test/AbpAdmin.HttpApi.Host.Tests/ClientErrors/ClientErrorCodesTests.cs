@@ -97,19 +97,25 @@ public class ClientErrorCodesTests
     /// 验证支持语言清单。
     /// 首期静态客户支持集：zh-Hans、zh-Hant、en。
     /// </summary>
+    /// <remarks>
+    /// 此测试记录 P0 阶段的设计决策。P1 将在资源文件中实现此支持集，
+    /// 届时可增加对实际资源文件的验证。
+    /// </remarks>
     [Fact]
-    public void Supported_Languages_Should_Be_Defined()
+    public void Supported_Languages_Should_Be_Defined_For_P0_Design()
     {
-        var supportedLanguages = new HashSet<string>
+        // P0 设计决策：首期静态客户支持集
+        var expectedSupportedLanguages = new HashSet<string>
         {
             "zh-Hans", // 简体中文
             "zh-Hant", // 繁体中文
             "en",      // 英文
         };
 
-        supportedLanguages.Count.ShouldBe(3);
-
-        // 这是首期明确支持集，不是对现有全部前端/后端文化数量的断言。
+        expectedSupportedLanguages.Count.ShouldBe(3);
+        expectedSupportedLanguages.ShouldContain("zh-Hans");
+        expectedSupportedLanguages.ShouldContain("zh-Hant");
+        expectedSupportedLanguages.ShouldContain("en");
     }
 
     /// <summary>

@@ -269,11 +269,16 @@ public class ErrorResponseProducerInventoryTests
     }
 
     /// <summary>
-    /// 生成错误响应生产者候选清单快照（P0 初始版本）。
-    /// 未来漂移检测将比对此快照。
+    /// 验证错误响应生产者快照格式可序列化。
+    /// P0 阶段验证快照结构，不验证与 JSON 文件的一致性（P4）。
     /// </summary>
+    /// <remarks>
+    /// 注：error-response-producers.json 包含 8 个生产者（完整清单），
+    /// 本测试只验证快照结构（4 个样例）。
+    /// P4 将增加快照与 JSON 文件的双向一致性验证。
+    /// </remarks>
     [RequiresHostDatabaseFact]
-    public async Task Generate_ErrorProducer_Snapshot()
+    public async Task Generate_ErrorProducer_Snapshot_Is_Serializable()
     {
         var snapshot = new ErrorResponseProducerSnapshot
         {

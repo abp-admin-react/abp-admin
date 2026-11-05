@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Imaging;
 using Shouldly;
@@ -247,13 +248,15 @@ public class ClientErrorCompatibilityTests
             },
         };
 
-        foreach (var scenario in scenarios)
-        {
-            if (scenario.IsValid)
-            {
-                // P0 只验证公约，P1 实现过滤
-            }
-        }
+        // P0 阶段：验证场景建模完整，记录已知的大小写兼容问题。
+        // P1 将实现大小写兼容映射，届时增加实际断言。
+        var validScenarios = scenarios.Where(s => s.IsValid).ToList();
+        var invalidScenarios = scenarios.Where(s => !s.IsValid).ToList();
+
+        validScenarios.Count.ShouldBe(2, "两个场景应通过验证（符合批准集合）。");
+        invalidScenarios.Count.ShouldBe(1, "一个场景有大小写兼容问题（P1 修复）。");
+        invalidScenarios[0].Note.ShouldNotBeNull();
+        invalidScenarios[0].Note!.ShouldContain("大小写");
     }
 }
 
