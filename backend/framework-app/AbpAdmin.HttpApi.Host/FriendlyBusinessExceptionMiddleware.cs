@@ -81,6 +81,9 @@ public class FriendlyBusinessExceptionMiddleware
             context.Response.Clear();
             context.Response.StatusCode = status;
             context.Response.ContentType = "application/json; charset=utf-8";
+            // P1: Filter business.Data against AdminErrorEndpointRegistry.ApprovedDataFields whitelist
+            // before writing to response. Current passthrough is documented in
+            // UserFriendlyExceptionInventoryTests.cs Data_Transmission_Paths_Should_Be_Identified.
             await context.Response.WriteAsJsonAsync(new
             {
                 error = new

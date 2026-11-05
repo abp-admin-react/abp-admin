@@ -358,6 +358,13 @@ public class ErrorResponseProducerInventoryTests
         deserialized.SchemaVersion.ShouldBe(1);
         deserialized.Producers.Count.ShouldBe(4);
 
+        // 验证字段完整性：关键字段在序列化后保持正确值
+        var first = deserialized.Producers[0];
+        first.SourceId.ShouldBe("FriendlyBusinessExceptionMiddleware.WriteAsJsonAsync");
+        first.Protocol.ShouldBe(ErrorProtocol.AbpEnvelope);
+        first.IsErrorOutput.ShouldBeTrue();
+        first.AssociatedExitId.ShouldBe("FriendlyBusinessExceptionMiddleware.InvokeAsync()");
+
         await Task.CompletedTask;
     }
 

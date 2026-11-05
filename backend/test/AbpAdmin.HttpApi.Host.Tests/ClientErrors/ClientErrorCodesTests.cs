@@ -227,17 +227,18 @@ public class ClientErrorCodesTests
 
     /// <summary>
     /// 基线失败夹具：非法等待时间丢弃。
+    /// 验证 RetryAfter 值的合法性边界：非负整数合法。
     /// </summary>
     [Theory]
-    [InlineData(-1, false)]
-    [InlineData(0, true)]
-    [InlineData(86401, true)] // 允许但展示策略不同
-    public void Invalid_RetryAfter_Should_Be_Discarded(int value, bool isValid)
+    [InlineData(-1, false, "负数应被丢弃")]
+    [InlineData(0, true, "0 是合法值")]
+    [InlineData(86401, true, "超过 86400 秒合法但不展示具体倒计时")]
+    public void Invalid_RetryAfter_Should_Be_Discarded(int value, bool isValid, string reason)
     {
         // 合法值：非负整数
         // 超过 86400 秒不展示具体倒计时，但不丢弃值
         var isValidSpec = value >= 0;
-        isValidSpec.ShouldBe(isValid);
+        isValidSpec.ShouldBe(isValid, reason);
     }
 }
 

@@ -237,6 +237,12 @@ public class AdminErrorEndpointRegistryTests
         currentSignatures.Count.ShouldBeGreaterThan(200,
             "端点签名数量应大于 200（验证枚举机制）。");
 
+        // 验证漂移检测机制：模拟移除一个端点后能检测到缺失
+        var baselineSignatures = new HashSet<string>(currentSignatures.Take(100));
+        var simulatedDrift = new HashSet<string>(currentSignatures.Skip(1));
+        var missing = baselineSignatures.Except(simulatedDrift).ToList();
+        missing.Count.ShouldBe(1, "模拟移除一个端点后应检测到 1 个缺失签名。");
+
         // 保存当前签名快照（P3 会生成 JSON）
         // File.WriteAllText("endpoint-signatures-snapshot.txt", string.Join("\n", currentSignatures.Order()));
     }

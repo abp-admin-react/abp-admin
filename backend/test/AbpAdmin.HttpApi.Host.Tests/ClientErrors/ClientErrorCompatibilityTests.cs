@@ -257,6 +257,11 @@ public class ClientErrorCompatibilityTests
         invalidScenarios.Count.ShouldBe(1, "一个场景有大小写兼容问题（P1 修复）。");
         invalidScenarios[0].Note.ShouldNotBeNull();
         invalidScenarios[0].Note!.ShouldContain("大小写");
+
+        // 验证：无效场景的 ActualKeys 与 ApprovedKeys 确实不匹配（大小写敏感比较）
+        var invalid = invalidScenarios[0];
+        var hasMismatch = !invalid.ActualKeys.SequenceEqual(invalid.ApprovedKeys, StringComparer.Ordinal);
+        hasMismatch.ShouldBeTrue("无效场景的 ActualKeys 与 ApprovedKeys 应确实存在大小写不匹配。");
     }
 }
 
