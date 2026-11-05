@@ -37,7 +37,7 @@ public class AdminErrorEndpointRegistryTests
     [Fact]
     public void Registry_Should_Support_Basic_Operations()
     {
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
 
         var registration = new AdminErrorEndpointRegistration
         {
@@ -61,7 +61,7 @@ public class AdminErrorEndpointRegistryTests
         found.Audience.ShouldBe(ClientErrorAudience.AdminCompatibility);
         found.RequiredPermissions.ShouldContain("Test.Read");
 
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
     }
 
     /// <summary>
@@ -70,7 +70,7 @@ public class AdminErrorEndpointRegistryTests
     [Fact]
     public void Duplicate_Registration_Should_Fail()
     {
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
 
         var registration = new AdminErrorEndpointRegistration
         {
@@ -87,7 +87,7 @@ public class AdminErrorEndpointRegistryTests
         Should.Throw<InvalidOperationException>(() =>
             AdminErrorEndpointRegistry.Register(registration));
 
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
     }
 
     /// <summary>
@@ -254,7 +254,7 @@ public class AdminErrorEndpointRegistryTests
     [Fact]
     public void Non_Mvc_Exits_Can_Be_Registered()
     {
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
 
         // TokenEndpoint 限流中间件（OAuth 协议）
         var tokenEndpoint = new AdminErrorEndpointRegistration
@@ -314,7 +314,7 @@ public class AdminErrorEndpointRegistryTests
         oauthExits.Count.ShouldBe(1);
         oauthExits[0].HttpStatusCode.ShouldBe(429);
 
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
     }
 
     private static IEnumerable<RouteEndpoint> AllRouteEndpoints(WebApplication app)
