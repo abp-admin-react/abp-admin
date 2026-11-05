@@ -144,17 +144,20 @@ public class AdminErrorEndpointRegistryTests
 
         // 有授权但非匿名的端点（候选项）
         byAuthStatus.TryGetValue(new { HasAuthorize = true, HasAllowAnonymous = false }, out var authorized);
-        authorized?.Count.ShouldBeGreaterThan(50,
+        authorized.ShouldNotBeNull("必须存在至少一个带授权且非匿名的端点（AdminCompatibility 候选项）。");
+        authorized.Count.ShouldBeGreaterThan(50,
             "有授权且非匿名的端点应至少有 50 个（AdminCompatibility 候选项）。");
 
         // 匿名端点（Public/Shared 候选项）
         byAuthStatus.TryGetValue(new { HasAuthorize = false, HasAllowAnonymous = true }, out var anonymous);
-        anonymous?.Count.ShouldBeGreaterThan(10,
+        anonymous.ShouldNotBeNull("必须存在至少一个匿名端点（Public 候选项）。");
+        anonymous.Count.ShouldBeGreaterThan(10,
             "匿名端点应至少有 10 个（Public 候选项）。");
 
         // 无授权且非匿名的端点（依赖 FallbackPolicy）
         byAuthStatus.TryGetValue(new { HasAuthorize = false, HasAllowAnonymous = false }, out var noAuth);
-        noAuth?.Count.ShouldBeLessThanOrEqualTo(0,
+        noAuth.ShouldNotBeNull("必须存在无授权且非匿名的端点分组（即使数量为 0）。");
+        noAuth.Count.ShouldBe(0,
             "无授权且非匿名的端点应依赖 FallbackPolicy（默认拒绝），实际应为 0。");
     }
 

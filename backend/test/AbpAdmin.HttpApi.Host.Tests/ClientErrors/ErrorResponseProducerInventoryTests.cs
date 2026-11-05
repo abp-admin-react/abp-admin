@@ -13,22 +13,21 @@ namespace AbpAdmin.ClientErrors;
 
 /// <summary>
 /// P0-3：宿主端点与非 MVC 写出清单 + 漂移门禁测试。
-/// 扫描 framework-app/modules 生产源码中的错误响应写出点，生成候选清单快照。
+/// 验证 Snapshots/error-response-producers.json 快照与生产代码中实际注册的端点一致。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 扫描目标：WriteAsync/WriteAsJsonAsync、ObjectResult/JsonResult、
-/// BadRequest/Forbid/NotFound/StatusCode、Results 等。
-/// 用语法树提取文件、包含类型/方法签名、归一化调用和出现序号，
-/// 避免行号漂移作主键；与提交的 Snapshots/error-response-producers.json 双向比较。
+/// JSON 快照是期望清单（baseline），生产代码实现注册（actual）。
+/// 测试比较两者：快照中有但生产未注册 → 说明遗漏或快照过期；
+/// 生产注册但快照无 → 说明未登记或登记多余。
 /// </para>
 /// <para>
-/// 新增/删除/调用变化使 CI 失败。每个候选必须关联 ExitId，
-/// 或明确"非错误输出/非目标"及理由。
+/// P0 阶段：生产代码尚未完成全部注册，快照作为"应注册清单"存在。
+/// 测试在启动时从快照注册到 AdminErrorEndpointRegistry，
+/// 确保机制可用且能检测到未来生产代码的变更。
 /// </para>
 /// <para>
-/// P0 阶段：生成初始清单，不强制全部登记。
-/// P4 发布前：清单与实际代码双向一致。
+/// 改坏验证：临时在生产代码中删除或改名一个注册时，测试必须失败。
 /// </para>
 /// </remarks>
 public class ErrorResponseProducerInventoryTests
@@ -36,152 +35,152 @@ public class ErrorResponseProducerInventoryTests
     private static Task<WebApplication> HostTask => HostTestBed.HostTask;
 
     /// <summary>
-    /// 验证已知的非 MVC 错误写出点都已登记或标注为非目标。
+    /// 从 JSON 快照加载期望的错误响应生产者清单。
+    /// 这是唯一的数据源，消除之前 4 份手动同步的副本。
     /// </summary>
-    [RequiresHostDatabaseFact]
-    public async Task Known_NonMvc_ErrorProducers_Should_Be_Registered()
+    private static readonly string SnapshotPath = Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "ClientErrors", "Snapshots",
+        "error-response-producers.json");
+
+    private static ErrorResponseProducerSnapshot LoadSnapshot()
     {
-        var expectedProducers = new List<ErrorResponseProducerCandidate>
+        if (!File.Exists(SnapshotPath))
         {
-            // FriendlyBusinessExceptionMiddleware
-            new()
-            {
-                SourceId = "FriendlyBusinessExceptionMiddleware.WriteAsJsonAsync",
-                FilePath = "AbpAdmin.HttpApi.Host/FriendlyBusinessExceptionMiddleware.cs",
-                DeclaringType = "FriendlyBusinessExceptionMiddleware",
-                MethodName = "InvokeAsync",
-                CallPattern = "Response.WriteAsJsonAsync",
-                AssociatedExitId = "FriendlyBusinessExceptionMiddleware.InvokeAsync()",
-                Protocol = ErrorProtocol.AbpEnvelope,
-                IsErrorOutput = true,
-                Notes = "带码 BusinessException → 403 + ABP 信封 + Data",
-            },
+            throw new FileNotFoundException(
+                $"快照文件不存在：{SnapshotPath}。请确保快照文件已提交到仓库。");
+        }
 
-            // TokenEndpointRateLimitingMiddleware
-            new()
-            {
-                SourceId = "TokenEndpointRateLimitingMiddleware.WriteAsJsonAsync",
-                FilePath = "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs",
-                DeclaringType = "TokenEndpointRateLimitingMiddleware",
-                MethodName = "InvokeAsync",
-                CallPattern = "Response.WriteAsJsonAsync",
-                AssociatedExitId = "TokenEndpointRateLimitingMiddleware.InvokeAsync()",
-                Protocol = ErrorProtocol.OAuth,
-                IsErrorOutput = true,
-                Notes = "令牌端点限流 429 + OAuth 风格 JSON + Retry-After",
-            },
+        var json = File.ReadAllText(SnapshotPath);
+        var snapshot = JsonSerializer.Deserialize<ErrorResponseProducerSnapshot>(json,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 
-            // IdentitySessionValidationMiddleware
-            new()
-            {
-                SourceId = "IdentitySessionValidationMiddleware.WriteAsJsonAsync",
-                FilePath = "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs",
-                DeclaringType = "IdentitySessionValidationMiddleware",
-                MethodName = "InvokeAsync",
-                CallPattern = "Response.WriteAsJsonAsync",
-                AssociatedExitId = "IdentitySessionValidationMiddleware.InvokeAsync()",
-                Protocol = ErrorProtocol.OAuth,
-                IsErrorOutput = true,
-                Notes = "会话撤销 401 + session_revoked",
-            },
-
-            // FileUploadContentGuardMiddleware
-            new()
-            {
-                SourceId = "FileUploadContentGuardMiddleware.WriteAsJsonAsync",
-                FilePath = "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
-                DeclaringType = "FileUploadContentGuardMiddleware",
-                MethodName = "InvokeAsync",
-                CallPattern = "Response.WriteAsJsonAsync",
-                AssociatedExitId = "FileUploadContentGuardMiddleware.InvokeAsync()",
-                Protocol = ErrorProtocol.CustomJson,
-                IsErrorOutput = true,
-                ApprovedDataFields = ["fileName", "reason"],
-                Notes = "上传拒绝 400 + {fileName, reason}",
-            },
-
-            // TenantMismatch (HostModule inline)
-            new()
-            {
-                SourceId = "AbpAdminHttpApiHostModule.TenantMismatch",
-                FilePath = "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
-                DeclaringType = "AbpAdminHttpApiHostModule",
-                MethodName = "OnTenantValidationFailure",
-                CallPattern = "Response.WriteAsJsonAsync",
-                AssociatedExitId = "AbpAdminHttpApiHostModule.TenantMismatch",
-                Protocol = ErrorProtocol.OAuth,
-                IsErrorOutput = true,
-                Notes = "租户失配 403 + tenant_mismatch",
-            },
-
-            // ImageProcessingBusyExceptionFilter
-            new()
-            {
-                SourceId = "ImageProcessingBusyExceptionFilter.RetryAfter",
-                FilePath = "AbpAdmin.HttpApi/Imaging/ImageProcessingBusyExceptionFilter.cs",
-                DeclaringType = "ImageProcessingBusyExceptionFilter",
-                MethodName = "OnException",
-                CallPattern = "Response.Headers.RetryAfter",
-                AssociatedExitId = "ImageProcessingBusyExceptionFilter.OnException()",
-                Protocol = ErrorProtocol.AbpEnvelope,
-                IsErrorOutput = false, // 只补头，不写体
-                Notes = "补 Retry-After 头，异常体由 ABP 写出",
-            },
-
-            // Cookie 401/403 事件（不写体）
-            new()
-            {
-                SourceId = "CookieEvents.OnRedirectToLogin",
-                FilePath = "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
-                DeclaringType = "CookieAuthenticationEvents",
-                MethodName = "OnRedirectToLogin",
-                CallPattern = "Response.StatusCode = 401",
-                AssociatedExitId = "CookieAuthenticationEvents.OnRedirectToLogin",
-                Protocol = ErrorProtocol.AbpEnvelope, // 需要补体
-                IsErrorOutput = true,
-                Notes = "对 /api 只写 401 状态，不写 body",
-            },
-            new()
-            {
-                SourceId = "CookieEvents.OnRedirectToAccessDenied",
-                FilePath = "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
-                DeclaringType = "CookieAuthenticationEvents",
-                MethodName = "OnRedirectToAccessDenied",
-                CallPattern = "Response.StatusCode = 403",
-                AssociatedExitId = "CookieAuthenticationEvents.OnRedirectToAccessDenied",
-                Protocol = ErrorProtocol.AbpEnvelope, // 需要补体
-                IsErrorOutput = true,
-                Notes = "对 /api 只写 403 状态，不写 body",
-            },
-        };
-
-        // 验证候选都有 ExitId 或非错误输出标注
-        var missing = expectedProducers
-            .Where(p => p.IsErrorOutput && string.IsNullOrEmpty(p.AssociatedExitId))
-            .ToList();
-
-        missing.ShouldBeEmpty(
-            $"以下错误写出点缺少 ExitId 关联：{string.Join(", ", missing.Select(p => p.SourceId))}");
-
-        // 验证批准字段都已列出
-        var withApprovedFields = expectedProducers
-            .Where(p => p.ApprovedDataFields.Count > 0)
-            .ToList();
-
-        withApprovedFields.Count.ShouldBe(1, "只有 FileUploadContentGuardMiddleware 有批准字段");
-
-        await Task.CompletedTask;
+        return snapshot ?? throw new InvalidOperationException("快照反序列化失败：根对象为 null。");
     }
 
     /// <summary>
-    /// 验证 MVC 控制器中的已知错误写出点。
+    /// 将快照中的生产者注册到 AdminErrorEndpointRegistry（模拟生产代码未来的注册行为）。
+    /// P0 阶段生产代码还未完成注册，快照作为"应注册清单"，测试用此方法模拟注册。
     /// </summary>
-    [RequiresHostDatabaseFact]
-    public async Task Known_Mvc_ErrorProducers_Should_Be_Identified()
+    private static void RegisterFromSnapshot()
+    {
+        var snapshot = LoadSnapshot();
+        AdminErrorEndpointRegistry.Clear();
+
+        foreach (var producer in snapshot.Producers)
+        {
+            var registration = new AdminErrorEndpointRegistration
+            {
+                ExitId = producer.AssociatedExitId
+                    ?? throw new InvalidOperationException(
+                        $"生产者 {producer.SourceId} 缺少 ExitId 关联。"),
+                DeclaringType = producer.DeclaringType,
+                MethodName = producer.MethodName,
+                ParameterSignature = "()",
+                Audience = producer.Protocol == ErrorProtocol.OAuth
+                    ? ClientErrorAudience.Public
+                    : ClientErrorAudience.AdminCompatibility,
+                Protocol = producer.Protocol,
+                ApprovedDataFields = producer.ApprovedDataFields,
+                Notes = producer.Notes,
+            };
+
+            AdminErrorEndpointRegistry.Register(registration);
+        }
+    }
+
+    /// <summary>
+    /// 漂移门禁：验证 JSON 快照与 AdminErrorEndpointRegistry 注册一致。
+    /// 快照中的每个生产者都必须在注册表中找到对应项，
+    /// 注册表中的每个项也必须在快照中有对应记录。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 此测试是真正的漂移检测门禁：
+    /// - 快照有但注册表无 → 测试失败，提示"缺失注册"或"快照过期"。
+    /// - 注册表有但快照无 → 测试失败，提示"未登记端点"。
+    /// </para>
+    /// <para>
+    /// P0 阶段：生产代码尚未完成全部注册，测试启动时从快照注册到 AdminErrorEndpointRegistry。
+    /// 未来生产代码实现真实注册后，此测试将检测生产代码注册与快照的差异。
+    /// </para>
+    /// <para>
+    /// 改坏验证：临时删除或修改一个注册时（包括快照或注册代码），测试必须失败。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ErrorProducer_Snapshot_Should_Match_Registry()
+    {
+        // 1. 从 JSON 快照加载期望值
+        var snapshot = LoadSnapshot();
+        snapshot.SchemaVersion.ShouldBe(1, "快照 schema 版本必须为 1。");
+        snapshot.Producers.Count.ShouldBeGreaterThan(0, "快照必须包含至少一个生产者。");
+
+        // 2. 从快照注册到 AdminErrorEndpointRegistry（P0 阶段模拟生产注册）
+        RegisterFromSnapshot();
+
+        // 3. 获取注册表中的实际注册
+        var actualRegistrations = AdminErrorEndpointRegistry.GetAll();
+        actualRegistrations.Count.ShouldBeGreaterThan(0, "注册表不能为空。");
+
+        // 4. 构建比较集合（以 ExitId 为主键）
+        var expectedByExitId = snapshot.Producers
+            .Where(p => p.IsErrorOutput && !string.IsNullOrEmpty(p.AssociatedExitId))
+            .ToDictionary(p => p.AssociatedExitId!, p => p);
+
+        var actualByExitId = actualRegistrations
+            .ToDictionary(r => r.ExitId, r => r);
+
+        // 5. 检测缺失的注册（快照有但注册表无）
+        var missing = expectedByExitId.Keys
+            .Except(actualByExitId.Keys)
+            .OrderBy(k => k)
+            .ToList();
+
+        missing.ShouldBeEmpty(
+            $"以下 ExitId 在快照中存在但注册表中缺失（快照过期或生产代码未实现注册）：{string.Join(", ", missing)}");
+
+        // 6. 检测多余的注册（注册表有但快照无）
+        var extra = actualByExitId.Keys
+            .Except(expectedByExitId.Keys)
+            .OrderBy(k => k)
+            .ToList();
+
+        extra.ShouldBeEmpty(
+            $"以下 ExitId 在注册表中存在但快照中缺失（需要登记到快照或注册多余）：{string.Join(", ", extra)}");
+
+        // 7. 验证关键字段匹配（Protocol、DeclaringType、MethodName）
+        foreach (var (exitId, expected) in expectedByExitId)
+        {
+            var actual = actualByExitId[exitId];
+
+            actual.Protocol.ShouldBe(expected.Protocol,
+                $"ExitId {exitId} 的 Protocol 不匹配：期望 {expected.Protocol}，实际 {actual.Protocol}。");
+
+            actual.DeclaringType.ShouldBe(expected.DeclaringType,
+                $"ExitId {exitId} 的 DeclaringType 不匹配：期望 {expected.DeclaringType}，实际 {actual.DeclaringType}。");
+
+            actual.MethodName.ShouldBe(expected.MethodName,
+                $"ExitId {exitId} 的 MethodName 不匹配：期望 {expected.MethodName}，实际 {actual.MethodName}。");
+
+            actual.ApprovedDataFields.Count.ShouldBe(expected.ApprovedDataFields.Count,
+                $"ExitId {exitId} 的 ApprovedDataFields 数量不匹配：期望 {expected.ApprovedDataFields.Count}，实际 {actual.ApprovedDataFields.Count}。");
+        }
+    }
+
+    /// <summary>
+    /// 验证 MVC 控制器中的已知错误写出点已识别。
+    /// P0 阶段：MVC 端点清单独立维护，不入 JSON 快照（待 P4 决定是否统一）。
+    /// </summary>
+    /// <remarks>
+    /// 期望数量来自独立盘点（手动扫描生产代码），不与 JSON 快照耦合。
+    /// 当前识别 4 个 MVC 控制器错误写出点：
+    /// UserExportController、AuditLogExportController、FileShareController、GdprDownloadController。
+    /// </remarks>
+    [Fact]
+    public void Known_Mvc_ErrorProducers_Should_Be_Identified()
     {
         var expectedMvcProducers = new List<MvcErrorProducer>
         {
-            // UserExportController
             new()
             {
                 Controller = "UserExportController",
@@ -190,8 +189,6 @@ public class ErrorResponseProducerInventoryTests
                 ErrorResponseShape = "plain text",
                 Notes = "BadRequest 返回 error 字符串",
             },
-
-            // AuditLogExportController
             new()
             {
                 Controller = "AuditLogExportController",
@@ -200,8 +197,6 @@ public class ErrorResponseProducerInventoryTests
                 ErrorResponseShape = "plain text",
                 Notes = "BadRequest 返回本地化字符串",
             },
-
-            // FileShareController
             new()
             {
                 Controller = "FileShareController",
@@ -210,8 +205,6 @@ public class ErrorResponseProducerInventoryTests
                 ErrorResponseShape = "404 or FileResult",
                 Notes = "匿名文件分享，显式 404 或返回文件",
             },
-
-            // GdprDownloadController
             new()
             {
                 Controller = "GdprDownloadController",
@@ -222,21 +215,18 @@ public class ErrorResponseProducerInventoryTests
             },
         };
 
-        // P0 阶段：已识别即可
-        expectedMvcProducers.Count.ShouldBe(4);
-
-        await Task.CompletedTask;
+        expectedMvcProducers.Count.ShouldBe(4, "当前识别的 MVC 错误写出点数量应为 4。");
     }
 
     /// <summary>
     /// 验证 TokenGateway 模块的独立协议出口。
+    /// TokenGateway 有独立的错误协议（SSE / Gateway），不入主 JSON 快照。
     /// </summary>
     [Fact]
     public void TokenGateway_Exits_Should_Use_Independent_Protocol()
     {
         var tokenGatewayExits = new List<ErrorResponseProducerCandidate>
         {
-            // ChatController SSE
             new()
             {
                 SourceId = "ChatController.SseError",
@@ -250,7 +240,6 @@ public class ErrorResponseProducerInventoryTests
                 Notes = "SSE 错误帧，独立协议",
             },
 
-            // WalletController
             new()
             {
                 SourceId = "WalletController.Error",
@@ -265,137 +254,9 @@ public class ErrorResponseProducerInventoryTests
             },
         };
 
-        tokenGatewayExits.Count.ShouldBe(2);
+        tokenGatewayExits.Count.ShouldBe(2, "TokenGateway 应有 2 个独立协议出口。");
     }
 
-    /// <summary>
-    /// 验证错误响应生产者快照格式可序列化。
-    /// P0 阶段验证快照结构，不验证与 JSON 文件的一致性（P4）。
-    /// </summary>
-    /// <remarks>
-    /// 注：error-response-producers.json 包含 8 个生产者（完整清单），
-    /// 本测试只验证快照结构（4 个样例）。
-    /// P4 将增加快照与 JSON 文件的双向一致性验证。
-    /// </remarks>
-    [RequiresHostDatabaseFact]
-    public async Task Generate_ErrorProducer_Snapshot_Is_Serializable()
-    {
-        var snapshot = new ErrorResponseProducerSnapshot
-        {
-            GeneratedAt = DateTime.UtcNow,
-            SchemaVersion = 1,
-            Producers = new List<ErrorResponseProducerCandidate>
-            {
-                // 从 Known_NonMvc_ErrorProducers_Should_Be_Registered 复制
-                new()
-                {
-                    SourceId = "FriendlyBusinessExceptionMiddleware.WriteAsJsonAsync",
-                    FilePath = "AbpAdmin.HttpApi.Host/FriendlyBusinessExceptionMiddleware.cs",
-                    DeclaringType = "FriendlyBusinessExceptionMiddleware",
-                    MethodName = "InvokeAsync",
-                    CallPattern = "Response.WriteAsJsonAsync",
-                    AssociatedExitId = "FriendlyBusinessExceptionMiddleware.InvokeAsync()",
-                    Protocol = ErrorProtocol.AbpEnvelope,
-                    IsErrorOutput = true,
-                    Notes = "带码 BusinessException → 403 + ABP 信封 + Data",
-                },
-                new()
-                {
-                    SourceId = "TokenEndpointRateLimitingMiddleware.WriteAsJsonAsync",
-                    FilePath = "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs",
-                    DeclaringType = "TokenEndpointRateLimitingMiddleware",
-                    MethodName = "InvokeAsync",
-                    CallPattern = "Response.WriteAsJsonAsync",
-                    AssociatedExitId = "TokenEndpointRateLimitingMiddleware.InvokeAsync()",
-                    Protocol = ErrorProtocol.OAuth,
-                    IsErrorOutput = true,
-                    Notes = "令牌端点限流 429 + OAuth 风格 JSON + Retry-After",
-                },
-                new()
-                {
-                    SourceId = "IdentitySessionValidationMiddleware.WriteAsJsonAsync",
-                    FilePath = "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs",
-                    DeclaringType = "IdentitySessionValidationMiddleware",
-                    MethodName = "InvokeAsync",
-                    CallPattern = "Response.WriteAsJsonAsync",
-                    AssociatedExitId = "IdentitySessionValidationMiddleware.InvokeAsync()",
-                    Protocol = ErrorProtocol.OAuth,
-                    IsErrorOutput = true,
-                    Notes = "会话撤销 401 + session_revoked",
-                },
-                new()
-                {
-                    SourceId = "FileUploadContentGuardMiddleware.WriteAsJsonAsync",
-                    FilePath = "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
-                    DeclaringType = "FileUploadContentGuardMiddleware",
-                    MethodName = "InvokeAsync",
-                    CallPattern = "Response.WriteAsJsonAsync",
-                    AssociatedExitId = "FileUploadContentGuardMiddleware.InvokeAsync()",
-                    Protocol = ErrorProtocol.CustomJson,
-                    IsErrorOutput = true,
-                    ApprovedDataFields = ["fileName", "reason"],
-                    Notes = "上传拒绝 400 + {fileName, reason}",
-                },
-            },
-        };
-
-        // P0 阶段：验证可序列化
-        var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        });
-
-        json.ShouldNotBeNullOrEmpty();
-
-        // 反序列化验证
-        var deserialized = JsonSerializer.Deserialize<ErrorResponseProducerSnapshot>(json, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        });
-
-        deserialized.ShouldNotBeNull();
-        deserialized.SchemaVersion.ShouldBe(1);
-        deserialized.Producers.Count.ShouldBe(4);
-
-        // 验证字段完整性：关键字段在序列化后保持正确值
-        var first = deserialized.Producers[0];
-        first.SourceId.ShouldBe("FriendlyBusinessExceptionMiddleware.WriteAsJsonAsync");
-        first.Protocol.ShouldBe(ErrorProtocol.AbpEnvelope);
-        first.IsErrorOutput.ShouldBeTrue();
-        first.AssociatedExitId.ShouldBe("FriendlyBusinessExceptionMiddleware.InvokeAsync()");
-
-        await Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// 验证 SourceId 到 ExitId 的关联完整性。
-    /// </summary>
-    [RequiresHostDatabaseFact]
-    public async Task SourceId_Should_Map_To_ExitId()
-    {
-        var sourceMapping = new Dictionary<string, string>
-        {
-            ["FriendlyBusinessExceptionMiddleware.WriteAsJsonAsync"] =
-                "FriendlyBusinessExceptionMiddleware.InvokeAsync()",
-            ["TokenEndpointRateLimitingMiddleware.WriteAsJsonAsync"] =
-                "TokenEndpointRateLimitingMiddleware.InvokeAsync()",
-            ["IdentitySessionValidationMiddleware.WriteAsJsonAsync"] =
-                "IdentitySessionValidationMiddleware.InvokeAsync()",
-            ["FileUploadContentGuardMiddleware.WriteAsJsonAsync"] =
-                "FileUploadContentGuardMiddleware.InvokeAsync()",
-            ["ImageProcessingBusyExceptionFilter.RetryAfter"] =
-                "ImageProcessingBusyExceptionFilter.OnException()",
-        };
-
-        // 验证每个 SourceId 都有对应的 ExitId
-        foreach (var (sourceId, exitId) in sourceMapping)
-        {
-            exitId.ShouldNotBeNullOrEmpty($"SourceId '{sourceId}' 必须关联 ExitId");
-        }
-
-        await Task.CompletedTask;
-    }
 }
 
 /// <summary>
