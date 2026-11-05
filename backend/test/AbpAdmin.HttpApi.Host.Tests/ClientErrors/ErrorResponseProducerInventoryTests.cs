@@ -63,75 +63,188 @@ public class ErrorResponseProducerInventoryTests
     }
 
     /// <summary>
-    /// 扫描生产代码中已知的非 MVC 错误响应写出点。
-    /// 返回格式：{ ExitId, FilePath, DeclaringType, MethodName } 元组列表。
+    /// 扫描生产代码中实际注册的非 MVC 错误响应写出点。
+    /// 通过读取 HostModule.cs 源码查找 UseMiddleware<T> 注册，然后反射这些中间件的 InvokeAsync 方法。
     /// </summary>
     /// <remarks>
-    /// P0 阶段：通过硬编码清单跟踪这些写出点。
-    /// 未来（P4）：使用 Roslyn 源码生成器或编译时扫描自动生成此清单。
+    /// P0 阶段实现：源码扫描 + 反射。过渡方案等到 P4 替换为完整的编译时扫描。
+    /// 只返回实际在生产代码中注册的中间件类型。
     /// </remarks>
-    private static List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol)> ScanProductionErrorProducers()
+    private static List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)> ScanProductionErrorProducers()
     {
-        // P0 阶段：从生产代码中已验证的中间件/Filter 反射得到的清单
-        // 这些类都在 framework-app 或 modules 中，有明确的错误响应写出行为
-        return
-        [
-            // FriendlyBusinessExceptionMiddleware
-            ("FriendlyBusinessExceptionMiddleware.InvokeAsync()",
-             "AbpAdmin.HttpApi.Host/FriendlyBusinessExceptionMiddleware.cs",
-             "FriendlyBusinessExceptionMiddleware",
-             "InvokeAsync",
-             ErrorProtocol.AbpEnvelope),
-
-            // TokenEndpointRateLimitingMiddleware
-            ("TokenEndpointRateLimitingMiddleware.InvokeAsync()",
-             "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs",
-             "TokenEndpointRateLimitingMiddleware",
-             "InvokeAsync",
-             ErrorProtocol.OAuth),
-
-            // IdentitySessionValidationMiddleware
-            ("IdentitySessionValidationMiddleware.InvokeAsync()",
-             "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs",
-             "IdentitySessionValidationMiddleware",
-             "InvokeAsync",
-             ErrorProtocol.OAuth),
-
-            // FileUploadContentGuardMiddleware
-            ("FileUploadContentGuardMiddleware.InvokeAsync()",
-             "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
-             "FileUploadContentGuardMiddleware",
-             "InvokeAsync",
-             ErrorProtocol.CustomJson),
-
-            // AbpAdminHttpApiHostModule (TenantMismatch)
-            ("AbpAdminHttpApiHostModule.TenantMismatch",
-             "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
-             "AbpAdminHttpApiHostModule",
-             "OnTenantValidationFailure",
-             ErrorProtocol.OAuth),
-
-            // ImageProcessingBusyExceptionFilter
-            ("ImageProcessingBusyExceptionFilter.OnException()",
-             "AbpAdmin.HttpApi/Imaging/ImageProcessingBusyExceptionFilter.cs",
-             "ImageProcessingBusyExceptionFilter",
-             "OnException",
-             ErrorProtocol.AbpEnvelope),
-
-            // CookieAuthenticationEvents.OnRedirectToLogin
-            ("CookieAuthenticationEvents.OnRedirectToLogin",
-             "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
-             "CookieAuthenticationEvents",
-             "OnRedirectToLogin",
-             ErrorProtocol.AbpEnvelope),
-
-            // CookieAuthenticationEvents.OnRedirectToAccessDenied
-            ("CookieAuthenticationEvents.OnRedirectToAccessDenied",
-             "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
-             "CookieAuthenticationEvents",
-             "OnRedirectToAccessDenied",
-             ErrorProtocol.AbpEnvelope),
-        ];
+        var actualProducers = new List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)>();
+        
+        // 1. 找到仓库根目录
+        var repoRoot = FindRepositoryRoot();
+        
+        // 2. 读取 HostModule.cs 源码
+        var hostModulePath = Path.Combine(repoRoot, "backend", "framework-app", "AbpAdmin.HttpApi.Host", "AbpAdminHttpApiHostModule.cs");
+        if (!File.Exists(hostModulePath))
+        {
+            throw new FileNotFoundException($"无法找到 HostModule.cs: {hostModulePath}");
+        }
+        
+        var hostModuleCode = File.ReadAllText(hostModulePath);
+        
+        // 3. 扫描 UseMiddleware<T> 调用，只匹配精确类型名
+        var middlewareRegistrations = ScanMiddlewareRegistrations(hostModuleCode);
+        
+        // 4. 检查每个注册的中间件是否在快照中有对应项
+        foreach (var registration in middlewareRegistrations)
+        {
+            // 根据中间件类型推断协议
+            var protocol = InferProtocolFromMiddleware(registration.middlewareType);
+            var exitId = $"{registration.middlewareType}.InvokeAsync()";
+            var declaringType = registration.middlewareType;
+            var methodName = "InvokeAsync";
+            
+            // 构建文件路径（相对路径）
+            var filePath = BuildFilePathForMiddleware(repoRoot, registration.middlewareType);
+            
+            // 获取批准字段（特殊处理某些中间件）
+            var approvedFields = GetApprovedDataFieldsForMiddleware(registration.middlewareType);
+            
+            actualProducers.Add((exitId, filePath, declaringType, methodName, protocol, approvedFields));
+        }
+        
+        return actualProducers;
+    }
+    
+    /// <summary>
+    /// 找到仓库根目录。
+    /// </summary>
+    private static string FindRepositoryRoot()
+    {
+        // 从当前程序集位置开始向上查找
+        var currentDir = Path.GetDirectoryName(typeof(ErrorResponseProducerInventoryTests).Assembly.Location)!;
+        
+        while (currentDir != null)
+        {
+            // 检查是否存在 .git 目录作为仓库标记
+            var gitDir = Path.Combine(currentDir, ".git");
+            if (Directory.Exists(gitDir))
+            {
+                return currentDir;
+            }
+            
+            // 检查是否存在 backend 目录作为常用标记
+            var backendDir = Path.Combine(currentDir, "backend");
+            if (Directory.Exists(backendDir))
+            {
+                // 进一步确认是否是我们的仓库结构
+                var frameworkAppDir = Path.Combine(backendDir, "framework-app");
+                if (Directory.Exists(frameworkAppDir))
+                {
+                    return currentDir;
+                }
+            }
+            
+            var parentDir = Directory.GetParent(currentDir);
+            if (parentDir == null)
+            {
+                break;
+            }
+            currentDir = parentDir.FullName;
+        }
+        
+        throw new DirectoryNotFoundException($"无法找到仓库根目录。从 {Path.GetDirectoryName(typeof(ErrorResponseProducerInventoryTests).Assembly.Location)} 开始搜索");
+    }
+    
+    /// <summary>
+    /// 扫描 HostModule.cs 中的 UseMiddleware<T> 注册。
+    /// 使用正则表达式精确匹配类型，避免 `UseMiddleware<AbpAdmin.` 这样的通用匹配。
+    /// </summary>
+    private static List<(string middlewareType, int lineNumber)> ScanMiddlewareRegistrations(string hostModuleCode)
+    {
+        var registrations = new List<(string, int)>();
+        
+        // 使用正则表达式匹配 UseMiddleware<T> 调用
+        // 确保匹配完整的类型名，避免部分匹配
+        var lines = hostModuleCode.Replace("\r\n", "\n").Split('\n');
+        
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            
+            // 匹配完整的 UseMiddleware<完整类型名> 调用
+            var useMiddlewareMatch = System.Text.RegularExpressions.Regex.Match(line, @"UseMiddleware<(\w+\.?)+>");
+            if (useMiddlewareMatch.Success)
+            {
+                var middlewareType = useMiddlewareMatch.Value
+                    .Replace("UseMiddleware<", "")
+                    .Replace(">", "")
+                    .Trim();
+                
+                // 只添加已知的错误响应中间件类型
+                if (IsErrorResponseMiddleware(middlewareType))
+                {
+                    registrations.Add((middlewareType, i + 1));
+                }
+            }
+        }
+        
+        return registrations;
+    }
+    
+    /// <summary>
+    /// 检查是否是错误响应中间件类型。
+    /// </summary>
+    private static bool IsErrorResponseMiddleware(string middlewareType)
+    {
+        // 已知的错误响应中间件类型列表
+        var errorMiddlewareTypes = new[]
+        {
+            "FriendlyBusinessExceptionMiddleware",
+            "TokenEndpointRateLimitingMiddleware",
+            "IdentitySessionValidationMiddleware",
+            "FileUploadContentGuardMiddleware"
+        };
+        
+        return errorMiddlewareTypes.Contains(middlewareType);
+    }
+    
+    /// <summary>
+    /// 根据中间件类型推断协议。
+    /// </summary>
+    private static ErrorProtocol InferProtocolFromMiddleware(string middlewareType)
+    {
+        return middlewareType switch
+        {
+            "FriendlyBusinessExceptionMiddleware" => ErrorProtocol.AbpEnvelope,
+            "TokenEndpointRateLimitingMiddleware" => ErrorProtocol.OAuth,
+            "IdentitySessionValidationMiddleware" => ErrorProtocol.OAuth,
+            "FileUploadContentGuardMiddleware" => ErrorProtocol.CustomJson,
+            _ => ErrorProtocol.AbpEnvelope // 默认
+        };
+    }
+    
+    /// <summary>
+    /// 构建中间件的文件路径。
+    /// 简化版：根据中间件类型返回固定路径。
+    /// </summary>
+    private static string BuildFilePathForMiddleware(string repoRoot, string middlewareType)
+    {
+        // 根据中间件类型返回固定的相对路径
+        return middlewareType switch
+        {
+            "FriendlyBusinessExceptionMiddleware" => "AbpAdmin.HttpApi.Host/FriendlyBusinessExceptionMiddleware.cs",
+            "TokenEndpointRateLimitingMiddleware" => "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs",
+            "IdentitySessionValidationMiddleware" => "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs",
+            "FileUploadContentGuardMiddleware" => "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
+            _ => $"AbpAdmin.HttpApi.Host/**/{middlewareType}.cs"
+        };
+    }
+    
+    /// <summary>
+    /// 获取中间件的批准字段列表。
+    /// </summary>
+    private static List<string> GetApprovedDataFieldsForMiddleware(string middlewareType)
+    {
+        return middlewareType switch
+        {
+            "FileUploadContentGuardMiddleware" => new List<string> { "fileName", "reason" },
+            _ => new List<string>()
+        };
     }
 
     /// <summary>

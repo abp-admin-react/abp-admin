@@ -157,8 +157,10 @@ public class AdminErrorEndpointRegistryTests
 
         // 无授权且非匿名的端点（依赖 FallbackPolicy）
         byAuthStatus.TryGetValue(new { HasAuthorize = false, HasAllowAnonymous = false }, out var noAuth);
-        noAuth.ShouldNotBeNull("必须存在无授权且非匿名的端点分组（即使数量为 0）。");
-        noAuth.Count.ShouldBe(0,
+        // Dictionary.TryGetValue returns null when the key does not exist
+        // If there are zero no-auth endpoints, the group doesn't exist and return null
+        // We accept that case: it means zero endpoints in this category, which is correct
+        (noAuth?.Count ?? 0).ShouldBe(0,
             "无授权且非匿名的端点应依赖 FallbackPolicy（默认拒绝），实际应为 0。");
     }
 
