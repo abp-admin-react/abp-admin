@@ -128,8 +128,9 @@ public class ErrorResponseProducerInventoryTests
         actualRegistrations.Count.ShouldBeGreaterThan(0, "注册表不能为空。");
 
         // 4. 构建比较集合（以 ExitId 为主键）
+        // 包括所有有 ExitId 的项（不区分 isErrorOutput）
         var expectedByExitId = snapshot.Producers
-            .Where(p => p.IsErrorOutput && !string.IsNullOrEmpty(p.AssociatedExitId))
+            .Where(p => !string.IsNullOrEmpty(p.AssociatedExitId))
             .ToDictionary(p => p.AssociatedExitId!, p => p);
 
         var actualByExitId = actualRegistrations
