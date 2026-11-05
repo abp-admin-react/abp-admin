@@ -64,20 +64,15 @@ public class ErrorResponseProducerInventoryTests
 
     /// <summary>
     /// 扫描生产代码中实际注册的非 MVC 错误响应写出点。
-    /// 通过读取 HostModule.cs 源码查找 UseMiddleware<T> 注册，然后反射这些中间件的 InvokeAsync 方法。
+    /// 通过读取 HostModule.cs 和 HttpApiModule.cs 源码，解析所有真实注册类型。
     /// </summary>
-    /// <remarks>
-    /// P0 阶段实现：源码扫描 + 反射。过渡方案等到 P4 替换为完整的编译时扫描。
-    /// 只返回实际在生产代码中注册的中间件类型。
-    /// </remarks>
     private static List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)> ScanProductionErrorProducers()
     {
         var actualProducers = new List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)>();
         
-        // 1. 找到仓库根目录
         var repoRoot = FindRepositoryRoot();
         
-        // 2. 读取 HostModule.cs 源码
+        // 读取 HostModule.cs 源码
         var hostModulePath = Path.Combine(repoRoot, "backend", "framework-app", "AbpAdmin.HttpApi.Host", "AbpAdminHttpApiHostModule.cs");
         if (!File.Exists(hostModulePath))
         {
@@ -86,28 +81,196 @@ public class ErrorResponseProducerInventoryTests
         
         var hostModuleCode = File.ReadAllText(hostModulePath);
         
-        // 3. 扫描 UseMiddleware<T> 调用，只匹配精确类型名
-        var middlewareRegistrations = ScanMiddlewareRegistrations(hostModuleCode);
+        // 1. 扫描扩展方法注册：UseFriendlyBusinessException, UseFileUploadContentGuard
+        var extensionMethodRegistrations = ScanExtensionMethodRegistrations(hostModuleCode);
+        actualProducers.AddRange(extensionMethodRegistrations);
         
-        // 4. 检查每个注册的中间件是否在快照中有对应项
-        foreach (var registration in middlewareRegistrations)
+        // 2. 扫描 UseMiddleware<T> 调用（支持短名和完整名，排除注释）
+        var middlewareRegistrations = ScanUseMiddlewareRegistrations(hostModuleCode);
+        actualProducers.AddRange(middlewareRegistrations);
+        
+        // 3. 扫描 Cookie 事件注册
+        var cookieEventRegistrations = ScanCookieEventRegistrations(hostModuleCode);
+        actualProducers.AddRange(cookieEventRegistrations);
+        
+        // 4. 扫描 TenantMismatch（UseMultiTenancy 启用时存在）
+        if (hostModuleCode.Contains("UseMultiTenancy"))
         {
-            // 根据中间件类型推断协议
-            var protocol = InferProtocolFromMiddleware(registration.middlewareType);
-            var exitId = $"{registration.middlewareType}.InvokeAsync()";
-            var declaringType = registration.middlewareType;
-            var methodName = "InvokeAsync";
-            
-            // 构建文件路径（相对路径）
-            var filePath = BuildFilePathForMiddleware(repoRoot, registration.middlewareType);
-            
-            // 获取批准字段（特殊处理某些中间件）
-            var approvedFields = GetApprovedDataFieldsForMiddleware(registration.middlewareType);
-            
-            actualProducers.Add((exitId, filePath, declaringType, methodName, protocol, approvedFields));
+            actualProducers.Add((
+                "AbpAdminHttpApiHostModule.TenantMismatch",
+                "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+                "AbpAdminHttpApiHostModule",
+                "OnTenantValidationFailure",
+                ErrorProtocol.OAuth,
+                new List<string>()
+            ));
+        }
+        
+        // 5. 扫描 ImageProcessingBusyExceptionFilter（MVC Filter）
+        // 首先检查 HostModule，如果没有则检查 HttpApiModule
+        var imageFilterAdded = hostModuleCode.Contains("ImageProcessingBusyExceptionFilter") ||
+                              hostModuleCode.Contains("AddFilter<ImageProcessingBusyExceptionFilter>");
+                              
+        if (!imageFilterAdded)
+        {
+            // 在 HttpApiModule 中搜索
+            var httpApiModulePath = Path.Combine(repoRoot, "backend", "framework-app", "AbpAdmin.HttpApi", "AbpAdminHttpApiModule.cs");
+            if (File.Exists(httpApiModulePath))
+            {
+                var httpApiModuleCode = File.ReadAllText(httpApiModulePath);
+                imageFilterAdded = httpApiModuleCode.Contains("ImageProcessingBusyExceptionFilter") ||
+                                  httpApiModuleCode.Contains("AddFilter<ImageProcessingBusyExceptionFilter>");
+            }
+        }
+        
+        if (imageFilterAdded)
+        {
+            actualProducers.Add((
+                "ImageProcessingBusyExceptionFilter.OnException()",
+                "AbpAdmin.HttpApi/Imaging/ImageProcessingBusyExceptionFilter.cs",
+                "ImageProcessingBusyExceptionFilter",
+                "OnException",
+                ErrorProtocol.AbpEnvelope,
+                new List<string>()
+            ));
         }
         
         return actualProducers;
+    }
+    
+    /// <summary>
+    /// 扫描扩展方法注册（UseFriendlyBusinessException, UseFileUploadContentGuard）。
+    /// </summary>
+    private static List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)> ScanExtensionMethodRegistrations(string hostModuleCode)
+    {
+        var result = new List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)>();
+        
+        // UseFriendlyBusinessException 扩展方法 -> FriendlyBusinessExceptionMiddleware
+        if (hostModuleCode.Contains("UseFriendlyBusinessException()") || hostModuleCode.Contains("app.UseFriendlyBusinessException"))
+        {
+            result.Add((
+                "FriendlyBusinessExceptionMiddleware.InvokeAsync()",
+                "AbpAdmin.HttpApi.Host/FriendlyBusinessExceptionMiddleware.cs",
+                "FriendlyBusinessExceptionMiddleware",
+                "InvokeAsync",
+                ErrorProtocol.AbpEnvelope,
+                new List<string>()
+            ));
+        }
+        
+        // UseFileUploadContentGuard 扩展方法 -> FileUploadContentGuardMiddleware
+        if (hostModuleCode.Contains("UseFileUploadContentGuard()") || hostModuleCode.Contains("app.UseFileUploadContentGuard"))
+        {
+            result.Add((
+                "FileUploadContentGuardMiddleware.InvokeAsync()",
+                "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
+                "FileUploadContentGuardMiddleware",
+                "InvokeAsync",
+                ErrorProtocol.CustomJson,
+                new List<string> { "fileName", "reason" }
+            ));
+        }
+        
+        return result;
+    }
+    
+    /// <summary>
+    /// 扫描 UseMiddleware<T> 注册。支持短名和完整命名空间类型名，排除注释行。
+    /// </summary>
+    private static List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)> ScanUseMiddlewareRegistrations(string hostModuleCode)
+    {
+        var result = new List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)>();
+        
+        // 已知错误响应中间件类型映射（短名到完整信息）
+        var knownMiddlewareTypes = new Dictionary<string, (string exitId, string filePath, ErrorProtocol protocol, List<string> approvedFields)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["TokenEndpointRateLimitingMiddleware"] = ("TokenEndpointRateLimitingMiddleware.InvokeAsync()", "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs", ErrorProtocol.OAuth, new List<string>()),
+            ["IdentitySessionValidationMiddleware"] = ("IdentitySessionValidationMiddleware.InvokeAsync()", "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs", ErrorProtocol.OAuth, new List<string>()),
+        };
+        
+        // 按行处理，排除注释
+        var lines = hostModuleCode.Replace("\r\n", "\n").Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            
+            // 跳过注释行
+            if (line.TrimStart().StartsWith("//"))
+            {
+                continue;
+            }
+            
+            // 查找 UseMiddleware<T> 调用
+            var useMiddlewareIndex = line.IndexOf("UseMiddleware<");
+            if (useMiddlewareIndex >= 0)
+            {
+                // 提取完整类型名
+                var start = useMiddlewareIndex + "UseMiddleware<".Length;
+                var end = line.IndexOf('>', start);
+                if (end > start)
+                {
+                    var fullTypeName = line.Substring(start, end - start).Trim();
+                    
+                    // 提取短名（最后一段）
+                    var shortName = fullTypeName;
+                    if (fullTypeName.Contains('.'))
+                    {
+                        shortName = fullTypeName.Substring(fullTypeName.LastIndexOf('.') + 1);
+                    }
+                    
+                    // 检查是否是已知的错误响应中间件
+                    if (knownMiddlewareTypes.TryGetValue(shortName, out var info))
+                    {
+                        result.Add((
+                            info.exitId,
+                            info.filePath,
+                            shortName,
+                            "InvokeAsync",
+                            info.protocol,
+                            info.approvedFields
+                        ));
+                    }
+                }
+            }
+        }
+        
+        return result;
+    }
+    
+    /// <summary>
+    /// 扫描 Cookie 事件注册（OnRedirectToLogin, OnRedirectToAccessDenied）。
+    /// </summary>
+    private static List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)> ScanCookieEventRegistrations(string hostModuleCode)
+    {
+        var result = new List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)>();
+        
+        // 扫描 OnRedirectToLogin 事件注册
+        if (hostModuleCode.Contains("OnRedirectToLogin"))
+        {
+            result.Add((
+                "CookieAuthenticationEvents.OnRedirectToLogin",
+                "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+                "CookieAuthenticationEvents",
+                "OnRedirectToLogin",
+                ErrorProtocol.AbpEnvelope,
+                new List<string>()
+            ));
+        }
+        
+        // 扫描 OnRedirectToAccessDenied 事件注册
+        if (hostModuleCode.Contains("OnRedirectToAccessDenied"))
+        {
+            result.Add((
+                "CookieAuthenticationEvents.OnRedirectToAccessDenied",
+                "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+                "CookieAuthenticationEvents",
+                "OnRedirectToAccessDenied",
+                ErrorProtocol.AbpEnvelope,
+                new List<string>()
+            ));
+        }
+        
+        return result;
     }
     
     /// <summary>
@@ -150,65 +313,21 @@ public class ErrorResponseProducerInventoryTests
         throw new DirectoryNotFoundException($"无法找到仓库根目录。从 {Path.GetDirectoryName(typeof(ErrorResponseProducerInventoryTests).Assembly.Location)} 开始搜索");
     }
     
-    /// <summary>
-    /// 扫描 HostModule.cs 中的 UseMiddleware<T> 注册。
-    /// 使用正则表达式精确匹配类型，避免 `UseMiddleware<AbpAdmin.` 这样的通用匹配。
-    /// </summary>
-    private static List<(string middlewareType, int lineNumber)> ScanMiddlewareRegistrations(string hostModuleCode)
-    {
-        var registrations = new List<(string, int)>();
-        
-        // 使用正则表达式匹配 UseMiddleware<T> 调用
-        // 确保匹配完整的类型名，避免部分匹配
-        var lines = hostModuleCode.Replace("\r\n", "\n").Split('\n');
-        
-        for (int i = 0; i < lines.Length; i++)
-        {
-            var line = lines[i].Trim();
-            
-            // 匹配完整的 UseMiddleware<完整类型名> 调用
-            var useMiddlewareMatch = System.Text.RegularExpressions.Regex.Match(line, @"UseMiddleware<(\w+\.?)+>");
-            if (useMiddlewareMatch.Success)
-            {
-                var middlewareType = useMiddlewareMatch.Value
-                    .Replace("UseMiddleware<", "")
-                    .Replace(">", "")
-                    .Trim();
-                
-                // 只添加已知的错误响应中间件类型
-                if (IsErrorResponseMiddleware(middlewareType))
-                {
-                    registrations.Add((middlewareType, i + 1));
-                }
-            }
-        }
-        
-        return registrations;
-    }
     
-    /// <summary>
-    /// 检查是否是错误响应中间件类型。
-    /// </summary>
-    private static bool IsErrorResponseMiddleware(string middlewareType)
-    {
-        // 已知的错误响应中间件类型列表
-        var errorMiddlewareTypes = new[]
-        {
-            "FriendlyBusinessExceptionMiddleware",
-            "TokenEndpointRateLimitingMiddleware",
-            "IdentitySessionValidationMiddleware",
-            "FileUploadContentGuardMiddleware"
-        };
-        
-        return errorMiddlewareTypes.Contains(middlewareType);
-    }
     
     /// <summary>
     /// 根据中间件类型推断协议。
     /// </summary>
     private static ErrorProtocol InferProtocolFromMiddleware(string middlewareType)
     {
-        return middlewareType switch
+        // 提取短名（如果包含完整命名空间）
+        var shortName = middlewareType;
+        if (middlewareType.Contains('.'))
+        {
+            shortName = middlewareType.Substring(middlewareType.LastIndexOf('.') + 1);
+        }
+        
+        return shortName switch
         {
             "FriendlyBusinessExceptionMiddleware" => ErrorProtocol.AbpEnvelope,
             "TokenEndpointRateLimitingMiddleware" => ErrorProtocol.OAuth,
@@ -218,34 +337,7 @@ public class ErrorResponseProducerInventoryTests
         };
     }
     
-    /// <summary>
-    /// 构建中间件的文件路径。
-    /// 简化版：根据中间件类型返回固定路径。
-    /// </summary>
-    private static string BuildFilePathForMiddleware(string repoRoot, string middlewareType)
-    {
-        // 根据中间件类型返回固定的相对路径
-        return middlewareType switch
-        {
-            "FriendlyBusinessExceptionMiddleware" => "AbpAdmin.HttpApi.Host/FriendlyBusinessExceptionMiddleware.cs",
-            "TokenEndpointRateLimitingMiddleware" => "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs",
-            "IdentitySessionValidationMiddleware" => "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs",
-            "FileUploadContentGuardMiddleware" => "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
-            _ => $"AbpAdmin.HttpApi.Host/**/{middlewareType}.cs"
-        };
-    }
     
-    /// <summary>
-    /// 获取中间件的批准字段列表。
-    /// </summary>
-    private static List<string> GetApprovedDataFieldsForMiddleware(string middlewareType)
-    {
-        return middlewareType switch
-        {
-            "FileUploadContentGuardMiddleware" => new List<string> { "fileName", "reason" },
-            _ => new List<string>()
-        };
-    }
 
     /// <summary>
     /// 漂移门禁：验证 JSON 快照与生产代码中的错误写出点一致。
