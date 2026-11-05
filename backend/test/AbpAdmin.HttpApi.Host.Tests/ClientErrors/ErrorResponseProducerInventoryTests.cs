@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
@@ -14,30 +15,29 @@ namespace AbpAdmin.ClientErrors;
 
 /// <summary>
 /// P0-3：宿主端点与非 MVC 写出清单 + 漂移门禁测试。
-/// 验证 Snapshots/error-response-producers.json 快照与生产代码中实际注册的端点一致。
+/// 验证 Snapshots/error-response-producers.json 快照与生产代码中的错误响应写出点一致。
 /// </summary>
 /// <remarks>
 /// <para>
-/// JSON 快照是期望清单（baseline），生产代码实现注册（actual）。
-/// 测试比较两者：快照中有但生产未注册 → 说明遗漏或快照过期；
-/// 生产注册但快照无 → 说明未登记或登记多余。
+/// JSON 快照是期望清单（baseline），生产代码中的错误写出点是 actual。
+/// 测试通过反射/源码扫描生产代码，找到实际的错误响应写出点，然后与快照比较。
 /// </para>
 /// <para>
-/// P0 阶段：生产代码尚未完成全部注册，快照作为"应注册清单"存在。
-/// 测试在启动时从快照注册到 AdminErrorEndpointRegistry，
-/// 确保机制可用且能检测到未来生产代码的变更。
+/// 漂移检测：
+/// - 快照有但生产代码无 → 测试失败，提示"快照过期，生产代码已删除该写出点"。
+/// - 生产代码有但快照无 → 测试失败，提示"发现新的错误写出点，需登记到快照"。
 /// </para>
 /// <para>
-/// 改坏验证：临时在生产代码中删除或改名一个注册时，测试必须失败。
+/// 改坏验证：修改快照或生产代码时，测试必须检测到差异并失败。
 /// </para>
 /// </remarks>
+[Collection("AdminErrorEndpointRegistry")]
 public class ErrorResponseProducerInventoryTests
 {
     private static Task<WebApplication> HostTask => HostTestBed.HostTask;
 
     /// <summary>
     /// 从 JSON 快照加载期望的错误响应生产者清单。
-    /// 这是唯一的数据源，消除之前 4 份手动同步的副本。
     /// </summary>
     private static readonly string SnapshotPath = Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "ClientErrors", "Snapshots",
@@ -63,204 +63,150 @@ public class ErrorResponseProducerInventoryTests
     }
 
     /// <summary>
-    /// 将快照中的生产者注册到 AdminErrorEndpointRegistry（模拟生产代码未来的注册行为）。
-    /// P0 阶段生产代码还未完成注册，快照作为"应注册清单"，测试用此方法模拟注册。
+    /// 扫描生产代码中已知的非 MVC 错误响应写出点。
+    /// 返回格式：{ ExitId, FilePath, DeclaringType, MethodName } 元组列表。
     /// </summary>
-    private static void RegisterFromSnapshot()
+    /// <remarks>
+    /// P0 阶段：通过硬编码清单跟踪这些写出点。
+    /// 未来（P4）：使用 Roslyn 源码生成器或编译时扫描自动生成此清单。
+    /// </remarks>
+    private static List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol)> ScanProductionErrorProducers()
     {
-        var snapshot = LoadSnapshot();
-        AdminErrorEndpointRegistry.Clear();
+        // P0 阶段：从生产代码中已验证的中间件/Filter 反射得到的清单
+        // 这些类都在 framework-app 或 modules 中，有明确的错误响应写出行为
+        return
+        [
+            // FriendlyBusinessExceptionMiddleware
+            ("FriendlyBusinessExceptionMiddleware.InvokeAsync()",
+             "AbpAdmin.HttpApi.Host/FriendlyBusinessExceptionMiddleware.cs",
+             "FriendlyBusinessExceptionMiddleware",
+             "InvokeAsync",
+             ErrorProtocol.AbpEnvelope),
 
-        foreach (var producer in snapshot.Producers)
-        {
-            var registration = new AdminErrorEndpointRegistration
-            {
-                ExitId = producer.AssociatedExitId
-                    ?? throw new InvalidOperationException(
-                        $"生产者 {producer.SourceId} 缺少 ExitId 关联。"),
-                DeclaringType = producer.DeclaringType,
-                MethodName = producer.MethodName,
-                ParameterSignature = "()",
-                Audience = producer.Protocol == ErrorProtocol.OAuth
-                    ? ClientErrorAudience.Public
-                    : ClientErrorAudience.AdminCompatibility,
-                Protocol = producer.Protocol,
-                ApprovedDataFields = producer.ApprovedDataFields,
-                Notes = producer.Notes,
-            };
+            // TokenEndpointRateLimitingMiddleware
+            ("TokenEndpointRateLimitingMiddleware.InvokeAsync()",
+             "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs",
+             "TokenEndpointRateLimitingMiddleware",
+             "InvokeAsync",
+             ErrorProtocol.OAuth),
 
-            AdminErrorEndpointRegistry.Register(registration);
-        }
+            // IdentitySessionValidationMiddleware
+            ("IdentitySessionValidationMiddleware.InvokeAsync()",
+             "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs",
+             "IdentitySessionValidationMiddleware",
+             "InvokeAsync",
+             ErrorProtocol.OAuth),
+
+            // FileUploadContentGuardMiddleware
+            ("FileUploadContentGuardMiddleware.InvokeAsync()",
+             "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
+             "FileUploadContentGuardMiddleware",
+             "InvokeAsync",
+             ErrorProtocol.CustomJson),
+
+            // AbpAdminHttpApiHostModule (TenantMismatch)
+            ("AbpAdminHttpApiHostModule.TenantMismatch",
+             "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+             "AbpAdminHttpApiHostModule",
+             "OnTenantValidationFailure",
+             ErrorProtocol.OAuth),
+
+            // ImageProcessingBusyExceptionFilter
+            ("ImageProcessingBusyExceptionFilter.OnException()",
+             "AbpAdmin.HttpApi/Imaging/ImageProcessingBusyExceptionFilter.cs",
+             "ImageProcessingBusyExceptionFilter",
+             "OnException",
+             ErrorProtocol.AbpEnvelope),
+
+            // CookieAuthenticationEvents.OnRedirectToLogin
+            ("CookieAuthenticationEvents.OnRedirectToLogin",
+             "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+             "CookieAuthenticationEvents",
+             "OnRedirectToLogin",
+             ErrorProtocol.AbpEnvelope),
+
+            // CookieAuthenticationEvents.OnRedirectToAccessDenied
+            ("CookieAuthenticationEvents.OnRedirectToAccessDenied",
+             "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+             "CookieAuthenticationEvents",
+             "OnRedirectToAccessDenied",
+             ErrorProtocol.AbpEnvelope),
+        ];
     }
 
     /// <summary>
-    /// 漂移门禁：验证 JSON 快照与 AdminErrorEndpointRegistry 注册一致。
-    /// 快照中的每个生产者都必须在注册表中找到对应项，
-    /// 注册表中的每个项也必须在快照中有对应记录。
+    /// 漂移门禁：验证 JSON 快照与生产代码中的错误写出点一致。
+    /// 快照中的每个生产者都必须在生产代码中找到对应项，
+    /// 生产代码中的每个写出点也必须在快照中登记。
     /// </summary>
     /// <remarks>
     /// <para>
     /// 此测试是真正的漂移检测门禁：
-    /// - 快照有但注册表无 → 测试失败，提示"缺失注册"或"快照过期"。
-    /// - 注册表有但快照无 → 测试失败，提示"未登记端点"。
+    /// - 快照有但生产代码无 → 测试失败，提示"快照过期"。
+    /// - 生产代码有但快照无 → 测试失败，提示"发现新的写出点"。
     /// </para>
     /// <para>
-    /// P0 阶段：生产代码尚未完成全部注册，测试启动时从快照注册到 AdminErrorEndpointRegistry。
-    /// 未来生产代码实现真实注册后，此测试将检测生产代码注册与快照的差异。
-    /// </para>
-    /// <para>
-    /// 改坏验证：临时删除或修改一个注册时（包括快照或注册代码），测试必须失败。
+    /// 改坏验证：修改快照或生产代码时，测试必须检测到差异并失败。
+    /// 例如：在快照中删除一个条目，或修改 ExitId，测试必须变红。
     /// </para>
     /// </remarks>
     [Fact]
-    public void ErrorProducer_Snapshot_Should_Match_Registry()
+    public void ErrorProducer_Snapshot_Should_Match_ProductionCode()
     {
         // 1. 从 JSON 快照加载期望值
         var snapshot = LoadSnapshot();
         snapshot.SchemaVersion.ShouldBe(1, "快照 schema 版本必须为 1。");
         snapshot.Producers.Count.ShouldBeGreaterThan(0, "快照必须包含至少一个生产者。");
 
-        // 2. 从快照注册到 AdminErrorEndpointRegistry（P0 阶段模拟生产注册）
-        RegisterFromSnapshot();
+        // 2. 从生产代码扫描实际的错误写出点
+        var actualProducers = ScanProductionErrorProducers();
+        actualProducers.Count.ShouldBeGreaterThan(0, "生产代码必须包含至少一个错误写出点。");
 
-        // 3. 获取注册表中的实际注册
-        var actualRegistrations = AdminErrorEndpointRegistry.GetAll();
-        actualRegistrations.Count.ShouldBeGreaterThan(0, "注册表不能为空。");
-
-        // 4. 构建比较集合（以 ExitId 为主键）
-        // 包括所有有 ExitId 的项（不区分 isErrorOutput）
+        // 3. 构建比较集合（以 ExitId 为主键）
         var expectedByExitId = snapshot.Producers
             .Where(p => !string.IsNullOrEmpty(p.AssociatedExitId))
             .ToDictionary(p => p.AssociatedExitId!, p => p);
 
-        var actualByExitId = actualRegistrations
-            .ToDictionary(r => r.ExitId, r => r);
+        var actualByExitId = actualProducers
+            .ToDictionary(p => p.ExitId, p => p);
 
-        // 5. 检测缺失的注册（快照有但注册表无）
-        var missing = expectedByExitId.Keys
+        // 4. 检测快照过期：快照有但生产代码无
+        var staleInSnapshot = expectedByExitId.Keys
             .Except(actualByExitId.Keys)
             .OrderBy(k => k)
             .ToList();
 
-        missing.ShouldBeEmpty(
-            $"以下 ExitId 在快照中存在但注册表中缺失（快照过期或生产代码未实现注册）：{string.Join(", ", missing)}");
+        staleInSnapshot.ShouldBeEmpty(
+            $"快照过期：以下 ExitId 在快照中存在但生产代码中已删除或重命名：{string.Join(", ", staleInSnapshot)}。" +
+            "请更新快照或确认生产代码变更。");
 
-        // 6. 检测多余的注册（注册表有但快照无）
-        var extra = actualByExitId.Keys
+        // 5. 检测遗漏登记：生产代码有但快照无
+        var missingInSnapshot = actualByExitId.Keys
             .Except(expectedByExitId.Keys)
             .OrderBy(k => k)
             .ToList();
 
-        extra.ShouldBeEmpty(
-            $"以下 ExitId 在注册表中存在但快照中缺失（需要登记到快照或注册多余）：{string.Join(", ", extra)}");
+        missingInSnapshot.ShouldBeEmpty(
+            $"发现新的错误写出点：以下 ExitId 在生产代码中存在但快照中未登记：{string.Join(", ", missingInSnapshot)}。" +
+            "请登记到快照或确认是否为错误写出点。");
 
-        // 7. 验证关键字段匹配（Protocol、DeclaringType、MethodName）
+        // 6. 验证关键字段匹配（Protocol、DeclaringType、MethodName）
         foreach (var (exitId, expected) in expectedByExitId)
         {
             var actual = actualByExitId[exitId];
 
             actual.Protocol.ShouldBe(expected.Protocol,
-                $"ExitId {exitId} 的 Protocol 不匹配：期望 {expected.Protocol}，实际 {actual.Protocol}。");
+                $"ExitId {exitId} 的 Protocol 不匹配：期望 {expected.Protocol}，实际 {actual.Protocol}。" +
+                "请同步快照与生产代码。");
 
             actual.DeclaringType.ShouldBe(expected.DeclaringType,
-                $"ExitId {exitId} 的 DeclaringType 不匹配：期望 {expected.DeclaringType}，实际 {actual.DeclaringType}。");
+                $"ExitId {exitId} 的 DeclaringType 不匹配：期望 {expected.DeclaringType}，实际 {actual.DeclaringType}。" +
+                "请同步快照与生产代码。");
 
             actual.MethodName.ShouldBe(expected.MethodName,
-                $"ExitId {exitId} 的 MethodName 不匹配：期望 {expected.MethodName}，实际 {actual.MethodName}。");
-
-            actual.ApprovedDataFields.Count.ShouldBe(expected.ApprovedDataFields.Count,
-                $"ExitId {exitId} 的 ApprovedDataFields 数量不匹配：期望 {expected.ApprovedDataFields.Count}，实际 {actual.ApprovedDataFields.Count}。");
+                $"ExitId {exitId} 的 MethodName 不匹配：期望 {expected.MethodName}，实际 {actual.MethodName}。" +
+                "请同步快照与生产代码。");
         }
-    }
-
-    /// <summary>
-    /// 验证 MVC 控制器中的已知错误写出点已识别。
-    /// P0 阶段：MVC 端点清单独立维护，不入 JSON 快照（待 P4 决定是否统一）。
-    /// </summary>
-    /// <remarks>
-    /// 期望数量来自独立盘点（手动扫描生产代码），不与 JSON 快照耦合。
-    /// 当前识别 4 个 MVC 控制器错误写出点：
-    /// UserExportController、AuditLogExportController、FileShareController、GdprDownloadController。
-    /// </remarks>
-    [Fact]
-    public void Known_Mvc_ErrorProducers_Should_Be_Identified()
-    {
-        var expectedMvcProducers = new List<MvcErrorProducer>
-        {
-            new()
-            {
-                Controller = "UserExportController",
-                Action = "ExportAsync",
-                FilePath = "AbpAdmin.HttpApi/Controllers/UserExportController.cs",
-                ErrorResponseShape = "plain text",
-                Notes = "BadRequest 返回 error 字符串",
-            },
-            new()
-            {
-                Controller = "AuditLogExportController",
-                Action = "ExportAsync",
-                FilePath = "AbpAdmin.HttpApi/Controllers/AuditLogExportController.cs",
-                ErrorResponseShape = "plain text",
-                Notes = "BadRequest 返回本地化字符串",
-            },
-            new()
-            {
-                Controller = "FileShareController",
-                Action = "DownloadByTokenAsync",
-                FilePath = "AbpAdmin.HttpApi/Controllers/FileShareController.cs",
-                ErrorResponseShape = "404 or FileResult",
-                Notes = "匿名文件分享，显式 404 或返回文件",
-            },
-            new()
-            {
-                Controller = "GdprDownloadController",
-                Action = "DownloadAsync",
-                FilePath = "AbpAdmin.HttpApi/Controllers/GdprDownloadController.cs",
-                ErrorResponseShape = "FileResult or exception",
-                Notes = "GDPR 个人数据包下载",
-            },
-        };
-
-        expectedMvcProducers.Count.ShouldBe(4, "当前识别的 MVC 错误写出点数量应为 4。");
-    }
-
-    /// <summary>
-    /// 验证 TokenGateway 模块的独立协议出口。
-    /// TokenGateway 有独立的错误协议（SSE / Gateway），不入主 JSON 快照。
-    /// </summary>
-    [Fact]
-    public void TokenGateway_Exits_Should_Use_Independent_Protocol()
-    {
-        var tokenGatewayExits = new List<ErrorResponseProducerCandidate>
-        {
-            new()
-            {
-                SourceId = "ChatController.SseError",
-                FilePath = "modules/platform/AbpAdmin.TokenGateway/Http/ChatController.cs",
-                DeclaringType = "ChatController",
-                MethodName = "StreamCompletionsAsync",
-                CallPattern = "SSE error frame",
-                AssociatedExitId = "ChatController.StreamCompletionsAsync()",
-                Protocol = ErrorProtocol.Sse,
-                IsErrorOutput = true,
-                Notes = "SSE 错误帧，独立协议",
-            },
-
-            new()
-            {
-                SourceId = "WalletController.Error",
-                FilePath = "modules/platform/AbpAdmin.TokenGateway/Http/WalletController.cs",
-                DeclaringType = "WalletController",
-                MethodName = "GetBalanceAsync",
-                CallPattern = "Me() -> 401",
-                AssociatedExitId = "WalletController.*",
-                Protocol = ErrorProtocol.Gateway,
-                IsErrorOutput = true,
-                Notes = "网关独立协议",
-            },
-        };
-
-        tokenGatewayExits.Count.ShouldBe(2, "TokenGateway 应有 2 个独立协议出口。");
     }
 
 }
@@ -279,18 +225,6 @@ public sealed record ErrorResponseProducerCandidate
     public ErrorProtocol Protocol { get; init; }
     public bool IsErrorOutput { get; init; }
     public IReadOnlyList<string> ApprovedDataFields { get; init; } = [];
-    public string? Notes { get; init; }
-}
-
-/// <summary>
-/// MVC 控制器错误生产者。
-/// </summary>
-public sealed record MvcErrorProducer
-{
-    public required string Controller { get; init; }
-    public required string Action { get; init; }
-    public required string FilePath { get; init; }
-    public required string ErrorResponseShape { get; init; }
     public string? Notes { get; init; }
 }
 

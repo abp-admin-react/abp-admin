@@ -27,6 +27,7 @@ namespace AbpAdmin.ClientErrors;
 /// 每个待接出口有明确适配负责人和回归用例。
 /// </para>
 /// </remarks>
+[Collection("AdminErrorEndpointRegistry")]
 public class AdminErrorEndpointRegistryTests
 {
     private static Task<WebApplication> HostTask => HostTestBed.HostTask;
