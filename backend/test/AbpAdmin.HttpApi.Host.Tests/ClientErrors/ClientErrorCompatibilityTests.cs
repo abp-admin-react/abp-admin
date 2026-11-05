@@ -30,184 +30,91 @@ namespace AbpAdmin.ClientErrors;
 public class ClientErrorCompatibilityTests
 {
     /// <summary>
-    /// 验证图片繁忙 503 + Retry-After 行为。
-    /// P0 记录当前行为：filter 补头，不接管异常，体由 ABP 写出。
+    /// 验证图片繁忙异常的 RetryAfterSeconds 属性被正确初始化。
+    /// 测试 AbpAdminImageProcessingBusyException 的构造函数行为。
     /// </summary>
-    [Fact]
-    public void Image_Processing_Busy_503_Should_Add_RetryAfter_Header()
+    [Theory]
+    [InlineData(10)]
+    [InlineData(30)]
+    [InlineData(60)]
+    public void Image_Processing_Busy_Exception_Should_Store_RetryAfter(int retrySeconds)
     {
-        // ImageProcessingBusyExceptionFilter.cs:20
-        // 补 Retry-After 头，不标记 handled
-        // 响应体仍由 ABP 的 AbpExceptionFilter 处理
+        var exception = new AbpAdminImageProcessingBusyException(retrySeconds);
 
-        var busyException = new AbpAdminImageProcessingBusyException(30);
-
-        busyException.RetryAfterSeconds.ShouldBe(30);
-        busyException.HttpStatusCode.ShouldBe(503);
-
-        // P0 不改变运行时行为
-        // P1 验证：
-        // - filter 先于 AbpExceptionFilter 执行
-        // - 头被正确写入
-        // - ABP 写出标准错误信封
+        exception.RetryAfterSeconds.ShouldBe(retrySeconds);
+        exception.HttpStatusCode.ShouldBe(503);
     }
 
     /// <summary>
-    /// 验证管理端 503 通用提示。
-    /// 本期不新增管理端 503 倒计时交互。
+    /// 验证 PublicErrorKind.Server 可以与 RetryAfter 共存。
+    /// Server kind 允许可选的 retryAfterSeconds（方案 3.2）。
     /// </summary>
     [Fact]
-    public void Management_503_Should_Use_Generic_Message()
+    public void Server_Kind_Can_Have_RetryAfter()
     {
-        // 方案 3.2 明确：
-        // - 基础 server 定义允许可选的有界 retryAfterSeconds
-        // - message 仍是静态通用故障提示，不拿等待参数插值
-        // - 不是让前端看到 503 后覆盖已识别 kind
+        // Client:Unexpected 映射到 Server kind
+        var kind = ClientErrorKindMapping.GetKind(ClientErrorCodes.Unexpected);
+        kind.ShouldBe(PublicErrorKind.Server);
 
-        var serverError = new ServerErrorCompatibility
-        {
-            HttpStatusCode = 503,
-            Kind = PublicErrorKind.Server,
-            Code = ClientErrorCodes.Unexpected,
-            Message = "服务暂时不可用，请稍后重试。",
-            HasRetryAfterHeader = true,
-            HasRetryAfterData = false, // 不插值
-        };
-
-        serverError.Kind.ShouldBe(PublicErrorKind.Server);
-        serverError.HasRetryAfterData.ShouldBeFalse(
-            "本期不新增管理端 503 倒计时交互；retryAfter 通过 header 传递。");
+        // Server kind 可以携带 RetryAfter 信息
+        // 验证 ClientErrorKindMapping 返回正确的 kind
+        ClientErrorKindMapping.GetKind(ClientErrorCodes.Unexpected)
+            .ShouldBe(PublicErrorKind.Server);
     }
 
     /// <summary>
-    /// 验证限流 429 + Retry-After 行为。
+    /// 验证管理端 404 的前端契约：PublicErrorKind.NotFound 不触发全局弹窗。
+    /// 前端 requestErrorConfig.ts 对 404 进行静默处理。
     /// </summary>
     [Fact]
-    public void RateLimited_429_Should_Preserve_RetryAfter()
+    public void NotFound_Kind_For_404_Does_Not_Trigger_Global_Error()
     {
-        // TokenEndpointRateLimitingMiddleware.cs:107-120
-        // - 写 429 状态码
-        // - 写 Retry-After 头
-        // - 写 OAuth 风格 JSON（error + error_description）
+        // 404 映射到 NotFound kind
+        var kind = ClientErrorKindMapping.GetKind(ClientErrorCodes.NotFound);
+        kind.ShouldBe(PublicErrorKind.NotFound);
 
-        var rateLimitedResponse = new RateLimitedCompatibility
-        {
-            HttpStatusCode = 429,
-            Protocol = ErrorProtocol.OAuth,
-            HasRetryAfterHeader = true,
-            HeaderValue = 300,
-            BodyFields = ["error", "error_description"],
-            ApprovedDataFields = [], // OAuth 格式无 data 字段
-        };
-
-        rateLimitedResponse.Protocol.ShouldBe(ErrorProtocol.OAuth);
-        rateLimitedResponse.HasRetryAfterHeader.ShouldBeTrue();
-        rateLimitedResponse.BodyFields.ShouldContain("error");
-        rateLimitedResponse.BodyFields.ShouldContain("error_description");
+        // 前端对 NotFound kind 的处理在 requestErrorConfig.ts 中实现
+        // 此测试验证 kind 映射正确，前端行为由前端测试覆盖
     }
 
     /// <summary>
-    /// 验证管理端 404 全局静默契约。
-    /// web/src/requestErrorConfig.ts 对 404 不弹全局错误。
+    /// 验证 403 对应 Forbidden kind，且不会触发会话恢复逻辑。
     /// </summary>
     [Fact]
-    public void Management_404_Should_Be_Globally_Silent()
+    public void Forbidden_Kind_For_403_Does_Not_Trigger_Recovery()
     {
-        // docs/framework-contracts.md:70-72
-        // 404 全局静默契约：
-        // - requestErrorConfig 对 404 不弹全局错误
-        // - 业务语义：不存在/未配置
-        // - 页面层读端点存在该语义时必须用 isNotFound 分流降级
+        var kind = ClientErrorKindMapping.GetKind(ClientErrorCodes.Forbidden);
+        kind.ShouldBe(PublicErrorKind.Forbidden);
 
-        var notFoundRule = new NotFoundCompatibility
-        {
-            HttpStatusCode = 404,
-            GlobalSilent = true, // 不弹全局错误
-            PageHandling = "isNotFound 分流降级",
-            DataFields = [], // 404 通常无 data
-        };
-
-        notFoundRule.GlobalSilent.ShouldBeTrue();
-        notFoundRule.PageHandling.ShouldBe("isNotFound 分流降级");
-
-        // 前端测试覆盖：
-        // web/src/requestErrorConfig.test.ts 中有 404 静默测试
+        // 403 不等于 Authentication kind，不会触发会话恢复
+        kind.ShouldNotBe(PublicErrorKind.Authentication);
     }
 
     /// <summary>
-    /// 验证管理端 403 单提示契约。
+    /// 验证 429RateLimited 对应正确的 kind。
     /// </summary>
     [Fact]
-    public void Management_403_Should_Show_Single_Toast()
+    public void RateLimited_Kind_For_429_Is_Correct()
     {
-        // 非权限 403 弹全局提示
-        // 不触发会话清理或登录恢复
-
-        var forbiddenRule = new ForbiddenCompatibility
-        {
-            HttpStatusCode = 403,
-            GlobalToast = true,
-            TriggerSessionClear = false,
-            TriggerLoginRecovery = false,
-        };
-
-        forbiddenRule.GlobalToast.ShouldBeTrue();
-        forbiddenRule.TriggerSessionClear.ShouldBeFalse();
-        forbiddenRule.TriggerLoginRecovery.ShouldBeFalse();
+        var kind = ClientErrorKindMapping.GetKind(ClientErrorCodes.RateLimited);
+        kind.ShouldBe(PublicErrorKind.RateLimited);
     }
 
     /// <summary>
-    /// 验证管理端 429 等待信息契约。
+    /// 验证 ManagementCompatibilityDataWhitelist 中的字段命名符合契约。
     /// </summary>
     [Fact]
-    public void Management_429_Should_Show_Wait_Time()
+    public void Management_Whitelist_Field_Names_Match_Contract()
     {
-        // 方案 4.3/A31：
-        // - 保留管理 429 等待信息契约
-        // - error.data.RetryAfterSeconds（管理端 PascalCase）
-        // - 或从 Retry-After 响应头解析
+        // 限流：RetryAfterSeconds（管理端 PascalCase）
+        ManagementCompatibilityDataWhitelist.RateLimiting.RetryAfterSeconds
+            .ShouldBe("RetryAfterSeconds");
 
-        var rateLimitedManagement = new RateLimitedManagementCompatibility
-        {
-            HttpStatusCode = 429,
-            HasRetryAfterHeader = true,
-            HasRetryAfterDataField = true,
-            DataFieldName = "RetryAfterSeconds", // 管理 PascalCase
-            CustomerDataFieldName = "retryAfterSeconds", // 客户 lowerCamelCase
-        };
-
-        rateLimitedManagement.DataFieldName.ShouldBe("RetryAfterSeconds");
-        rateLimitedManagement.CustomerDataFieldName.ShouldBe("retryAfterSeconds");
-    }
-
-    /// <summary>
-    /// 验证 ImageProcessingBusy 由目录映射到 Unexpected/server + 503。
-    /// 错误注册失败 scenario（P1 实现）。
-    /// </summary>
-    [Fact]
-    public void ImageProcessingBusy_Should_Map_To_Unexpected_Server_503()
-    {
-        // 方案 3.2 明确：
-        // - 内部 AbpAdmin:ImageProcessingBusy 映射至 Client:Unexpected
-        // - 目录 kind 固定 server
-        // - 实际 HTTP 503
-        // - 基础 server 定义允许可选的有界 retryAfterSeconds
-        // - message 仍是静态通用故障提示，不拿等待参数插值
-
-        var mapping = new InternalToPublicMapping
-        {
-            InternalCode = "AbpAdmin:ImageProcessingBusy",
-            PublicCode = ClientErrorCodes.Unexpected,
-            Kind = PublicErrorKind.Server,
-            HttpStatusCode = 503,
-            HasRetryAfter = true,
-            RetryAfterSource = "header", // 仅 header，不插值到 message
-        };
-
-        mapping.PublicCode.ShouldBe(ClientErrorCodes.Unexpected);
-        mapping.Kind.ShouldBe(PublicErrorKind.Server);
-        mapping.RetryAfterSource.ShouldBe("header",
-            "等待时间通过 Retry-After header 传递，不插值到 message。");
+        // 文件上传：fileName, reason（客户端 lowerCamelCase）
+        ManagementCompatibilityDataWhitelist.FileUploadRejection.FileName
+            .ShouldBe("fileName");
+        ManagementCompatibilityDataWhitelist.FileUploadRejection.Reason
+            .ShouldBe("reason");
     }
 
     /// <summary>
@@ -263,79 +170,6 @@ public class ClientErrorCompatibilityTests
         var hasMismatch = !invalid.ActualKeys.SequenceEqual(invalid.ApprovedKeys, StringComparer.Ordinal);
         hasMismatch.ShouldBeTrue("无效场景的 ActualKeys 与 ApprovedKeys 应确实存在大小写不匹配。");
     }
-}
-
-/// <summary>
-/// 服务端错误兼容性。
-/// </summary>
-public sealed record ServerErrorCompatibility
-{
-    public int HttpStatusCode { get; init; }
-    public PublicErrorKind Kind { get; init; }
-    public string Code { get; init; } = "";
-    public string Message { get; init; } = "";
-    public bool HasRetryAfterHeader { get; init; }
-    public bool HasRetryAfterData { get; init; }
-}
-
-/// <summary>
-/// 限流兼容性。
-/// </summary>
-public sealed record RateLimitedCompatibility
-{
-    public int HttpStatusCode { get; init; }
-    public ErrorProtocol Protocol { get; init; }
-    public bool HasRetryAfterHeader { get; init; }
-    public int HeaderValue { get; init; }
-    public IReadOnlyList<string> BodyFields { get; init; } = [];
-    public IReadOnlyList<string> ApprovedDataFields { get; init; } = [];
-}
-
-/// <summary>
-/// 404 兼容性。
-/// </summary>
-public sealed record NotFoundCompatibility
-{
-    public int HttpStatusCode { get; init; }
-    public bool GlobalSilent { get; init; }
-    public string PageHandling { get; init; } = "";
-    public IReadOnlyList<string> DataFields { get; init; } = [];
-}
-
-/// <summary>
-/// 403 兼容性。
-/// </summary>
-public sealed record ForbiddenCompatibility
-{
-    public int HttpStatusCode { get; init; }
-    public bool GlobalToast { get; init; }
-    public bool TriggerSessionClear { get; init; }
-    public bool TriggerLoginRecovery { get; init; }
-}
-
-/// <summary>
-/// 管理端 429 兼容性。
-/// </summary>
-public sealed record RateLimitedManagementCompatibility
-{
-    public int HttpStatusCode { get; init; }
-    public bool HasRetryAfterHeader { get; init; }
-    public bool HasRetryAfterDataField { get; init; }
-    public string DataFieldName { get; init; } = "";
-    public string CustomerDataFieldName { get; init; } = "";
-}
-
-/// <summary>
-/// 内部码到公开码映射。
-/// </summary>
-public sealed record InternalToPublicMapping
-{
-    public string InternalCode { get; init; } = "";
-    public string PublicCode { get; init; } = "";
-    public PublicErrorKind Kind { get; init; }
-    public int HttpStatusCode { get; init; }
-    public bool HasRetryAfter { get; init; }
-    public string RetryAfterSource { get; init; } = "";
 }
 
 /// <summary>

@@ -93,30 +93,7 @@ public class ClientErrorCodesTests
         ClientErrorFieldNames.Members.ShouldBe("members");
     }
 
-    /// <summary>
-    /// 验证支持语言清单。
-    /// 首期静态客户支持集：zh-Hans、zh-Hant、en。
-    /// </summary>
-    /// <remarks>
-    /// 此测试记录 P0 阶段的设计决策。P1 将在资源文件中实现此支持集，
-    /// 届时可增加对实际资源文件的验证。
-    /// </remarks>
-    [Fact]
-    public void Supported_Languages_Should_Be_Defined_For_P0_Design()
-    {
-        // P0 设计决策：首期静态客户支持集
-        var expectedSupportedLanguages = new HashSet<string>
-        {
-            "zh-Hans", // 简体中文
-            "zh-Hant", // 繁体中文
-            "en",      // 英文
-        };
 
-        expectedSupportedLanguages.Count.ShouldBe(3);
-        expectedSupportedLanguages.ShouldContain("zh-Hans");
-        expectedSupportedLanguages.ShouldContain("zh-Hant");
-        expectedSupportedLanguages.ShouldContain("en");
-    }
 
     /// <summary>
     /// 验证管理兼容数据白名单定义正确。
@@ -162,83 +139,56 @@ public class ClientErrorCodesTests
         // 这与 ABP 的 GetValidationErrorInfos 返回结构一致
     }
 
-    /// <summary>
-    /// 基线失败夹具：401 触发会话恢复。
-    /// </summary>
-    [Fact]
-    public void AuthenticationRequired_401_Should_Trigger_Session_Recovery()
-    {
-        // 方案 7.2/7.3：
-        // - HTTP 401 触发同会话单次恢复
-        // - HTTP 403 永不触发清理/恢复
-        // - 只有 Client:AuthenticationRequired 或无公开码允许在 401 上
-        // - 其他码 + 401 丢弃码/message，用本地 authentication 兜底
 
-        var rule401 = new AuthenticationRecoveryRule
-        {
-            HttpStatusCode = 401,
-            AllowedCodes = [ClientErrorCodes.AuthenticationRequired, ""], // 无码也允许
-            TriggerRecovery = true,
-        };
-
-        rule401.AllowedCodes.ShouldContain(ClientErrorCodes.AuthenticationRequired);
-        rule401.TriggerRecovery.ShouldBeTrue();
-    }
 
     /// <summary>
-    /// 基线失败夹具：403 不触发会话清理。
-    /// </summary>
-    [Fact]
-    public void Forbidden_403_Should_Not_Trigger_Session_Clear()
-    {
-        var rule403 = new AuthenticationRecoveryRule
-        {
-            HttpStatusCode = 403,
-            AllowedCodes = [ClientErrorCodes.Forbidden, ClientErrorCodes.OperationFailed],
-            TriggerRecovery = false, // 403 永不触发恢复
-        };
-
-        rule403.TriggerRecovery.ShouldBeFalse();
-        rule403.AllowedCodes.ShouldContain(ClientErrorCodes.Forbidden);
-        rule403.AllowedCodes.ShouldContain(ClientErrorCodes.OperationFailed); // 业务码可以在 403 上
-    }
-
-    /// <summary>
-    /// 基线失败夹具：等待时间优先级。
-    /// 合法 header 优先，批准 body 兜底。
+    /// 验证等待时间优先级：合法 HTTP header 优先，批准 body 字段兜底。
+    /// 测试 RetryAfterResolver.Resolve 的实际行为。
     /// </summary>
     [Fact]
     public void RetryAfter_Header_Should_Precede_Body()
     {
-        // 方案 3.2/Q26：
-        // - 合法 HTTP Retry-After header 优先
-        // - 批准 body 字段兜底
-        // - 冲突不拼值、不相加
+        // Header 优先：header 有值时忽略 body
+        RetryAfterResolver.Resolve(headerValue: 30, bodyValue: 25)
+            .ShouldBe(30, "header 优先");
 
-        var scenario = new RetryAfterPriorityScenario
-        {
-            HeaderValue = 30,
-            BodyValue = 25,
-            ExpectedResult = 30, // header 优先
-        };
+        // Header 为 null 时使用 body
+        RetryAfterResolver.Resolve(headerValue: null, bodyValue: 25)
+            .ShouldBe(25, "header 为 null 时 body 兜底");
 
-        scenario.ExpectedResult.ShouldBe(30);
+        // 两者都为 null 时返回 null
+        RetryAfterResolver.Resolve(headerValue: null, bodyValue: null)
+            .ShouldBeNull("两者都为 null 时返回 null");
+
+        // Header 无效（负数）时使用 body
+        RetryAfterResolver.Resolve(headerValue: -1, bodyValue: 25)
+            .ShouldBe(25, "header 无效时 body 兜底");
     }
 
     /// <summary>
-    /// 基线失败夹具：非法等待时间丢弃。
-    /// 验证 RetryAfter 值的合法性边界：非负整数合法。
+    /// 验证 RetryAfter 值的合法性检测。
+    /// 测试 RetryAfterResolver.IsValid 的实际行为：非负整数为合法。
     /// </summary>
     [Theory]
-    [InlineData(-1, false, "负数应被丢弃")]
+    [InlineData(-1, false, "负数应被判定为非法")]
     [InlineData(0, true, "0 是合法值")]
-    [InlineData(86401, true, "超过 86400 秒合法但不展示具体倒计时")]
+    [InlineData(86400, true, "86400 秒（24小时）是合法值")]
+    [InlineData(86401, true, "超过 86400 秒也合法，只是不展示倒计时")]
     public void Invalid_RetryAfter_Should_Be_Discarded(int value, bool isValid, string reason)
     {
-        // 合法值：非负整数
-        // 超过 86400 秒不展示具体倒计时，但不丢弃值
-        var isValidSpec = value >= 0;
-        isValidSpec.ShouldBe(isValid, reason);
+        RetryAfterResolver.IsValid(value).ShouldBe(isValid, reason);
+    }
+
+    /// <summary>
+    /// 验证超过 24 小时的 RetryAfter 不展示倒计时，但值本身合法。
+    /// </summary>
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(86400, true)]
+    [InlineData(86401, false)]
+    public void RetryAfter_Countdown_Display_Rules(int seconds, bool shouldShowCountdown)
+    {
+        RetryAfterResolver.ShouldShowCountdown(seconds).ShouldBe(shouldShowCountdown);
     }
 }
 
@@ -249,24 +199,4 @@ public sealed record ValidationErrorFixture
 {
     public required string Message { get; init; }
     public required IReadOnlyList<string> Members { get; init; }
-}
-
-/// <summary>
-/// 认证恢复规则夹具。
-/// </summary>
-public sealed record AuthenticationRecoveryRule
-{
-    public int HttpStatusCode { get; init; }
-    public required IReadOnlyList<string> AllowedCodes { get; init; }
-    public bool TriggerRecovery { get; init; }
-}
-
-/// <summary>
-/// 等待时间优先级场景夹具。
-/// </summary>
-public sealed record RetryAfterPriorityScenario
-{
-    public int? HeaderValue { get; init; }
-    public int? BodyValue { get; init; }
-    public required int ExpectedResult { get; init; }
 }
