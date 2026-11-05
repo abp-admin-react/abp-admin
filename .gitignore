@@ -334,3 +334,8 @@ coverage/
 # 路径无关写法——字面量路径在分区迁移时必失效（本文件 run-2 C-6 事故同类），宿主已迁至 framework-app/
 **/AbpAdmin.HttpApi.Host/Configuration/Database.json
 **/AbpAdmin.HttpApi.Host/Configuration/Security.json
+
+# user rule 2026-11-05: markdown files are never committed
+*.md
+*.MD
+
