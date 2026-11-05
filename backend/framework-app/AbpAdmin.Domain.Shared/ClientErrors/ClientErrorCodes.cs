@@ -126,11 +126,8 @@ public static class ClientErrorKindMapping
                 throw new InvalidOperationException("Client error code cannot be null or empty.");
             }
 
-            // 映射必须明确
-            if (kind == default)
-            {
-                throw new InvalidOperationException($"Client error code '{code}' has invalid kind mapping.");
-            }
+            // Business == 0 是有效的 default，不应拒绝
+            // 只拒绝真正未初始化的情况（此时 CodeToKind 不会有该条目）
         }
     }
 }
