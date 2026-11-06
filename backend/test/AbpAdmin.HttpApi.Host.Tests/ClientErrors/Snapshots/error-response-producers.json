@@ -1,0 +1,102 @@
+{
+  "generatedAt": "2026-11-05T09:00:00Z",
+  "schemaVersion": 1,
+  "producers": [
+    {
+      "sourceId": "FriendlyBusinessExceptionMiddleware.WriteAsJsonAsync",
+      "filePath": "AbpAdmin.HttpApi.Host/FriendlyBusinessExceptionMiddleware.cs",
+      "declaringType": "FriendlyBusinessExceptionMiddleware",
+      "methodName": "InvokeAsync",
+      "callPattern": "Response.WriteAsJsonAsync",
+      "associatedExitId": "FriendlyBusinessExceptionMiddleware.InvokeAsync()",
+      "protocol": "AbpEnvelope",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "带码 BusinessException → 403 + ABP 信封 + Data"
+    },
+    {
+      "sourceId": "TokenEndpointRateLimitingMiddleware.WriteAsJsonAsync",
+      "filePath": "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs",
+      "declaringType": "TokenEndpointRateLimitingMiddleware",
+      "methodName": "InvokeAsync",
+      "callPattern": "Response.WriteAsJsonAsync",
+      "associatedExitId": "TokenEndpointRateLimitingMiddleware.InvokeAsync()",
+      "protocol": "OAuth",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "令牌端点限流 429 + OAuth 风格 JSON + Retry-After"
+    },
+    {
+      "sourceId": "IdentitySessionValidationMiddleware.WriteAsJsonAsync",
+      "filePath": "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs",
+      "declaringType": "IdentitySessionValidationMiddleware",
+      "methodName": "InvokeAsync",
+      "callPattern": "Response.WriteAsJsonAsync",
+      "associatedExitId": "IdentitySessionValidationMiddleware.InvokeAsync()",
+      "protocol": "OAuth",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "会话撤销 401 + session_revoked"
+    },
+    {
+      "sourceId": "FileUploadContentGuardMiddleware.WriteAsJsonAsync",
+      "filePath": "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
+      "declaringType": "FileUploadContentGuardMiddleware",
+      "methodName": "InvokeAsync",
+      "callPattern": "Response.WriteAsJsonAsync",
+      "associatedExitId": "FileUploadContentGuardMiddleware.InvokeAsync()",
+      "protocol": "CustomJson",
+      "isErrorOutput": true,
+      "approvedDataFields": ["fileName", "reason"],
+      "notes": "上传拒绝 400 + {fileName, reason}"
+    },
+    {
+      "sourceId": "AbpAdminHttpApiHostModule.TenantMismatch",
+      "filePath": "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+      "declaringType": "AbpAdminHttpApiHostModule",
+      "methodName": "OnTenantValidationFailure",
+      "callPattern": "Response.WriteAsJsonAsync",
+      "associatedExitId": "AbpAdminHttpApiHostModule.TenantMismatch",
+      "protocol": "OAuth",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "租户失配 403 + tenant_mismatch"
+    },
+    {
+      "sourceId": "ImageProcessingBusyExceptionFilter.RetryAfter",
+      "filePath": "AbpAdmin.HttpApi/Imaging/ImageProcessingBusyExceptionFilter.cs",
+      "declaringType": "ImageProcessingBusyExceptionFilter",
+      "methodName": "OnException",
+      "callPattern": "Response.Headers.RetryAfter",
+      "associatedExitId": "ImageProcessingBusyExceptionFilter.OnException()",
+      "protocol": "AbpEnvelope",
+      "isErrorOutput": false,
+      "approvedDataFields": [],
+      "notes": "补 Retry-After 头，异常体由 ABP 写出"
+    },
+    {
+      "sourceId": "CookieEvents.OnRedirectToLogin",
+      "filePath": "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+      "declaringType": "CookieAuthenticationEvents",
+      "methodName": "OnRedirectToLogin",
+      "callPattern": "Response.StatusCode = 401",
+      "associatedExitId": "CookieAuthenticationEvents.OnRedirectToLogin",
+      "protocol": "AbpEnvelope",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "对 /api 只写 401 状态，不写 body"
+    },
+    {
+      "sourceId": "CookieEvents.OnRedirectToAccessDenied",
+      "filePath": "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
+      "declaringType": "CookieAuthenticationEvents",
+      "methodName": "OnRedirectToAccessDenied",
+      "callPattern": "Response.StatusCode = 403",
+      "associatedExitId": "CookieAuthenticationEvents.OnRedirectToAccessDenied",
+      "protocol": "AbpEnvelope",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "对 /api 只写 403 状态，不写 body"
+    }
+  ]
+}

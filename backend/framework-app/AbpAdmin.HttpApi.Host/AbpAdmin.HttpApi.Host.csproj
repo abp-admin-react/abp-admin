@@ -15,6 +15,7 @@
   <ItemGroup>
     <!-- 单测直读中间件门限谓词（NV-16 回归锁）：internal 静态方法的路径归一化语义要钉死 -->
     <InternalsVisibleTo Include="AbpAdmin.HttpApi.Host.Tests" />
+    <InternalsVisibleTo Include="AbpAdmin.ClientError.HttpPipeline.Tests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="AspNetCore.HealthChecks.UI" />

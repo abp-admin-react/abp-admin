@@ -5,8 +5,11 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using AbpAdmin;
+using AbpAdmin.HttpApi.ClientErrors;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 
@@ -208,13 +211,28 @@ public class FileUploadContentGuardMiddleware
             "上传被内容防线拒绝：{FileName}（扩展名 {Extension}，原因 {Reason}），路径 {Path}",
             fileName, Path.GetExtension(fileName), reason, path);
 
+        var dispatcher = context.RequestServices?.GetService<ClientErrorHttpDispatcher>();
+        if (dispatcher != null)
+        {
+            await dispatcher.WriteKnownAsync(
+                context,
+                AbpAdminDomainErrorCodes.Files.ContentMismatch,
+                StatusCodes.Status400BadRequest,
+                new Dictionary<string, object?>
+                {
+                    ["fileName"] = fileName,
+                    ["reason"] = reason,
+                });
+            return;
+        }
+
         context.Response.StatusCode = StatusCodes.Status400BadRequest;
         context.Response.ContentType = "application/json; charset=utf-8";
         await context.Response.WriteAsJsonAsync(new
         {
             error = new
             {
-                code = "AbpAdmin:Files:ContentMismatch",
+                code = AbpAdminDomainErrorCodes.Files.ContentMismatch,
                 message = "上传被拒绝：文件内容与其扩展名不匹配，或包含不允许的脚本内容。",
                 details = (string?)null,
                 data = new { fileName, reason },

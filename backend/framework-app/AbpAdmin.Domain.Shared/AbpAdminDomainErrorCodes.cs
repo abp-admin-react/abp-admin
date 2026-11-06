@@ -81,6 +81,9 @@ public static class AbpAdminDomainErrorCodes
 
         /// <summary>语言文本覆盖写入口校验：文化名不是合法的文化标识。</summary>
         public const string InvalidCultureName = "AbpAdmin:InvalidLocalizationCultureName";
+
+        /// <summary>拒绝覆盖随版本发布的客户静态错误资源。</summary>
+        public const string ClientErrorResourceReadOnly = "AbpAdmin:ClientErrorResourceReadOnly";
     }
 
     /// <summary>
@@ -306,6 +309,7 @@ public static class AbpAdminDomainErrorCodes
         public const string ShareLinkExpired = "AbpAdmin:FileShareLinkExpired";
         public const string ShareLinkInvalid = "AbpAdmin:FileShareLinkInvalid";
         public const string StorageQuotaExceeded = "AbpAdmin:FileStorageQuotaExceeded";
+        public const string ContentMismatch = "AbpAdmin:Files:ContentMismatch";
     }
 
     public static class Payments

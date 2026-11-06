@@ -1,0 +1,15 @@
+{
+  "Culture": "zh-Hans",
+  "Texts": {
+    "AuthenticationRequired": "请先登录后再试。",
+    "Forbidden": "没有权限执行此操作。",
+    "ValidationFailed": "输入校验未通过。",
+    "NotFound": "请求的资源不存在。",
+    "RateLimited": "请求过于频繁，请稍后再试。",
+    "Conflict": "数据已变化，请刷新后重试。",
+    "OperationFailed": "操作失败，请稍后重试。",
+    "Unexpected": "系统繁忙，请稍后重试。",
+    "FileContentMismatch": "上传被拒绝：文件内容与其扩展名不匹配，或包含不允许的脚本内容。",
+    "SyncExportThresholdExceeded": "结果集超过同步导出上限，请使用异步导出。"
+  }
+}

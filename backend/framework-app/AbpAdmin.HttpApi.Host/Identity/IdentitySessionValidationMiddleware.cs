@@ -1,6 +1,10 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
+using AbpAdmin.ClientErrors;
+using AbpAdmin.HttpApi.ClientErrors;
 using AbpAdmin.Identity;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.Security.Claims;
 using Volo.Abp.Uow;
 using Volo.Abp.Users;
@@ -54,12 +58,12 @@ public class IdentitySessionValidationMiddleware
                 var session = await sessionManager.FindBySessionIdAsync(sessionId);
                 if (session == null)
                 {
-                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    await context.Response.WriteAsJsonAsync(new
-                    {
-                        error = "session_revoked",
-                        error_description = "The identity session has been revoked."
-                    });
+                    var dispatcher = context.RequestServices.GetRequiredService<ClientErrorHttpDispatcher>();
+                    await dispatcher.WriteKnownAsync(
+                        context,
+                        ClientErrorCodes.AuthenticationRequired,
+                        StatusCodes.Status401Unauthorized,
+                        protocolOverride: ErrorProtocol.OAuth);
                     return;
                 }
 

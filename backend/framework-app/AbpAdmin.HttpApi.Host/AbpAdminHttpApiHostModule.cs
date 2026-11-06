@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Extensions.DependencyInjection;
 using OpenIddict.Validation.AspNetCore;
 using OpenIddict.Server.AspNetCore;
+using AbpAdmin.ClientErrors;
 using AbpAdmin.EntityFrameworkCore;
 using AbpAdmin.Biz.Template;
 using AbpAdmin.Ledger;
@@ -275,6 +276,13 @@ public class AbpAdminHttpApiHostModule : AbpModule
         {
             options.Kind = DateTimeKind.Utc;
         });
+
+        context.Services.AddOptions<ClientErrorHandlingOptions>()
+            .Bind(configuration.GetSection(ClientErrorHandlingOptions.SectionName), binder =>
+            {
+                binder.ErrorOnUnknownConfiguration = true;
+            })
+            .ValidateOnStart();
 
         // 链上 worker（M5 计划第 59 行）：扫链/归集/热钱包监控/提现广播 BackgroundService 只在宿主注册
         //（DbMigrator 不调）；开关/间隔/阈值已迁设置页（worker 每轮热读）；Redis 支撑守卫在
@@ -865,31 +873,45 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 ? CookieSecurePolicy.Always
                 : CookieSecurePolicy.SameAsRequest;
 
-            options.Events.OnRedirectToLogin = redirectContext =>
+            options.Events.OnRedirectToLogin = async redirectContext =>
             {
                 if (redirectContext.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
                 {
                     redirectContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    var dispatcher = redirectContext.HttpContext.RequestServices
+                        .GetService<AbpAdmin.HttpApi.ClientErrors.ClientErrorHttpDispatcher>();
+                    if (dispatcher != null)
+                    {
+                        await dispatcher.WriteKnownAsync(
+                            redirectContext.HttpContext,
+                            ClientErrorCodes.AuthenticationRequired,
+                            StatusCodes.Status401Unauthorized);
+                    }
                 }
                 else
                 {
                     redirectContext.Response.Redirect(redirectContext.RedirectUri);
                 }
-
-                return Task.CompletedTask;
             };
-            options.Events.OnRedirectToAccessDenied = redirectContext =>
+            options.Events.OnRedirectToAccessDenied = async redirectContext =>
             {
                 if (redirectContext.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
                 {
                     redirectContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    var dispatcher = redirectContext.HttpContext.RequestServices
+                        .GetService<AbpAdmin.HttpApi.ClientErrors.ClientErrorHttpDispatcher>();
+                    if (dispatcher != null)
+                    {
+                        await dispatcher.WriteKnownAsync(
+                            redirectContext.HttpContext,
+                            ClientErrorCodes.Forbidden,
+                            StatusCodes.Status403Forbidden);
+                    }
                 }
                 else
                 {
                     redirectContext.Response.Redirect(redirectContext.RedirectUri);
                 }
-
-                return Task.CompletedTask;
             };
         });
 
@@ -1499,12 +1521,16 @@ public class AbpAdminHttpApiHostModule : AbpModule
                             .GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
                             .LogWarning("Tenant mismatch blocked. ClaimTenant={ClaimTenant} ResolvedTenant={ResolvedTenant} Path={Path}",
                                 claimTenant, currentTenant.Id, httpContext.Request.Path);
-                        httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        await httpContext.Response.WriteAsJsonAsync(new
-                        {
-                            error = "tenant_mismatch",
-                            error_description = "The authenticated tenant does not match the resolved tenant."
-                        });
+                        var protocol = path.StartsWithSegments("/signalr-hubs")
+                            ? ErrorProtocol.SignalR
+                            : ErrorProtocol.OAuth;
+                        var dispatcher = httpContext.RequestServices
+                            .GetRequiredService<AbpAdmin.HttpApi.ClientErrors.ClientErrorHttpDispatcher>();
+                        await dispatcher.WriteKnownAsync(
+                            httpContext,
+                            ClientErrorCodes.Forbidden,
+                            StatusCodes.Status403Forbidden,
+                            protocolOverride: protocol);
                         return;
                     }
                 }

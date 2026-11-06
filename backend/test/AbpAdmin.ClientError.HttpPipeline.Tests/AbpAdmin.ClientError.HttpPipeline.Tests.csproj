@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AbpAdmin</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\AbpAdmin.HttpApi.Host.Tests\HostUnderTest.cs" Link="Shared\HostUnderTest.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\framework-app\AbpAdmin.HttpApi.Host\AbpAdmin.HttpApi.Host.csproj" />
+    <ProjectReference Include="..\AbpAdmin.TestBase\AbpAdmin.TestBase.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+</Project>
