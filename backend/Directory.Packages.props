@@ -3,20 +3,21 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
 
-    <!-- ABP 10.7.0：含 GHSA-4x2h-f4f8-xjr6（Volo.Abp.BlobStoring.FileSystem 路径穿越，
-         Low）修复（PR #26232）与安全集（拒绝无效身份会话 cookie、OpenIddict 7.7.0、
-         client_id 不进交互式认证 cookie、租户连接串不进审计日志、UoW api key 连接串
-         改哈希、密码授权 2FA 修复）。官方无 10.6→10.7 迁移指南。
+    <!-- ABP 10.7.1：10.7.0 安全集（GHSA-4x2h-f4f8-xjr6 BlobStoring.FileSystem 路径穿越、
+         拒绝无效身份会话 cookie、OpenIddict 7.7.0、client_id 不进交互式认证 cookie、
+         租户连接串不进审计日志、UoW api key 连接串改哈希、密码授权 2FA）之上的补丁。
+         10.7.1 额外含远程 Dynamic Claims 吊销会话、外链登录签到检查、编译查询过滤 fail-closed。
+         官方无 10.6→10.7 迁移指南。
          通告处置口径：该 GHSA ID 未同步进 GitHub 全局 Advisory Database（github.com/
          advisories 与 OSV 均查不到），同步前 Dependabot 不会按它告警；若同步后按其
          区间（只列 10.7.0 为修复版）告警，按已知误报处理——修复确在包内，可独立复核：
          PR #26232 + 10.6.1/10.7.0 两个 tag 的 DefaultBlobFilePathCalculator.cs 对照
          （10.6.1 为裸 Path.Combine）。 -->
-    <AbpVersion>10.7.0</AbpVersion>
+    <AbpVersion>10.7.1</AbpVersion>
     <!-- LeptonXLite 主题走独立版本号，不要改成 AbpVersion -->
-    <!-- 与 ABP 10.7.0 同日配套版（5.6.1 是 10.6 配套；旧主题的 bundle 定义缺
-         jquery-migrate，Razor 页渲染即 500，lab 实测） -->
-    <AbpLeptonXLiteVersion>5.7.0</AbpLeptonXLiteVersion>
+    <!-- 与 ABP 10.7.1 配套（5.7.1 依赖 Volo.Abp.* >= 10.7.1；5.6.1 是 10.6 配套，
+         旧主题 bundle 缺 jquery-migrate，Razor 页渲染即 500） -->
+    <AbpLeptonXLiteVersion>5.7.1</AbpLeptonXLiteVersion>
     <AbpStudioVersion>3.0.10</AbpStudioVersion>
     <!-- 与运行时对齐：aspnet 10.0.11 带 2 CRITICAL + 11 HIGH（trivy），修复版本
          10.0.13（= 微软 2026-10 Patch Tuesday 服务版本）。DataProtection 同版对齐后
@@ -103,6 +104,7 @@
     <PackageVersion Include="Volo.Abp.OpenIddict.EntityFrameworkCore" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.PermissionManagement.Application" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.PermissionManagement.Application.Contracts" Version="$(AbpVersion)" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Domain" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.Identity" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.OpenIddict" Version="$(AbpVersion)" />
     <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.Shared" Version="$(AbpVersion)" />
@@ -175,7 +177,7 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="$(MicrosoftVersion)" />
-    <!-- ABP 10.7.0 的 EF PostgreSQL 提供器传递底线 >= 10.0.3 -->
+    <!-- ABP 10.7.x 的 EF PostgreSQL 提供器传递底线 >= 10.0.3 -->
     <PackageVersion Include="Npgsql" Version="10.0.3" />
 
     <!-- Serilog -->
@@ -304,7 +306,7 @@
     <PackageVersion Include="MessagePack" Version="3.1.9" />
     <PackageVersion Include="MessagePack.Annotations" Version="3.1.9" />
     <!-- AWSSDK.Core 4.0.102.3：覆盖 GHSA-9cvc-h2w8-phrp / CVE-2026-22611，同时满足
-         ABP 10.7.0 BlobStoring.Aws 的传递底线 >= 4.0.102。由 AWSSDK.S3 /
+         ABP 10.7.x BlobStoring.Aws 的传递底线 >= 4.0.102。由 AWSSDK.S3 /
          AWSSDK.SecurityToken（文件管理 S3 存储链）引入 -->
     <PackageVersion Include="AWSSDK.Core" Version="4.0.102.3" />
     <!-- Pkcs 由 MimeKit 4.17.0 以最低版本约束引入（解析到 10.0.0），

@@ -38,7 +38,7 @@
     "@ant-design/x-sdk": "^2.9.0",
     "@microsoft/signalr": "^10.0.11",
     "@tanstack/react-query": "^5.104.2",
-    "antd": "^6.6.6",
+    "antd": "^6.7.0",
     "antd-img-crop": "^4.30.0",
     "antd-style": "^4.1.0",
     "china-division": "^2.7.0",
@@ -49,7 +49,7 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@ant-design/cli": "^6.6.6",
+    "@ant-design/cli": "^6.7.0",
     "@biomejs/biome": "^2.5.15",
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",

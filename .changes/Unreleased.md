@@ -4,6 +4,8 @@
 
 ## 模块变更
 
+- 依赖升级：ABP `10.7.0` → `10.7.1`（`Directory.Packages.props` 的 `AbpVersion`），LeptonXLite `5.7.0` → `5.7.1`（主题依赖 `Volo.Abp.* >= 10.7.1`，必须同升）。管理前端 antd lock `6.6.6` → `6.7.0`，`@ant-design/cli` 跟随；`@ant-design/pro-components` 仍钉 `3.1.14-7`。
+
 - `backend/NuGet.Config`:`<packageSources>` 增加 `<clear />`——屏蔽用户级/机器级源,包只允许来自本文件声明源(供应链加固,借鉴 abp-next-admin)。
 - 新增 `.changes/` 结构化升级说明约定(本目录):发布版本时把 `Unreleased.md` 整理为 `Migration X.Y - X.Z.md`。
 - `AbpAdmin.HttpApi.Host`:新增 `LogUniqueIdEnricher`——每条日志附唯一短 ID(`LogUniqueId` 属性),报障单点定位,覆盖后台作业/启动期等无请求上下文的日志。
