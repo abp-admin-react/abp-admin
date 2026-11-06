@@ -250,11 +250,11 @@ public class ClientErrorProtocolAdapterTests
     }
 
     /// <summary>
-    /// 验证：OAuthErrorProtocolAdapter 非 /connect 路径返回 false。
-    /// 行为：不处理非 OAuth 端点。
+    /// 验证：OAuthErrorProtocolAdapter 由调用方选定协议后即可写出，不限定 /connect。
+    /// 会话撤销等 /api 出口复用同一 OAuth 形状。
     /// </summary>
     [Fact]
-    public async Task OAuth_Adapter_Should_Return_False_For_Non_Connect_Path()
+    public async Task OAuth_Adapter_Should_Write_For_Api_Path_When_Invoked()
     {
         var adapter = new OAuthErrorProtocolAdapter();
         var httpContext = new DefaultHttpContext();
@@ -262,7 +262,8 @@ public class ClientErrorProtocolAdapterTests
 
         var result = await adapter.TryWriteProtocolErrorAsync(httpContext, CreateProjection());
 
-        result.ShouldBeFalse();
+        result.ShouldBeTrue();
+        httpContext.Response.StatusCode.ShouldBe(500);
     }
 
     /// <summary>
@@ -325,29 +326,29 @@ public class ClientErrorProtocolAdapterTests
     /// 行为：不处理任何请求（默认适配器）。
     /// </summary>
     [Fact]
-    public void Abp_Adapter_Should_Always_Return_False()
+    public async Task Abp_Adapter_Should_Always_Return_False()
     {
         var adapter = new AbpEnvelopeProtocolAdapter();
         var httpContext = new DefaultHttpContext();
 
-        var result = adapter.TryWriteProtocolErrorAsync(httpContext, CreateProjection()).Result;
+        var result = await adapter.TryWriteProtocolErrorAsync(httpContext, CreateProjection());
 
         result.ShouldBeFalse();
     }
 
     /// <summary>
-    /// 验证：SignalRProtocolAdapter 总是返回 false。
-    /// 行为：不处理任何请求。
+    /// 验证：SignalRProtocolAdapter 未开始响应时写状态且不套 ABP 信封。
     /// </summary>
     [Fact]
-    public void SignalR_Adapter_Should_Always_Return_False()
+    public async Task SignalR_Adapter_Should_Set_Status_Without_Envelope()
     {
         var adapter = new SignalRProtocolAdapter();
         var httpContext = new DefaultHttpContext();
 
-        var result = adapter.TryWriteProtocolErrorAsync(httpContext, CreateProjection()).Result;
+        var result = await adapter.TryWriteProtocolErrorAsync(httpContext, CreateProjection());
 
-        result.ShouldBeFalse();
+        result.ShouldBeTrue();
+        httpContext.Response.StatusCode.ShouldBe(500);
     }
 
     private static ClientErrorHttpProjection CreateProjection()

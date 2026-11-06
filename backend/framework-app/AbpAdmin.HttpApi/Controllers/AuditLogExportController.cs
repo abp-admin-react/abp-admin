@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using AbpAdmin.ClientErrors;
 using AbpAdmin.Localization;
 using AbpAdmin.Permissions;
 using AbpAdmin.RateLimiting;
@@ -58,10 +59,7 @@ public class AuditLogExportController : AbpController
 
         if (count > AuditLogExportConsts.SyncThreshold)
         {
-            return BadRequest(new
-            {
-                error = _localizer["AuditLogExport:SyncThresholdExceeded", count, AuditLogExportConsts.SyncThreshold]
-            });
+            throw new BusinessException("AbpAdmin:Export:SyncThresholdExceeded");
         }
 
         var bytes = await _excelBuilder.BuildAsync(input, maxResultCount: (int)count);
@@ -81,13 +79,13 @@ public class AuditLogExportController : AbpController
         var excelFile = await _auditLogExcelFileRepository.FindAsync(id);
         if (excelFile == null)
         {
-            return NotFound();
+            throw new BusinessException(ClientErrorCodes.NotFound);
         }
 
         // 跨用户不可下别人的导出结果
         if (excelFile.CreatorId != CurrentUser.GetId())
         {
-            return Forbid();
+            throw new BusinessException(ClientErrorCodes.Forbidden);
         }
 
         byte[] bytes;
@@ -103,7 +101,7 @@ public class AuditLogExportController : AbpController
             // 捕获范围以它为限：其他异常（瞬时存储故障等）保持 500/重试语义不伪装成死链。
             Logger.LogWarning(ex,
                 "Export file record {RecordId} exists but its blob is missing; returning 404.", id);
-            return NotFound();
+            throw new BusinessException(ClientErrorCodes.NotFound);
         }
 
         return File(

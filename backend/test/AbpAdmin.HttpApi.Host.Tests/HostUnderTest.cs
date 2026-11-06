@@ -69,13 +69,16 @@ internal static class HostUnderTest
     internal static async Task<WebApplicationBuilder> CreateBuilderAsync(
         IEnumerable<KeyValuePair<string, string?>>? configurationOverrides = null,
         bool useAutofac = false,
-        Action<WebApplicationBuilder>? beforeAddApplication = null)
+        Action<WebApplicationBuilder>? beforeAddApplication = null,
+        string? environmentName = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             ApplicationName = typeof(AbpAdminHttpApiHostModule).Assembly.GetName().Name,
             ContentRootPath = ResolveHostContentRootPath(),
-            EnvironmentName = Environments.Development
+            EnvironmentName = string.IsNullOrWhiteSpace(environmentName)
+                ? Environments.Development
+                : environmentName
         });
 
         // AddAppSettingsSecretsJson is deliberately NOT replayed: the secrets file is

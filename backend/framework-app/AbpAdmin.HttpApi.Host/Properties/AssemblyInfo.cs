@@ -4,3 +4,4 @@ using System.Runtime.CompilerServices;
 // 键名格式——env 后缀一旦丢失就是跨环境令牌互验漏洞），与 Application/Domain 等
 // 项目的 AssemblyInfo 同一惯例。
 [assembly: InternalsVisibleToAttribute("AbpAdmin.HttpApi.Host.Tests")]
+[assembly: InternalsVisibleToAttribute("AbpAdmin.ClientError.HttpPipeline.Tests")]

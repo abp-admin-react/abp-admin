@@ -5,7 +5,11 @@ using AbpAdmin.ClientErrors;
 using AbpAdmin.Domain.ClientErrors;
 using AbpAdmin.HttpApi.ClientErrors;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
+using Volo.Abp;
+using Volo.Abp.ExceptionHandling;
+using Volo.Abp.Tracing;
 using Xunit;
 
 namespace AbpAdmin.ClientErrors;
@@ -24,16 +28,14 @@ public class ClientErrorHttpProjectorTests
             new() { InternalCode = "Test:RateLimited", PublicCode = ClientErrorCodes.RateLimited, ResourceType = ClientErrorResourceType, MessageKey = "RateLimited", Kind = PublicErrorKind.RateLimited },
             new() { InternalCode = "Test:Server", PublicCode = ClientErrorCodes.Unexpected, ResourceType = ClientErrorResourceType, MessageKey = "Unexpected", Kind = PublicErrorKind.Server },
         };
-        _catalog = new PublicErrorCatalog(definitions);
+        _catalog = PublicErrorCatalog.FromDefinitions(definitions);
         var projectionCore = new ClientErrorProjectionCore(_catalog);
         var eligibilityResolver = new AdminErrorEligibilityResolver();
         _projector = new ClientErrorHttpProjector(projectionCore, eligibilityResolver);
     }
 
     /// <summary>
-    /// 验证：Project 拒绝 null context。
-    /// 行为：抛出 ArgumentNullException。
-    /// </summary>
+    /// 验证：Project 拒绝 null context�?    /// 行为：抛�?ArgumentNullException�?    /// </summary>
     [Fact]
     public void Project_Should_Reject_Null_Context()
     {
@@ -41,9 +43,7 @@ public class ClientErrorHttpProjectorTests
     }
 
     /// <summary>
-    /// 验证：Project 提取异常代码。
-    /// 行为：从异常中提取 Code 属性。
-    /// </summary>
+    /// 验证：Project 提取异常代码�?    /// 行为：从异常中提�?Code 属性�?    /// </summary>
     [Fact]
     public void Project_Should_Extract_Exception_Code()
     {
@@ -64,9 +64,7 @@ public class ClientErrorHttpProjectorTests
     }
 
     /// <summary>
-    /// 验证：Project 确定 HTTP 状态码。
-    /// 行为：根据 kind 映射到正确的状态码。
-    /// </summary>
+    /// 验证：Project 确定 HTTP 状态码�?    /// 行为：根�?kind 映射到正确的状态码�?    /// </summary>
     [Fact]
     public void Project_Should_Determine_Http_Status()
     {
@@ -86,9 +84,7 @@ public class ClientErrorHttpProjectorTests
     }
 
     /// <summary>
-    /// 验证：Project 映射 RateLimited 到 429。
-    /// 行为：Kind.RateLimited → 429。
-    /// </summary>
+    /// 验证：Project 映射 RateLimited �?429�?    /// 行为：Kind.RateLimited �?429�?    /// </summary>
     [Fact]
     public void Project_Should_Map_RateLimited_To_429()
     {
@@ -108,9 +104,7 @@ public class ClientErrorHttpProjectorTests
     }
 
     /// <summary>
-    /// 验证：Project 保留已有状态码。
-    /// 行为：如果已有 400+ 状态码，保留不变。
-    /// </summary>
+    /// 验证：Project 保留已有状态码�?    /// 行为：如果已�?400+ 状态码，保留不变�?    /// </summary>
     [Fact]
     public void Project_Should_Keep_Existing_Status_When_400_Plus()
     {
@@ -130,14 +124,14 @@ public class ClientErrorHttpProjectorTests
     }
 
     /// <summary>
-    /// 验证：Project 使用 TraceIdentifier 作为 CorrelationId。
-    /// 行为：从 HttpContext 获取。
-    /// </summary>
+    /// 验证：Project 使用 TraceIdentifier 作为 CorrelationId�?    /// 行为：从 HttpContext 获取�?    /// </summary>
     [Fact]
-    public void Project_Should_Use_TraceIdentifier_As_CorrelationId()
+    public void Project_Should_Use_ICorrelationIdProvider()
     {
         var httpContext = new DefaultHttpContext();
-        httpContext.TraceIdentifier = "trace-123";
+        var services = new ServiceCollection();
+        services.AddSingleton<ICorrelationIdProvider>(new StaticCorrelationIdProvider("corr-from-provider"));
+        httpContext.RequestServices = services.BuildServiceProvider();
 
         var context = new ClientErrorHttpProjectionContext
         {
@@ -148,10 +142,30 @@ public class ClientErrorHttpProjectorTests
 
         var result = _projector.Project(context);
 
-        result.Body.CorrelationId.ShouldBe("trace-123");
+        result!.Body.CorrelationId.ShouldBe("corr-from-provider");
     }
 
-    private class TestBusinessException : Exception
+    private sealed class StaticCorrelationIdProvider : ICorrelationIdProvider
+    {
+        private readonly string? _id;
+
+        public StaticCorrelationIdProvider(string? id) => _id = id;
+
+        public string? Get() => _id;
+
+        public IDisposable Change(string? correlationId) => NullDisposable.Instance;
+    }
+
+    private sealed class NullDisposable : IDisposable
+    {
+        public static readonly NullDisposable Instance = new();
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private class TestBusinessException : Exception, IHasErrorCode
     {
         public string? Code { get; }
 
@@ -165,9 +179,7 @@ public class ClientErrorHttpProjectorTests
 public class ClientErrorResponseWriterTests
 {
     /// <summary>
-    /// 验证：ResponseWriter 写入状态码和 JSON 体。
-    /// 行为：响应包含正确的状态码和序列化内容。
-    /// </summary>
+    /// 验证：ResponseWriter 写入状态码�?JSON 体�?    /// 行为：响应包含正确的状态码和序列化内容�?    /// </summary>
     [Fact]
     public async Task WriteResponse_Should_Write_Status_And_Body()
     {
@@ -192,9 +204,7 @@ public class ClientErrorResponseWriterTests
     }
 
     /// <summary>
-    /// 验证：ResponseWriter 写入 ValidationErrors。
-    /// 行为：当有验证错误时，包含在响应中。
-    /// </summary>
+    /// 验证：ResponseWriter 写入 ValidationErrors�?    /// 行为：当有验证错误时，包含在响应中�?    /// </summary>
     [Fact]
     public async Task WriteResponse_Should_Include_ValidationErrors()
     {
@@ -222,9 +232,7 @@ public class ClientErrorResponseWriterTests
     }
 
     /// <summary>
-    /// 验证：ResponseWriter 处理 RetryAfter。
-    /// 行为：包含 Retry-After 头。
-    /// </summary>
+    /// 验证：ResponseWriter 处理 RetryAfter�?    /// 行为：包�?Retry-After 头�?    /// </summary>
     [Fact]
     public async Task WriteResponse_Should_Include_RetryAfter_Header()
     {

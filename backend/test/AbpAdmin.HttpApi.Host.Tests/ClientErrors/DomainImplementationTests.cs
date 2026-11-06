@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AbpAdmin;
 using AbpAdmin.ClientErrors;
 using AbpAdmin.Domain.ClientErrors;
 using Shouldly;
@@ -13,22 +14,24 @@ public class PublicErrorDefinitionRegistryTests
     private static readonly Type ClientErrorResourceType = typeof(ClientErrorResource);
 
     /// <summary>
-    /// 验证：Registry 构造时注册基础定义。
-    /// 行为：初始包含 8 个基础错误定义。
-    /// </summary>
+    /// 验证：Registry 构造时注册基础定义�?    /// 行为：初始包�?8 个基础错误定义�?    /// </summary>
     [Fact]
     public void Constructor_Should_Register_Base_Definitions()
     {
         var registry = new PublicErrorDefinitionRegistry();
         var definitions = registry.GetDefinitions();
+        var codes = definitions.Select(d => d.InternalCode).ToHashSet();
 
-        definitions.Count.ShouldBe(8);
+        codes.ShouldContain(ClientErrorCodes.AuthenticationRequired);
+        codes.ShouldContain(ClientErrorCodes.Unexpected);
+        codes.ShouldContain(AbpAdminDomainErrorCodes.Imaging.ImageProcessingBusy);
+        codes.ShouldContain(AbpAdminDomainErrorCodes.RateLimiting.OperationRateLimitExceeded);
+        codes.ShouldContain(AbpAdminDomainErrorCodes.Files.ContentMismatch);
+        codes.ShouldContain("AbpAdmin:Export:SyncThresholdExceeded");
     }
 
     /// <summary>
-    /// 验证：基础定义包含正确的 InternalCode。
-    /// 行为：每个基础定义有唯一的 InternalCode。
-    /// </summary>
+    /// 验证：基础定义包含正确�?InternalCode�?    /// 行为：每个基础定义有唯一�?InternalCode�?    /// </summary>
     [Fact]
     public void Base_Definitions_Should_Have_Unique_InternalCodes()
     {
@@ -43,8 +46,7 @@ public class PublicErrorDefinitionRegistryTests
     }
 
     /// <summary>
-    /// 验证：基础定义映射到正确的 PublicCode。
-    /// 行为：Client:AuthenticationRequired → AuthenticationRequired
+    /// 验证：基础定义映射到正确的 PublicCode�?    /// 行为：Client:AuthenticationRequired �?AuthenticationRequired
     /// </summary>
     [Fact]
     public void Base_Definition_Should_Map_AuthenticationRequired()
@@ -58,9 +60,7 @@ public class PublicErrorDefinitionRegistryTests
     }
 
     /// <summary>
-    /// 验证：Register 方法可添加新定义。
-    /// 行为：新定义可被 GetDefinitions 返回。
-    /// </summary>
+    /// 验证：Register 方法可添加新定义�?    /// 行为：新定义可被 GetDefinitions 返回�?    /// </summary>
     [Fact]
     public void Register_Should_Add_New_Definition()
     {
@@ -83,9 +83,7 @@ public class PublicErrorDefinitionRegistryTests
     }
 
     /// <summary>
-    /// 验证：Register 拒绝重复的 InternalCode。
-    /// 行为：抛出 InvalidOperationException。
-    /// </summary>
+    /// 验证：Register 拒绝重复�?InternalCode�?    /// 行为：抛�?InvalidOperationException�?    /// </summary>
     [Fact]
     public void Register_Should_Reject_Duplicate_InternalCode()
     {
@@ -104,9 +102,7 @@ public class PublicErrorDefinitionRegistryTests
     }
 
     /// <summary>
-    /// 验证：Register 拒绝空的 InternalCode。
-    /// 行为：抛出 ArgumentException。
-    /// </summary>
+    /// 验证：Register 拒绝空的 InternalCode�?    /// 行为：抛�?ArgumentException�?    /// </summary>
     [Fact]
     public void Register_Should_Reject_Empty_InternalCode()
     {
@@ -124,10 +120,40 @@ public class PublicErrorDefinitionRegistryTests
         Should.Throw<ArgumentException>(() => registry.Register(emptyDef));
     }
 
+    [Fact]
+    public void Register_Should_Allow_Consistent_Duplicate_PublicCode()
+    {
+        var registry = new PublicErrorDefinitionRegistry();
+
+        registry.Register(new PublicErrorDefinition
+        {
+            InternalCode = "Custom:AlsoUnexpected",
+            PublicCode = ClientErrorCodes.Unexpected,
+            ResourceType = ClientErrorResourceType,
+            MessageKey = "Unexpected",
+            Kind = PublicErrorKind.Server,
+        });
+
+        registry.GetDefinitions().ShouldContain(d => d.InternalCode == "Custom:AlsoUnexpected");
+    }
+
+    [Fact]
+    public void Register_Should_Reject_Inconsistent_Duplicate_PublicCode()
+    {
+        var registry = new PublicErrorDefinitionRegistry();
+
+        Should.Throw<InvalidOperationException>(() => registry.Register(new PublicErrorDefinition
+        {
+            InternalCode = "Custom:WrongKind",
+            PublicCode = ClientErrorCodes.Unexpected,
+            ResourceType = ClientErrorResourceType,
+            MessageKey = "Unexpected",
+            Kind = PublicErrorKind.Business,
+        }));
+    }
+
     /// <summary>
-    /// 验证：IPublicErrorDefinitionProvider 接口实现。
-    /// 行为：GetDefinitions 返回相同集合。
-    /// </summary>
+    /// 验证：IPublicErrorDefinitionProvider 接口实现�?    /// 行为：GetDefinitions 返回相同集合�?    /// </summary>
     [Fact]
     public void Provider_Interface_Should_Return_Definitions()
     {
@@ -136,7 +162,7 @@ public class PublicErrorDefinitionRegistryTests
 
         var providerDefs = provider.GetDefinitions();
         providerDefs.ShouldNotBeNull();
-        providerDefs.ToList().Count.ShouldBe(8);
+        providerDefs.ToList().Count.ShouldBeGreaterThanOrEqualTo(13);
     }
 }
 
@@ -145,9 +171,7 @@ public class PublicErrorCatalogTests
     private static readonly Type ClientErrorResourceType = typeof(ClientErrorResource);
 
     /// <summary>
-    /// 验证：Catalog 使用提供的定义集合。
-    /// 行为：Definitions 属性返回所有定义。
-    /// </summary>
+    /// 验证：Catalog 使用提供的定义集合�?    /// 行为：Definitions 属性返回所有定义�?    /// </summary>
     [Fact]
     public void Constructor_Should_Store_Definitions()
     {
@@ -157,25 +181,21 @@ public class PublicErrorCatalogTests
             new() { InternalCode = "Test:2", PublicCode = "Test2", ResourceType = ClientErrorResourceType, MessageKey = "T2", Kind = PublicErrorKind.Server },
         };
 
-        var catalog = new PublicErrorCatalog(definitions);
+        var catalog = PublicErrorCatalog.FromDefinitions(definitions);
 
         catalog.Definitions.Count.ShouldBe(2);
     }
 
     /// <summary>
-    /// 验证：Catalog 拒绝 null 定义集合。
-    /// 行为：抛出 ArgumentNullException。
-    /// </summary>
+    /// 验证：Catalog 拒绝 null 定义集合�?    /// 行为：抛�?ArgumentNullException�?    /// </summary>
     [Fact]
     public void Constructor_Should_Reject_Null_Definitions()
     {
-        Should.Throw<ArgumentNullException>(() => new PublicErrorCatalog(null!));
+        Should.Throw<ArgumentNullException>(() => PublicErrorCatalog.FromDefinitions(null!));
     }
 
     /// <summary>
-    /// 验证：FindByInternalCode 找到存在的定义。
-    /// 行为：返回匹配的 PublicErrorDefinition。
-    /// </summary>
+    /// 验证：FindByInternalCode 找到存在的定义�?    /// 行为：返回匹配的 PublicErrorDefinition�?    /// </summary>
     [Fact]
     public void FindByInternalCode_Should_Find_Existing()
     {
@@ -184,7 +204,7 @@ public class PublicErrorCatalogTests
             new() { InternalCode = "Test:FindMe", PublicCode = "Found", ResourceType = ClientErrorResourceType, MessageKey = "Find", Kind = PublicErrorKind.Business },
         };
 
-        var catalog = new PublicErrorCatalog(definitions);
+        var catalog = PublicErrorCatalog.FromDefinitions(definitions);
         var result = catalog.FindByInternalCode("Test:FindMe");
 
         result.ShouldNotBeNull();
@@ -192,13 +212,11 @@ public class PublicErrorCatalogTests
     }
 
     /// <summary>
-    /// 验证：FindByInternalCode 对空字符串返回 null。
-    /// 行为：不抛出异常，返回 null。
-    /// </summary>
+    /// 验证：FindByInternalCode 对空字符串返�?null�?    /// 行为：不抛出异常，返�?null�?    /// </summary>
     [Fact]
     public void FindByInternalCode_Should_Return_Null_For_Empty()
     {
-        var catalog = new PublicErrorCatalog(new List<PublicErrorDefinition>());
+        var catalog = PublicErrorCatalog.FromDefinitions(new List<PublicErrorDefinition>());
 
         var result = catalog.FindByInternalCode("");
 
@@ -206,9 +224,7 @@ public class PublicErrorCatalogTests
     }
 
     /// <summary>
-    /// 验证：FindByInternalCode 使用 Ordinal 比较。
-    /// 行为：大小写敏感匹配。
-    /// </summary>
+    /// 验证：FindByInternalCode 使用 Ordinal 比较�?    /// 行为：大小写敏感匹配�?    /// </summary>
     [Fact]
     public void FindByInternalCode_Should_Use_Ordinal_Comparison()
     {
@@ -217,16 +233,14 @@ public class PublicErrorCatalogTests
             new() { InternalCode = "Test:Case", PublicCode = "Found", ResourceType = ClientErrorResourceType, MessageKey = "Case", Kind = PublicErrorKind.Business },
         };
 
-        var catalog = new PublicErrorCatalog(definitions);
+        var catalog = PublicErrorCatalog.FromDefinitions(definitions);
 
         catalog.FindByInternalCode("Test:case").ShouldBeNull();
         catalog.FindByInternalCode("Test:Case").ShouldNotBeNull();
     }
 
     /// <summary>
-    /// 验证：FindByPublicCode 找到存在的定义。
-    /// 行为：返回匹配的 PublicErrorDefinition。
-    /// </summary>
+    /// 验证：FindByPublicCode 找到存在的定义�?    /// 行为：返回匹配的 PublicErrorDefinition�?    /// </summary>
     [Fact]
     public void FindByPublicCode_Should_Find_Existing()
     {
@@ -235,7 +249,7 @@ public class PublicErrorCatalogTests
             new() { InternalCode = "Test:Code", PublicCode = "PublicCode", ResourceType = ClientErrorResourceType, MessageKey = "Code", Kind = PublicErrorKind.Business },
         };
 
-        var catalog = new PublicErrorCatalog(definitions);
+        var catalog = PublicErrorCatalog.FromDefinitions(definitions);
         var result = catalog.FindByPublicCode("PublicCode");
 
         result.ShouldNotBeNull();
@@ -243,13 +257,11 @@ public class PublicErrorCatalogTests
     }
 
     /// <summary>
-    /// 验证：FindByPublicCode 不存在时返回 null。
-    /// 行为：返回 null，不抛出异常。
-    /// </summary>
+    /// 验证：FindByPublicCode 不存在时返回 null�?    /// 行为：返�?null，不抛出异常�?    /// </summary>
     [Fact]
     public void FindByPublicCode_Should_Return_Null_For_NonExisting()
     {
-        var catalog = new PublicErrorCatalog(new List<PublicErrorDefinition>());
+        var catalog = PublicErrorCatalog.FromDefinitions(new List<PublicErrorDefinition>());
 
         var result = catalog.FindByPublicCode("NonExistent");
 
@@ -270,13 +282,11 @@ public class ClientErrorProjectionCoreTests
             new() { InternalCode = "Test:Forbidden", PublicCode = ClientErrorCodes.Forbidden, ResourceType = ClientErrorResourceType, MessageKey = "Forbidden", Kind = PublicErrorKind.Forbidden },
             new() { InternalCode = "Test:RateLimited", PublicCode = ClientErrorCodes.RateLimited, ResourceType = ClientErrorResourceType, MessageKey = "RateLimited", Kind = PublicErrorKind.RateLimited },
         };
-        _catalog = new PublicErrorCatalog(definitions);
+        _catalog = PublicErrorCatalog.FromDefinitions(definitions);
     }
 
     /// <summary>
-    /// 验证：Project 投影已知 InternalCode。
-    /// 行为：返回正确的 PublicCode 和 Kind。
-    /// </summary>
+    /// 验证：Project 投影已知 InternalCode�?    /// 行为：返回正确的 PublicCode �?Kind�?    /// </summary>
     [Fact]
     public void Project_Should_Map_Known_InternalCode()
     {
@@ -296,9 +306,7 @@ public class ClientErrorProjectionCoreTests
     }
 
     /// <summary>
-    /// 验证：Project 未知 InternalCode 返回 OperationFailed。
-    /// 行为：PublicCode 为 OperationFailed，Kind 为 Business。
-    /// </summary>
+    /// 验证：Project 未知 InternalCode 返回 OperationFailed�?    /// 行为：PublicCode �?OperationFailed，Kind �?Business�?    /// </summary>
     [Fact]
     public void Project_Should_Return_OperationFailed_For_Unknown()
     {
@@ -316,9 +324,7 @@ public class ClientErrorProjectionCoreTests
     }
 
     /// <summary>
-    /// 验证：无 InternalCode 返回 Unexpected。
-    /// 行为：PublicCode 为 Unexpected，Kind 为 Server。
-    /// </summary>
+    /// 验证：无 InternalCode 返回 Unexpected�?    /// 行为：PublicCode �?Unexpected，Kind �?Server�?    /// </summary>
     [Fact]
     public void Project_Should_Return_Unexpected_When_No_Code()
     {
@@ -333,9 +339,7 @@ public class ClientErrorProjectionCoreTests
     }
 
     /// <summary>
-    /// 验证：Project 返回本地化回退消息。
-    /// 行为：消息符合 FallbackMessage 映射。
-    /// </summary>
+    /// 验证：Project 返回本地化回退消息�?    /// 行为：消息符�?FallbackMessage 映射�?    /// </summary>
     [Fact]
     public void Project_Should_Return_Fallback_Message()
     {
@@ -349,9 +353,7 @@ public class ClientErrorProjectionCoreTests
     }
 
     /// <summary>
-    /// 验证：Project 拒绝 null 输入。
-    /// 行为：抛出 ArgumentNullException。
-    /// </summary>
+    /// 验证：Project 拒绝 null 输入�?    /// 行为：抛�?ArgumentNullException�?    /// </summary>
     [Fact]
     public void Project_Should_Reject_Null_Input()
     {
@@ -361,9 +363,7 @@ public class ClientErrorProjectionCoreTests
     }
 
     /// <summary>
-    /// 验证：Project 传递 RetryAfterSeconds。
-    /// 行为：结果包含相同的值。
-    /// </summary>
+    /// 验证：Project 传�?RetryAfterSeconds�?    /// 行为：结果包含相同的值�?    /// </summary>
     [Fact]
     public void Project_Should_Pass_Through_RetryAfterSeconds()
     {
@@ -381,9 +381,7 @@ public class ClientErrorProjectionCoreTests
     }
 
     /// <summary>
-    /// 验证：Project 过滤 ExceptionData。
-    /// 行为：未批准字段被丢弃。
-    /// </summary>
+    /// 验证：Project 过滤 ExceptionData�?    /// 行为：未批准字段被丢弃�?    /// </summary>
     [Fact]
     public void Project_Should_Filter_ExceptionData()
     {
@@ -409,9 +407,7 @@ public class ClientErrorProjectionCoreTests
 public class BusinessDataFilterTests
 {
     /// <summary>
-    /// 验证：FilterDefault 仅返回 correlationId。
-    /// 行为：其他字段被过滤。
-    /// </summary>
+    /// 验证：FilterDefault 仅返�?correlationId�?    /// 行为：其他字段被过滤�?    /// </summary>
     [Fact]
     public void FilterDefault_Should_Only_Return_CorrelationId()
     {
@@ -429,9 +425,7 @@ public class BusinessDataFilterTests
     }
 
     /// <summary>
-    /// 验证：FilterDefault 处理 null 源。
-    /// 行为：返回空字典。
-    /// </summary>
+    /// 验证：FilterDefault 处理 null 源�?    /// 行为：返回空字典�?    /// </summary>
     [Fact]
     public void FilterDefault_Should_Handle_Null_Source()
     {
@@ -441,9 +435,7 @@ public class BusinessDataFilterTests
     }
 
     /// <summary>
-    /// 验证：FilterWithApprovedFields 按指定字段过滤。
-    /// 行为：只保留批准的字段。
-    /// </summary>
+    /// 验证：FilterWithApprovedFields 按指定字段过滤�?    /// 行为：只保留批准的字段�?    /// </summary>
     [Fact]
     public void FilterWithApprovedFields_Should_Filter_By_Approved_Set()
     {
@@ -464,9 +456,7 @@ public class BusinessDataFilterTests
     }
 
     /// <summary>
-    /// 验证：FilterWithApprovedFields 拒绝 null source。
-    /// 行为：返回空字典（源为空则过滤后也为空）。
-    /// </summary>
+    /// 验证：FilterWithApprovedFields 拒绝 null source�?    /// 行为：返回空字典（源为空则过滤后也为空）�?    /// </summary>
     [Fact]
     public void FilterWithApprovedFields_Should_Handle_Null_Source()
     {
@@ -478,9 +468,7 @@ public class BusinessDataFilterTests
     }
 
     /// <summary>
-    /// 验证：FilterWithEndpointRegistration 使用端点登记的字段。
-    /// 行为：使用 registration.ApprovedDataFields 过滤。
-    /// </summary>
+    /// 验证：FilterWithEndpointRegistration 使用端点登记的字段�?    /// 行为：使�?registration.ApprovedDataFields 过滤�?    /// </summary>
     [Fact]
     public void FilterWithEndpointRegistration_Should_Use_Registration_Fields()
     {
@@ -508,9 +496,7 @@ public class BusinessDataFilterTests
     }
 
     /// <summary>
-    /// 验证：FilterWithEndpointRegistration 处理 null registration。
-    /// 行为：返回空字典。
-    /// </summary>
+    /// 验证：FilterWithEndpointRegistration 处理 null registration�?    /// 行为：返回空字典�?    /// </summary>
     [Fact]
     public void FilterWithEndpointRegistration_Should_Handle_Null_Registration()
     {
@@ -522,9 +508,7 @@ public class BusinessDataFilterTests
     }
 
     /// <summary>
-    /// 验证：FilterWithEndpointRegistration 处理无 ApprovedDataFields 的 registration。
-    /// 行为：返回空字典。
-    /// </summary>
+    /// 验证：FilterWithEndpointRegistration 处理�?ApprovedDataFields �?registration�?    /// 行为：返回空字典�?    /// </summary>
     [Fact]
     public void FilterWithEndpointRegistration_Should_Handle_Empty_ApprovedFields()
     {

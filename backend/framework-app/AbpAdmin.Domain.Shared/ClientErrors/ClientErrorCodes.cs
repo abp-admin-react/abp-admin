@@ -69,6 +69,11 @@ public static class ClientErrorCodes
     /// 按正常异常状态映射返回，通用提示。
     /// </summary>
     public const string Unexpected = "Client:Unexpected";
+
+    /// <summary>
+    /// 超长文案/投影故障时的无参数安全兜底，不截断原文。
+    /// </summary>
+    public const string SafeFallbackMessage = "An error occurred. Please try again.";
 }
 
 /// <summary>
@@ -110,6 +115,14 @@ public static class ClientErrorKindMapping
     public static PublicErrorKind GetKind(string code)
     {
         return CodeToKind.TryGetValue(code, out var kind) ? kind : PublicErrorKind.Business;
+    }
+
+    /// <summary>
+    /// 基础公开码才有固定 kind；模块码返回 false。
+    /// </summary>
+    public static bool TryGetKind(string code, out PublicErrorKind kind)
+    {
+        return CodeToKind.TryGetValue(code, out kind);
     }
 
     /// <summary>

@@ -1,28 +1,23 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
-using AbpAdmin.ClientErrors;
-using Volo.Abp.Application.Services;
+using Volo.Abp;
+using Volo.Abp.DependencyInjection;
+using Volo.Abp.ExceptionHandling;
 
-namespace AbpAdmin.Application.ClientErrors;
+namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 客户端错误应用服务。
-/// 用于将 Domain 层的投影结果转换为 Application 层的 ClientFailureDto。
+/// HTTP 200 任务/批量失败结果映射。不是 ApplicationService，避免被 Auto API 暴露。
 /// </summary>
-public class ClientErrorAppService : ApplicationService
+public class ClientFailureMapper : ITransientDependency
 {
     private readonly IClientErrorProjectionCore _projectionCore;
 
-    public ClientErrorAppService(IClientErrorProjectionCore projectionCore)
+    public ClientFailureMapper(IClientErrorProjectionCore projectionCore)
     {
         _projectionCore = projectionCore;
     }
 
-    /// <summary>
-    /// 根据输入创建客户端失败结果。
-    /// 用于 HTTP 200 任务/批量失败结果。
-    /// </summary>
     public ClientFailureDto CreateFailureResult(
         string? internalCode,
         IReadOnlyDictionary<string, object?>? exceptionData,
@@ -40,32 +35,24 @@ public class ClientErrorAppService : ApplicationService
 
         var result = _projectionCore.Project(input);
 
-        var dto = new ClientFailureDto
+        return new ClientFailureDto
         {
             Code = result.PublicCode ?? ClientErrorCodes.OperationFailed,
             Message = result.Message,
             CorrelationId = result.CorrelationId,
+            Data = result.Data.Count == 0
+                ? new Dictionary<string, object?>()
+                : new Dictionary<string, object?>(result.Data, ClientErrorDataKeys.Comparer),
         };
-
-        if (result.Data != null && result.Data.Count > 0)
-        {
-            dto.Data = new Dictionary<string, object?>(result.Data);
-        }
-
-        return dto;
     }
 
-    /// <summary>
-    /// 根据异常创建客户端失败结果。
-    /// </summary>
     public ClientFailureDto CreateFailureFromException(
         Exception exception,
         string? correlationId,
         string? cultureName = null)
     {
         var exceptionData = new Dictionary<string, object?>();
-
-        if (exception.Data != null)
+        if (exception.Data is { Count: > 0 })
         {
             foreach (var key in exception.Data.Keys)
             {
@@ -77,31 +64,9 @@ public class ClientErrorAppService : ApplicationService
         }
 
         return CreateFailureResult(
-            exception is BusinessException bex ? bex.Code : null,
+            exception is IHasErrorCode hasCode ? hasCode.Code : null,
             exceptionData,
             correlationId,
             cultureName);
-    }
-}
-
-/// <summary>
-/// 业务异常基类（简化版本，用于错误处理）。
-/// </summary>
-public class BusinessException : Exception
-{
-    public string? Code { get; }
-
-    public BusinessException(string message) : base(message)
-    {
-    }
-
-    public BusinessException(string code, string message) : base(message)
-    {
-        Code = code;
-    }
-
-    public BusinessException(string message, Exception innerException)
-        : base(message, innerException)
-    {
     }
 }

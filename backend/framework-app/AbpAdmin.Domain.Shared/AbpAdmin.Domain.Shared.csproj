@@ -42,9 +42,11 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Localization\AbpAdmin\*.json" />
+    <EmbeddedResource Include="Localization\ClientErrors\*.json" />
     <!-- SettingUi 元数据（T2.6 起用，T3.5 修复嵌入遗漏——此前该文件未嵌入程序集，元数据静默失效） -->
     <EmbeddedResource Include="SettingProperties\*.json" />
     <Content Remove="Localization\AbpAdmin\*.json" />
+    <Content Remove="Localization\ClientErrors\*.json" />
     <Content Remove="SettingProperties\*.json" />
   </ItemGroup>
 

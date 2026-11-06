@@ -1,18 +1,22 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using AbpAdmin.ClientErrors;
+using AbpAdmin.Imaging;
+using AbpAdmin.RateLimiting;
 using Microsoft.AspNetCore.Http;
-using Volo.Abp.Domain.Entities;
+using Microsoft.Extensions.DependencyInjection;
+using Volo.Abp;
+using Volo.Abp.AspNetCore.ExceptionHandling;
+using Volo.Abp.DependencyInjection;
+using Volo.Abp.ExceptionHandling;
+using Volo.Abp.Tracing;
 
 namespace AbpAdmin.HttpApi.ClientErrors;
 
 /// <summary>
-/// HTTP 错误投影器实现。
-/// 实现 IClientErrorHttpProjector 契约，将 HTTP 上下文投影为安全响应。
+/// HTTP 层组装投影输入并确定状态码。不修改原异常。
 /// </summary>
-public class ClientErrorHttpProjector : IClientErrorHttpProjector
+public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDependency
 {
     private readonly IClientErrorProjectionCore _projectionCore;
     private readonly IAdminErrorEligibilityResolver _eligibilityResolver;
@@ -37,52 +41,96 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector
             return null;
         }
 
+        try
+        {
+            return ProjectCore(context);
+        }
+        catch
+        {
+            return new ClientErrorHttpProjection
+            {
+                Body = new PublicErrorProjectionResult
+                {
+                    PublicCode = ClientErrorCodes.Unexpected,
+                    Kind = PublicErrorKind.Server,
+                    Message = ClientErrorCodes.SafeFallbackMessage,
+                },
+                StatusCode = StatusCodes.Status500InternalServerError,
+            };
+        }
+    }
+
+    private ClientErrorHttpProjection ProjectCore(ClientErrorHttpProjectionContext context)
+    {
+        var httpContext = context.HttpContext;
+        var services = httpContext.RequestServices;
+        var registration = context.EndpointRegistration;
+
         var eligibilityResult = _eligibilityResolver.Resolve(
             new AdminErrorEligibilityContext
             {
-                HttpContext = context.HttpContext,
-                EndpointRegistration = context.EndpointRegistration,
+                HttpContext = httpContext,
+                EndpointRegistration = registration,
             });
+
+        if (!eligibilityResult.IsEligible && eligibilityResult.DegradeReason is { } reason)
+        {
+            services?.GetService<IAdminEligibilityDegradeMetrics>()
+                ?.Record(reason, registration?.ExitId ?? "unregistered");
+        }
 
         var audience = eligibilityResult.IsEligible
             ? ClientErrorAudience.AdminCompatibility
-            : context.EffectiveAudience;
+            : context.EffectiveAudience == ClientErrorAudience.AdminCompatibility
+                ? ClientErrorAudience.Public
+                : context.EffectiveAudience;
 
-        string? internalCode = null;
-        IReadOnlyDictionary<string, object?>? exceptionData = null;
+        string? internalCode = context.InternalCode;
+        IReadOnlyDictionary<string, object?>? exceptionData = context.ExceptionData;
+        int? retryAfter = context.RetryAfterSeconds;
 
         if (context.Exception != null)
         {
-            internalCode = GetExceptionCode(context.Exception);
-            exceptionData = ExtractExceptionData(context.Exception);
+            exceptionData ??= ExtractExceptionData(context.Exception);
+            if (context.Exception is AbpAdminOperationRateLimitingException)
+            {
+                internalCode ??= ClientErrorCodes.RateLimited;
+                retryAfter ??= TryReadRetryAfter(exceptionData);
+            }
+            else if (context.Exception is AbpAdminImageProcessingBusyException busy)
+            {
+                internalCode ??= busy.Code;
+                retryAfter ??= busy.RetryAfterSeconds;
+            }
+            else
+            {
+                internalCode ??= (context.Exception as IHasErrorCode)?.Code;
+            }
         }
 
-        var correlationId = context.HttpContext.TraceIdentifier;
+        var correlationId = services?.GetService<ICorrelationIdProvider>()?.Get();
 
         var input = new PublicErrorProjectionInput
         {
             InternalCode = internalCode,
             ExceptionData = exceptionData,
-            HttpStatusCode = context.HttpContext.Response.StatusCode,
+            HttpStatusCode = context.HttpStatusCode ?? (httpContext.Response.StatusCode >= 400
+                ? httpContext.Response.StatusCode
+                : null),
             CorrelationId = correlationId,
             Audience = audience,
-            EndpointRegistration = context.EndpointRegistration,
+            EndpointRegistration = registration,
+            RetryAfterSeconds = retryAfter,
         };
 
         var projectionResult = _projectionCore.Project(input);
-
-        var statusCode = DetermineHttpStatus(
-            context.HttpContext.Response.StatusCode,
-            projectionResult.Kind,
-            context.Exception);
-
-        var retryAfter = DetermineRetryAfter(projectionResult);
+        var statusCode = DetermineHttpStatus(context, projectionResult.Kind);
 
         return new ClientErrorHttpProjection
         {
             Body = projectionResult,
             StatusCode = statusCode,
-            RetryAfterSeconds = retryAfter,
+            RetryAfterSeconds = projectionResult.RetryAfterSeconds ?? retryAfter,
         };
     }
 
@@ -101,25 +149,56 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector
                 data[keyStr] = ex.Data[key];
             }
         }
+
         return data.Count > 0 ? data : null;
     }
 
-    private static string? GetExceptionCode(Exception ex)
+    private static int? TryReadRetryAfter(IReadOnlyDictionary<string, object?>? exceptionData)
     {
-        var codeProperty = ex.GetType().GetProperty("Code");
-        return codeProperty?.GetValue(ex) as string;
+        if (exceptionData == null
+            || !exceptionData.TryGetValue("RetryAfterSeconds", out var raw)
+            || raw == null)
+        {
+            return null;
+        }
+
+        return raw switch
+        {
+            int i when i >= 0 => i,
+            long l when l >= 0 && l <= int.MaxValue => (int)l,
+            double d when !double.IsNaN(d) && d >= 0 => (int)Math.Ceiling(d),
+            float f when !float.IsNaN(f) && f >= 0 => (int)Math.Ceiling(f),
+            string text when double.TryParse(text, out var parsed) && parsed >= 0
+                => (int)Math.Ceiling(parsed),
+            _ => null,
+        };
     }
 
-    private static int DetermineHttpStatus(int currentStatus, PublicErrorKind kind, Exception? ex)
+    private static int DetermineHttpStatus(ClientErrorHttpProjectionContext context, PublicErrorKind kind)
     {
+        if (context.HttpStatusCode is >= 400 and <= 599)
+        {
+            return context.HttpStatusCode.Value;
+        }
+
+        var currentStatus = context.HttpContext.Response.StatusCode;
         if (currentStatus >= 400)
         {
             return currentStatus;
         }
 
-        if (ex is IHasHttpStatusCode hasStatus)
+        if (context.Exception != null)
         {
-            return hasStatus.HttpStatusCode;
+            var finder = context.HttpContext.RequestServices?.GetService<IHttpExceptionStatusCodeFinder>();
+            if (finder != null)
+            {
+                return (int)finder.GetStatusCode(context.HttpContext, context.Exception);
+            }
+
+            if (context.Exception is IHasHttpStatusCode hasStatus)
+            {
+                return hasStatus.HttpStatusCode;
+            }
         }
 
         return kind switch
@@ -134,21 +213,4 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector
             _ => 400,
         };
     }
-
-    private static int? DetermineRetryAfter(PublicErrorProjectionResult result)
-    {
-        if (result.RetryAfterSeconds.HasValue && result.RetryAfterSeconds.Value >= 0)
-        {
-            return result.RetryAfterSeconds.Value;
-        }
-        return null;
-    }
-}
-
-/// <summary>
-/// 异常接口，用于获取 HTTP 状态码。
-/// </summary>
-public interface IHasHttpStatusCode
-{
-    int HttpStatusCode { get; }
 }

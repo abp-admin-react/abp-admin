@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
@@ -129,8 +130,12 @@ public class ImpersonationTokenExtensionGrant : ITokenExtensionGrant
         }
         catch (BusinessException ex)
         {
-            // BusinessException 的 Message 是未本地化的原始文本，对外给稳定的错误码更有用
-            return ExtensionGrantSupport.CreateErrorResult(OpenIddictConstants.Errors.InvalidGrant, ex.Code ?? ex.Message);
+            context.HttpContext.RequestServices
+                .GetRequiredService<ILogger<ImpersonationTokenExtensionGrant>>()
+                .LogWarning(ex, "Impersonation grant failed. Code={Code}", ex.Code);
+            return ExtensionGrantSupport.CreateErrorResult(
+                OpenIddictConstants.Errors.InvalidGrant,
+                "Impersonation failed");
         }
 
         return await SignInUserAsync(context, target.User, target.ImpersonatorClaims);

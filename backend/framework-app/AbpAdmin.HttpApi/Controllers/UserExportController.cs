@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using AbpAdmin.AuditLogs;
+using AbpAdmin.ClientErrors;
 using AbpAdmin.Identity;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
@@ -55,10 +56,7 @@ public class UserExportController : AbpController
 
         if (count > AuditLogExportConsts.SyncThreshold)
         {
-            return BadRequest(new
-            {
-                error = $"结果集 {count} 条超过同步导出阈值 {AuditLogExportConsts.SyncThreshold} 条，请使用异步导出。"
-            });
+            throw new Volo.Abp.BusinessException("AbpAdmin:Export:SyncThresholdExceeded");
         }
 
         // 导出权限与明文查看权限（Update）独立授予：仅有前者时邮箱/手机号列脱敏输出（安全审查 H1）
@@ -106,7 +104,7 @@ public class UserExportController : AbpController
         // 跨用户不可下别人的导出结果
         if (excelFile.CreatorId != CurrentUser.GetId())
         {
-            return Forbid();
+            throw new Volo.Abp.BusinessException(ClientErrorCodes.Forbidden);
         }
 
         var bytes = await _blobContainer.GetAllBytesAsync(id.ToString());
@@ -129,7 +127,7 @@ public class UserExportController : AbpController
         // 跨用户不可下别人的导入结果
         if (excelFile.CreatorId != CurrentUser.GetId())
         {
-            return Forbid();
+            throw new Volo.Abp.BusinessException(ClientErrorCodes.Forbidden);
         }
 
         var bytes = await _blobContainer.GetAllBytesAsync(id.ToString());

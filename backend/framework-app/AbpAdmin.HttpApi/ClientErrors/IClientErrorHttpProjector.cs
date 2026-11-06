@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -20,6 +21,31 @@ public sealed class ClientErrorHttpProjectionContext
     /// 未捕获异常（已知时）。null 表示非异常场景（如授权拒绝、模型绑定错误）。
     /// </summary>
     public Exception? Exception { get; init; }
+
+    /// <summary>
+    /// 手写出口显式内部码。优先于从异常提取的码。
+    /// </summary>
+    public string? InternalCode { get; init; }
+
+    /// <summary>
+    /// 手写出口已确定的 HTTP 状态。优先于 kind 映射。
+    /// </summary>
+    public int? HttpStatusCode { get; init; }
+
+    /// <summary>
+    /// 手写出口的受控参数快照。
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? ExceptionData { get; init; }
+
+    /// <summary>
+    /// 手写出口或异常上的等待秒数。
+    /// </summary>
+    public int? RetryAfterSeconds { get; init; }
+
+    /// <summary>
+    /// 覆盖协议登记。用于 /api 上仍保持 OAuth 形状的既有出口。
+    /// </summary>
+    public ErrorProtocol? ProtocolOverride { get; init; }
 
     /// <summary>
     /// 端点登记（已知时）。null 表示未登记端点（走 Public 策略）。

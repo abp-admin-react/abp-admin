@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.ClientErrors;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
@@ -275,6 +276,11 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
             throw new BusinessException(AbpAdminDomainErrorCodes.Localization.UnknownResourceName);
         }
 
+        if (IsClientStaticResource(input.ResourceName))
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.Localization.ClientErrorResourceReadOnly);
+        }
+
         try
         {
             _ = CultureInfo.GetCultureInfo(input.CultureName);
@@ -361,5 +367,12 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
     {
         var resourceNames = _localizationOptions.Value.Resources.Keys.ToList();
         return await Task.FromResult(new ListResultDto<string>(resourceNames));
+    }
+
+    private bool IsClientStaticResource(string resourceName)
+    {
+        return _localizationOptions.Value.Resources.TryGetValue(resourceName, out var resource)
+               && resource is LocalizationResource localizationResource
+               && typeof(IClientStaticResource).IsAssignableFrom(localizationResource.ResourceType);
     }
 }

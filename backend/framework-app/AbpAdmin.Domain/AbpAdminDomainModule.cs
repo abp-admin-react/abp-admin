@@ -21,6 +21,7 @@ using Volo.Abp.Localization;
 using Volo.Abp.OpenIddict;
 using Volo.Abp.PermissionManagement.OpenIddict;
 using Volo.Abp.TenantManagement;
+using AbpAdmin.ClientErrors;
 using AbpAdmin.Localization;
 using AbpAdmin.RateLimiting;
 using AbpAdmin.ModuleConfigurators;
@@ -176,6 +177,12 @@ public class AbpAdminDomainModule : AbpModule
 
         foreach (var resource in localizationOptions.Resources.Values)
         {
+            if (resource is LocalizationResource localizationResource
+                && typeof(IClientStaticResource).IsAssignableFrom(localizationResource.ResourceType))
+            {
+                continue;
+            }
+
             resource.Contributors.Add(new DbLocalizationResourceContributor(rootServiceProvider, currentTenant));
         }
 

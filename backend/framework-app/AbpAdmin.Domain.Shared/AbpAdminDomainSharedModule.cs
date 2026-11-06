@@ -1,3 +1,4 @@
+using AbpAdmin.ClientErrors;
 using AbpAdmin.Localization;
 using Volo.Abp.AuditLogging;
 using Volo.Abp.BackgroundJobs;
@@ -65,6 +66,10 @@ public class AbpAdminDomainSharedModule : AbpModule
                 .Add<AbpAdminResource>("en")
                 .AddBaseTypes(typeof(AbpValidationResource))
                 .AddVirtualJson("/Localization/AbpAdmin");
+
+            options.Resources
+                .Add<ClientErrorResource>("en")
+                .AddVirtualJson("/Localization/ClientErrors");
 
             // SettingUi 模块使用应用的本地化资源（分组名、设置显示名等）
             options.Resources

@@ -1,0 +1,15 @@
+{
+  "Culture": "zh-Hant",
+  "Texts": {
+    "AuthenticationRequired": "請先登入後再試。",
+    "Forbidden": "沒有權限執行此操作。",
+    "ValidationFailed": "輸入校驗未通過。",
+    "NotFound": "請求的資源不存在。",
+    "RateLimited": "請求過於頻繁，請稍後再試。",
+    "Conflict": "資料已變化，請重新整理後重試。",
+    "OperationFailed": "操作失敗，請稍後重試。",
+    "Unexpected": "系統繁忙，請稍後重試。",
+    "FileContentMismatch": "上傳被拒絕：檔案內容與其副檔名不符，或包含不允許的指令碼內容。",
+    "SyncExportThresholdExceeded": "結果集超過同步匯出上限，請使用非同步匯出。"
+  }
+}

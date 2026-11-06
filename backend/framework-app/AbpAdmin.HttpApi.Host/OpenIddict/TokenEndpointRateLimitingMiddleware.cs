@@ -1,5 +1,7 @@
 using System;
 using System.Threading.Tasks;
+using AbpAdmin.ClientErrors;
+using AbpAdmin.HttpApi.ClientErrors;
 using AbpAdmin.RateLimiting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -104,20 +106,22 @@ public class TokenEndpointRateLimitingMiddleware
         }
         catch (AbpAdminOperationRateLimitingException exception)
         {
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            int? retryAfter = null;
             // Checker 写入的是 TotalSeconds（double，如 "293.7412"）——必须按 double 解析再
             // 取整：int.TryParse 解析小数串恒失败，Retry-After 头就从未真正下发过。
             if (exception.Data.Contains("RetryAfterSeconds") &&
                 double.TryParse(exception.Data["RetryAfterSeconds"]?.ToString(), out var retryAfterSeconds))
             {
-                context.Response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfterSeconds)).ToString();
+                retryAfter = (int)Math.Ceiling(retryAfterSeconds);
             }
 
-            await context.Response.WriteAsJsonAsync(new
-            {
-                error = "rate_limited",
-                error_description = "Too many token requests. Please retry later."
-            });
+            var dispatcher = context.RequestServices.GetRequiredService<ClientErrorHttpDispatcher>();
+            await dispatcher.WriteKnownAsync(
+                context,
+                ClientErrorCodes.RateLimited,
+                StatusCodes.Status429TooManyRequests,
+                retryAfterSeconds: retryAfter,
+                protocolOverride: ErrorProtocol.OAuth);
             return true;
         }
     }

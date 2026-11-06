@@ -2,21 +2,59 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using AbpAdmin.ClientErrors;
+using Volo.Abp.DependencyInjection;
 
 namespace AbpAdmin.Domain.ClientErrors;
 
 /// <summary>
 /// 公开错误目录实现。
 /// 实现 IPublicErrorCatalog 契约，提供只读的公开错误定义查询。
+/// 经 ABP 约定式注册为单例；定义由所有已注册的 <see cref="IPublicErrorDefinitionProvider"/> 聚合。
 /// </summary>
-public class PublicErrorCatalog : IPublicErrorCatalog
+[ExposeServices(typeof(IPublicErrorCatalog))]
+public class PublicErrorCatalog : IPublicErrorCatalog, ISingletonDependency
 {
     private readonly IReadOnlyCollection<PublicErrorDefinition> _definitions;
 
-    public PublicErrorCatalog(IEnumerable<PublicErrorDefinition> definitions)
+    /// <summary>
+    /// DI 构造：聚合所有 provider 的定义。DI 唯一公开构造，避免解析歧义。
+    /// </summary>
+    public PublicErrorCatalog(IEnumerable<IPublicErrorDefinitionProvider> providers)
+        : this(Flatten(providers))
     {
-        _definitions = definitions?.ToList().AsReadOnly()
-            ?? throw new ArgumentNullException(nameof(definitions));
+    }
+
+    private PublicErrorCatalog(IReadOnlyCollection<PublicErrorDefinition> definitions)
+    {
+        _definitions = definitions;
+    }
+
+    /// <summary>
+    /// 测试/手工构造：直接使用给定的定义集合。
+    /// </summary>
+    public static PublicErrorCatalog FromDefinitions(IEnumerable<PublicErrorDefinition> definitions)
+    {
+        if (definitions is null)
+        {
+            throw new ArgumentNullException(nameof(definitions));
+        }
+
+        return new PublicErrorCatalog(definitions.ToList().AsReadOnly());
+    }
+
+    private static IReadOnlyCollection<PublicErrorDefinition> Flatten(
+        IEnumerable<IPublicErrorDefinitionProvider> providers)
+    {
+        if (providers is null)
+        {
+            throw new ArgumentNullException(nameof(providers));
+        }
+
+        var flattened = providers
+            .SelectMany(p => p.GetDefinitions())
+            .ToList();
+        PublicErrorCatalogStartupValidator.Validate(flattened);
+        return flattened.AsReadOnly();
     }
 
     public IReadOnlyCollection<PublicErrorDefinition> Definitions => _definitions;

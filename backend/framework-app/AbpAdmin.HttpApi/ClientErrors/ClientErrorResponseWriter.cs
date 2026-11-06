@@ -5,14 +5,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.ClientErrors;
 using Microsoft.AspNetCore.Http;
+using Volo.Abp.DependencyInjection;
 
 namespace AbpAdmin.HttpApi.ClientErrors;
 
 /// <summary>
 /// HTTP 错误响应写入器实现。
 /// 实现 IClientErrorResponseWriter 契约，一次性写出安全响应。
+/// 经 ABP 约定式注册为单例（无状态；接口名与类名符合 I{ClassName} 约定，默认暴露）。
 /// </summary>
-public class ClientErrorResponseWriter : IClientErrorResponseWriter
+public class ClientErrorResponseWriter : IClientErrorResponseWriter, ISingletonDependency
 {
     private readonly JsonSerializerOptions _jsonOptions;
 
