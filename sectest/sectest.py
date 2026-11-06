@@ -97,16 +97,33 @@ def multipart(fields, files):
     return b"".join(out), "multipart/form-data; boundary=" + boundary
 
 
+INTERNAL_CODE_MARKERS = (
+    "AbpAdmin:",
+    "Volo.Abp:",
+    "SmsEndpointBlocked",
+    "CredentialNotConfigured",
+    "INTERNAL_ONLY_MARKER",
+)
+
+
 def error_code(resp):
+    """提取客户可见公开码。内部码不得当作判定依据，也不应出现在客户响应里。"""
     if resp.json and isinstance(resp.json, dict):
-        code = resp.json.get("error", {}).get("code") if isinstance(resp.json.get("error"), dict) else None
-        return code or resp.json.get("code") or resp.json.get("error_code")
+        err = resp.json.get("error")
+        if isinstance(err, dict) and err.get("code"):
+            return err.get("code")
+        return resp.json.get("code") or resp.json.get("error_code")
     t = resp.text()
-    for marker in ("AbpAdmin:", "Volo.Abp:"):
+    for marker in ("Client:", "BizTemplate:Public:"):
         i = t.find(marker)
         if i >= 0:
             return t[i:i + 80].split('"')[0].split("\\")[0]
     return None
+
+
+def leaks_internal_code(resp):
+    t = resp.text()
+    return any(marker in t for marker in INTERNAL_CODE_MARKERS)
 
 
 # ---------------------------------------------------------------- fixtures
@@ -464,13 +481,15 @@ def a11_sms_intranet_endpoint_blocked():
         r = req(WEB, "POST", "/api/app/account-pro/send-phone-number-confirmation-code",
                 json_body={"phoneNumber": "13800138000"})
         code = error_code(r) or ""
-        no_egress = r.status in (204, 400, 403) or (
-            r.status == 500 and ("SmsEndpointBlocked" in code or "CredentialNotConfigured" in code))
+        leaked = leaks_internal_code(r)
+        # 客户响应不再回内部码；守卫生效看状态 + 日志无真实出站，并断言内部码未泄漏。
+        no_egress = (r.status in (204, 400, 403, 500) and not leaked)
         # 额外硬证据：宿主日志 3 分钟内不得出现指向 169.254 的出站尝试
         log = subprocess.run(["docker", "logs", "abpadmin-sectest-host-1", "--since", "3m"],
                              capture_output=True, timeout=20).stdout.decode("utf-8", "replace")
         attempted = "169.254.169.254" in log and ("SmsSendFailed" in log or "HttpRequestException" in log)
-        return no_egress and not attempted, f"status={r.status} code={code} egress_attempt={attempted}"
+        return no_egress and not attempted, (
+            f"status={r.status} code={code} leaked={leaked} egress_attempt={attempted}")
     finally:
         api("PUT", "/api/setting-ui/set-setting-values", json_body={
             "Setting_AbpAdmin_Sms_Provider": "Aliyun",

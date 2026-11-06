@@ -70,10 +70,14 @@ jobs:
         # HostServiceGraphValidationTests（建图零拨号）、RedisStartupPostureTests（首用 fail-fast，
         # 拨 127.0.0.1:1 立即拒绝，runner 上语义相同）——契约快照未同提交刷新时本步必红
         run: dotnet test backend/AbpAdmin.slnx --nologo
+      - name: Client error HTTP pipeline (Production)
+        env:
+          CLIENT_ERROR_TEST_ENVIRONMENT: Production
+        run: dotnet test backend/test/AbpAdmin.ClientError.HttpPipeline.Tests/AbpAdmin.ClientError.HttpPipeline.Tests.csproj --nologo
 
   web:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: web
@@ -95,6 +99,10 @@ jobs:
         run: pnpm tsc
       - name: Test
         run: pnpm test
+      - name: Production build
+        run: pnpm run build
+      - name: Client error demo must be absent from production artifacts
+        run: node ../scripts/check-client-error-demo-absent.mjs
 
   docker:
     runs-on: ubuntu-latest

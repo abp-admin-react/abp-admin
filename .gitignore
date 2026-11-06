@@ -338,4 +338,7 @@ coverage/
 # user rule 2026-11-05: markdown files are never committed
 *.md
 *.MD
+# 客户端错误处理方案要求文档入库（相对链接交付版、模块指南、AGENTS）
+!docs/*.md
+!**/AGENTS.md
 

@@ -12,6 +12,9 @@
 | 测试 | 钉住的契约 | 破坏后果 |
 |---|---|---|
 | `FrontendContractSnapshotTests`（Application.Tests） | 前端消费的 DTO 形状/可空性 ↔ `web/src/abp` 手写镜像 | 契约漂移静默上线；改契约必须同提交刷新快照（`FRONTEND_CONTRACT_SNAPSHOT_UPDATE=1`）并同步镜像 |
+| `PublicErrorContractSnapshotTests`（Host.Tests） | 组装后的公开错误码/kind/字段/HTTP 组合 ↔ `web/src/abp/customer/public-error-catalog.json` | 客户前端接受未批准码或内部映射；刷新用 `UPDATE_PUBLIC_ERROR_CONTRACT=1` |
+| `AllEndpointsHaveAudienceTests` / `ErrorResponseProducerInventoryTests` | 受控 MVC 受众元数据、写出点清单 | 新 API 未分类或手写错误出口漏登记 |
+| `AbpAdmin.ClientError.HttpPipeline.Tests` | 真实 HTTP 投影（含 `CLIENT_ERROR_TEST_ENVIRONMENT=Production`） | 客户响应泄漏 details/堆栈/原文；开发异常页落到受控入口 |
 | `HostServiceGraphValidationTests` / `HostInitializationLogTests`（HttpApi.Host.Tests） | 容器建图阶段零拨号、初始化日志清单 | 测试环境/慢网下建图卡死或误报 |
 | `RedisStartupPostureTests` | 首用 fail-fast、失败冷却、`AbortOnConnectFail` 强制、关停闩锁、姿态告警纯判定（含缺省=启用口径）、非法 `Redis:IsEnabled` 启动即败、生产模板三件套（backplane/Redis/Quartz） | 多实例静默退化（进程内锁/令牌互验失败/重复触发） |
 | `DataProtectionServiceRegistrationTests` | 密钥环 Redis 仓储、键名格式（env + 部署判别键）、`SetApplicationName`、证书加密出口 | 跨环境/跨部署令牌互验漏洞；密钥静默退回明文 |
@@ -67,9 +70,13 @@
 
 ## 5. 已知取舍登记（有意为之，勿当缺陷修）
 
-- **404 全局静默**：`requestErrorConfig` 对 404 不弹全局错误（业务语义：不存在/未配置）。
+- **404 全局静默（仅管理端 axios）**：`requestErrorConfig` 对 404 不弹全局错误（业务语义：不存在/未配置）。
   页面层读端点存在该语义时**必须**用 `isNotFound` 分流（对照实现：`dataScope.ts`）；
   开发期有 console 痕迹。改全局策略前先盘全仓 404 语义调用点。
+  客户请求库 `web/src/abp/customer` 默认反馈 404，不继承管理端静默。
+- **客户错误投影**：受控 HTTP 出口经 `ClientErrorExceptionFilter` / 异常中间件投影；
+  不得替换全局 `IExceptionToErrorInfoConverter`。公开资源视图固定裁剪，管理专用入口为
+  `/api/abp-admin/application-localization`。模块接入见 [client-error-module-guide.md](client-error-module-guide.md)。
 - **`onRealTimeMessage`/`offRealTimeMessage` 暂无生产消费者**：页面级动态订阅的框架基建，
   契约（两层注册属主、合并不清空、重建重挂）由 `signalr.test.ts` 钉住；接入首个页面
   消费者时按测试里的用法接线，不新增并行机制。
