@@ -27,9 +27,149 @@ namespace AbpAdmin.ClientErrors;
 /// 每个待接出口有明确适配负责人和回归用例。
 /// </para>
 /// </remarks>
+[Collection("AdminErrorEndpointRegistry")]
 public class AdminErrorEndpointRegistryTests
 {
     private static Task<WebApplication> HostTask => HostTestBed.HostTask;
+
+    /// <summary>
+    /// 验证 ResetForTesting 清空登记并取消冻结状态。
+    /// </summary>
+    [Fact]
+    public void ResetForTesting_Should_Clear_And_Unfreeze()
+    {
+        AdminErrorEndpointRegistry.ResetForTesting();
+
+        var registration = new AdminErrorEndpointRegistration
+        {
+            ExitId = "TestController.GetAsync()",
+            DeclaringType = "TestController",
+            MethodName = "GetAsync",
+            ParameterSignature = "()",
+            Audience = ClientErrorAudience.AdminCompatibility,
+            Protocol = ErrorProtocol.AbpEnvelope,
+        };
+
+        AdminErrorEndpointRegistry.Register(registration);
+        AdminErrorEndpointRegistry.Freeze();
+        AdminErrorEndpointRegistry.IsFrozen.ShouldBeTrue();
+
+        AdminErrorEndpointRegistry.ResetForTesting();
+        AdminErrorEndpointRegistry.IsFrozen.ShouldBeFalse();
+        AdminErrorEndpointRegistry.GetAll().Count.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// 验证冻结后无法注册。
+    /// </summary>
+    [Fact]
+    public void Frozen_Registry_Should_Prevent_Registration()
+    {
+        AdminErrorEndpointRegistry.ResetForTesting();
+
+        var registration = new AdminErrorEndpointRegistration
+        {
+            ExitId = "FrozenTest.GetAsync()",
+            DeclaringType = "FrozenTest",
+            MethodName = "GetAsync",
+            ParameterSignature = "()",
+            Audience = ClientErrorAudience.AdminCompatibility,
+            Protocol = ErrorProtocol.AbpEnvelope,
+        };
+
+        AdminErrorEndpointRegistry.Register(registration);
+        AdminErrorEndpointRegistry.Freeze();
+
+        var frozenRegistration = new AdminErrorEndpointRegistration
+        {
+            ExitId = "FrozenTest2.GetAsync()",
+            DeclaringType = "FrozenTest2",
+            MethodName = "GetAsync",
+            ParameterSignature = "()",
+            Audience = ClientErrorAudience.AdminCompatibility,
+            Protocol = ErrorProtocol.AbpEnvelope,
+        };
+
+        Should.Throw<InvalidOperationException>(() =>
+            AdminErrorEndpointRegistry.Register(frozenRegistration));
+
+        AdminErrorEndpointRegistry.ResetForTesting();
+    }
+
+    /// <summary>
+    /// 验证冻结后无法清空。
+    /// </summary>
+    [Fact]
+    public void Frozen_Registry_Should_Prevent_Clear()
+    {
+        AdminErrorEndpointRegistry.ResetForTesting();
+
+        var registration = new AdminErrorEndpointRegistration
+        {
+            ExitId = "FrozenClearTest.GetAsync()",
+            DeclaringType = "FrozenClearTest",
+            MethodName = "GetAsync",
+            ParameterSignature = "()",
+            Audience = ClientErrorAudience.AdminCompatibility,
+            Protocol = ErrorProtocol.AbpEnvelope,
+        };
+
+        AdminErrorEndpointRegistry.Register(registration);
+        AdminErrorEndpointRegistry.Freeze();
+
+        Should.Throw<InvalidOperationException>(() =>
+            AdminErrorEndpointRegistry.Clear());
+
+        AdminErrorEndpointRegistry.ResetForTesting();
+    }
+
+    /// <summary>
+    /// 验证重复冻结会失败。
+    /// </summary>
+    [Fact]
+    public void Double_Freeze_Should_Fail()
+    {
+        AdminErrorEndpointRegistry.ResetForTesting();
+
+        AdminErrorEndpointRegistry.Freeze();
+        AdminErrorEndpointRegistry.IsFrozen.ShouldBeTrue();
+
+        Should.Throw<InvalidOperationException>(() =>
+            AdminErrorEndpointRegistry.Freeze());
+
+        AdminErrorEndpointRegistry.ResetForTesting();
+    }
+
+    /// <summary>
+    /// 验证 Clear 被冻结状态阻止。
+    /// 使用 Clear() 的老测试应迁移到 ResetForTesting()。
+    /// </summary>
+    [Fact]
+    public void Clear_Should_Be_Blocked_When_Frozen()
+    {
+        AdminErrorEndpointRegistry.ResetForTesting();
+
+        var registration = new AdminErrorEndpointRegistration
+        {
+            ExitId = "ClearBlockedTest.GetAsync()",
+            DeclaringType = "ClearBlockedTest",
+            MethodName = "GetAsync",
+            ParameterSignature = "()",
+            Audience = ClientErrorAudience.AdminCompatibility,
+            Protocol = ErrorProtocol.AbpEnvelope,
+        };
+
+        AdminErrorEndpointRegistry.Register(registration);
+        AdminErrorEndpointRegistry.Freeze();
+
+        // Clear 被冻结阻止
+        Should.Throw<InvalidOperationException>(() => AdminErrorEndpointRegistry.Clear());
+
+        // ResetForTesting 可以清除冻结状态
+        AdminErrorEndpointRegistry.ResetForTesting();
+        AdminErrorEndpointRegistry.IsFrozen.ShouldBeFalse();
+        AdminErrorEndpointRegistry.GetAll().Count.ShouldBe(0);
+    }
 
     /// <summary>
     /// 验证登记表结构正确，支持增删查。
@@ -37,7 +177,7 @@ public class AdminErrorEndpointRegistryTests
     [Fact]
     public void Registry_Should_Support_Basic_Operations()
     {
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
 
         var registration = new AdminErrorEndpointRegistration
         {
@@ -61,7 +201,7 @@ public class AdminErrorEndpointRegistryTests
         found.Audience.ShouldBe(ClientErrorAudience.AdminCompatibility);
         found.RequiredPermissions.ShouldContain("Test.Read");
 
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
     }
 
     /// <summary>
@@ -70,7 +210,7 @@ public class AdminErrorEndpointRegistryTests
     [Fact]
     public void Duplicate_Registration_Should_Fail()
     {
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
 
         var registration = new AdminErrorEndpointRegistration
         {
@@ -87,7 +227,7 @@ public class AdminErrorEndpointRegistryTests
         Should.Throw<InvalidOperationException>(() =>
             AdminErrorEndpointRegistry.Register(registration));
 
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
     }
 
     /// <summary>
@@ -144,17 +284,22 @@ public class AdminErrorEndpointRegistryTests
 
         // 有授权但非匿名的端点（候选项）
         byAuthStatus.TryGetValue(new { HasAuthorize = true, HasAllowAnonymous = false }, out var authorized);
-        authorized?.Count.ShouldBeGreaterThan(50,
+        authorized.ShouldNotBeNull("必须存在至少一个带授权且非匿名的端点（AdminCompatibility 候选项）。");
+        authorized.Count.ShouldBeGreaterThan(50,
             "有授权且非匿名的端点应至少有 50 个（AdminCompatibility 候选项）。");
 
         // 匿名端点（Public/Shared 候选项）
         byAuthStatus.TryGetValue(new { HasAuthorize = false, HasAllowAnonymous = true }, out var anonymous);
-        anonymous?.Count.ShouldBeGreaterThan(10,
+        anonymous.ShouldNotBeNull("必须存在至少一个匿名端点（Public 候选项）。");
+        anonymous.Count.ShouldBeGreaterThan(10,
             "匿名端点应至少有 10 个（Public 候选项）。");
 
         // 无授权且非匿名的端点（依赖 FallbackPolicy）
         byAuthStatus.TryGetValue(new { HasAuthorize = false, HasAllowAnonymous = false }, out var noAuth);
-        noAuth?.Count.ShouldBeLessThanOrEqualTo(0,
+        // Dictionary.TryGetValue returns null when the key does not exist
+        // If there are zero no-auth endpoints, the group doesn't exist and return null
+        // We accept that case: it means zero endpoints in this category, which is correct
+        (noAuth?.Count ?? 0).ShouldBe(0,
             "无授权且非匿名的端点应依赖 FallbackPolicy（默认拒绝），实际应为 0。");
     }
 
@@ -254,7 +399,7 @@ public class AdminErrorEndpointRegistryTests
     [Fact]
     public void Non_Mvc_Exits_Can_Be_Registered()
     {
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
 
         // TokenEndpoint 限流中间件（OAuth 协议）
         var tokenEndpoint = new AdminErrorEndpointRegistration
@@ -314,7 +459,7 @@ public class AdminErrorEndpointRegistryTests
         oauthExits.Count.ShouldBe(1);
         oauthExits[0].HttpStatusCode.ShouldBe(429);
 
-        AdminErrorEndpointRegistry.Clear();
+        AdminErrorEndpointRegistry.ResetForTesting();
     }
 
     private static IEnumerable<RouteEndpoint> AllRouteEndpoints(WebApplication app)

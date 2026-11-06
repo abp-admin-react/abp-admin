@@ -168,32 +168,79 @@ public enum ErrorProtocol
 /// P1 will move it to Domain or Application layer with proper DI-based singleton lifecycle.
 /// </para>
 /// <para>
-/// <b>Thread Safety</b>: Not thread-safe. Registration must complete before any concurrent reads.
-/// In P0, this is guaranteed by test-only usage. P1 will use ConcurrentDictionary or lock-based sync.
+/// <b>Thread Safety</b>: Uses lock for thread-safe registration. Frozen state prevents modifications.
 /// </para>
 /// </remarks>
 public static class AdminErrorEndpointRegistry
 {
     private static readonly Dictionary<string, AdminErrorEndpointRegistration> Registrations = new();
+    private static readonly object Lock = new();
+    private static bool _isFrozen;
+
+    /// <summary>
+    /// 注册表是否已冻结。冻结后无法 Register 或 Clear。
+    /// </summary>
+    public static bool IsFrozen => _isFrozen;
+
+    /// <summary>
+    /// 冻结注册表。冻结后调用 Register 或 Clear 会抛出 InvalidOperationException。
+    /// </summary>
+    /// <exception cref="InvalidOperationException">如果已冻结则抛出。</exception>
+    public static void Freeze()
+    {
+        lock (Lock)
+        {
+            if (_isFrozen)
+            {
+                throw new InvalidOperationException("Registry is already frozen.");
+            }
+            _isFrozen = true;
+        }
+    }
+
+    /// <summary>
+    /// 重置注册表以进行测试。清除所有登记并取消冻结状态。
+    /// </summary>
+    /// <remarks>
+    /// 必须在每个测试开始时调用以确保隔离。
+    /// </remarks>
+    public static void ResetForTesting()
+    {
+        lock (Lock)
+        {
+            Registrations.Clear();
+            _isFrozen = false;
+        }
+    }
 
     /// <summary>
     /// 注册端点（模块初始化时调用）。
     /// </summary>
+    /// <exception cref="ArgumentException">ExitId 为空时抛出。</exception>
+    /// <exception cref="InvalidOperationException">已冻结或重复注册时抛出。</exception>
     public static void Register(AdminErrorEndpointRegistration registration)
     {
-        if (string.IsNullOrEmpty(registration.ExitId))
+        lock (Lock)
         {
-            throw new ArgumentException("ExitId is required.", nameof(registration));
-        }
+            if (_isFrozen)
+            {
+                throw new InvalidOperationException("Cannot register: registry is frozen. Call ResetForTesting() first.");
+            }
 
-        if (Registrations.TryGetValue(registration.ExitId, out var existing))
-        {
-            throw new InvalidOperationException(
-                $"Duplicate endpoint registration: ExitId '{registration.ExitId}' " +
-                $"already registered by {existing.DeclaringType}.{existing.MethodName}.");
-        }
+            if (string.IsNullOrEmpty(registration.ExitId))
+            {
+                throw new ArgumentException("ExitId is required.", nameof(registration));
+            }
 
-        Registrations[registration.ExitId] = registration;
+            if (Registrations.TryGetValue(registration.ExitId, out var existing))
+            {
+                throw new InvalidOperationException(
+                    $"Duplicate endpoint registration: ExitId '{registration.ExitId}' " +
+                    $"already registered by {existing.DeclaringType}.{existing.MethodName}.");
+            }
+
+            Registrations[registration.ExitId] = registration;
+        }
     }
 
     /// <summary>
@@ -201,7 +248,10 @@ public static class AdminErrorEndpointRegistry
     /// </summary>
     public static IReadOnlyCollection<AdminErrorEndpointRegistration> GetAll()
     {
-        return Registrations.Values;
+        lock (Lock)
+        {
+            return new List<AdminErrorEndpointRegistration>(Registrations.Values);
+        }
     }
 
     /// <summary>
@@ -209,7 +259,10 @@ public static class AdminErrorEndpointRegistry
     /// </summary>
     public static AdminErrorEndpointRegistration? FindByExitId(string exitId)
     {
-        return Registrations.TryGetValue(exitId, out var registration) ? registration : null;
+        lock (Lock)
+        {
+            return Registrations.TryGetValue(exitId, out var registration) ? registration : null;
+        }
     }
 
     /// <summary>
@@ -217,8 +270,11 @@ public static class AdminErrorEndpointRegistry
     /// </summary>
     public static IEnumerable<AdminErrorEndpointRegistration> FindByRouteTemplate(string routeTemplate)
     {
-        return Registrations.Values.Where(r =>
-            r.RouteTemplate?.Equals(routeTemplate, StringComparison.OrdinalIgnoreCase) == true);
+        lock (Lock)
+        {
+            return Registrations.Values.Where(r =>
+                r.RouteTemplate?.Equals(routeTemplate, StringComparison.OrdinalIgnoreCase) == true).ToList();
+        }
     }
 
     /// <summary>
@@ -226,14 +282,25 @@ public static class AdminErrorEndpointRegistry
     /// </summary>
     public static IEnumerable<AdminErrorEndpointRegistration> FindByAudience(ClientErrorAudience audience)
     {
-        return Registrations.Values.Where(r => r.Audience == audience);
+        lock (Lock)
+        {
+            return Registrations.Values.Where(r => r.Audience == audience).ToList();
+        }
     }
 
     /// <summary>
     /// 清空登记（仅测试用）。
     /// </summary>
+    /// <exception cref="InvalidOperationException">已冻结时抛出。</exception>
     public static void Clear()
     {
-        Registrations.Clear();
+        lock (Lock)
+        {
+            if (_isFrozen)
+            {
+                throw new InvalidOperationException("Cannot clear: registry is frozen. Call ResetForTesting() first.");
+            }
+            Registrations.Clear();
+        }
     }
 }
