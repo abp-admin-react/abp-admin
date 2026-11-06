@@ -152,6 +152,20 @@ describe('requestErrorConfig', () => {
       expect(notification.error).not.toHaveBeenCalled();
     });
 
+    it('should show retry hint with camelCase retryAfterSeconds on 429', () => {
+      const error: any = new Error('Too Many Requests');
+      error.response = {
+        status: 429,
+        data: { error: { data: { retryAfterSeconds: 90 } } },
+      };
+
+      errorHandler(error, {});
+
+      expect(message.error).toHaveBeenCalledWith(
+        '操作过于频繁，请在 1 分 30 秒 后重试',
+      );
+    });
+
     it('should show retry hint with seconds on 429', () => {
       const error: any = new Error('Too Many Requests');
       error.response = {

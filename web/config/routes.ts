@@ -566,6 +566,16 @@ export default [
     path: '/payments',
     redirect: '/administration/payments',
   },
+  ...(process.env.NODE_ENV === 'production'
+    ? []
+    : [
+        {
+          path: '/framework/customer-errors-demo',
+          name: 'customer-errors-demo',
+          hideInMenu: true,
+          component: './framework/customer-errors-demo',
+        },
+      ]),
   {
     component: './exception/404',
     layout: false,

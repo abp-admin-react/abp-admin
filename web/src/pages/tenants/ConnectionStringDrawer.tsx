@@ -69,9 +69,8 @@ const ConnectionStringDrawer: React.FC<ConnectionStringDrawerProps> = ({
     <DrawerForm
       title={`连接字符串 - ${tenantName || ''}`}
       trigger={<a>连接字符串</a>}
-      width={640}
       formRef={formRef}
-      drawerProps={{ destroyOnHidden: true }}
+      drawerProps={{ destroyOnHidden: true, size: 640 }}
       request={async () => {
         const [management, availableDatabases] = await Promise.all([
           getTenantConnectionStringManagement(tenantId),

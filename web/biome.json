@@ -55,5 +55,30 @@
     "formatter": {
       "quoteStyle": "single"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/abp/customer/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@umijs/max": "客户错误库不得导入管理端 Umi request",
+                  "umi": "客户错误库不得导入 umi",
+                  "@/requestErrorConfig": "客户 skip 只关闭展示，不得导入管理 requestErrorConfig",
+                  "src/requestErrorConfig": "客户 skip 只关闭展示，不得导入管理 requestErrorConfig",
+                  "axios": "客户错误库使用独立 fetch，不得导入 axios",
+                  "antd": "客户错误纯 TS 层不得依赖 antd",
+                  "react": "客户错误纯 TS 层不得依赖 react"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

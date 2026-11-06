@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "code": "AbpAdmin:Export:SyncThresholdExceeded",
+      "kind": "business",
+      "httpStatuses": [
+        400
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "AbpAdmin:Files:ContentMismatch",
+      "kind": "validation",
+      "httpStatuses": [
+        400
+      ],
+      "dataFields": [
+        "correlationId",
+        "fileName",
+        "reason"
+      ]
+    },
+    {
+      "code": "BizTemplate:Public:ProjectUnavailable",
+      "kind": "business",
+      "httpStatuses": [
+        403,
+        404
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "Client:AuthenticationRequired",
+      "kind": "authentication",
+      "httpStatuses": [
+        401
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "Client:Conflict",
+      "kind": "conflict",
+      "httpStatuses": [
+        409
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "Client:Forbidden",
+      "kind": "forbidden",
+      "httpStatuses": [
+        403
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "Client:NotFound",
+      "kind": "notFound",
+      "httpStatuses": [
+        404
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "Client:OperationFailed",
+      "kind": "business",
+      "httpStatuses": [
+        400
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "Client:RateLimited",
+      "kind": "rateLimited",
+      "httpStatuses": [
+        429
+      ],
+      "dataFields": [
+        "correlationId",
+        "retryAfterSeconds"
+      ]
+    },
+    {
+      "code": "Client:Unexpected",
+      "kind": "server",
+      "httpStatuses": [
+        500,
+        503
+      ],
+      "dataFields": [
+        "correlationId",
+        "retryAfterSeconds"
+      ]
+    },
+    {
+      "code": "Client:ValidationFailed",
+      "kind": "validation",
+      "httpStatuses": [
+        400
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    }
+  ]
+}

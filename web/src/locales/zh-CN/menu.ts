@@ -54,6 +54,7 @@ export default {
   'menu.current-session': '当前会话',
   'menu.account-center': '个人中心',
   'menu.data-scope-demo': '数据权限演示',
+  'menu.customer-errors-demo': '客户错误协议演示',
   'menu.biz-template-data-scope': '业务模块·数据权限示例',
   'menu.collection': '收付款',
   'menu.collection-orders': '订单',

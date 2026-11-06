@@ -53,7 +53,7 @@ const Callback: React.FC = () => {
 
   return (
     <div style={{ paddingTop: 120, textAlign: 'center' }}>
-      <Spin size="large" tip="正在完成登录..." />
+      <Spin size="large" description="正在完成登录..." />
     </div>
   );
 };

@@ -54,6 +54,7 @@ export default {
   'menu.current-session': 'Current session',
   'menu.account-center': 'Account',
   'menu.data-scope-demo': 'Data Scope Demo',
+  'menu.customer-errors-demo': 'Customer error protocol demo',
   'menu.biz-template-data-scope': 'Biz Module · Data Scope Demo',
   'menu.collection': 'Payments',
   'menu.collection-orders': 'Orders',

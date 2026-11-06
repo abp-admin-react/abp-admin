@@ -7,7 +7,8 @@
  *   绝不透出 axios 英文 "Request failed with status code 403"。
  * - 404 → 全局静默；开发环境 console.warn `[request] 404 silenced...` 便于抓错路径；
  *   页面必须用 isNotFound 自行降级（见 AGENTS.md）。
- * - 429 → 限流文案，含 RetryAfterSeconds 时格式化等待时间。
+ * - 429 → 限流文案。管理端 Data 键是 PascalCase RetryAfterSeconds，
+ *   客户信封是 retryAfterSeconds；两键都读，有秒数才格式化等待时间。
  * - 离线 → message「网络不可用」（i18n）；与 OfflineBanner 一致语义。
  * - 请求头：Bearer（oidc.getAccessToken）+ __tenant（getAbpHeaders）+
  *   RequestVerificationToken（XSRF-TOKEN cookie）+ Accept-Language（toAbpCulture）。
@@ -84,6 +85,7 @@ export const errorConfig: RequestConfig = {
       }
     },
     errorHandler: (error: any, opts: any) => {
+      // 管理 skip 仍直接抛出 axios/ABP 原错误。客户请求库 skipErrorHandler 只映射 display=none，仍归一化为 CustomerError，两套不要混用。
       if (opts?.skipErrorHandler) throw error;
       if (error.response?.status === 401) {
         history.replace('/user/login');
@@ -114,7 +116,9 @@ export const errorConfig: RequestConfig = {
           string,
           any
         >;
-        const seconds = Number(data.RetryAfterSeconds ?? 0);
+        const seconds = Number(
+          data.RetryAfterSeconds ?? data.retryAfterSeconds ?? 0,
+        );
         const retryText =
           seconds > 0
             ? `操作过于频繁，请在 ${formatRetryAfter(seconds)} 后重试`

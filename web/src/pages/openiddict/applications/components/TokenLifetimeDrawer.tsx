@@ -35,8 +35,7 @@ const TokenLifetimeDrawer: React.FC<TokenLifetimeDrawerProps> = ({
     <DrawerForm
       title={`Token 生命周期 - ${clientId ?? ''}`}
       trigger={<a>Token 生命周期</a>}
-      width={520}
-      drawerProps={{ destroyOnHidden: true }}
+      drawerProps={{ destroyOnHidden: true, size: 520 }}
       request={async () =>
         await getOpenIddictApplicationTokenLifetime(applicationId)
       }

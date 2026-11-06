@@ -72,6 +72,8 @@ const abpWsProxy = {
  * - `/api/`：业务与 ABP REST
  * - `/connect/`、`/.well-known/`：OIDC 发现/授权/令牌
  * - `/Account/`：后端登录等 SSR 页
+ * - `/Pages/`：Razor Pages 页面脚本（登录页引用 `/Pages/Account/Login.js`、`/Pages/Abp/MultiTenancy/tenant-switch.js`）
+ * - `/dev-login-helper.js`：Development bundle 打进登录页的辅助脚本
  * - `/Abp/`、`/libs/`、`/Themes/`、`/__bundles/`、`/global-styles.css`、`/global-scripts.js`：ABP 虚文件/打包产物
  * - `/images/`、`/favicon.svg`：LeptonXLite 登录页的 logo/favicon 虚拟文件（SPA public/ 无同名文件）
  * - `/signalr-hubs/`：SignalR（须 ws）
@@ -82,6 +84,8 @@ export default {
     '/connect/': abpProxy,
     '/.well-known/': abpProxy,
     '/Account/': abpProxy,
+    '/Pages/': abpProxy,
+    '/dev-login-helper.js': abpProxy,
     '/Abp/': abpProxy,
     '/libs/': abpProxy,
     '/Themes/': abpProxy,

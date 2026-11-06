@@ -81,7 +81,7 @@ const RoleUsersDrawer: React.FC<RoleUsersDrawerProps> = ({ role, onClose }) => {
       title={`角色成员 - ${role?.name ?? ''}`}
       open={!!role}
       onClose={onClose}
-      width={720}
+      size={720}
       destroyOnHidden
     >
       <ResizableTable<RoleUserDto>

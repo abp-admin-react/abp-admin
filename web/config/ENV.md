@@ -51,7 +51,7 @@
 | secure | 是否校验证书 | 本地自签须 false；生产不靠本代理 | false | true 时本地 HTTPS 握手失败 |
 | onProxyRes / Location 改写 | 把 localhost:443x 绝对 Location 改相对路径 | 正则通配 443 段 | 已启用 | 登录 302 跳出前端源 |
 | ws（abpWsProxy） | SignalR Upgrade | 仅 /signalr-hubs/ 为 true | Hub 用 true | Hub 连不上 |
-| path 清单 dev | /api/ /connect/ /.well-known/ /Account/ /Abp/ /libs/ /Themes/ /__bundles/ /global-styles.css /global-scripts.js /images/ /favicon.svg /signalr-hubs/ | 与 nginx 对齐 | 见文件 | 少一条断对应功能 |
+| path 清单 dev | /api/ /connect/ /.well-known/ /Account/ /Pages/ /dev-login-helper.js /Abp/ /libs/ /Themes/ /__bundles/ /global-styles.css /global-scripts.js /images/ /favicon.svg /signalr-hubs/ | 与 nginx 对齐 | 见文件 | 少一条断对应功能 |
 | path 清单 test/pre | 仅 /api/ + /signalr-hubs/ | 不做完整登录联调 | 见文件 | 用这两档登录会缺 OIDC |
 | pathRewrite | **未使用** | — | 无 | 不要擅自加，除非与后端路径迁移对齐 |
 
