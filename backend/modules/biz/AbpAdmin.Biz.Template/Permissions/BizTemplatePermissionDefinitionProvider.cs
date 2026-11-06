@@ -21,6 +21,11 @@ public class BizTemplatePermissionDefinitionProvider : PermissionDefinitionProvi
 
         // 数据权限示例：消费框架数据范围基建的最小业务面（见 BizDataScopeDemoAppService）
         group.AddPermission(BizTemplatePermissions.DataScopeDemo.Default, L("Permission:DataScopeDemo"));
+
+        // 客户错误样例：定义始终在；授权只在 EnableClientErrorSample=true 时由种子授给 admin。
+        group.AddPermission(
+            BizTemplatePermissions.ClientErrorSample.Default,
+            L("Permission:ClientErrorSample"));
     }
 
     private static LocalizableString L(string name)

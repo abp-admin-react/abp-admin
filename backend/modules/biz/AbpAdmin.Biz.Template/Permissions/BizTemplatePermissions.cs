@@ -18,4 +18,13 @@ public static class BizTemplatePermissions
     {
         public const string Default = GroupName + ".DataScopeDemo";
     }
+
+    /// <summary>
+    /// 客户错误协议接入样例。基线不向任何角色播种；仅当 EnableClientErrorSample=true
+    /// 时由种子贡献者授给 admin，供本机联调。
+    /// </summary>
+    public static class ClientErrorSample
+    {
+        public const string Default = GroupName + ".ClientErrorSample";
+    }
 }

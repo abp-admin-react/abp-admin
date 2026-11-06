@@ -26,13 +26,16 @@ namespace AbpAdmin.Biz.Template.Services;
 public class BizProjectAppService : ApplicationService, IBizProjectAppService
 {
     private readonly IRepository<BizProject, Guid> _bizProjectRepository;
+    private readonly IBizProjectAccessService _bizProjectAccessService;
     private readonly BizTemplateOptions _bizTemplateOptions;
 
     public BizProjectAppService(
         IRepository<BizProject, Guid> bizProjectRepository,
+        IBizProjectAccessService bizProjectAccessService,
         IOptions<BizTemplateOptions> bizTemplateOptions)
     {
         _bizProjectRepository = bizProjectRepository;
+        _bizProjectAccessService = bizProjectAccessService;
         // 第②层：部署期配置（模块自带 JSON 基线 + 宿主可选覆盖），改配置需重启，快照一次即可
         _bizTemplateOptions = bizTemplateOptions.Value;
         LocalizationResource = typeof(BizTemplateResource);
@@ -61,7 +64,7 @@ public class BizProjectAppService : ApplicationService, IBizProjectAppService
 
     public async Task<BizProjectDto> GetAsync(Guid id)
     {
-        var project = await _bizProjectRepository.GetAsync(id);
+        var project = await _bizProjectAccessService.GetRequiredAsync(id);
         return ObjectMapper.Map<BizProject, BizProjectDto>(project);
     }
 

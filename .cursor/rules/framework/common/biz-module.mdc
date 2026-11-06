@@ -9,7 +9,7 @@ alwaysApply: false
 # 业务模块规约(自包含模块样板)
 
 > 样板:`backend/modules/biz/AbpAdmin.Biz.Template` —— 新增子系统级业务 = 复制一个工程改名（业务模块统一放 `backend/modules/biz/`，测试随复制进 `backend/test/modules/biz/`）。平台功能模块(收款/台账/订单/代币网关/Webhooks 等平台自带能力)同构,放 `backend/modules/platform/`,测试在 `backend/test/modules/platform/`。
-> **改名清单(全部词根一个不落,漏一处即静默冲突)**:① `BizTemplate`——模块/类/资源/SectionName/History 表 `__BizTemplateMigrations`;② `Biz`——表前缀(`XxxConsts.DbTablePrefix`);③ `BizProject(s)`——实体/表名/本地化键 `Menu:BizProjects`。
+> **改名清单(全部词根一个不落,漏一处即静默冲突)**:① `BizTemplate`——模块/类/资源/SectionName/History 表 `__BizTemplateMigrations`;② `Biz`——表前缀(`XxxConsts.DbTablePrefix`);③ `BizProject(s)`——实体/表名/本地化键 `Menu:BizProjects`;④ `BizTemplateClient`——客户静态资源名与 `Localization/BizTemplateClient` 目录;⑤ `<模块>:Public:`——公开错误码前缀(样板为 `BizTemplate:Public:`，漏改会与样板争码、宿主启动失败);⑥ `EnableClientErrorSample`——样例开关名(`Xxx:EnableClientErrorSample`);⑦ 客户入口目录 `Client/` 与 `ClientErrors/`。
 
 ## 边界(升级顺滑的前提)
 

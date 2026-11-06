@@ -20,5 +20,6 @@ public class BizTemplateConfigBindingTests : BizTemplateTestBase
         // 绑定成功 ⇔ Content 复制到了测试输出目录 + 根节名与 SectionName 对齐 + 绑定顺序正确
         options.MaxPageSize.ShouldBe(100);
         options.SeedSampleData.ShouldBeTrue();
+        options.EnableClientErrorSample.ShouldBeFalse();
     }
 }

@@ -34,4 +34,12 @@ public class BizTemplateOptions
     /// 生产切换走环境变量 BizTemplate__SeedSampleData=false，不改宿主任何文件。
     /// </summary>
     public bool SeedSampleData { get; set; } = true;
+
+    /// <summary>
+    /// 是否注册客户错误协议接入样例（<c>/api/client/biz-template</c>）。
+    /// 默认 false；仅 Development / Testing 允许改为 true，其它环境启动即拒绝。
+    /// 这是错误协议 onboarding，不是多租户客户授权模板。
+    /// </summary>
+    public bool EnableClientErrorSample { get; set; }
 }
+

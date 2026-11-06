@@ -7,6 +7,7 @@
     "Permission:Update": "Update",
     "Permission:Delete": "Delete",
     "Permission:DataScopeDemo": "Data scope demo",
+    "Permission:ClientErrorSample": "Client error sample",
     "Menu:BizTemplate": "Biz Template",
     "Menu:BizProjects": "Projects",
 

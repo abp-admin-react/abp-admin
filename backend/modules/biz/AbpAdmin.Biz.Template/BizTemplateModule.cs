@@ -1,11 +1,14 @@
 using System;
+using AbpAdmin.Biz.Template.Client;
 using AbpAdmin.Biz.Template.Configuration;
 using AbpAdmin.Biz.Template.Data;
 using AbpAdmin.Biz.Template.Localization;
 using AbpAdmin.Data;
 using AbpAdmin.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Volo.Abp;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Authorization;
 using Volo.Abp.EntityFrameworkCore;
@@ -24,7 +27,10 @@ namespace AbpAdmin.Biz.Template;
 /// 框架迁移循环与宿主启动待办检查会自动枚举模块的 IAbpAdminDbSchemaMigrator（MigrateAsync / HasPendingAsync）。
 /// 新增业务：复制本工程改名。改名清单（全部词根一个不落，漏一处即静默冲突）：
 /// ① BizTemplate——模块/类/资源/SectionName/History 表 __BizTemplate_EFMigrationsHistory；
-/// ② Biz——表前缀（BizTemplateConsts.DbTablePrefix）；③ BizProject(s)——实体/表名/本地化键 Menu:BizProjects。
+/// ② Biz——表前缀（BizTemplateConsts.DbTablePrefix）；③ BizProject(s)——实体/表名/本地化键 Menu:BizProjects；
+/// ④ BizTemplateClient——客户静态资源名与 Localization/BizTemplateClient 目录；
+/// ⑤ BizTemplate:Public:——公开错误码前缀（漏改会与样板争码、宿主启动失败）；
+/// ⑥ EnableClientErrorSample——样例开关名；⑦ 客户入口目录 Client/ 与 ClientErrors/。
 ///
 /// 模块配置按三层落位（对应实现都带注释，照着扩）：
 /// ① 基础设施配置（连接串/Redis/端口）——只属于宿主 appsettings.json（框架配置唯一来源），模块只读不写；
@@ -36,6 +42,11 @@ namespace AbpAdmin.Biz.Template;
 /// ③ 运行期业务参数——Settings/BizTemplateSettingDefinitionProvider：设置页可调、免重启，
 ///    定义随模块自持，存储复用框架 SettingManagement（对应 Admin.NET SysConfig 表的角色，无需建表）。
 /// 判定一句话：换环境变的进 ②，管理员日常调的进 ③，底座运转的在 ①（不归业务管）。
+///
+/// 客户错误样例（Client/、EnableClientErrorSample）只用于错误协议接入 onboarding：
+/// 演示独立客户入口、公开错误码与静态客户文案。不是多租户客户授权模板，
+/// 不能按 CreatorId 过滤直接上线正式客户模块；正式客户模块需自行建立租户与数据授权契约。
+/// BizProject 有意不实现 IMultiTenant，本样例也不为其补上。
 /// </summary>
 [DependsOn(
     typeof(AbpAdminEntityFrameworkCoreModule), // EF 基建 + IAbpAdminDbSchemaMigrator 约定接口
@@ -72,10 +83,26 @@ public class AbpAdminBizTemplateModule : AbpModule
                 "复制模块改名时，JSON 根节名必须与 BizTemplateOptions.SectionName 同步替换词根。");
         }
 
-        context.Services.Configure<BizTemplateOptions>(options =>
+        void BindBizTemplateOptions(BizTemplateOptions options)
         {
             moduleBaseline.GetSection(BizTemplateOptions.SectionName).Bind(options);
             hostConfiguration.GetSection(BizTemplateOptions.SectionName).Bind(options);
+        }
+
+        context.Services.Configure<BizTemplateOptions>(BindBizTemplateOptions);
+
+        var bizTemplateOptions = new BizTemplateOptions();
+        BindBizTemplateOptions(bizTemplateOptions);
+        var hostEnvironment = context.Services.GetSingletonInstance<IAbpHostEnvironment>();
+        BizTemplateClientErrorSampleGuard.EnsureCanEnable(
+            bizTemplateOptions.EnableClientErrorSample,
+            hostEnvironment);
+
+        // 样例关闭时从 MVC 模型移除客户控制器，默认生产不发现该入口。
+        Configure<MvcOptions>(mvc =>
+        {
+            mvc.Conventions.Add(
+                new BizProjectClientControllerConvention(bizTemplateOptions.EnableClientErrorSample));
         });
         // 第③层（Settings/BizTemplateSettingDefinitionProvider）无需在此注册：
         // SettingDefinitionProvider 由 ABP 按模块程序集自动发现，DependsOn 本模块即生效。
@@ -115,6 +142,10 @@ public class AbpAdminBizTemplateModule : AbpModule
             options.Resources
                 .Add<BizTemplateResource>("en")
                 .AddVirtualJson("/Localization/BizTemplate");
+
+            options.Resources
+                .Add<BizTemplateClientResource>("en")
+                .AddVirtualJson("/Localization/BizTemplateClient");
 
             // 设置页分组名本地化：EasyAbp SettingUi 用 IStringLocalizer<SettingUiResource> 解析
             // Group1 显示名（GroupDisplayName = _localizer["BizTemplate"]），模块资源必须挂到

@@ -16,6 +16,11 @@
     // 列表查询单页上限（GetListAsync 钳制用，防深分页）
     "MaxPageSize": 100,
     // 首次迁移是否写入模块样例数据（生产置 false）
-    "SeedSampleData": true
+    "SeedSampleData": true,
+    // 客户错误协议接入样例（/api/client/biz-template）。默认关闭；
+    // 仅 Development/Testing 可改为 true，其它环境启动拒绝。不是多租户客户授权模板。
+    // 本机联调走宿主覆盖：appsettings.Development.json 的 BizTemplate:EnableClientErrorSample，
+    // 或环境变量 BizTemplate__EnableClientErrorSample=true。不要把基线改成 true。
+    "EnableClientErrorSample": false
   }
 }
