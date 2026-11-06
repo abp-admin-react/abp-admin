@@ -181,7 +181,11 @@ public class ClientErrorProjectionCore : IClientErrorProjectionCore, ISingletonD
             switch (param.ValueType)
             {
                 case PublicErrorParameterValueType.String:
-                    var text = raw as string ?? raw.ToString();
+                    if (raw is not string text)
+                    {
+                        return false;
+                    }
+
                     if (string.IsNullOrEmpty(text) || text.Length > _options.MaxPublicParameterLength)
                     {
                         return false;

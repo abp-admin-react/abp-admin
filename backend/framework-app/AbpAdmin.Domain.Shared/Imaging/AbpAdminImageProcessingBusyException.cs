@@ -5,8 +5,8 @@ namespace AbpAdmin.Imaging;
 
 /// <summary>
 /// 图片处理并发闸门等待超时异常。HTTP 状态码 503。
-/// Retry-After 响应头由 HttpApi 层的 ImageProcessingBusyExceptionFilter 根据
-/// <see cref="RetryAfterSeconds"/> 设置（与 的 429 异常同款 IHasHttpStatusCode 模式）。
+/// Retry-After 由 <c>ClientErrorHttpProjector</c> 从 <see cref="RetryAfterSeconds"/> 投影，
+/// 经 Filter / Writer 在 Clear 之后写出（与限流 429 同款 IHasHttpStatusCode 模式）。
 /// </summary>
 public class AbpAdminImageProcessingBusyException : BusinessException, IHasHttpStatusCode
 {

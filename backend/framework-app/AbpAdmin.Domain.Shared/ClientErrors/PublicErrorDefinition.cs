@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 公开错误定义（方案 5.2）。P1 契约，模块通过 <see cref="IPublicErrorDefinitionProvider"/> 注册。
+/// 公开错误定义（方案 5.2）。模块通过 <see cref="IPublicErrorDefinitionProvider"/> 注册。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -13,7 +13,7 @@ namespace AbpAdmin.ClientErrors;
 /// </para>
 /// <para>
 /// 多个内部码可收敛到同一公开定义；同一内部键重复登记或同一公开码出现不一致定义
-/// 必须在启动阶段失败（由 P1 Domain 的 PublicErrorDefinitionRegistry 强制）。
+/// 必须在启动阶段失败（由 Domain 层 PublicErrorDefinitionRegistry 强制）。
 /// </para>
 /// <para>
 /// 本记录只承载声明；它自身不执行本地化、不读取 HttpContext、不触碰 Exception.Data，
@@ -61,6 +61,11 @@ public sealed record PublicErrorDefinition
     /// 基础码的 kind 固定由 <see cref="ClientErrorKindMapping"/> 决定，模块不可重新定义。
     /// </summary>
     public required PublicErrorKind Kind { get; init; }
+
+    /// <summary>
+    /// 该公开码允许的 HTTP 状态组合。空则按 kind 默认状态导出快照。
+    /// </summary>
+    public IReadOnlyList<int> PublicHttpStatuses { get; init; } = [];
 }
 
 /// <summary>

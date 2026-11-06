@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 客户端 HTTP 200 任务/批量失败结果契约（方案 3.3）。P1 契约。
+/// 客户端 HTTP 200 任务/批量失败结果契约（方案 3.3）。
 /// 用于异步任务、批量操作、导出状态等 HTTP 200 响应中的失败信息。
 /// </summary>
 /// <remarks>

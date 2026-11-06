@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 客户端错误协议适配器接口（方案 5.3.3）。P1 契约。
+/// 客户端错误协议适配器接口（方案 5.3.3）。
 /// 用于处理非 ABP 信封协议的错误响应（OAuth/Gateway/SSE 等）。
 /// </summary>
 /// <remarks>

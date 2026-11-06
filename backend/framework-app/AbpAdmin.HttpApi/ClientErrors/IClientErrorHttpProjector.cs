@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// HTTP 错误投影上下文（方案 5.3.1）。P1 契约。
+/// HTTP 错误投影上下文（方案 5.3.1）。
 /// 包含 HTTP 请求/响应状态和异常信息，供 <see cref="IClientErrorHttpProjector"/> 使用。
 /// </summary>
 public sealed class ClientErrorHttpProjectionContext
@@ -43,7 +43,8 @@ public sealed class ClientErrorHttpProjectionContext
     public int? RetryAfterSeconds { get; init; }
 
     /// <summary>
-    /// 覆盖协议登记。用于 /api 上仍保持 OAuth 形状的既有出口。
+    /// 覆盖协议登记。生产出口按路径登记表选择协议；仅当调用方已处于该协议路径
+    /// （例如测试夹具）时才应传入。不得把 /api 压成 OAuth。
     /// </summary>
     public ErrorProtocol? ProtocolOverride { get; init; }
 
@@ -53,7 +54,7 @@ public sealed class ClientErrorHttpProjectionContext
     public AdminErrorEndpointRegistration? EndpointRegistration { get; init; }
 
     /// <summary>
-    /// 有效受众（由 P1-HTTP 的 <see cref="IAdminErrorEligibilityResolver"/> 决定）。
+    /// 有效受众（由 <see cref="IAdminErrorEligibilityResolver"/> 决定；声明受众优先）。
     /// 默认 Public（安全降级）。
     /// </summary>
     public ClientErrorAudience EffectiveAudience { get; init; } = ClientErrorAudience.Public;
@@ -65,7 +66,7 @@ public sealed class ClientErrorHttpProjectionContext
 }
 
 /// <summary>
-/// HTTP 错误投影结果（方案 5.3.1）。P1 契约。
+/// HTTP 错误投影结果（方案 5.3.1）。
 /// 包含投影后的状态码、响应体和等待时间，供 <see cref="IClientErrorResponseWriter"/> 写出。
 /// </summary>
 public sealed class ClientErrorHttpProjection
@@ -88,20 +89,20 @@ public sealed class ClientErrorHttpProjection
 }
 
 /// <summary>
-/// HTTP 错误投影器接口（方案 5.3.1）。P1 契约。
+/// HTTP 错误投影器接口（方案 5.3.1）。
 /// 负责将异常/HTTP 上下文投影为安全响应模型。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 消费者：P1-HTTP 的 ClientErrorExceptionFilter、ClientErrorAbpExceptionHandlingMiddleware、
+/// 消费者：ClientErrorExceptionFilter、ClientErrorAbpExceptionHandlingMiddleware、
 /// 授权异常 handler、协议感知 API 兜底中间件。
 /// </para>
 /// <para>
 /// 实现约束：
 /// </para>
 /// <list type="bullet">
-///   <item><description>不得抛出异常（所有异常必须安全降级）。</description></item>
-///   <item><description>不得修改 HttpContext（只读访问）。</description></item>
+///   <item><description>context 为 null 抛 ArgumentNullException（编程错误）。投影失败一律安全降级，不得把内部异常抛给客户端。</description></item>
+///   <item><description>不得修改 HttpContext（只读访问；写出由 Writer / 适配器负责）。</description></item>
 ///   <item><description>调用 Domain 层 <see cref="IClientErrorProjectionCore"/> 完成核心投影。</description></item>
 /// </list>
 /// </remarks>
@@ -112,15 +113,20 @@ public interface IClientErrorHttpProjector
     /// 已开始响应的场景返回 null（由调用方决定日志/中止策略）。
     /// </summary>
     ClientErrorHttpProjection? Project(ClientErrorHttpProjectionContext context);
+
+    /// <summary>
+    /// 异步投影。HTTP 热路径必须走此方法，避免资格解析阻塞线程池。
+    /// </summary>
+    Task<ClientErrorHttpProjection?> ProjectAsync(ClientErrorHttpProjectionContext context);
 }
 
 /// <summary>
-/// HTTP 错误响应写入器接口（方案 5.3.1）。P1 契约。
+/// HTTP 错误响应写入器接口（方案 5.3.1）。
 /// 负责一次性写出安全响应（状态码、Retry-After 头、ABP 信封）。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 消费者：P1-HTTP 的异常 filter/中间件（所有受控入口统一出口）。
+/// 消费者：异常 filter / 中间件（所有受控入口统一出口）。
 /// </para>
 /// <para>
 /// 实现约束：

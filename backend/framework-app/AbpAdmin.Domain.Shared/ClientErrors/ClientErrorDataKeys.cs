@@ -3,8 +3,7 @@ using System;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 客户端错误数据键比较规则（方案 P0 审查项+ 方案 3.1 客户端 lowerCamelCase）。
-/// P1 契约。
+/// 客户端错误数据键比较规则（方案审查项 + 方案 3.1 客户端 lowerCamelCase）。
 /// </summary>
 /// <remarks>
 /// <para>

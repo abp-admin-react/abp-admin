@@ -1,11 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using AbpAdmin.ClientErrors;
 using AbpAdmin.HttpApi.ClientErrors;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
+using Volo.Abp.Authorization.Permissions;
+using Volo.Abp.MultiTenancy;
+using Volo.Abp.Users;
 using Xunit;
 
 namespace AbpAdmin.ClientErrors;
@@ -24,9 +30,9 @@ public class AdminErrorEligibilityResolverTests
     /// 行为：抛出 ArgumentNullException。
     /// </summary>
     [Fact]
-    public void Resolve_Should_Reject_Null_Context()
+    public async Task Resolve_Should_Reject_Null_Context()
     {
-        Should.Throw<ArgumentNullException>(() => _resolver.Resolve(null!));
+        await Should.ThrowAsync<ArgumentNullException>(() => _resolver.ResolveAsync(null!));
     }
 
     /// <summary>
@@ -34,7 +40,7 @@ public class AdminErrorEligibilityResolverTests
     /// 行为：返回 IsEligible=false，原因是 EligibilityQueryFailed。
     /// </summary>
     [Fact]
-    public void Resolve_Should_Return_False_When_HttpContext_Null()
+    public async Task Resolve_Should_Return_False_When_HttpContext_Null()
     {
         var context = new AdminErrorEligibilityContext
         {
@@ -50,7 +56,7 @@ public class AdminErrorEligibilityResolverTests
             },
         };
 
-        var result = _resolver.Resolve(context);
+        var result = await _resolver.ResolveAsync(context);
 
         result.IsEligible.ShouldBeFalse();
         result.DegradeReason.ShouldBe(AdminEligibilityDegradeReason.EligibilityQueryFailed);
@@ -61,7 +67,7 @@ public class AdminErrorEligibilityResolverTests
     /// 行为：返回 IsEligible=false，原因是 NotRegistered。
     /// </summary>
     [Fact]
-    public void Resolve_Should_Return_False_When_Registration_Null()
+    public async Task Resolve_Should_Return_False_When_Registration_Null()
     {
         var context = new AdminErrorEligibilityContext
         {
@@ -69,7 +75,7 @@ public class AdminErrorEligibilityResolverTests
             EndpointRegistration = null,
         };
 
-        var result = _resolver.Resolve(context);
+        var result = await _resolver.ResolveAsync(context);
 
         result.IsEligible.ShouldBeFalse();
         result.DegradeReason.ShouldBe(AdminEligibilityDegradeReason.NotRegistered);
@@ -80,7 +86,7 @@ public class AdminErrorEligibilityResolverTests
     /// 行为：返回 IsEligible=false，原因是 NotDeclaredAdminCompatibility。
     /// </summary>
     [Fact]
-    public void Resolve_Should_Return_False_When_Not_AdminCompatibility()
+    public async Task Resolve_Should_Return_False_When_Not_AdminCompatibility()
     {
         var context = new AdminErrorEligibilityContext
         {
@@ -96,7 +102,7 @@ public class AdminErrorEligibilityResolverTests
             },
         };
 
-        var result = _resolver.Resolve(context);
+        var result = await _resolver.ResolveAsync(context);
 
         result.IsEligible.ShouldBeFalse();
         result.DegradeReason.ShouldBe(AdminEligibilityDegradeReason.NotDeclaredAdminCompatibility);
@@ -107,7 +113,7 @@ public class AdminErrorEligibilityResolverTests
     /// 行为：返回 IsEligible=false，原因是 Unauthenticated。
     /// </summary>
     [Fact]
-    public void Resolve_Should_Return_False_When_Unauthenticated()
+    public async Task Resolve_Should_Return_False_When_Unauthenticated()
     {
         var context = new AdminErrorEligibilityContext
         {
@@ -123,7 +129,7 @@ public class AdminErrorEligibilityResolverTests
             },
         };
 
-        var result = _resolver.Resolve(context);
+        var result = await _resolver.ResolveAsync(context);
 
         result.IsEligible.ShouldBeFalse();
         result.DegradeReason.ShouldBe(AdminEligibilityDegradeReason.Unauthenticated);
@@ -134,7 +140,7 @@ public class AdminErrorEligibilityResolverTests
     /// 行为：返回 IsEligible=true。
     /// </summary>
     [Fact]
-    public void Resolve_Should_Return_True_When_Valid_Admin_Compatibility()
+    public async Task Resolve_Should_Return_True_When_Valid_Admin_Compatibility()
     {
         var context = new AdminErrorEligibilityContext
         {
@@ -150,10 +156,104 @@ public class AdminErrorEligibilityResolverTests
             },
         };
 
-        var result = _resolver.Resolve(context);
+        var result = await _resolver.ResolveAsync(context);
 
         result.IsEligible.ShouldBeTrue();
         result.DegradeReason.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// 验证：已登录但租户上下文未就绪时降级公开。
+    /// 行为：返回 IsEligible=false，原因是 SessionOrTenantNotReady。
+    /// </summary>
+    [Fact]
+    public async Task Resolve_Should_Return_False_When_Session_Or_Tenant_Not_Ready()
+    {
+        var httpContext = CreateHttpContext(authenticated: true);
+        var services = new ServiceCollection();
+        var user = Substitute.For<ICurrentUser>();
+        user.IsAuthenticated.Returns(true);
+        user.TenantId.Returns(Guid.NewGuid());
+        var tenant = Substitute.For<ICurrentTenant>();
+        tenant.IsAvailable.Returns(false);
+        services.AddSingleton(user);
+        services.AddSingleton(tenant);
+        httpContext.RequestServices = services.BuildServiceProvider();
+
+        var context = new AdminErrorEligibilityContext
+        {
+            HttpContext = httpContext,
+            EndpointRegistration = CreateRegistration(),
+        };
+
+        var result = await _resolver.ResolveAsync(context);
+
+        result.IsEligible.ShouldBeFalse();
+        result.DegradeReason.ShouldBe(AdminEligibilityDegradeReason.SessionOrTenantNotReady);
+    }
+
+    /// <summary>
+    /// 验证：声明了权限但容器里没有 IPermissionChecker 时 fail-closed。
+    /// 行为：返回 IsEligible=false，原因是 EligibilityQueryFailed。
+    /// </summary>
+    [Fact]
+    public async Task Resolve_Should_Return_False_When_Permission_Checker_Missing()
+    {
+        var httpContext = CreateHttpContext(authenticated: true);
+        httpContext.RequestServices = new ServiceCollection().BuildServiceProvider();
+
+        var context = new AdminErrorEligibilityContext
+        {
+            HttpContext = httpContext,
+            EndpointRegistration = new AdminErrorEndpointRegistration
+            {
+                ExitId = "TestController.Test()",
+                DeclaringType = "TestController",
+                MethodName = "Test",
+                ParameterSignature = "()",
+                Audience = ClientErrorAudience.AdminCompatibility,
+                Protocol = ErrorProtocol.AbpEnvelope,
+                RequiredPermissions = ["Test.Read"],
+            },
+        };
+
+        var result = await _resolver.ResolveAsync(context);
+
+        result.IsEligible.ShouldBeFalse();
+        result.DegradeReason.ShouldBe(AdminEligibilityDegradeReason.EligibilityQueryFailed);
+    }
+
+    /// <summary>
+    /// 验证：已登录但缺少声明权限时降级公开。
+    /// 行为：返回 IsEligible=false，原因是 PermissionDenied。
+    /// </summary>
+    [Fact]
+    public async Task Resolve_Should_Return_False_When_Permission_Denied()
+    {
+        var httpContext = CreateHttpContext(authenticated: true);
+        var services = new ServiceCollection();
+        services.AddSingleton<IPermissionChecker>(new DenyAllPermissionChecker());
+        httpContext.RequestServices = services.BuildServiceProvider();
+
+        var context = new AdminErrorEligibilityContext
+        {
+            HttpContext = httpContext,
+            EndpointRegistration = new AdminErrorEndpointRegistration
+            {
+                ExitId = "TestController.Test()",
+                DeclaringType = "TestController",
+                MethodName = "Test",
+                ParameterSignature = "()",
+                Audience = ClientErrorAudience.AdminCompatibility,
+                Protocol = ErrorProtocol.AbpEnvelope,
+                RequiredPermissions = ["Test.Read"],
+            },
+        };
+
+        var result = await _resolver.ResolveAsync(context);
+
+        result.IsEligible.ShouldBeFalse();
+        result.DegradeReason.ShouldBe(AdminEligibilityDegradeReason.PermissionDenied);
     }
 
     private static AdminErrorEndpointRegistration CreateRegistration()
@@ -180,6 +280,21 @@ public class AdminErrorEligibilityResolverTests
             }, "Test"));
         }
         return httpContext;
+    }
+
+    private sealed class DenyAllPermissionChecker : IPermissionChecker
+    {
+        public Task<bool> IsGrantedAsync(string name) => Task.FromResult(false);
+
+        public Task<bool> IsGrantedAsync(ClaimsPrincipal? claimsPrincipal, string name) => Task.FromResult(false);
+
+        public Task<MultiplePermissionGrantResult> IsGrantedAsync(params string[] names)
+            => throw new NotSupportedException();
+
+        public Task<MultiplePermissionGrantResult> IsGrantedAsync(
+            ClaimsPrincipal? claimsPrincipal,
+            params string[] names)
+            => throw new NotSupportedException();
     }
 }
 
@@ -250,8 +365,7 @@ public class ClientErrorProtocolAdapterTests
     }
 
     /// <summary>
-    /// 验证：OAuthErrorProtocolAdapter 由调用方选定协议后即可写出，不限定 /connect。
-    /// 会话撤销等 /api 出口复用同一 OAuth 形状。
+    /// 验证：OAuthErrorProtocolAdapter 本身不按路径拒绝。生产 /api 不再把请求交给它。
     /// </summary>
     [Fact]
     public async Task OAuth_Adapter_Should_Write_For_Api_Path_When_Invoked()
@@ -319,6 +433,35 @@ public class ClientErrorProtocolAdapterTests
 
         result.ShouldBeTrue();
         httpContext.Response.Headers.ContainsKey("WWW-Authenticate").ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Clear 之后必须按投影重写封顶 Retry-After，否则 /connect/token 429 丢掉等待秒数。
+    /// </summary>
+    [Fact]
+    public async Task OAuth_Adapter_Should_Write_Capped_Retry_After()
+    {
+        var adapter = new OAuthErrorProtocolAdapter();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        httpContext.Request.Path = "/connect/token";
+
+        var projection = new ClientErrorHttpProjection
+        {
+            Body = new PublicErrorProjectionResult
+            {
+                PublicCode = ClientErrorCodes.RateLimited,
+                Kind = PublicErrorKind.RateLimited,
+                Message = "slow",
+            },
+            StatusCode = 429,
+            RetryAfterSeconds = 90000,
+        };
+
+        var result = await adapter.TryWriteProtocolErrorAsync(httpContext, projection);
+
+        result.ShouldBeTrue();
+        httpContext.Response.Headers.RetryAfter.ToString().ShouldBe("86400");
     }
 
     /// <summary>

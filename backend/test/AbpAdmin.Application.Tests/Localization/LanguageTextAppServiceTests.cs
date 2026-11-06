@@ -9,6 +9,7 @@ using Volo.Abp.Modularity;
 using Volo.Abp.MultiTenancy;
 using Volo.Abp.TenantManagement;
 using Volo.Abp.Validation;
+using AbpAdmin.ClientErrors;
 using Xunit;
 
 namespace AbpAdmin.Localization;
@@ -602,5 +603,41 @@ public abstract class LanguageTextAppServiceTests<TStartupModule> : AbpAdminAppl
         {
             (string.CompareOrdinal(names[i - 1], names[i]) <= 0).ShouldBeTrue();
         }
+    }
+
+    [Fact]
+    public async Task Client_Static_Resource_Should_Be_Hidden_And_Rejected_On_Update()
+    {
+        var names = await _languageTextAppService.GetResourceNamesAsync();
+        names.Items.ShouldNotContain("AbpAdminClientErrors");
+
+        var list = await _languageTextAppService.GetListAsync(new GetLanguageTextsInput
+        {
+            CultureName = CultureName,
+            MaxResultCount = 20
+        });
+        list.Items.ShouldNotContain(x => x.ResourceName == "AbpAdminClientErrors");
+
+        var hidden = await _languageTextAppService.GetListAsync(new GetLanguageTextsInput
+        {
+            ResourceName = "AbpAdminClientErrors",
+            CultureName = "en",
+            MaxResultCount = 20
+        });
+        hidden.TotalCount.ShouldBe(0);
+
+        var exception = await Should.ThrowAsync<Volo.Abp.BusinessException>(() =>
+            _languageTextAppService.UpdateAsync(new UpdateLanguageTextDto
+            {
+                ResourceName = "AbpAdminClientErrors",
+                CultureName = "en",
+                Name = "Unexpected",
+                Value = "hacked"
+            }));
+        exception.Code.ShouldBe(AbpAdmin.AbpAdminDomainErrorCodes.Localization.ClientErrorResourceReadOnly);
+
+        var restore = await Should.ThrowAsync<Volo.Abp.BusinessException>(() =>
+            _languageTextAppService.RestoreToDefaultAsync("AbpAdminClientErrors", "en", "Unexpected"));
+        restore.Code.ShouldBe(AbpAdmin.AbpAdminDomainErrorCodes.Localization.ClientErrorResourceReadOnly);
     }
 }

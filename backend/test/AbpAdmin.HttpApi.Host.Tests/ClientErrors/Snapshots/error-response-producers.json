@@ -33,10 +33,10 @@
       "methodName": "InvokeAsync",
       "callPattern": "Response.WriteAsJsonAsync",
       "associatedExitId": "IdentitySessionValidationMiddleware.InvokeAsync()",
-      "protocol": "OAuth",
+      "protocol": "AbpEnvelope",
       "isErrorOutput": true,
       "approvedDataFields": [],
-      "notes": "会话撤销 401 + session_revoked"
+      "notes": "会话撤销 401 + ABP 信封（路径登记表，不再强制 OAuth）"
     },
     {
       "sourceId": "FileUploadContentGuardMiddleware.WriteAsJsonAsync",
@@ -45,10 +45,10 @@
       "methodName": "InvokeAsync",
       "callPattern": "Response.WriteAsJsonAsync",
       "associatedExitId": "FileUploadContentGuardMiddleware.InvokeAsync()",
-      "protocol": "CustomJson",
+      "protocol": "AbpEnvelope",
       "isErrorOutput": true,
       "approvedDataFields": ["fileName", "reason"],
-      "notes": "上传拒绝 400 + {fileName, reason}"
+      "notes": "上传拒绝 400 + ABP 信封 data.fileName/reason"
     },
     {
       "sourceId": "AbpAdminHttpApiHostModule.TenantMismatch",
@@ -57,22 +57,10 @@
       "methodName": "OnTenantValidationFailure",
       "callPattern": "Response.WriteAsJsonAsync",
       "associatedExitId": "AbpAdminHttpApiHostModule.TenantMismatch",
-      "protocol": "OAuth",
+      "protocol": "AbpEnvelope",
       "isErrorOutput": true,
       "approvedDataFields": [],
-      "notes": "租户失配 403 + tenant_mismatch"
-    },
-    {
-      "sourceId": "ImageProcessingBusyExceptionFilter.RetryAfter",
-      "filePath": "AbpAdmin.HttpApi/Imaging/ImageProcessingBusyExceptionFilter.cs",
-      "declaringType": "ImageProcessingBusyExceptionFilter",
-      "methodName": "OnException",
-      "callPattern": "Response.Headers.RetryAfter",
-      "associatedExitId": "ImageProcessingBusyExceptionFilter.OnException()",
-      "protocol": "AbpEnvelope",
-      "isErrorOutput": false,
-      "approvedDataFields": [],
-      "notes": "补 Retry-After 头，异常体由 ABP 写出"
+      "notes": "租户失配 403 + ABP 信封（/signalr-hubs 由路径登记表选 SignalR）"
     },
     {
       "sourceId": "CookieEvents.OnRedirectToLogin",
@@ -97,6 +85,54 @@
       "isErrorOutput": true,
       "approvedDataFields": [],
       "notes": "对 /api 只写 403 状态，不写 body"
+    },
+    {
+      "sourceId": "FileShareController.ClientErrorActionResults.NotFoundAsync",
+      "filePath": "AbpAdmin.HttpApi/Controllers/FileShareController.cs",
+      "declaringType": "FileShareController",
+      "methodName": "DownloadByTokenAsync",
+      "callPattern": "ClientErrorActionResults.NotFoundAsync",
+      "associatedExitId": "FileShareController.DownloadByTokenAsync(String)",
+      "protocol": "AbpEnvelope",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "匿名分享业务失败显式 404 信封"
+    },
+    {
+      "sourceId": "AuditLogExportController.ClientErrorActionResults",
+      "filePath": "AbpAdmin.HttpApi/Controllers/AuditLogExportController.cs",
+      "declaringType": "AuditLogExportController",
+      "methodName": "GetExportFileAsync",
+      "callPattern": "ClientErrorActionResults.EmptyNotFound/EmptyForbidden",
+      "associatedExitId": "AuditLogExportController.GetExportFileAsync(Guid)",
+      "protocol": "AbpEnvelope",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "导出空体 404/403 改为安全 helper"
+    },
+    {
+      "sourceId": "UserExportController.ClientErrorActionResults",
+      "filePath": "AbpAdmin.HttpApi/Controllers/UserExportController.cs",
+      "declaringType": "UserExportController",
+      "methodName": "GetExportFileAsync",
+      "callPattern": "ClientErrorActionResults.EmptyForbidden",
+      "associatedExitId": "UserExportController.GetExportFileAsync(Guid)",
+      "protocol": "AbpEnvelope",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "导出跨用户 403 安全 helper"
+    },
+    {
+      "sourceId": "GdprDownloadController.ClientErrorActionResults.NotFoundAsync",
+      "filePath": "AbpAdmin.HttpApi/Controllers/GdprDownloadController.cs",
+      "declaringType": "GdprDownloadController",
+      "methodName": "DownloadAsync",
+      "callPattern": "ClientErrorActionResults.NotFoundAsync",
+      "associatedExitId": "GdprDownloadController.DownloadAsync(Guid,String)",
+      "protocol": "AbpEnvelope",
+      "isErrorOutput": true,
+      "approvedDataFields": [],
+      "notes": "匿名 GDPR 下载业务失败折叠为 404 信封"
     }
   ]
 }

@@ -101,41 +101,61 @@ public class ErrorResponseProducerInventoryTests
                 "AbpAdmin.HttpApi.Host/AbpAdminHttpApiHostModule.cs",
                 "AbpAdminHttpApiHostModule",
                 "OnTenantValidationFailure",
-                ErrorProtocol.OAuth,
-                new List<string>()
-            ));
-        }
-        
-        // 5. 扫描 ImageProcessingBusyExceptionFilter（MVC Filter）
-        // 首先检查 HostModule，如果没有则检查 HttpApiModule
-        var imageFilterAdded = hostModuleCode.Contains("ImageProcessingBusyExceptionFilter") ||
-                              hostModuleCode.Contains("AddFilter<ImageProcessingBusyExceptionFilter>");
-                              
-        if (!imageFilterAdded)
-        {
-            // 在 HttpApiModule 中搜索
-            var httpApiModulePath = Path.Combine(repoRoot, "backend", "framework-app", "AbpAdmin.HttpApi", "AbpAdminHttpApiModule.cs");
-            if (File.Exists(httpApiModulePath))
-            {
-                var httpApiModuleCode = File.ReadAllText(httpApiModulePath);
-                imageFilterAdded = httpApiModuleCode.Contains("ImageProcessingBusyExceptionFilter") ||
-                                  httpApiModuleCode.Contains("AddFilter<ImageProcessingBusyExceptionFilter>");
-            }
-        }
-        
-        if (imageFilterAdded)
-        {
-            actualProducers.Add((
-                "ImageProcessingBusyExceptionFilter.OnException()",
-                "AbpAdmin.HttpApi/Imaging/ImageProcessingBusyExceptionFilter.cs",
-                "ImageProcessingBusyExceptionFilter",
-                "OnException",
                 ErrorProtocol.AbpEnvelope,
                 new List<string>()
             ));
         }
+
+        actualProducers.AddRange(ScanActionResultHelpers(repoRoot));
         
         return actualProducers;
+    }
+
+    private static List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)> ScanActionResultHelpers(string repoRoot)
+    {
+        var result = new List<(string ExitId, string FilePath, string DeclaringType, string MethodName, ErrorProtocol Protocol, List<string> ApprovedDataFields)>();
+        var files = new (string relative, string exitId, string declaringType, string methodName)[]
+        {
+            ("backend/framework-app/AbpAdmin.HttpApi/Controllers/FileShareController.cs",
+                "FileShareController.DownloadByTokenAsync(String)",
+                "FileShareController",
+                "DownloadByTokenAsync"),
+            ("backend/framework-app/AbpAdmin.HttpApi/Controllers/AuditLogExportController.cs",
+                "AuditLogExportController.GetExportFileAsync(Guid)",
+                "AuditLogExportController",
+                "GetExportFileAsync"),
+            ("backend/framework-app/AbpAdmin.HttpApi/Controllers/UserExportController.cs",
+                "UserExportController.GetExportFileAsync(Guid)",
+                "UserExportController",
+                "GetExportFileAsync"),
+            ("backend/framework-app/AbpAdmin.HttpApi/Controllers/GdprDownloadController.cs",
+                "GdprDownloadController.DownloadAsync(Guid,String)",
+                "GdprDownloadController",
+                "DownloadAsync"),
+        };
+
+        foreach (var file in files)
+        {
+            var path = Path.Combine(repoRoot, file.relative.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            var code = File.ReadAllText(path);
+            if (code.Contains("ClientErrorActionResults.", StringComparison.Ordinal))
+            {
+                result.Add((
+                    file.exitId,
+                    file.relative.Replace("backend/framework-app/", string.Empty),
+                    file.declaringType,
+                    file.methodName,
+                    ErrorProtocol.AbpEnvelope,
+                    new List<string>()));
+            }
+        }
+
+        return result;
     }
     
     /// <summary>
@@ -166,7 +186,7 @@ public class ErrorResponseProducerInventoryTests
                 "AbpAdmin.HttpApi.Host/Files/FileUploadContentGuardMiddleware.cs",
                 "FileUploadContentGuardMiddleware",
                 "InvokeAsync",
-                ErrorProtocol.CustomJson,
+                ErrorProtocol.AbpEnvelope,
                 new List<string> { "fileName", "reason" }
             ));
         }
@@ -185,7 +205,7 @@ public class ErrorResponseProducerInventoryTests
         var knownMiddlewareTypes = new Dictionary<string, (string exitId, string filePath, ErrorProtocol protocol, List<string> approvedFields)>(StringComparer.OrdinalIgnoreCase)
         {
             ["TokenEndpointRateLimitingMiddleware"] = ("TokenEndpointRateLimitingMiddleware.InvokeAsync()", "AbpAdmin.HttpApi.Host/OpenIddict/TokenEndpointRateLimitingMiddleware.cs", ErrorProtocol.OAuth, new List<string>()),
-            ["IdentitySessionValidationMiddleware"] = ("IdentitySessionValidationMiddleware.InvokeAsync()", "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs", ErrorProtocol.OAuth, new List<string>()),
+            ["IdentitySessionValidationMiddleware"] = ("IdentitySessionValidationMiddleware.InvokeAsync()", "AbpAdmin.HttpApi.Host/Identity/IdentitySessionValidationMiddleware.cs", ErrorProtocol.AbpEnvelope, new List<string>()),
         };
         
         // 按行处理，排除注释
@@ -331,8 +351,8 @@ public class ErrorResponseProducerInventoryTests
         {
             "FriendlyBusinessExceptionMiddleware" => ErrorProtocol.AbpEnvelope,
             "TokenEndpointRateLimitingMiddleware" => ErrorProtocol.OAuth,
-            "IdentitySessionValidationMiddleware" => ErrorProtocol.OAuth,
-            "FileUploadContentGuardMiddleware" => ErrorProtocol.CustomJson,
+            "IdentitySessionValidationMiddleware" => ErrorProtocol.AbpEnvelope,
+            "FileUploadContentGuardMiddleware" => ErrorProtocol.AbpEnvelope,
             _ => ErrorProtocol.AbpEnvelope // 默认
         };
     }

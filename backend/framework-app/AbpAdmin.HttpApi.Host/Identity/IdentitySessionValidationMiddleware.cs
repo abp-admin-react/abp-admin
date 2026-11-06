@@ -62,8 +62,7 @@ public class IdentitySessionValidationMiddleware
                     await dispatcher.WriteKnownAsync(
                         context,
                         ClientErrorCodes.AuthenticationRequired,
-                        StatusCodes.Status401Unauthorized,
-                        protocolOverride: ErrorProtocol.OAuth);
+                        StatusCodes.Status401Unauthorized);
                     return;
                 }
 

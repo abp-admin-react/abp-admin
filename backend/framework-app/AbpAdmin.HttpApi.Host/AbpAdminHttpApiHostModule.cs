@@ -206,7 +206,9 @@ public class AbpAdminHttpApiHostModule : AbpModule
             serverBuilder.AddEventHandler(OpenIddict.RequireS256CodeChallengeHandler.Descriptor);
         });
 
-        if (!hostingEnvironment.IsDevelopment())
+        var useDevelopmentCertificates = hostingEnvironment.IsDevelopment()
+            || configuration.GetValue<bool>("AuthServer:UseDevelopmentCertificates");
+        if (!useDevelopmentCertificates)
         {
             PreConfigure<AbpOpenIddictAspNetCoreOptions>(options =>
             {
@@ -217,6 +219,17 @@ public class AbpAdminHttpApiHostModule : AbpModule
             {
                 serverBuilder.AddProductionEncryptionAndSigningCertificate("openiddict.pfx", configuration["AuthServer:CertificatePassPhrase"]!);
                 serverBuilder.SetIssuer(new Uri(configuration["AuthServer:Authority"]!));
+            });
+        }
+        else if (!hostingEnvironment.IsDevelopment())
+        {
+            PreConfigure<OpenIddictServerBuilder>(serverBuilder =>
+            {
+                var authority = configuration["AuthServer:Authority"];
+                if (!string.IsNullOrWhiteSpace(authority))
+                {
+                    serverBuilder.SetIssuer(new Uri(authority));
+                }
             });
         }
 
@@ -1521,16 +1534,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
                             .GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
                             .LogWarning("Tenant mismatch blocked. ClaimTenant={ClaimTenant} ResolvedTenant={ResolvedTenant} Path={Path}",
                                 claimTenant, currentTenant.Id, httpContext.Request.Path);
-                        var protocol = path.StartsWithSegments("/signalr-hubs")
-                            ? ErrorProtocol.SignalR
-                            : ErrorProtocol.OAuth;
                         var dispatcher = httpContext.RequestServices
                             .GetRequiredService<AbpAdmin.HttpApi.ClientErrors.ClientErrorHttpDispatcher>();
                         await dispatcher.WriteKnownAsync(
                             httpContext,
                             ClientErrorCodes.Forbidden,
-                            StatusCodes.Status403Forbidden,
-                            protocolOverride: protocol);
+                            StatusCodes.Status403Forbidden);
                         return;
                     }
                 }

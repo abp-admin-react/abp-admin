@@ -5,7 +5,6 @@ namespace AbpAdmin.ClientErrors;
 
 /// <summary>
 /// 框架基础公开码定义（方案 3.2）。
-/// P0 阶段固定命名，不改变运行时行为。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -130,8 +129,7 @@ public static class ClientErrorKindMapping
     /// 启动时调用，防止模块重复定义基础码 kind。
     /// </summary>
     /// <remarks>
-    /// P0 阶段只验证静态映射完整性（字典键非空）。
-    /// P1/P4 将增加跨模块重复定义检测，需要运行时注册表。
+    /// 基础码非空。跨模块重复定义由 PublicErrorDefinitionRegistry 在启动时强制。
     /// </remarks>
     public static void Validate()
     {
@@ -150,8 +148,7 @@ public static class ClientErrorKindMapping
 }
 
 /// <summary>
-/// 管理兼容数据白名单。
-/// P0 阶段记录已批准字段，P1 实现过滤。
+/// 管理兼容数据白名单。投影按批准字段过滤，PascalCase 键原样写回。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -160,7 +157,7 @@ public static class ClientErrorKindMapping
 /// <list type="bullet">
 ///   <item><description>Management responses use <b>PascalCase</b> for historical fields (e.g., <c>RetryAfterSeconds</c>).</description></item>
 ///   <item><description>Client responses use <b>lowerCamelCase</b> for all new fields (e.g., <c>retryAfterSeconds</c>).</description></item>
-///   <item><description>P1 filtering will need case-aware matching to preserve management compatibility while normalizing client output.</description></item>
+///   <item><description>过滤使用 Ordinal 比较：管理端 PascalCase 与客户 lowerCamelCase 并存，互不归一。</description></item>
 /// </list>
 /// </remarks>
 public static class ManagementCompatibilityDataWhitelist

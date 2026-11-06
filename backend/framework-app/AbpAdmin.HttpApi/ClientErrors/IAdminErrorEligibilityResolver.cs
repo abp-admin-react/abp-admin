@@ -1,10 +1,11 @@
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 管理资格解析结果（方案 4.2）。P1 契约。
+/// 管理资格解析结果（方案 4.2）。
 /// </summary>
 public sealed class AdminErrorEligibilityResult
 {
@@ -21,13 +22,14 @@ public sealed class AdminErrorEligibilityResult
     public AdminEligibilityDegradeReason? DegradeReason { get; init; }
 
     /// <summary>
-    /// 详细消息（可选，仅供日志；不写入响应）。
+    /// 诊断细节（可选）。只进 Debug 日志与测试断言，不写入响应、不进指标标签。
+    /// 允许内容：HttpContext is null、缺失服务名、异常类型名。禁止 token、用户 ID、输入原值。
     /// </summary>
     public string? Details { get; init; }
 }
 
 /// <summary>
-/// 管理资格降级原因（方案 4.2）。P1 契约。
+/// 管理资格降级原因（方案 4.2）。
 /// </summary>
 public enum AdminEligibilityDegradeReason
 {
@@ -51,14 +53,14 @@ public enum AdminEligibilityDegradeReason
 }
 
 /// <summary>
-/// 管理资格解析上下文（方案 4.2）。P1 契约。
+/// 管理资格解析上下文（方案 4.2）。
 /// </summary>
 public sealed class AdminErrorEligibilityContext
 {
     /// <summary>
-    /// 当前 HTTP 上下文。
+    /// 当前 HTTP 上下文。null 时资格查询失败，降级 Public（EligibilityQueryFailed）。
     /// </summary>
-    public required HttpContext HttpContext { get; init; }
+    public required HttpContext? HttpContext { get; init; }
 
     /// <summary>
     /// 端点登记（已知时）。null 表示未登记。
@@ -67,7 +69,7 @@ public sealed class AdminErrorEligibilityContext
 }
 
 /// <summary>
-/// 管理资格解析器接口（方案 4.2）。P1 契约。
+/// 管理资格解析器接口（方案 4.2）。
 /// 实现方案 4.2 的资格判定顺序。
 /// </summary>
 /// <remarks>
@@ -92,7 +94,7 @@ public sealed class AdminErrorEligibilityContext
 ///   <item><description>不记录 token、输入原值、原始异常文本；不使用用户 ID 作为无界指标标签。</description></item>
 /// </list>
 /// <para>
-/// 消费者：P1-HTTP 的异常 filter/中间件（决定错误输出策略）。
+/// 消费者：HTTP 异常 filter / 中间件（决定错误输出策略）。
 /// </para>
 /// </remarks>
 public interface IAdminErrorEligibilityResolver
@@ -100,5 +102,5 @@ public interface IAdminErrorEligibilityResolver
     /// <summary>
     /// 解析当前请求是否具备 AdminCompatibility 资格。
     /// </summary>
-    AdminErrorEligibilityResult Resolve(AdminErrorEligibilityContext context);
+    Task<AdminErrorEligibilityResult> ResolveAsync(AdminErrorEligibilityContext context);
 }

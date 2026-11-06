@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 只读公开错误目录（方案 5.2）。P1 契约。
+/// 只读公开错误目录（方案 5.2）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -11,7 +11,7 @@ namespace AbpAdmin.ClientErrors;
 /// 一致：冻结后任何写入尝试都必须失败，并发读安全。
 /// </para>
 /// <para>
-/// 消费者：P1 Domain 非 HTTP 投影核心（按内部码查定义）、P1-HTTP 出口投影、P3 快照导出。
+/// 消费者：Domain 非 HTTP 投影核心（按内部码查定义）、HTTP 出口投影、公开契约快照导出。
 /// </para>
 /// </remarks>
 public interface IPublicErrorCatalog

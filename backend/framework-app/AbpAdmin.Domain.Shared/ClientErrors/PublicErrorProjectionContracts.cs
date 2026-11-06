@@ -4,12 +4,12 @@ using System.Collections.Generic;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 非 HTTP 投影核心输入契约（方案 5.2）。P1 契约。
+/// 非 HTTP 投影核心输入契约（方案 5.2）。
 /// 无 HttpContext 依赖，可被 Domain 投影核心、Application（ClientFailureDto 映射）和测试安全调用。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 消费者：P1 Domain 的 <see cref="IClientErrorProjectionCore"/> 实现、
+/// 消费者：Domain 层 <see cref="IClientErrorProjectionCore"/> 实现、
 /// Application 层的 ClientFailureDto 映射、HTTP 层的 <see cref="IClientErrorHttpProjector"/>（组装输入）。
 /// </para>
 /// </remarks>
@@ -81,7 +81,7 @@ public sealed record PublicValidationErrorItem
 }
 
 /// <summary>
-/// 非 HTTP 投影核心输出契约（方案 5.2）。P1 契约。
+/// 非 HTTP 投影核心输出契约（方案 5.2）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -135,8 +135,8 @@ public sealed record PublicErrorProjectionResult
 }
 
 /// <summary>
-/// 非 HTTP 投影核心接口（方案 5.2）。P1 契约。
-/// 定义在 Domain.Shared，实现由 P1 Domain 提供，消费者通过 DI 获取。
+/// 非 HTTP 投影核心接口（方案 5.2）。
+/// 定义在 Domain.Shared，实现由 Domain 层提供，消费者通过 DI 获取。
 /// </summary>
 /// <remarks>
 /// <para>

@@ -145,6 +145,7 @@ public class PublicErrorDefinitionRegistry : IPublicErrorDefinitionProvider, ISi
             MessageKey = "Unexpected",
             Kind = PublicErrorKind.Server,
             AllowedParameters = unexpectedParameters,
+            PublicHttpStatuses = [500, 503],
         });
         Register(new PublicErrorDefinition
         {
@@ -154,6 +155,7 @@ public class PublicErrorDefinitionRegistry : IPublicErrorDefinitionProvider, ISi
             MessageKey = "Unexpected",
             Kind = PublicErrorKind.Server,
             AllowedParameters = unexpectedParameters,
+            PublicHttpStatuses = [500, 503],
         });
         Register(new PublicErrorDefinition
         {

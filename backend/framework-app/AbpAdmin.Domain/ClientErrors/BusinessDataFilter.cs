@@ -6,7 +6,7 @@ namespace AbpAdmin.Domain.ClientErrors;
 
 /// <summary>
 /// 业务异常数据过滤器 - 用于安全过滤业务异常中的 data 字段。
-/// 实现 P0 审查项 (a)：批准数据字段白名单。
+/// 批准数据字段白名单过滤。
 /// </summary>
 public static class BusinessDataFilter
 {

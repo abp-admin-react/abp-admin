@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 受控协议登记项（方案 5.3.3）。P1 契约。
+/// 受控协议登记项（方案 5.3.3）。
 /// 用于启动时建立受控入口到错误协议的映射（ABP/OAuth/Gateway/SSE 等）。
 /// </summary>
 /// <remarks>
@@ -58,7 +58,7 @@ public sealed record ControlledProtocolRegistration
 }
 
 /// <summary>
-/// 受控协议注册表接口（方案 5.3.3）。P1 契约。
+/// 受控协议注册表接口（方案 5.3.3）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -92,7 +92,7 @@ public interface IControlledProtocolRegistry
 }
 
 /// <summary>
-/// 受控协议路径前缀常量（方案 5.3.3 + 方案 5.1 目录与职责）。P1 契约。
+/// 受控协议路径前缀常量（方案 5.3.3 + 方案 5.1 目录与职责）。
 /// </summary>
 public static class ControlledProtocolPathPrefixes
 {

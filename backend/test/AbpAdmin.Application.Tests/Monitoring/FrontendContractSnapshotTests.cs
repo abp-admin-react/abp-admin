@@ -60,6 +60,7 @@ public class FrontendContractSnapshotTests
         // 输入 UpdateRoleMenuGrantsDto 的 MenuIds 列表可空性同样登记）
         typeof(AbpAdmin.Menus.RoleMenuGrantItemDto),
         typeof(AbpAdmin.Menus.UpdateRoleMenuGrantsDto),
+        typeof(AbpAdmin.ClientErrors.ClientFailureDto),
     };
 
     private static readonly NullabilityInfoContext NullabilityCtx = new();

@@ -120,8 +120,7 @@ public class TokenEndpointRateLimitingMiddleware
                 context,
                 ClientErrorCodes.RateLimited,
                 StatusCodes.Status429TooManyRequests,
-                retryAfterSeconds: retryAfter,
-                protocolOverride: ErrorProtocol.OAuth);
+                retryAfterSeconds: retryAfter);
             return true;
         }
     }

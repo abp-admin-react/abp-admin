@@ -54,6 +54,27 @@
       }
     }
   },
+  "AbpAdmin.ClientErrors.ClientFailureDto": {
+    "kind": "dto",
+    "properties": {
+      "Code": {
+        "type": "string",
+        "nullable": false
+      },
+      "CorrelationId": {
+        "type": "string",
+        "nullable": true
+      },
+      "Data": {
+        "type": "Dictionary\u003Cstring, Object\u003E",
+        "nullable": false
+      },
+      "Message": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Identity.DynamicSearchFieldDto": {
     "kind": "dto",
     "properties": {

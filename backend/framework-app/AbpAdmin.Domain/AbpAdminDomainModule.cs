@@ -180,6 +180,14 @@ public class AbpAdminDomainModule : AbpModule
             if (resource is LocalizationResource localizationResource
                 && typeof(IClientStaticResource).IsAssignableFrom(localizationResource.ResourceType))
             {
+                for (var i = resource.Contributors.Count - 1; i >= 0; i--)
+                {
+                    if (resource.Contributors[i] is DbLocalizationResourceContributor)
+                    {
+                        resource.Contributors.RemoveAt(i);
+                    }
+                }
+
                 continue;
             }
 

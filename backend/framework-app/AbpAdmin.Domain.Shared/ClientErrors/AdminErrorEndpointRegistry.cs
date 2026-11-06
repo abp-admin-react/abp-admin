@@ -6,7 +6,7 @@ namespace AbpAdmin.ClientErrors;
 
 /// <summary>
 /// 管理端错误端点登记项。
-/// P0 阶段建立登记结构，不改变运行时行为。
+/// HTTP Convention 写入，投影与资格解析按 ExitId 读取。
 /// </summary>
 /// <remarks>
 /// 登记键采用"具体控制器/服务类型全名 + 方法名 + 参数类型签名"，
@@ -160,16 +160,11 @@ public enum ErrorProtocol
 }
 
 /// <summary>
-/// 管理端错误端点登记表（P0 只读访问）。
+/// 管理端错误端点登记表。启动后 Freeze，运行时只读。
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>Layering Notice</b>: This static mutable registry is in Domain.Shared for P0 contract definition.
-/// P1 will move it to Domain or Application layer with proper DI-based singleton lifecycle.
-/// </para>
-/// <para>
-/// <b>Thread Safety</b>: Uses lock for thread-safe registration. Frozen state prevents modifications.
-/// </para>
+/// 静态表放在 Domain.Shared，供 HttpApi Convention 与测试共用。
+/// 注册用锁；Freeze 后禁止再改。ResetForTesting 仅测试调用。
 /// </remarks>
 public static class AdminErrorEndpointRegistry
 {

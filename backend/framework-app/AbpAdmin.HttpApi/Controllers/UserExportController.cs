@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using AbpAdmin.AuditLogs;
 using AbpAdmin.ClientErrors;
+using AbpAdmin.HttpApi.ClientErrors;
 using AbpAdmin.Identity;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
@@ -104,7 +105,7 @@ public class UserExportController : AbpController
         // 跨用户不可下别人的导出结果
         if (excelFile.CreatorId != CurrentUser.GetId())
         {
-            throw new Volo.Abp.BusinessException(ClientErrorCodes.Forbidden);
+            return ClientErrorActionResults.EmptyForbidden();
         }
 
         var bytes = await _blobContainer.GetAllBytesAsync(id.ToString());
@@ -127,7 +128,7 @@ public class UserExportController : AbpController
         // 跨用户不可下别人的导入结果
         if (excelFile.CreatorId != CurrentUser.GetId())
         {
-            throw new Volo.Abp.BusinessException(ClientErrorCodes.Forbidden);
+            return ClientErrorActionResults.EmptyForbidden();
         }
 
         var bytes = await _blobContainer.GetAllBytesAsync(id.ToString());

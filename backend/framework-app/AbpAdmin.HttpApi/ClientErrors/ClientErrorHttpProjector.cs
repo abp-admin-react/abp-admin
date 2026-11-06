@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Threading.Tasks;
 using AbpAdmin.ClientErrors;
 using AbpAdmin.Imaging;
 using AbpAdmin.RateLimiting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp;
-using Volo.Abp.AspNetCore.ExceptionHandling;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.ExceptionHandling;
 using Volo.Abp.Tracing;
@@ -29,7 +30,15 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDep
         _eligibilityResolver = eligibilityResolver;
     }
 
+    /// <summary>
+    /// 同步包装。HTTP 热路径必须走 <see cref="ProjectAsync"/>，避免资格解析阻塞线程池。
+    /// </summary>
     public ClientErrorHttpProjection? Project(ClientErrorHttpProjectionContext context)
+    {
+        return ProjectAsync(context).GetAwaiter().GetResult();
+    }
+
+    public async Task<ClientErrorHttpProjection?> ProjectAsync(ClientErrorHttpProjectionContext context)
     {
         if (context == null)
         {
@@ -43,9 +52,9 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDep
 
         try
         {
-            return ProjectCore(context);
+            return await ProjectCoreAsync(context);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new ClientErrorHttpProjection
             {
@@ -60,30 +69,44 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDep
         }
     }
 
-    private ClientErrorHttpProjection ProjectCore(ClientErrorHttpProjectionContext context)
+    /// <summary>
+    /// 组装投影输入：声明受众优先；仅 AdminCompatibility 走资格闸；文化取当前 UI 文化。
+    /// </summary>
+    /// <param name="context">HTTP 投影上下文。不得为 null。</param>
+    /// <returns>安全信封模型。资格失败时受众降为 Public，不抛给客户端。</returns>
+    /// <remarks>
+    /// Public/Shared 不调用资格解析，避免每个客户错误都记 Admin degrade。
+    /// 取消异常不在此捕获，由 <see cref="ProjectAsync"/> 的 filter 继续抛出。
+    /// </remarks>
+    private async Task<ClientErrorHttpProjection> ProjectCoreAsync(ClientErrorHttpProjectionContext context)
     {
         var httpContext = context.HttpContext;
         var services = httpContext.RequestServices;
-        var registration = context.EndpointRegistration;
+        var registration = context.EndpointRegistration
+                           ?? httpContext.GetEndpoint()?.Metadata.GetMetadata<ClientErrorEndpointMetadata>()
+                               ?.ToRegistration();
 
-        var eligibilityResult = _eligibilityResolver.Resolve(
-            new AdminErrorEligibilityContext
-            {
-                HttpContext = httpContext,
-                EndpointRegistration = registration,
-            });
+        var declaredAudience = registration?.Audience ?? context.EffectiveAudience;
+        var eligibilityResult = declaredAudience == ClientErrorAudience.AdminCompatibility
+            ? await _eligibilityResolver.ResolveAsync(
+                new AdminErrorEligibilityContext
+                {
+                    HttpContext = httpContext,
+                    EndpointRegistration = registration,
+                })
+            : null;
 
-        if (!eligibilityResult.IsEligible && eligibilityResult.DegradeReason is { } reason)
+        if (eligibilityResult is { IsEligible: false, DegradeReason: { } reason })
         {
             services?.GetService<IAdminEligibilityDegradeMetrics>()
                 ?.Record(reason, registration?.ExitId ?? "unregistered");
         }
 
-        var audience = eligibilityResult.IsEligible
-            ? ClientErrorAudience.AdminCompatibility
-            : context.EffectiveAudience == ClientErrorAudience.AdminCompatibility
-                ? ClientErrorAudience.Public
-                : context.EffectiveAudience;
+        var audience = declaredAudience == ClientErrorAudience.AdminCompatibility
+            ? eligibilityResult is { IsEligible: true }
+                ? ClientErrorAudience.AdminCompatibility
+                : ClientErrorAudience.Public
+            : declaredAudience;
 
         string? internalCode = context.InternalCode;
         IReadOnlyDictionary<string, object?>? exceptionData = context.ExceptionData;
@@ -121,6 +144,7 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDep
             Audience = audience,
             EndpointRegistration = registration,
             RetryAfterSeconds = retryAfter,
+            CultureName = CultureInfo.CurrentUICulture.Name,
         };
 
         var projectionResult = _projectionCore.Project(input);
@@ -174,6 +198,17 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDep
         };
     }
 
+    /// <summary>
+    /// 决定 HTTP 状态码。目录 Kind 优先于 ABP 的 BusinessException 默认 403。
+    /// </summary>
+    /// <param name="context">可带显式状态（WriteKnown / ActionResults）。</param>
+    /// <param name="kind">投影核心给出的公开分类。</param>
+    /// <returns>400–599 状态码。</returns>
+    /// <remarks>
+    /// ABP <c>IHttpExceptionStatusCodeFinder</c> 把未标状态的 <c>BusinessException</c> 映射成 403。
+    /// 若先信 finder，已登记的 <c>Client:NotFound</c> 会变成 Forbidden，登录恢复和 404 静默都会走错。
+    /// 页面流 Kind（401/403/404/400/409/429）以目录为准；Server 才保留已写出的 503 等。
+    /// </remarks>
     private static int DetermineHttpStatus(ClientErrorHttpProjectionContext context, PublicErrorKind kind)
     {
         if (context.HttpStatusCode is >= 400 and <= 599)
@@ -181,27 +216,7 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDep
             return context.HttpStatusCode.Value;
         }
 
-        var currentStatus = context.HttpContext.Response.StatusCode;
-        if (currentStatus >= 400)
-        {
-            return currentStatus;
-        }
-
-        if (context.Exception != null)
-        {
-            var finder = context.HttpContext.RequestServices?.GetService<IHttpExceptionStatusCodeFinder>();
-            if (finder != null)
-            {
-                return (int)finder.GetStatusCode(context.HttpContext, context.Exception);
-            }
-
-            if (context.Exception is IHasHttpStatusCode hasStatus)
-            {
-                return hasStatus.HttpStatusCode;
-            }
-        }
-
-        return kind switch
+        var fromKind = kind switch
         {
             PublicErrorKind.Authentication => 401,
             PublicErrorKind.Forbidden => 403,
@@ -212,5 +227,24 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDep
             PublicErrorKind.Server => 500,
             _ => 400,
         };
+
+        if (kind is not PublicErrorKind.Server)
+        {
+            return fromKind;
+        }
+
+        var currentStatus = context.HttpContext.Response.StatusCode;
+        if (currentStatus >= 400)
+        {
+            return currentStatus;
+        }
+
+        if (context.Exception is IHasHttpStatusCode hasStatus
+            && hasStatus.HttpStatusCode is >= 400 and <= 599)
+        {
+            return hasStatus.HttpStatusCode;
+        }
+
+        return fromKind;
     }
 }

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 客户端错误处理配置节（方案 5.4）。P1 契约。
+/// 客户端错误处理配置节（方案 5.4）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -61,7 +61,7 @@ public class ClientErrorHandlingOptions
 }
 
 /// <summary>
-/// 客户端错误处理绝对限制（框架上限，方案 5.4）。P1 契约。
+/// 客户端错误处理绝对限制（框架上限，方案 5.4）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -91,7 +91,7 @@ public static class ClientErrorHandlingLimits
 }
 
 /// <summary>
-/// 客户端错误静态资源支持文化（方案 6.1）。P1 契约。
+/// 客户端错误静态资源支持文化（方案 6.1）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -115,7 +115,7 @@ public static class ClientErrorCultures
 }
 
 /// <summary>
-/// 客户端静态资源标记接口（方案 6.2）。P1 契约。
+/// 客户端静态资源标记接口（方案 6.2）。
 /// </summary>
 /// <remarks>
 /// <para>

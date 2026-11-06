@@ -1,4 +1,6 @@
 using System.Threading.Tasks;
+using AbpAdmin.ClientErrors;
+using AbpAdmin.HttpApi.ClientErrors;
 using AbpAdmin.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,6 +16,7 @@ namespace AbpAdmin.Controllers;
 /// 限流命中（AbpAdminOperationRateLimitingException，429）不在此吞掉，交给 ABP 异常处理返回 429 + Retry-After。
 /// </summary>
 [Route("api/app/file-share")]
+[ClientErrorAudience(ClientErrorAudience.Public)]
 public class FileShareController : AbpController
 {
     private readonly Files.IFileShareAppService _fileShareAppService;
@@ -37,7 +40,7 @@ public class FileShareController : AbpController
         }
         catch (BusinessException ex) when (ex is not AbpAdminOperationRateLimitingException)
         {
-            return NotFound();
+            return await ClientErrorActionResults.NotFoundAsync(HttpContext);
         }
     }
 }

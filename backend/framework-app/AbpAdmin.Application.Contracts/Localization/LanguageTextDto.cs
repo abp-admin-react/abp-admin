@@ -12,10 +12,13 @@ public class LanguageTextDto : EntityDto
     /// <summary>覆盖行的实体 Id；静态基线行（无覆盖）为 null。</summary>
     public Guid? Id { get; set; }
 
+    /// <summary>ABP 资源名。客户静态资源在列表里 IsReadOnly=true。</summary>
     public string ResourceName { get; set; } = string.Empty;
 
+    /// <summary>目标文化名，如 zh-Hans。</summary>
     public string CultureName { get; set; } = string.Empty;
 
+    /// <summary>资源内的本地化 key。</summary>
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
@@ -45,4 +48,9 @@ public class LanguageTextDto : EntityDto
     /// 但若覆盖值恰好等于下层提供值，显示值可能不变（存储变化 ≠ 显示变化）。
     /// </summary>
     public bool IsOverridden { get; set; }
+
+    /// <summary>
+    /// 客户静态资源不可在线覆盖。列表标明只读；UpdateAsync 仍会拒绝写入。
+    /// </summary>
+    public bool IsReadOnly { get; set; }
 }

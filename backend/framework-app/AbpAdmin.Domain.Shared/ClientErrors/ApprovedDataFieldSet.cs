@@ -5,7 +5,7 @@ using System.Linq;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// 批准数据字段集合（方案 4.3 + P0 审查项）。P1 契约。
+/// 批准数据字段集合（方案 4.3）。
 /// 实现出口批准字段的不可变集合，保证未批准字段无法进入投影结果。
 /// </summary>
 /// <remarks>
@@ -22,7 +22,7 @@ namespace AbpAdmin.ClientErrors;
 /// 避免 <c>CorrelationId</c> vs <c>correlationId</c> 等逃脱检查。
 /// </para>
 /// <para>
-/// <b>消费者</b>：P1 Domain 投影核心（构建 data）、P1-HTTP 出口 writer（二次校验）、
+/// <b>消费者</b>：Domain 投影核心（构建 data）、HTTP 出口 writer（二次校验）、
 /// P1-HTTP filter（将定义中 <see cref="PublicErrorParameterDefinition"/> 的可回传字段转为批准集合）。
 /// </para>
 /// </remarks>

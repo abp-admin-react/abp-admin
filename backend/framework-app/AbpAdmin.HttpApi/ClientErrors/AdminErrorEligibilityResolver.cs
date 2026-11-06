@@ -1,7 +1,10 @@
 using System;
+using System.Threading.Tasks;
 using AbpAdmin.ClientErrors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.MultiTenancy;
@@ -11,10 +14,18 @@ namespace AbpAdmin.HttpApi.ClientErrors;
 
 /// <summary>
 /// 管理资格：未登记、未声明、未认证、租户未就绪、权限失败一律降级 Public。
+/// Details 只写 Debug 日志，不进响应。
 /// </summary>
 public class AdminErrorEligibilityResolver : IAdminErrorEligibilityResolver, ITransientDependency
 {
-    public AdminErrorEligibilityResult Resolve(AdminErrorEligibilityContext context)
+    private readonly ILogger<AdminErrorEligibilityResolver> _logger;
+
+    public AdminErrorEligibilityResolver(ILogger<AdminErrorEligibilityResolver>? logger = null)
+    {
+        _logger = logger ?? NullLogger<AdminErrorEligibilityResolver>.Instance;
+    }
+
+    public async Task<AdminErrorEligibilityResult> ResolveAsync(AdminErrorEligibilityContext context)
     {
         if (context == null)
         {
@@ -64,7 +75,7 @@ public class AdminErrorEligibilityResolver : IAdminErrorEligibilityResolver, ITr
 
                 foreach (var permission in context.EndpointRegistration.RequiredPermissions)
                 {
-                    if (!permissionChecker.IsGrantedAsync(permission).GetAwaiter().GetResult())
+                    if (!await permissionChecker.IsGrantedAsync(permission))
                     {
                         return Degrade(AdminEligibilityDegradeReason.PermissionDenied);
                     }
@@ -83,10 +94,14 @@ public class AdminErrorEligibilityResolver : IAdminErrorEligibilityResolver, ITr
         }
     }
 
-    private static AdminErrorEligibilityResult Degrade(
+    private AdminErrorEligibilityResult Degrade(
         AdminEligibilityDegradeReason reason,
         string? details = null)
     {
+        _logger.LogDebug(
+            "管理资格降级：{Reason}。{Details}",
+            reason,
+            details ?? string.Empty);
         return new AdminErrorEligibilityResult
         {
             IsEligible = false,

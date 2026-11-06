@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using Volo.Abp.AspNetCore.ExceptionHandling;
 
 namespace AbpAdmin.ClientErrors;
 
@@ -45,6 +46,16 @@ internal static class ClientErrorPipelineHost
             new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = connString,
+                ["AuthServer:UseDevelopmentCertificates"] = environment == "Production" ? "true" : null,
+                ["Identity:AdminPassword"] = environment == "Production"
+                    ? "ClientErrorPipeline!Test1"
+                    : null,
+                ["StringEncryption:DefaultPassPhrase"] = environment == "Production"
+                    ? "ClientErrorPipeline-StringEncryption-Test"
+                    : null,
+                // 夹具只验证错误投影。本机/Production 叠加若打开 Redis，会在 TestServer 里拨号失败。
+                ["Redis:IsEnabled"] = "false",
+                ["SignalR:UseRedisBackplane"] = "false",
             },
             useAutofac: true,
             beforeAddApplication: servicesBuilder =>
@@ -53,6 +64,11 @@ internal static class ClientErrorPipelineHost
                 servicesBuilder.Services
                     .AddControllers()
                     .AddApplicationPart(typeof(ClientErrorFaultController).Assembly);
+                servicesBuilder.Services.PostConfigure<AbpExceptionHandlingOptions>(options =>
+                {
+                    options.SendExceptionsDetailsToClients = true;
+                    options.SendStackTraceToClients = true;
+                });
             },
             environmentName: environment);
 

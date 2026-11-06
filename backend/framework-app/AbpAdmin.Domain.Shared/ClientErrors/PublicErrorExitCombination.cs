@@ -3,15 +3,15 @@ using System;
 namespace AbpAdmin.ClientErrors;
 
 /// <summary>
-/// HTTP 出口允许的（公开码, 分类, HTTP 状态码）组合（方案 5.2）。P1 契约。
+/// HTTP 出口允许的（公开码, 分类, HTTP 状态码）组合（方案 5.2）。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 每个受控 HTTP 出口声明允许的组合，启动时由 P1 目录校验；运行时由前端 snapshot 匹配。
+/// 每个受控 HTTP 出口声明允许的组合，启动时由目录校验；运行时由前端 snapshot 匹配。
 /// 不为整个 kind 武断绑定唯一状态；允许非基础模块码的多状态组合（显式登记）。
 /// </para>
 /// <para>
-/// 消费者：P1 Domain 启动校验（StaticClientPublicErrorDefinitionValidator）、
+/// 消费者：Domain 启动校验（StaticClientPublicErrorDefinitionValidator）、
 /// P1-HTTP 出口投影（组合校验）、P3 快照导出（publicErrorCatalog.json）。
 /// </para>
 /// </remarks>
@@ -49,7 +49,7 @@ public sealed record PublicErrorExitCombination
 }
 
 /// <summary>
-/// 公开错误出口契约基础规则（方案 5.2 + 方案 7.2）。P1 契约。
+/// 公开错误出口契约基础规则（方案 5.2 + 方案 7.2）。
 /// 提供 <see cref="PublicErrorExitCombination"/> 的静态校验方法。
 /// </summary>
 /// <remarks>

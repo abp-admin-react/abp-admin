@@ -47,8 +47,13 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
     public virtual async Task<PagedResultDto<LanguageTextDto>> GetListAsync(GetLanguageTextsInput input)
     {
         // 目标文化必选（DTO [Required]，页面默认选中启用语言）；资源可选，空 = 全部注册资源
+        if (!string.IsNullOrWhiteSpace(input.ResourceName) && IsClientStaticResource(input.ResourceName))
+        {
+            return new PagedResultDto<LanguageTextDto>(0, new List<LanguageTextDto>());
+        }
+
         var resourceNames = string.IsNullOrWhiteSpace(input.ResourceName)
-            ? _localizationOptions.Value.Resources.Keys.ToList()
+            ? _localizationOptions.Value.Resources.Keys.Where(name => !IsClientStaticResource(name)).ToList()
             : new List<string> { input.ResourceName };
 
         // 生效值：一次批量取 store 合并缓存（版本号读取与命中路径各一次批量往返，
@@ -121,6 +126,7 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
                             : staticTexts.GetValueOrDefault(name, string.Empty),
                         BaseValue = baseTexts.TryGetValue(name, out var baseValue) ? baseValue : null,
                         IsOverridden = contextNames.Contains(name),
+                        IsReadOnly = IsClientStaticResource(resource),
                     };
                 });
         });
@@ -224,7 +230,8 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
             CultureName = x.CultureName,
             Name = x.Name,
             Value = x.Value,
-            IsOverridden = true
+            IsOverridden = true,
+            IsReadOnly = false
         };
     }
 
@@ -340,6 +347,11 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
     [Authorize(AbpAdminPermissions.LanguageTexts.Edit)]
     public virtual async Task RestoreToDefaultAsync(string resourceName, string cultureName, string name)
     {
+        if (IsClientStaticResource(resourceName))
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.Localization.ClientErrorResourceReadOnly);
+        }
+
         await _languageTextRepository.DeleteAsync(CurrentTenant.Id, resourceName, cultureName, name);
 
         // 使缓存失效（同 UpdateAsync：提交后执行 + 版本号对全体租户生效）
@@ -365,10 +377,16 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
     /// </summary>
     public virtual async Task<ListResultDto<string>> GetResourceNamesAsync()
     {
-        var resourceNames = _localizationOptions.Value.Resources.Keys.ToList();
+        var resourceNames = _localizationOptions.Value.Resources.Keys
+            .Where(name => !IsClientStaticResource(name))
+            .ToList();
         return await Task.FromResult(new ListResultDto<string>(resourceNames));
     }
 
+    /// <summary>
+    /// 客户静态资源（IClientStaticResource）禁止在线覆盖。
+    /// 列表不展示、更新/删除抛 ClientErrorResourceReadOnly。
+    /// </summary>
     private bool IsClientStaticResource(string resourceName)
     {
         return _localizationOptions.Value.Resources.TryGetValue(resourceName, out var resource)

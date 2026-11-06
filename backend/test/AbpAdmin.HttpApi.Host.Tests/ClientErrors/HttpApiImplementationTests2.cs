@@ -6,9 +6,12 @@ using AbpAdmin.Domain.ClientErrors;
 using AbpAdmin.HttpApi.ClientErrors;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
+using Volo.Abp.AspNetCore.ExceptionHandling;
 using Volo.Abp.ExceptionHandling;
+using Volo.Abp.Http;
 using Volo.Abp.Tracing;
 using Xunit;
 
@@ -18,24 +21,26 @@ public class ClientErrorHttpProjectorTests
 {
     private static readonly Type ClientErrorResourceType = typeof(ClientErrorResource);
     private readonly ClientErrorHttpProjector _projector;
-    private readonly PublicErrorCatalog _catalog;
 
     public ClientErrorHttpProjectorTests()
     {
         var definitions = new List<PublicErrorDefinition>
         {
             new() { InternalCode = "Test:Auth", PublicCode = ClientErrorCodes.AuthenticationRequired, ResourceType = ClientErrorResourceType, MessageKey = "AuthenticationRequired", Kind = PublicErrorKind.Authentication },
+            new() { InternalCode = "Test:NotFound", PublicCode = ClientErrorCodes.NotFound, ResourceType = ClientErrorResourceType, MessageKey = "NotFound", Kind = PublicErrorKind.NotFound },
             new() { InternalCode = "Test:RateLimited", PublicCode = ClientErrorCodes.RateLimited, ResourceType = ClientErrorResourceType, MessageKey = "RateLimited", Kind = PublicErrorKind.RateLimited },
             new() { InternalCode = "Test:Server", PublicCode = ClientErrorCodes.Unexpected, ResourceType = ClientErrorResourceType, MessageKey = "Unexpected", Kind = PublicErrorKind.Server },
         };
-        _catalog = PublicErrorCatalog.FromDefinitions(definitions);
-        var projectionCore = new ClientErrorProjectionCore(_catalog);
+        var catalog = PublicErrorCatalog.FromDefinitions(definitions);
+        var projectionCore = new ClientErrorProjectionCore(catalog);
         var eligibilityResolver = new AdminErrorEligibilityResolver();
         _projector = new ClientErrorHttpProjector(projectionCore, eligibilityResolver);
     }
 
     /// <summary>
-    /// 验证：Project 拒绝 null context�?    /// 行为：抛�?ArgumentNullException�?    /// </summary>
+    /// 验证：Project 拒绝 null context。
+    /// 行为：抛出 ArgumentNullException。这是编程错误，不走安全信封。
+    /// </summary>
     [Fact]
     public void Project_Should_Reject_Null_Context()
     {
@@ -43,7 +48,9 @@ public class ClientErrorHttpProjectorTests
     }
 
     /// <summary>
-    /// 验证：Project 提取异常代码�?    /// 行为：从异常中提�?Code 属性�?    /// </summary>
+    /// 验证：Project 从 IHasErrorCode 取内部码再查目录。
+    /// 行为：Test:Auth 投影为 AuthenticationRequired。
+    /// </summary>
     [Fact]
     public void Project_Should_Extract_Exception_Code()
     {
@@ -64,7 +71,9 @@ public class ClientErrorHttpProjectorTests
     }
 
     /// <summary>
-    /// 验证：Project 确定 HTTP 状态码�?    /// 行为：根�?kind 映射到正确的状态码�?    /// </summary>
+    /// 验证：目录 Kind 映射 HTTP 状态。
+    /// 行为：Authentication → 401。
+    /// </summary>
     [Fact]
     public void Project_Should_Determine_Http_Status()
     {
@@ -80,11 +89,14 @@ public class ClientErrorHttpProjectorTests
 
         var result = _projector.Project(context);
 
+        result.ShouldNotBeNull();
         result.StatusCode.ShouldBe(401);
     }
 
     /// <summary>
-    /// 验证：Project 映射 RateLimited �?429�?    /// 行为：Kind.RateLimited �?429�?    /// </summary>
+    /// 验证：RateLimited 映射 429。
+    /// 行为：目录 Kind 优先，不走 ABP 默认状态。
+    /// </summary>
     [Fact]
     public void Project_Should_Map_RateLimited_To_429()
     {
@@ -100,11 +112,44 @@ public class ClientErrorHttpProjectorTests
 
         var result = _projector.Project(context);
 
+        result.ShouldNotBeNull();
         result.StatusCode.ShouldBe(429);
     }
 
     /// <summary>
-    /// 验证：Project 保留已有状态码�?    /// 行为：如果已�?400+ 状态码，保留不变�?    /// </summary>
+    /// 验证：已登记的 NotFound 不被 ABP BusinessException→403 覆盖。
+    /// 行为：IHttpExceptionStatusCodeFinder 返回 Forbidden 也不调用；状态 404。
+    /// </summary>
+    [Fact]
+    public void Project_Should_Prefer_Catalog_Kind_Over_Abp_BusinessException_Forbidden()
+    {
+        var httpContext = new DefaultHttpContext();
+        var services = new ServiceCollection();
+        var finder = Substitute.For<IHttpExceptionStatusCodeFinder>();
+        finder.GetStatusCode(Arg.Any<HttpContext>(), Arg.Any<Exception>())
+            .Returns(System.Net.HttpStatusCode.Forbidden);
+        services.AddSingleton(finder);
+        httpContext.RequestServices = services.BuildServiceProvider();
+
+        var context = new ClientErrorHttpProjectionContext
+        {
+            HttpContext = httpContext,
+            Exception = new TestBusinessException("Test:NotFound", "missing"),
+            EffectiveAudience = ClientErrorAudience.Public,
+        };
+
+        var result = _projector.Project(context);
+
+        result.ShouldNotBeNull();
+        result.StatusCode.ShouldBe(404);
+        result.Body.PublicCode.ShouldBe(ClientErrorCodes.NotFound);
+        finder.DidNotReceive().GetStatusCode(Arg.Any<HttpContext>(), Arg.Any<Exception>());
+    }
+
+    /// <summary>
+    /// 验证：无内部码的 Server 兜底保留已写出的 400+ 状态。
+    /// 行为：响应已是 418 时不改成 500。
+    /// </summary>
     [Fact]
     public void Project_Should_Keep_Existing_Status_When_400_Plus()
     {
@@ -120,11 +165,14 @@ public class ClientErrorHttpProjectorTests
 
         var result = _projector.Project(context);
 
+        result.ShouldNotBeNull();
         result.StatusCode.ShouldBe(418);
     }
 
     /// <summary>
-    /// 验证：Project 使用 TraceIdentifier 作为 CorrelationId�?    /// 行为：从 HttpContext 获取�?    /// </summary>
+    /// 验证：关联号来自 ICorrelationIdProvider，不是 TraceIdentifier。
+    /// 行为：DI 中的 provider 返回 corr-from-provider。
+    /// </summary>
     [Fact]
     public void Project_Should_Use_ICorrelationIdProvider()
     {
@@ -142,7 +190,41 @@ public class ClientErrorHttpProjectorTests
 
         var result = _projector.Project(context);
 
-        result!.Body.CorrelationId.ShouldBe("corr-from-provider");
+        result.ShouldNotBeNull();
+        result.Body.CorrelationId.ShouldBe("corr-from-provider");
+    }
+
+    /// <summary>
+    /// 验证：MVC 信封拷贝投影 Data，Details 保持 null。
+    /// 行为：correlationId 与 retryAfterSeconds 出现在 RemoteServiceErrorInfo.Data。
+    /// </summary>
+    [Fact]
+    public void ToRemoteServiceErrorResponse_Should_Copy_Projection_Data()
+    {
+        var projection = new ClientErrorHttpProjection
+        {
+            StatusCode = 429,
+            Body = new PublicErrorProjectionResult
+            {
+                PublicCode = ClientErrorCodes.RateLimited,
+                Kind = PublicErrorKind.RateLimited,
+                Message = "slow down",
+                Data = new Dictionary<string, object?>
+                {
+                    [ClientErrorFieldNames.CorrelationId] = "corr-1",
+                    ["retryAfterSeconds"] = 7,
+                },
+            },
+            RetryAfterSeconds = 7,
+        };
+
+        var envelope = ClientErrorExceptionFilter.ToRemoteServiceErrorResponse(projection);
+
+        envelope.Error.ShouldNotBeNull();
+        envelope.Error.Data.ShouldNotBeNull();
+        envelope.Error.Data[ClientErrorFieldNames.CorrelationId].ShouldBe("corr-1");
+        envelope.Error.Data["retryAfterSeconds"].ShouldBe(7);
+        envelope.Error.Details.ShouldBeNull();
     }
 
     private sealed class StaticCorrelationIdProvider : ICorrelationIdProvider
@@ -179,7 +261,9 @@ public class ClientErrorHttpProjectorTests
 public class ClientErrorResponseWriterTests
 {
     /// <summary>
-    /// 验证：ResponseWriter 写入状态码�?JSON 体�?    /// 行为：响应包含正确的状态码和序列化内容�?    /// </summary>
+    /// 验证：Writer 写出状态码和 JSON 体。
+    /// 行为：StatusCode=500；Data 空字典表示无批准字段，不传 null。
+    /// </summary>
     [Fact]
     public async Task WriteResponse_Should_Write_Status_And_Body()
     {
@@ -193,7 +277,6 @@ public class ClientErrorResponseWriterTests
                 PublicCode = ClientErrorCodes.Unexpected,
                 Kind = PublicErrorKind.Server,
                 Message = "Test error",
-                Data = null,
             },
             StatusCode = 500,
         };
@@ -204,7 +287,9 @@ public class ClientErrorResponseWriterTests
     }
 
     /// <summary>
-    /// 验证：ResponseWriter 写入 ValidationErrors�?    /// 行为：当有验证错误时，包含在响应中�?    /// </summary>
+    /// 验证：Writer 写出 ValidationErrors。
+    /// 行为：校验失败时 members 进入信封。
+    /// </summary>
     [Fact]
     public async Task WriteResponse_Should_Include_ValidationErrors()
     {
@@ -232,7 +317,9 @@ public class ClientErrorResponseWriterTests
     }
 
     /// <summary>
-    /// 验证：ResponseWriter 处理 RetryAfter�?    /// 行为：包�?Retry-After 头�?    /// </summary>
+    /// 验证：Writer 在 Clear 之后重写 Retry-After。
+    /// 行为：429 响应带 Retry-After: 60。
+    /// </summary>
     [Fact]
     public async Task WriteResponse_Should_Include_RetryAfter_Header()
     {
@@ -254,5 +341,6 @@ public class ClientErrorResponseWriterTests
         await writer.WriteAsync(httpContext, projection, default);
 
         httpContext.Response.StatusCode.ShouldBe(429);
+        httpContext.Response.Headers.RetryAfter.ToString().ShouldBe("60");
     }
 }

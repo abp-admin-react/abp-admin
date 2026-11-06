@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Domain.ClientErrors;
 using AbpAdmin.Imaging;
 using Shouldly;
 using Xunit;
@@ -118,68 +119,78 @@ public class ClientErrorCompatibilityTests
     }
 
     /// <summary>
-    /// 验证管理响应 data 键集合是批准集合的子集。
-    /// A17 管理兼容断言。
+    /// A17：管理响应 error.data 键集合必须是批准集合的子集。
+    /// Public 只有 lowerCamelCase；AdminCompatibility 额外复制 PascalCase RetryAfterSeconds。
     /// </summary>
     [Fact]
     public void Management_DataKeys_Should_Be_Subset_Of_Approved()
     {
-        // 方案 4.3：
-        // - 管理响应 error.data 键集合 ⊆ 批准集合
-        // - 未批准字段丢弃
-        // - ExtraProperties 没有自动公开资格
-
-        var scenarios = new List<DataKeySubsetScenario>
+        var rateLimitedParameters = new PublicErrorParameterDefinition[]
         {
             new()
             {
-                ExitId = "TokenEndpointRateLimitingMiddleware.InvokeAsync()",
-                ActualKeys = [], // OAuth 格式无 data
-                ApprovedKeys = [],
-                IsValid = true,
-            },
-            new()
-            {
-                ExitId = "FileUploadContentGuardMiddleware.InvokeAsync()",
-                ActualKeys = ["fileName", "reason"],
-                ApprovedKeys = ["fileName", "reason"],
-                IsValid = true,
-            },
-            new()
-            {
-                ExitId = "FriendlyBusinessExceptionMiddleware.InvokeAsync()",
-                ActualKeys = ["retryAfterSeconds"], // 管理端限流
-                ApprovedKeys = ["RetryAfterSeconds"],
-                IsValid = false, // 大小写不兼容
-                Note = "需在 P1 实现大小写兼容映射",
+                Name = ClientErrorFieldNames.RetryAfterSeconds,
+                Source = PublicErrorParameterSource.RetryAfterSeconds,
+                ValueType = PublicErrorParameterValueType.Int32,
+                MinValue = 0,
+                MaxValue = 86400,
+                CanReturnToClient = true,
             },
         };
+        var catalog = PublicErrorCatalog.FromDefinitions(
+        [
+            new PublicErrorDefinition
+            {
+                InternalCode = ClientErrorCodes.RateLimited,
+                PublicCode = ClientErrorCodes.RateLimited,
+                ResourceType = typeof(ClientErrorResource),
+                MessageKey = "RateLimited",
+                Kind = PublicErrorKind.RateLimited,
+                AllowedParameters = rateLimitedParameters,
+            },
+        ]);
+        var core = new ClientErrorProjectionCore(catalog);
 
-        // P0 阶段：验证场景建模完整，记录已知的大小写兼容问题。
-        // P1 将实现大小写兼容映射，届时增加实际断言。
-        var validScenarios = scenarios.Where(s => s.IsValid).ToList();
-        var invalidScenarios = scenarios.Where(s => !s.IsValid).ToList();
+        var publicProjection = core.Project(new PublicErrorProjectionInput
+        {
+            InternalCode = ClientErrorCodes.RateLimited,
+            Audience = ClientErrorAudience.Public,
+            RetryAfterSeconds = 7,
+            CorrelationId = "corr-public",
+            HttpStatusCode = 429,
+        });
+        var adminProjection = core.Project(new PublicErrorProjectionInput
+        {
+            InternalCode = ClientErrorCodes.RateLimited,
+            Audience = ClientErrorAudience.AdminCompatibility,
+            RetryAfterSeconds = 7,
+            CorrelationId = "corr-admin",
+            HttpStatusCode = 429,
+        });
 
-        validScenarios.Count.ShouldBe(2, "两个场景应通过验证（符合批准集合）。");
-        invalidScenarios.Count.ShouldBe(1, "一个场景有大小写兼容问题（P1 修复）。");
-        invalidScenarios[0].Note.ShouldNotBeNull();
-        invalidScenarios[0].Note!.ShouldContain("大小写");
+        var publicApproved = new HashSet<string>(StringComparer.Ordinal)
+        {
+            ClientErrorFieldNames.CorrelationId,
+            ClientErrorFieldNames.RetryAfterSeconds,
+        };
+        var adminApproved = new HashSet<string>(publicApproved, StringComparer.Ordinal)
+        {
+            ManagementCompatibilityDataWhitelist.RateLimiting.RetryAfterSeconds,
+        };
 
-        // 验证：无效场景的 ActualKeys 与 ApprovedKeys 确实不匹配（大小写敏感比较）
-        var invalid = invalidScenarios[0];
-        var hasMismatch = !invalid.ActualKeys.SequenceEqual(invalid.ApprovedKeys, StringComparer.Ordinal);
-        hasMismatch.ShouldBeTrue("无效场景的 ActualKeys 与 ApprovedKeys 应确实存在大小写不匹配。");
+        foreach (var key in publicProjection.Data.Keys)
+        {
+            publicApproved.ShouldContain(key);
+        }
+
+        foreach (var key in adminProjection.Data.Keys)
+        {
+            adminApproved.ShouldContain(key);
+        }
+
+        adminProjection.Data.Keys.ShouldContain(
+            ManagementCompatibilityDataWhitelist.RateLimiting.RetryAfterSeconds);
+        publicProjection.Data.ContainsKey(
+            ManagementCompatibilityDataWhitelist.RateLimiting.RetryAfterSeconds).ShouldBeFalse();
     }
-}
-
-/// <summary>
-/// Data 键子集验证场景。
-/// </summary>
-public sealed record DataKeySubsetScenario
-{
-    public string ExitId { get; init; } = "";
-    public IReadOnlyList<string> ActualKeys { get; init; } = [];
-    public IReadOnlyList<string> ApprovedKeys { get; init; } = [];
-    public bool IsValid { get; init; }
-    public string? Note { get; init; }
 }

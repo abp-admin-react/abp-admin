@@ -94,7 +94,8 @@ public class AnonymousEndpointSweepTests
             "ABP /Abp/*Script 脚本端点（登录页 LeptonXLite SSR 以 <script> 引用；默认拒绝下 302 到登录页，"
             + "浏览器按 MIME 拒执行——GUI 全量测试实锤。由 PreLoginApiEndpointsConvention 豁免。"
             + "数据面与已豁免的 JSON 端点同源：ConfigurationScript=application-configuration 的 $.extend 包装，"
-            + "匿名视角只有匿名用户配置；LocalizationScript 只含公开文案；ServiceProxyScript 的 API 面"
+            + "匿名视角只有匿名用户配置；LocalizationScript 经公开资源投影，只含公开文案"
+            + "（不含管理内部模板与客户静态资源的数据库覆盖）；ServiceProxyScript 的 API 面"
             + "与仓库随附的 web/swagger.json 同构，无边际泄露）",
             e => e.Template is "Abp/ApplicationConfigurationScript"
                      or "Abp/ApplicationLocalizationScript"

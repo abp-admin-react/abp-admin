@@ -10,6 +10,7 @@ namespace AbpAdmin.HttpApi.ClientErrors;
 /// <summary>
 /// OAuth 错误协议适配器。
 /// 实现 IClientErrorProtocolAdapter 契约，处理 OAuth 端点（/connect/*）的错误响应。
+/// 生产路径由登记表选择本适配器；不得用 protocolOverride 把 /api 压成 OAuth。
 /// 经 ABP 约定式注册为单例（无状态），显式暴露为 IClientErrorProtocolAdapter
 /// （类名不符合 I{ClassName} 默认暴露约定，供 IEnumerable 聚合解析）。
 /// </summary>
@@ -41,6 +42,7 @@ public class OAuthErrorProtocolAdapter : IClientErrorProtocolAdapter, ISingleton
         httpContext.Response.Clear();
         httpContext.Response.StatusCode = projection.StatusCode;
         httpContext.Response.ContentType = "application/json; charset=utf-8";
+        ClientErrorHttpHeaders.ApplyRetryAfter(httpContext.Response, projection.RetryAfterSeconds);
 
         if (projection.StatusCode == 401)
         {
@@ -131,6 +133,7 @@ public class GatewayErrorProtocolAdapter : IClientErrorProtocolAdapter, ISinglet
         httpContext.Response.Clear();
         httpContext.Response.StatusCode = projection.StatusCode >= 400 ? projection.StatusCode : 500;
         httpContext.Response.ContentType = "application/json; charset=utf-8";
+        ClientErrorHttpHeaders.ApplyRetryAfter(httpContext.Response, projection.RetryAfterSeconds);
         await httpContext.Response.WriteAsJsonAsync(
             new
             {

@@ -18,6 +18,7 @@ public class ClientFailureMapper : ITransientDependency
         _projectionCore = projectionCore;
     }
 
+    /// <summary>按内部码投影 HTTP 200 任务失败结果。Data 只含批准键。</summary>
     public ClientFailureDto CreateFailureResult(
         string? internalCode,
         IReadOnlyDictionary<string, object?>? exceptionData,
@@ -46,6 +47,23 @@ public class ClientFailureMapper : ITransientDependency
         };
     }
 
+    /// <summary>
+    /// 丢弃原文，走 OperationFailed 公开码。rawMessage 不得进入客户响应。
+    /// </summary>
+    public ClientFailureDto CreateFailureFromMessage(
+        string? rawMessage,
+        string? correlationId,
+        string? cultureName = null)
+    {
+        _ = rawMessage;
+        return CreateFailureResult(
+            ClientErrorCodes.OperationFailed,
+            exceptionData: null,
+            correlationId,
+            cultureName);
+    }
+
+    /// <summary>从异常取内部码和 Data 快照，再走公开目录。异常原文不回传。</summary>
     public ClientFailureDto CreateFailureFromException(
         Exception exception,
         string? correlationId,

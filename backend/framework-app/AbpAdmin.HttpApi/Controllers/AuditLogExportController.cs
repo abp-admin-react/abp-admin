@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using AbpAdmin.ClientErrors;
+using AbpAdmin.HttpApi.ClientErrors;
 using AbpAdmin.Localization;
 using AbpAdmin.Permissions;
 using AbpAdmin.RateLimiting;
@@ -79,13 +80,13 @@ public class AuditLogExportController : AbpController
         var excelFile = await _auditLogExcelFileRepository.FindAsync(id);
         if (excelFile == null)
         {
-            throw new BusinessException(ClientErrorCodes.NotFound);
+            return ClientErrorActionResults.EmptyNotFound();
         }
 
         // 跨用户不可下别人的导出结果
         if (excelFile.CreatorId != CurrentUser.GetId())
         {
-            throw new BusinessException(ClientErrorCodes.Forbidden);
+            return ClientErrorActionResults.EmptyForbidden();
         }
 
         byte[] bytes;
@@ -101,7 +102,7 @@ public class AuditLogExportController : AbpController
             // 捕获范围以它为限：其他异常（瞬时存储故障等）保持 500/重试语义不伪装成死链。
             Logger.LogWarning(ex,
                 "Export file record {RecordId} exists but its blob is missing; returning 404.", id);
-            throw new BusinessException(ClientErrorCodes.NotFound);
+            return ClientErrorActionResults.EmptyNotFound();
         }
 
         return File(

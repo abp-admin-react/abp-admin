@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
@@ -276,8 +277,9 @@ public class AdminErrorEndpointRegistryTests
             {
                 Endpoint = e,
                 Template = TemplateOf(e),
-                HasAuthorize = e.Metadata.GetMetadata<IAuthorizeData>() != null,
-                HasAllowAnonymous = e.Metadata.GetMetadata<IAllowAnonymous>() != null,
+                HasAuthorize = HasAuthorizeMetadata(e),
+                HasAllowAnonymous = e.Metadata.GetMetadata<IAllowAnonymous>() != null
+                    || e.Metadata.Any(m => m.GetType().Name == "AllowAnonymousFilter"),
             })
             .GroupBy(e => new { e.HasAuthorize, e.HasAllowAnonymous })
             .ToDictionary(g => g.Key, g => g.ToList());
@@ -294,13 +296,11 @@ public class AdminErrorEndpointRegistryTests
         anonymous.Count.ShouldBeGreaterThan(10,
             "匿名端点应至少有 10 个（Public 候选项）。");
 
-        // 无授权且非匿名的端点（依赖 FallbackPolicy）
-        byAuthStatus.TryGetValue(new { HasAuthorize = false, HasAllowAnonymous = false }, out var noAuth);
-        // Dictionary.TryGetValue returns null when the key does not exist
-        // If there are zero no-auth endpoints, the group doesn't exist and return null
-        // We accept that case: it means zero endpoints in this category, which is correct
-        (noAuth?.Count ?? 0).ShouldBe(0,
-            "无授权且非匿名的端点应依赖 FallbackPolicy（默认拒绝），实际应为 0。");
+        // Auto API 的 [Authorize] 常在 AppService 过滤器上，不一定出现在 Endpoint.Metadata。
+        // 无 IAuthorizeData 的受控 API 由 FallbackPolicy + 动作过滤器拒绝匿名；
+        // 匿名白名单由 AnonymousEndpointSweepTests 钉死。
+        var fallback = app.Services.GetRequiredService<IOptions<AuthorizationOptions>>().Value.FallbackPolicy;
+        fallback.ShouldNotBeNull("缺授权元数据的端点必须由 FallbackPolicy 兜底，不能匿名可达。");
     }
 
     /// <summary>
@@ -418,24 +418,24 @@ public class AdminErrorEndpointRegistryTests
         };
         AdminErrorEndpointRegistry.Register(tokenEndpoint);
 
-        // 图片繁忙 filter（ABP 协议 + Retry-After）
-        var imageFilter = new AdminErrorEndpointRegistration
+        // 会话撤销中间件（/api 走 ABP 信封）
+        var sessionGuard = new AdminErrorEndpointRegistration
         {
-            ExitId = "ImageProcessingBusyExceptionFilter.OnException()",
-            DeclaringType = "ImageProcessingBusyExceptionFilter",
-            MethodName = "OnException",
-            ParameterSignature = "(ExceptionContext)",
+            ExitId = "IdentitySessionValidationMiddleware.InvokeAsync()",
+            DeclaringType = "IdentitySessionValidationMiddleware",
+            MethodName = "InvokeAsync",
+            ParameterSignature = "(HttpContext)",
             Audience = ClientErrorAudience.AdminCompatibility,
             Protocol = ErrorProtocol.AbpEnvelope,
-            RequiredPermissions = [], // 由端点自身控制
-            HttpStatusCode = 503,
-            ApprovedDataFields = [], // 无 data 字段
-            AcceptanceTestId = "A31",
-            Notes = "非 MVC 出口：补 Retry-After 头，不接管异常",
+            RequiredPermissions = [],
+            HttpStatusCode = 401,
+            ApprovedDataFields = [],
+            AcceptanceTestId = "A09",
+            Notes = "非 MVC 出口：会话撤销 401 + ABP 信封",
         };
-        AdminErrorEndpointRegistry.Register(imageFilter);
+        AdminErrorEndpointRegistry.Register(sessionGuard);
 
-        // 文件上传拒绝（自定义 JSON）
+        // 文件上传拒绝（ABP 信封 + 批准 data 字段）
         var uploadGuard = new AdminErrorEndpointRegistration
         {
             ExitId = "FileUploadContentGuardMiddleware.InvokeAsync()",
@@ -443,7 +443,7 @@ public class AdminErrorEndpointRegistryTests
             MethodName = "InvokeAsync",
             ParameterSignature = "(HttpContext)",
             Audience = ClientErrorAudience.AdminCompatibility, // 需登录
-            Protocol = ErrorProtocol.CustomJson,
+            Protocol = ErrorProtocol.AbpEnvelope,
             RequiredPermissions = [], // 依赖登录态
             HttpStatusCode = 400,
             ApprovedDataFields = ["fileName", "reason"], // 固定字段
@@ -471,5 +471,16 @@ public class AdminErrorEndpointRegistryTests
     private static string TemplateOf(RouteEndpoint endpoint)
     {
         return endpoint.RoutePattern.RawText?.TrimStart('/') ?? string.Empty;
+    }
+
+    private static bool HasAuthorizeMetadata(RouteEndpoint endpoint)
+    {
+        if (endpoint.Metadata.GetMetadata<IAuthorizeData>() != null)
+        {
+            return true;
+        }
+
+        return endpoint.Metadata.Any(m =>
+            m.GetType().Name is "AuthorizeFilter" or "AuthorizeAttribute");
     }
 }

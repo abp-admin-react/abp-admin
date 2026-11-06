@@ -211,6 +211,37 @@ public class FileUploadContentGuardTests
     }
 
     [Fact]
+    public async Task With_bytes_json_pascal_fileName_mz_is_rejected()
+    {
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"FileName\":\"shell.jpg\",\"Content\":\"{B64("MZ")}\"}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "PascalCase 属性名与 MVC 绑定同口径，不得绕过内容扫描");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task With_bytes_json_no_extension_mz_is_rejected()
+    {
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"fileName\":\"payload\",\"content\":\"{B64("MZ")}\"}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "有内容无扩展名必须 fail-closed，不得当作普通文档放行");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Multipart_no_extension_mz_is_rejected()
+    {
+        var body = MultipartBody("payload", "MZ"u8.ToArray());
+        var (status, reached) = await InvokeAsync("/api/file-management/file", body.Length, body);
+        status.ShouldBe(400, "multipart 无扩展名同样 fail-closed");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Json_zero_byte_content_with_extension_is_rejected()
     {
         var body = JsonBody(

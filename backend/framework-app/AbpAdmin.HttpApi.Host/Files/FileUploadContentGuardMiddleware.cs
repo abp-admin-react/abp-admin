@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin;
 using AbpAdmin.HttpApi.ClientErrors;
@@ -26,6 +27,7 @@ namespace AbpAdmin.Files;
 /// 请求不再进入端点，且每次拒绝打 Warning 日志（含文件名与拒绝原因，便于审计回溯）。
 /// EnableBuffering 回卷请求体，后续管道照常解析。扩展名不在清单内的文件
 /// （txt/pdf 等普通文档）放行，交由下载侧 Content-Disposition: attachment 兜底。
+/// 有内容但缺少扩展名则拒绝（fail-closed）：MVC 绑定不要求扩展名，空扩展名曾放行走魔数绕过。
 ///
 /// 受理面两条通道都要扫，按「基路由自身或其子路径」前缀收口（EasyAbp 5.12.0 FileController
 /// 基路由 /api/file-management/file，包升级新增路由自动覆盖；下载路由是 GET 不受影响）：
@@ -102,7 +104,7 @@ public class FileUploadContentGuardMiddleware
 
             foreach (var file in form.Files)
             {
-                var reason = await FindRejectionReasonAsync(file);
+                var reason = await FindRejectionReasonAsync(file, context.RequestAborted);
                 if (reason != null)
                 {
                     await RejectAsync(context, file.FileName, reason, path);
@@ -212,40 +214,52 @@ public class FileUploadContentGuardMiddleware
             fileName, Path.GetExtension(fileName), reason, path);
 
         var dispatcher = context.RequestServices?.GetService<ClientErrorHttpDispatcher>();
-        if (dispatcher != null)
+        if (dispatcher == null)
         {
-            await dispatcher.WriteKnownAsync(
-                context,
-                AbpAdminDomainErrorCodes.Files.ContentMismatch,
-                StatusCodes.Status400BadRequest,
-                new Dictionary<string, object?>
-                {
-                    ["fileName"] = fileName,
-                    ["reason"] = reason,
-                });
+            // 测试夹具或未注册写出器：仍 400 短路（fail-closed），不回显用户 fileName。
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
-        context.Response.StatusCode = StatusCodes.Status400BadRequest;
-        context.Response.ContentType = "application/json; charset=utf-8";
-        await context.Response.WriteAsJsonAsync(new
-        {
-            error = new
+        await dispatcher.WriteKnownAsync(
+            context,
+            AbpAdminDomainErrorCodes.Files.ContentMismatch,
+            StatusCodes.Status400BadRequest,
+            new Dictionary<string, object?>
             {
-                code = AbpAdminDomainErrorCodes.Files.ContentMismatch,
-                message = "上传被拒绝：文件内容与其扩展名不匹配，或包含不允许的脚本内容。",
-                details = (string?)null,
-                data = new { fileName, reason },
-                validationErrors = Array.Empty<object>(),
-            },
-        });
+                ["fileName"] = fileName,
+                ["reason"] = reason,
+            });
+    }
+
+    /// <summary>
+    /// JSON 属性名按忽略大小写查找。MVC 模型绑定不区分大小写，大小写敏感会让 FileName/Content 绕过扫描。
+    /// </summary>
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
+    {
+        value = default;
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>从 JSON 元素收集指定属性的字节数组值（byte[] 以 base64 字符串进 JSON，可单值或数组）。</summary>
     private static void CollectByteArrays(JsonElement element, string propertyName, List<byte[]> into)
     {
         if (element.ValueKind != JsonValueKind.Object ||
-            !element.TryGetProperty(propertyName, out var prop))
+            !TryGetPropertyIgnoreCase(element, propertyName, out var prop))
         {
             return;
         }
@@ -284,7 +298,7 @@ public class FileUploadContentGuardMiddleware
     private static void CollectStrings(JsonElement element, string propertyName, List<string> into)
     {
         if (element.ValueKind != JsonValueKind.Object ||
-            !element.TryGetProperty(propertyName, out var prop))
+            !TryGetPropertyIgnoreCase(element, propertyName, out var prop))
         {
             return;
         }
@@ -306,12 +320,13 @@ public class FileUploadContentGuardMiddleware
     }
 
     /// <summary>返回拒绝原因；null 表示放行。原因文案同时进入 Warning 日志与响应 data.reason。</summary>
-    private static async Task<string?> FindRejectionReasonAsync(IFormFile file)
+    /// <param name="cancellationToken">请求中止令牌；探测读必须可取消，避免已断开连接继续占缓冲。</param>
+    private static async Task<string?> FindRejectionReasonAsync(IFormFile file, CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(file.FileName);
         if (string.IsNullOrEmpty(extension))
         {
-            return null;
+            return "缺少文件扩展名";
         }
 
         // 只读判定所需的有界前缀（文本样窗 8KB / 魔数 ≤4 字节），不整文件
@@ -324,7 +339,7 @@ public class FileUploadContentGuardMiddleware
         {
             int read;
             while (total < ProbeLength &&
-                   (read = await stream.ReadAsync(head.AsMemory(total, ProbeLength - total))) > 0)
+                   (read = await stream.ReadAsync(head.AsMemory(total, ProbeLength - total), cancellationToken)) > 0)
             {
                 total += read;
             }
@@ -338,7 +353,7 @@ public class FileUploadContentGuardMiddleware
     {
         if (string.IsNullOrEmpty(extension))
         {
-            return null;
+            return "缺少文件扩展名";
         }
 
         if (length == 0)

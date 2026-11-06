@@ -50,6 +50,40 @@ public class ClientErrorPipelineBaselineTests
         detailsIndex.ShouldBeGreaterThanOrEqualTo(0);
         body.Substring(detailsIndex, Math.Min(40, body.Length - detailsIndex))
             .ShouldContain("null");
+        body.ShouldContain("correlationId");
+    }
+
+    [Fact]
+    public async Task Registered_Business_Exception_Should_Return_Public_Code_And_Culture()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, ClientErrorFaultController.RegisteredPath);
+        request.Headers.AcceptLanguage.ParseAdd("en");
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        body.ShouldContain(ClientErrorCodes.NotFound);
+        body.ShouldContain("The requested resource was not found.");
+        body.ShouldNotContain(ClientErrorFaultController.Marker);
+        body.ShouldNotContain("SELECT * FROM secrets");
+        body.ShouldNotContain("请求的资源不存在");
+    }
+
+    [Fact]
+    public async Task Uncaught_Api_Exception_Should_Use_Request_Culture()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, ClientErrorFaultController.BoomPath);
+        request.Headers.AcceptLanguage.ParseAdd("en");
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        body.ShouldContain("An unexpected error occurred");
+        body.ShouldNotContain("系统繁忙");
     }
 
     [Fact]
@@ -102,6 +136,126 @@ public class ClientErrorPipelineBaselineTests
 
         body.ShouldNotContain(ClientErrorFaultController.Marker);
         ClientErrorTestLogBuffer.Instance.Contains(ClientErrorFaultController.Marker).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task NotFound_Helper_Should_Return_Safe_Envelope()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+
+        using var response = await client.GetAsync(ClientErrorFaultController.NotFoundPath);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        body.ShouldContain(ClientErrorCodes.NotFound);
+        body.ShouldNotContain(ClientErrorFaultController.Marker);
+        body.Contains("<html", StringComparison.OrdinalIgnoreCase).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Forbidden_Helper_Should_Return_Safe_Envelope()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+
+        using var response = await client.GetAsync(ClientErrorFaultController.ForbiddenPath);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        body.ShouldContain(ClientErrorCodes.Forbidden);
+        body.ShouldNotContain(ClientErrorFaultController.Marker);
+    }
+
+    [Fact]
+    public async Task String_Failure_Result_Should_Use_OperationFailed()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+
+        using var response = await client.GetAsync(ClientErrorFaultController.StringFailurePath);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        body.ShouldContain(ClientErrorCodes.OperationFailed);
+        body.ShouldNotContain(ClientErrorFaultController.Marker);
+        body.ShouldNotContain("SELECT * FROM secrets");
+    }
+
+    [Fact]
+    public async Task Connect_Uncaught_Exception_Should_Return_OAuth_Without_Html()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+
+        using var response = await client.GetAsync(ClientErrorFaultController.ConnectBoomPath);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        body.ShouldContain("server_error");
+        body.ShouldNotContain(ClientErrorFaultController.Marker);
+        body.ShouldNotContain("stackTrace");
+        body.Contains("<html", StringComparison.OrdinalIgnoreCase).ShouldBeFalse();
+        body.Contains("\"error\":", StringComparison.OrdinalIgnoreCase).ShouldBeTrue();
+        body.ShouldNotContain(ClientErrorCodes.Unexpected);
+    }
+
+    [Fact]
+    public async Task Gateway_Uncaught_Exception_Should_Return_Fixed_Internal_Shape()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+
+        using var response = await client.GetAsync(ClientErrorFaultController.GatewayBoomPath);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        body.ShouldContain("INTERNAL");
+        body.ShouldNotContain(ClientErrorFaultController.Marker);
+        body.Contains("<html", StringComparison.OrdinalIgnoreCase).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Started_Response_Should_Not_Append_Json_Envelope()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+
+        try
+        {
+            using var response = await client.GetAsync(ClientErrorFaultController.StartedPath);
+            var body = await response.Content.ReadAsStringAsync();
+            var mixed = body.Contains("partial-body", StringComparison.Ordinal)
+                        && body.Contains("\"error\"", StringComparison.Ordinal);
+            mixed.ShouldBeFalse("已写出的响应不得再追加 JSON 信封。");
+            if (body.Contains("partial-body", StringComparison.Ordinal))
+            {
+                body.ShouldNotContain(ClientErrorCodes.Unexpected);
+            }
+            else
+            {
+                ClientErrorTestLogBuffer.Instance.Contains(ClientErrorFaultController.Marker).ShouldBeTrue();
+            }
+        }
+        catch (HttpRequestException)
+        {
+            ClientErrorTestLogBuffer.Instance.Contains(ClientErrorFaultController.Marker).ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task Converter_Should_Keep_Internal_Details_When_Http_Response_Is_Safe()
+    {
+        var (app, client) = await ClientErrorPipelineHost.HostTask;
+        var exception = new InvalidOperationException($"{ClientErrorFaultController.Marker} SELECT * FROM secrets");
+        var converter = app.Services.GetRequiredService<Volo.Abp.AspNetCore.ExceptionHandling.IExceptionToErrorInfoConverter>();
+        var info = converter.Convert(exception, options =>
+        {
+            options.SendExceptionsDetailsToClients = true;
+            options.SendStackTraceToClients = true;
+        });
+
+        info.Message.ShouldNotBeNull();
+        info.Message.ShouldContain(ClientErrorFaultController.Marker);
+
+        using var response = await client.GetAsync(ClientErrorFaultController.BoomPath);
+        var body = await response.Content.ReadAsStringAsync();
+        body.ShouldNotContain(ClientErrorFaultController.Marker);
+        body.ShouldNotContain("stackTrace");
     }
 
     [Fact]

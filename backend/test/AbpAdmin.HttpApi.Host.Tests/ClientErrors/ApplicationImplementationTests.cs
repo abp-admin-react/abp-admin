@@ -114,6 +114,19 @@ public class ClientFailureMapperTests
     }
 
     [Fact]
+    public void CreateFailureFromMessage_Should_Map_To_OperationFailed_Without_Raw_Text()
+    {
+        var result = _mapper.CreateFailureFromMessage(
+            "INTERNAL_ONLY_MARKER SELECT * FROM secrets",
+            correlationId: null);
+
+        result.Code.ShouldBe(ClientErrorCodes.OperationFailed);
+        result.Message.ShouldNotContain("INTERNAL_ONLY_MARKER");
+        result.Message.ShouldNotContain("SELECT * FROM secrets");
+        result.CorrelationId.ShouldBeNull();
+    }
+
+    [Fact]
     public void CreateFailureFromException_Should_Handle_Non_BusinessException()
     {
         var exception = new InvalidOperationException("Generic error");
