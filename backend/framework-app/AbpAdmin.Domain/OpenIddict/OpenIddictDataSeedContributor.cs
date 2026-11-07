@@ -133,7 +133,8 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     /// <summary>
     /// 幂等补挂 PKCE requirement：应用已带则跳过；否则 Populate 现值到 descriptor，
     /// 追加 requirement 后整只更新（保留既有 permissions/settings/凭据）。
-    /// 仅用于公共客户端；swagger-ui 等不发 code_challenge 的工具不要调用。
+    /// 用于公共授权码客户端（run-3 起含 AbpAdmin_Swagger：现代 swagger-ui 默认发
+    /// code_challenge，与管理端 DescriptorBuilder 的强制口径一致）。
     /// </summary>
     private async Task EnsurePkceRequirementAsync(string clientId)
     {
@@ -333,6 +334,12 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                 clientUri: swaggerRootUrl.EnsureEndsWith('/') + "swagger",
                 logoUri: "/images/clients/swagger.svg"
             );
+
+            // 公共授权码客户端一律带 PKCE 要求（安全审计 run-3，与管理端
+            // OpenIddictApplicationDescriptorBuilder 同口径）：被截获的授权码无
+            // verifier 不可兑换。现代 swagger-ui（>=5.x）默认发送 code_challenge，
+            // 强制不改变现有登录行为。种子后幂等补挂（已带则跳过，不产生写放大）。
+            await EnsurePkceRequirementAsync(swaggerClientId!);
         }
 
         // 脚本化/E2E 测试客户端（机密）：ROPC 从 SPA 客户端移除后，密码换令牌的唯一通道。
