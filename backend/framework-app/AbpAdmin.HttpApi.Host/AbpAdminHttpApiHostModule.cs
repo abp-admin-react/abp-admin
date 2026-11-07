@@ -347,8 +347,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 options.KnownIPNetworks.Clear();
                 options.KnownProxies.Clear();
 
-                var knownProxies = configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>()
-                    ?? Array.Empty<string>();
+                // 读标量再切分数组：GetSection(...).Get<string[]>() 只按子键（0、1、…）绑定，
+                // 单标量 env（ForwardedHeaders__KnownProxies=172.16.0.0/12）会绑出空数组——
+                // 逗号分隔标量必须手工 Split（run-3 C-6 实测踩坑：空数组静默早退 = XFF 仍不处理）。
+                var knownProxies = (configuration["ForwardedHeaders:KnownProxies"] ?? string.Empty)
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 if (knownProxies.Length == 0)
                 {
                     return;
@@ -361,10 +364,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
                     {
                         options.KnownProxies.Add(ip);
                     }
-                    else if (Microsoft.AspNetCore.HttpOverrides.IPNetwork.TryParse(proxy.AsSpan(), out var network))
+                    else if (System.Net.IPNetwork.TryParse(proxy.AsSpan(), out var network))
                     {
                         // CIDR 支持（run-3 C-6）：compose 网段逐栈漂移（172.18/172.19…），
                         // 只收单 IP 会逼操作者写死容器地址；网段形式（172.16.0.0/12）钉一次即可。
+                        // .NET 10 的 KnownIPNetworks 收 System.Net.IPNetwork（HttpOverrides 旧类型已弃用）。
                         options.KnownIPNetworks.Add(network);
                     }
                 }
