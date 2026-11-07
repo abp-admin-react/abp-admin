@@ -120,13 +120,16 @@ public class ChatBilling(Wallet wallet, UsageLog usage, IOptions<TokenGatewayOpt
     /// <summary>粗估输入 token：字符数/2 向上取整（中文偏保守），宁多冻不少冻。
     /// 除 messages[].content 外，其余顶层字段（tools/tool_choice/response_format 等）的序列化
     /// 质量同样计入：上游按整个请求体计费（BeginAsync 原样转发），只数消息内容会结构性低估，
-    /// 结算被 clamp 到预占额 ⇒ 差额平台倒贴。</summary>
+    /// 结算被 clamp 到预占额 ⇒ 差额平台倒贴。
+    /// messages 按每条消息对象的完整序列化计量（安全审计 run-3）：messages[] 内非 content
+    /// 字段——典型如 assistant tool_calls[].function.arguments（可塞满 2MB 上限）——
+    /// 旧实现只数 content，~2MB 计费输入仅预冻 ~20 token（比值 ~22,700:1 平台倒贴）。</summary>
     internal static long EstimatePromptTokens(JsonObject request)
     {
         long chars = 0;
         if (request["messages"] is JsonArray msgs)
             foreach (var m in msgs)
-                chars += m?["content"]?.ToJsonString().Length ?? 0;
+                chars += m?.ToJsonString().Length ?? 0;
         long otherChars = 0;
         foreach (var kv in request)
         {

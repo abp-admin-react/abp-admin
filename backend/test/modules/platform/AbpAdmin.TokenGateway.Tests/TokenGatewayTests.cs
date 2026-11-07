@@ -223,6 +223,33 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
     }
 
     [Fact]
+    public void Estimate_counts_tool_calls_arguments_inside_messages()
+    {
+        // 回归锁（安全审计 run-3）：messages[] 内的非 content 字段（assistant
+        // tool_calls[].function.arguments，可塞满 2MB 上限）同样按输入计费且原样转发。
+        // 旧实现只数 content：~2MB 计费输入仅预冻 ~20 token（比值 ~22,700:1 平台倒贴）。
+        // 修复后逐消息整对象序列化计量，content=null 的 tool_calls 消息也计入质量。
+        var tiny = JsonNode.Parse("""{"messages":[{"role":"user","content":"hi"}]}""")!.AsObject();
+        var argsHeavy = JsonNode.Parse($$"""
+            {
+              "messages": [
+                {"role":"user","content":"hi"},
+                {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"{{new string('A', 100_000)}}"}}]},
+                {"role":"user","content":"go"}
+              ],
+              "max_tokens": 1
+            }
+            """)!.AsObject();
+
+        var tinyEst = ChatBilling.EstimatePromptTokens(tiny);
+        var heavyEst = ChatBilling.EstimatePromptTokens(argsHeavy);
+        heavyEst.ShouldBeGreaterThan(tinyEst + 40_000,
+            "tool_calls 质量必须按整消息序列化计入（~10 万字符 ⇒ ≥5 万 token 口径）");
+        ChatBilling.Cost(Opt.Aliases[0], heavyEst, 1).ShouldBeGreaterThan(50_000,
+            "该形态的预占额必须随输入质量同步放大");
+    }
+
+    [Fact]
     public async Task Stream_abort_after_delivered_frames_charges_estimate_instead_of_full_release()
     {
         // 回归锁：流式中客户端断开——已 flush 的帧真实消耗上游计费，不得全额解冻
@@ -306,6 +333,30 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
         newKey.ShouldNotBe(oldKey);
         (await keys.ResolveAsync(newKey, false)).ShouldBe(U);
         (await keys.ResolveAsync(session, true)).ShouldBe(U); // 存量会话照常
+    }
+
+    [Fact]
+    public async Task Revoke_sessions_invalidates_all_hbs_tokens_and_new_login_still_works()
+    {
+        // 回归锁（run-3，run-2 C-4 残余）：hbs- 会话此前只有自然过期一条路（默认 168h），
+        // 外泄凭证无法在不销户的前提下作废。WalletController sessions/revoke 端点的组合
+        // 语义在此钉住：删除该用户全部 TgSessions 行 → 所有存量会话立即 401 INVALID_KEY
+        // （与未知 Key 同错）→ hb- 本体不受影响 → 重新登录得到新会话可用。
+        var keys = NewKeys();
+        var key = await keys.IssueOrReuseKeyAsync(U);
+        var (session1, _) = await keys.IssueSessionAsync(U);
+        var (session2, _) = await keys.IssueSessionAsync(U);
+        (await keys.ResolveAsync(session1, true)).ShouldBe(U);
+        (await keys.ResolveAsync(session2, true)).ShouldBe(U);
+
+        await keys.RevokeSessionsAsync(U);
+
+        await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(session1, true));
+        await Should.ThrowAsync<GatewayException>(() => keys.ResolveAsync(session2, true));
+        (await keys.ResolveAsync(key, false)).ShouldBe(U); // hb- 本体不受会话吊销影响
+
+        var (session3, _) = await keys.IssueSessionAsync(U);
+        (await keys.ResolveAsync(session3, true)).ShouldBe(U); // 重新登录照常
     }
 
     [Fact]
