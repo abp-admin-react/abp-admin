@@ -94,8 +94,13 @@ try {
         (Get-Content $statePath -Raw | ConvertFrom-Json).PSObject.Properties |
             ForEach-Object { $previous[$_.Name] = $_.Value }
     }
+    # 变更检测（安全审计 run-3）：除"快照已有的 ref 摘要变化"外，"监控清单新增的 ref
+    # （快照从未记录）"同样按有更新处理——否则新增 ref 的摘要变化永远检不出（基线吸收
+    # 只挂在成功部署路径上，no-change 路径不写快照，快照会一直缺那个 ref）。
+    # 典型事故：NV-12 补挂 node:22-bookworm-slim 后快照仍只有 4 ref，该底座盲区持续存在。
+    $newRefs = @($baseRefs | Where-Object { -not $previous.ContainsKey($_) })
     $changedRefs = @($baseRefs | Where-Object { $previous.ContainsKey($_) -and $previous[$_] -ne $snapshot[$_] })
-    $baseChanged = ($previous.Count -eq 0) -or ($changedRefs.Count -gt 0)
+    $baseChanged = ($previous.Count -eq 0) -or ($changedRefs.Count -gt 0) -or ($newRefs.Count -gt 0)
     if ($pullFailedRefs) {
         Log "（本周未能确认远端版本的底座：$($pullFailedRefs -join ', ')——它们真有新版时会在下周拉取成功后被检出）"
     }
@@ -103,6 +108,8 @@ try {
     if ($baseChanged) {
         if ($previous.Count -eq 0) {
             Log '底座快照缺失（首次运行），按有更新处理。'
+        } elseif ($newRefs.Count -gt 0) {
+            Log "监控清单新增底座：$($newRefs -join ', ')——按有更新处理以重建基线快照。"
         } else {
             Log "底座有新版本：$($changedRefs -join ', ')"
         }
