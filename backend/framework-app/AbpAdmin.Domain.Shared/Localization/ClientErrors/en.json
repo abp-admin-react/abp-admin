@@ -10,6 +10,8 @@
     "OperationFailed": "The operation failed. Please try again.",
     "Unexpected": "An unexpected error occurred. Please try again later.",
     "FileContentMismatch": "Upload rejected: the file content does not match its extension, or contains disallowed script content.",
-    "SyncExportThresholdExceeded": "The result set exceeds the synchronous export limit. Please use asynchronous export."
+    "SyncExportThresholdExceeded": "The result set exceeds the synchronous export limit. Please use asynchronous export.",
+    "CannotCarryRole": "Claims of authoritative types (role) cannot be written.",
+    "RoleDataScopeEscalation": "This grant would escalate beyond your own authority."
   }
 }

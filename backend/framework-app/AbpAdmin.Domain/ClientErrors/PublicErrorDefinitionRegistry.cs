@@ -212,6 +212,29 @@ public class PublicErrorDefinitionRegistry : IPublicErrorDefinitionProvider, ISi
             MessageKey = "SyncExportThresholdExceeded",
             Kind = PublicErrorKind.Business,
         });
+
+        // 反提权守卫码登记（安全审计 run-3 契约漂移收口）：IdentityClaimAuthorityGuard 抛出的
+        // CannotCarryRole 与 OrganizationUnitRoleConferralGuard/RoleDataScope 写面抛出的
+        // RoleDataScopeEscalation 此前未登记进公开目录——管线 fail-closed 把它们展平成
+        // 400 Client:OperationFailed（强制语义完好，但管理端与 sectest 断言失去专属码，
+        // 且 HTTP 状态从 403 漂到 400）。Forbidden 语义（拒绝越权授予）与公共码保留：
+        // 内部码即公开码（与 FileContentMismatch 同模式），HTTP 403。
+        Register(new PublicErrorDefinition
+        {
+            InternalCode = AbpAdminIdentityClaimsErrorCodes.CannotCarryRole,
+            PublicCode = AbpAdminIdentityClaimsErrorCodes.CannotCarryRole,
+            ResourceType = typeof(ClientErrorResource),
+            MessageKey = "CannotCarryRole",
+            Kind = PublicErrorKind.Forbidden,
+        });
+        Register(new PublicErrorDefinition
+        {
+            InternalCode = AbpAdminDomainErrorCodes.DataScopes.RoleDataScopeEscalation,
+            PublicCode = AbpAdminDomainErrorCodes.DataScopes.RoleDataScopeEscalation,
+            ResourceType = typeof(ClientErrorResource),
+            MessageKey = "RoleDataScopeEscalation",
+            Kind = PublicErrorKind.Forbidden,
+        });
     }
 
     IEnumerable<PublicErrorDefinition> IPublicErrorDefinitionProvider.GetDefinitions()
