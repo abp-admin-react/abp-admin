@@ -22,12 +22,17 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
         ous.AddChild(AbpAdminPermissions.OrganizationUnits.ManageMembers, L("Permission:ManageMembers"));
         ous.AddChild(AbpAdminPermissions.OrganizationUnits.ManageRoles, L("Permission:ManageRoles"));
 
+        // claim-type 目录钉 Host（安全审计 run-3）：AbpClaimTypes 是 host 全局表（实体无 TenantId，
+        // 单库拓扑下 host 与所有租户共享一行集），与下方 OpenIddict/Editions/BackgroundJobs 等
+        // host 全局资源同族——未钉侧时 ABP 种子会把它默认授给每个租户 admin，任一租户管理员
+        // 即可增删改 host 与全体租户共用的声明定义。
         var claims = group.AddPermission(
             AbpAdminPermissions.ClaimTypes.Default,
-            L("Permission:ClaimTypes"));
-        claims.AddChild(AbpAdminPermissions.ClaimTypes.Create, L("Permission:Create"));
-        claims.AddChild(AbpAdminPermissions.ClaimTypes.Update, L("Permission:Update"));
-        claims.AddChild(AbpAdminPermissions.ClaimTypes.Delete, L("Permission:Delete"));
+            L("Permission:ClaimTypes"),
+            multiTenancySide: MultiTenancySides.Host);
+        claims.AddChild(AbpAdminPermissions.ClaimTypes.Create, L("Permission:Create"), MultiTenancySides.Host);
+        claims.AddChild(AbpAdminPermissions.ClaimTypes.Update, L("Permission:Update"), MultiTenancySides.Host);
+        claims.AddChild(AbpAdminPermissions.ClaimTypes.Delete, L("Permission:Delete"), MultiTenancySides.Host);
 
         group.AddPermission(
             AbpAdminPermissions.SecurityLogs.Default,

@@ -26,6 +26,9 @@ public class ClaimTypeAppService : AbpAdminAppService, IClaimTypeAppService
 
     public virtual async Task<PagedResultDto<ClaimTypeDto>> GetListAsync(PagedAndSortedResultRequestDto input)
     {
+        // 双保险（安全审计 run-3）：目录是 host 全局表，权限侧已钉 Host；此处再加运行时断言，
+        // 未来侧注册回归（或存量租户授权行未清理）时 fail-closed 而不是静默放行。
+        EnsureHostSide();
         var count = await _claimTypeRepository.GetCountAsync();
         var items = await _claimTypeRepository.GetListAsync(
             input.Sorting,
@@ -37,6 +40,7 @@ public class ClaimTypeAppService : AbpAdminAppService, IClaimTypeAppService
 
     public virtual async Task<List<ClaimTypeDto>> GetLookupAsync()
     {
+        EnsureHostSide();
         var items = await _claimTypeRepository.GetListAsync();
         return items.Select(Map).ToList();
     }
@@ -44,6 +48,7 @@ public class ClaimTypeAppService : AbpAdminAppService, IClaimTypeAppService
     [Authorize(AbpAdminPermissions.ClaimTypes.Create)]
     public virtual async Task<ClaimTypeDto> CreateAsync(CreateClaimTypeDto input)
     {
+        EnsureHostSide();
         var claimType = new IdentityClaimType(
             GuidGenerator.Create(),
             input.Name,
@@ -60,6 +65,7 @@ public class ClaimTypeAppService : AbpAdminAppService, IClaimTypeAppService
     [Authorize(AbpAdminPermissions.ClaimTypes.Update)]
     public virtual async Task<ClaimTypeDto> UpdateAsync(Guid id, UpdateClaimTypeDto input)
     {
+        EnsureHostSide();
         var claimType = await _claimTypeRepository.GetAsync(id);
         if (claimType.IsStatic)
         {
@@ -78,6 +84,7 @@ public class ClaimTypeAppService : AbpAdminAppService, IClaimTypeAppService
     [Authorize(AbpAdminPermissions.ClaimTypes.Delete)]
     public virtual async Task DeleteAsync(Guid id)
     {
+        EnsureHostSide();
         var claimType = await _claimTypeRepository.GetAsync(id);
         if (claimType.IsStatic)
         {
