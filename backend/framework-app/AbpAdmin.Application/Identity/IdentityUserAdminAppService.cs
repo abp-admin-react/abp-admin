@@ -34,6 +34,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
     private readonly IBlobContainer<UserExportBlobContainer> _blobContainer;
     private readonly IRepository<UserExcelFile, Guid> _excelFileRepository;
     private readonly IPermissionChecker _permissionChecker;
+    private readonly AbpAdmin.DataScopes.ICurrentDataScopeProvider _currentDataScopeProvider;
 
     public IdentityUserAdminAppService(
         IdentityUserManager userManager,
@@ -43,7 +44,8 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
         IBackgroundJobManager backgroundJobManager,
         IBlobContainer<UserExportBlobContainer> blobContainer,
         IRepository<UserExcelFile, Guid> excelFileRepository,
-        IPermissionChecker permissionChecker)
+        IPermissionChecker permissionChecker,
+        AbpAdmin.DataScopes.ICurrentDataScopeProvider currentDataScopeProvider)
     {
         _userManager = userManager;
         _roleRepository = roleRepository;
@@ -53,6 +55,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
         _backgroundJobManager = backgroundJobManager;
         _blobContainer = blobContainer;
         _excelFileRepository = excelFileRepository;
+        _currentDataScopeProvider = currentDataScopeProvider;
     }
 
     [OperationLog("身份管理", "锁定用户", BizNo = "{{id}}", Success = "锁定了用户 {{user(id)}}")]
@@ -338,6 +341,10 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
     /// <summary>
     /// 将导入用户挂接到解析好的组织单元。id 在行 UoW 内按主键取实体（并发删除时出行级错误），
     /// 不跨 UoW 复用文件级加载的实体；AddToOrganizationUnitAsync 返回 void（内部查重，重复挂接幂等）。
+    /// 反提权守卫（安全审计 run-3）：OU 派生角色 = 完整角色成员资格——把导入用户挂进挂着
+    /// 超越操作者自身权限角色的 OU，等价于向其授予那个角色。与 OrganizationUnitAppService
+    /// .AddMembersAsync 同口径（run-2 C-2 守卫），批量导入面不得成为无守卫的平行通道。
+    /// 未认证上下文跳过（后台作业/种子/单测直连，与既有守卫豁免口径一致）。
     /// </summary>
     protected virtual async Task AssignOrganizationUnitsAsync(
         Volo.Abp.Identity.IdentityUser user,
@@ -346,6 +353,15 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
         foreach (var organizationUnitId in organizationUnitIds)
         {
             var unit = await _organizationUnitRepository.GetAsync(organizationUnitId);
+            if (CurrentUser.IsAuthenticated)
+            {
+                var snapshot = await _currentDataScopeProvider.GetAsync();
+                foreach (var role in await _organizationUnitRepository.GetRolesAsync(unit))
+                {
+                    OrganizationUnitRoleConferralGuard.EnsureRoleAttachable(role.Name, CurrentUser.Roles, snapshot.IsAll);
+                }
+            }
+
             await _userManager.AddToOrganizationUnitAsync(user, unit);
         }
     }
@@ -521,6 +537,19 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
         if (missing.Count > 0)
         {
             throw new UserFriendlyException(L["UserImport:RoleNotFound", rowNumber, string.Join(";", missing)]);
+        }
+
+        // 反提权守卫（安全审计 run-3）：SetRolesAsync 直呼绕过 ABP 模块面的
+        // FilterRolesByCurrentUserAsync（非 admin 操作者只能授自己已有的角色）。
+        // 导入面必须与交互面权限等价：admin/IsAll/己有角色之外的角色逐个拒绝。
+        // 未认证上下文跳过（后台作业/种子/单测直连，与 OU 守卫豁免口径一致）。
+        if (CurrentUser.IsAuthenticated)
+        {
+            var snapshot = await _currentDataScopeProvider.GetAsync();
+            foreach (var roleName in roleNames)
+            {
+                OrganizationUnitRoleConferralGuard.EnsureRoleAttachable(roleName, CurrentUser.Roles, snapshot.IsAll);
+            }
         }
 
         ThrowIfFailed(await _userManager.SetRolesAsync(user, roleNames));
