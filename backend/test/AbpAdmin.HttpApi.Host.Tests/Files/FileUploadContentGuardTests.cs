@@ -167,6 +167,45 @@ public class FileUploadContentGuardTests
     }
 
     [Fact]
+    public async Task Many_with_bytes_real_dto_shape_mz_is_rejected()
+    {
+        // 真实 EasyAbp CreateManyFileInput 形态（安全审计 run-3）：名字与字节嵌在
+        // fileInfos[*] 一层之下——只扫根对象的旧实现对该通道 200 直通（对照面 400）。
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\"," +
+            "\"fileInfos\":[{\"fileName\":\"shell.png\",\"mimeType\":\"image/png\",\"fileType\":1," +
+            $"\"content\":\"{B64("MZ\\u0090\\u0000")}\"}}]}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/many/with-bytes", body);
+        status.ShouldBe(400, "嵌套 fileInfos 形态必须与其他通道同口径被扫");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Many_with_bytes_real_dto_shape_zero_byte_is_rejected()
+    {
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\"," +
+            "\"fileInfos\":[{\"fileName\":\"empty.png\",\"mimeType\":\"image/png\",\"fileType\":1," +
+            "\"content\":\"\"}]}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/many/with-bytes", body);
+        status.ShouldBe(400, "嵌套形态的零字节文件同样 fail-closed（multipart/with-bytes 均拒）");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Many_with_bytes_real_dto_shape_legit_png_passes()
+    {
+        var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\"," +
+            "\"fileInfos\":[{\"fileName\":\"pic.png\",\"mimeType\":\"image/png\",\"fileType\":1," +
+            $"\"content\":\"{png}\"}}]}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/many/with-bytes", body);
+        status.ShouldBe(200);
+        reached.ShouldBeTrue("嵌套形态的合法 PNG 放行（不过度封锁）");
+    }
+
+    [Fact]
     public async Task With_bytes_json_legit_png_passes()
     {
         var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });

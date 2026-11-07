@@ -181,18 +181,18 @@ public class FileUploadContentGuardMiddleware
 
         using (doc)
         {
-            var contents = new List<byte[]>();
-            var names = new List<string>();
-            CollectByteArrays(doc.RootElement, "content", contents);
-            CollectByteArrays(doc.RootElement, "fileContents", contents);
-            CollectStrings(doc.RootElement, "fileName", names);
-            CollectStrings(doc.RootElement, "fileNames", names);
+            // 深度优先扫描（安全审计 run-3）：对 DOM 里每一个 JSON 对象，把它自身的
+            // fileName/fileNames 与 content/fileContents 配对送检——many/with-bytes 真实
+            // DTO（EasyAbp CreateManyFileInput）把名字与字节嵌在 fileInfos[*] 一层之下，
+            // 只看根对象会让该通道完全绕过内容防线（对照面 with-bytes 400、嵌套面 200）。
+            // 保持 64MiB 预读上限与大小写不敏感属性匹配语义不变。
+            var pairs = new List<(string Name, byte[] Bytes)>();
+            WalkJson(doc.RootElement, pairs);
 
-            for (var i = 0; i < contents.Count; i++)
+            foreach (var (fileName, content) in pairs)
             {
-                var fileName = names.Count > 0 ? names[Math.Min(i, names.Count - 1)] : string.Empty;
-                var reason = FindRejectionReason(Path.GetExtension(fileName), contents[i].LongLength, contents[i],
-                    contents[i].Length);
+                var reason = FindRejectionReason(Path.GetExtension(fileName), content.LongLength, content,
+                    content.Length);
                 if (reason != null)
                 {
                     await RejectAsync(context, fileName, reason, path);
@@ -253,6 +253,40 @@ public class FileUploadContentGuardMiddleware
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 深度优先遍历 JSON DOM：对每个对象收集其自身的 (fileName, content) 配对（同名属性可单值或数组，
+    /// 多字节少名字时最后一个名字兜底配对，与原根级配对语义一致），再递归子对象与数组元素。
+    /// </summary>
+    private static void WalkJson(JsonElement element, List<(string Name, byte[] Bytes)> pairs)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new List<string>();
+            var contents = new List<byte[]>();
+            CollectStrings(element, "fileName", names);
+            CollectStrings(element, "fileNames", names);
+            CollectByteArrays(element, "content", contents);
+            CollectByteArrays(element, "fileContents", contents);
+
+            for (var i = 0; i < contents.Count; i++)
+            {
+                pairs.Add((names.Count > 0 ? names[Math.Min(i, names.Count - 1)] : string.Empty, contents[i]));
+            }
+
+            foreach (var property in element.EnumerateObject())
+            {
+                WalkJson(property.Value, pairs);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                WalkJson(item, pairs);
+            }
+        }
     }
 
     /// <summary>从 JSON 元素收集指定属性的字节数组值（byte[] 以 base64 字符串进 JSON，可单值或数组）。</summary>
