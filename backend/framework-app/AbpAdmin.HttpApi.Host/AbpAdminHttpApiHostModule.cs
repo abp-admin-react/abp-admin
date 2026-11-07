@@ -361,6 +361,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
                     {
                         options.KnownProxies.Add(ip);
                     }
+                    else if (Microsoft.AspNetCore.HttpOverrides.IPNetwork.TryParse(proxy.AsSpan(), out var network))
+                    {
+                        // CIDR 支持（run-3 C-6）：compose 网段逐栈漂移（172.18/172.19…），
+                        // 只收单 IP 会逼操作者写死容器地址；网段形式（172.16.0.0/12）钉一次即可。
+                        options.KnownIPNetworks.Add(network);
+                    }
                 }
             });
         }
