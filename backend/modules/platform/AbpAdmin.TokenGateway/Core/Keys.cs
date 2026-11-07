@@ -52,6 +52,18 @@ public class KeyStore(IDbContextFactory<TokenGatewayDbContext> dbf, TimeProvider
         await db.ApiKeys.Where(k => k.UserId == userId).ExecuteDeleteAsync();
     }
 
+    /// <summary>
+    /// 吊销该用户的全部 hbs- 会话（删行）。与 hb- 轮换同口径的泄漏响应面（安全审计
+    /// run-3，run-2 C-4 残余）：会话此前只有自然过期一条路——外泄的 hbs- 在默认
+    /// 168h 内无法被受害者或运维在不销户的前提下作废。被吊销会话下次解析即
+    /// INVALID_KEY（与未知 Key 同错，不构成存在性预言）。
+    /// </summary>
+    public async Task RevokeSessionsAsync(Guid userId)
+    {
+        await using var db = await dbf.CreateDbContextAsync();
+        await db.Sessions.Where(x => x.UserId == userId).ExecuteDeleteAsync();
+    }
+
     public async Task<(string Token, DateTimeOffset ExpiresAt)> IssueSessionAsync(Guid userId)
     {
         var token = "hbs-" + Random(24);

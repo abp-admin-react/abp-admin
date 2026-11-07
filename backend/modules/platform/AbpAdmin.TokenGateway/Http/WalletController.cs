@@ -126,6 +126,20 @@ public class WalletController(
         return Ok(new { apiKey = await keys.IssueOrReuseKeyAsync(me) });
     }, log);
 
+    /// <summary>
+    /// 吊销全部 hbs- 会话（安全审计 run-3，run-2 C-4 残余）：会话此前只有自然过期
+    /// （默认 168h）一条路，外泄凭证无法在不销户的前提下作废。与轮换同口径，仅
+    /// hb- 本体可触发——用 hbs- 吊销等于让"只偷到会话"的攻击者顺手废掉受害者
+    /// 其余会话（DoS 面）。被吊销会话下次解析即 401 INVALID_KEY（与未知 Key 同错）。
+    /// </summary>
+    [HttpPost("sessions/revoke")]
+    public Task<IActionResult> RevokeSessions() => Run(async () =>
+    {
+        var me = await keys.ResolveAsync(Bearer(), allowSession: false);
+        await keys.RevokeSessionsAsync(me);
+        return Ok(new { revoked = true });
+    }, log);
+
     private object View(TgOrder o)
     {
         var method = o.Method == PayMethod.Wechat ? "wechat" : "alipay";
