@@ -13,6 +13,9 @@
 #
 # 可用 backend 同级（仓库根）.env 覆盖的变量（不入库）：
 #   POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+#   IDENTITY_ADMIN_PASSWORD
+#     迁移器种子用的 admin 口令。不设值 = Production 姿态下 fail-fast 直接拒跑
+#     （见下方 migrator 服务注释），设了值才起得来——这是本机体验栈的必填项。
 #   OPENIDDICT_CERT_PASSPHRASE / STRING_ENCRYPTION_PASSPHRASE
 #     ⚠ 改 OPENIDDICT_CERT_PASSPHRASE 必须 docker compose build host 重建镜像——
 #     openiddict.pfx 在构建期用该口令烘焙加密，只改运行时会让容器拿新口令解旧证书，
@@ -83,6 +86,10 @@ services:
       # Frontend port single source = WEB_PUBLIC_URL (CORS + redirect allowlist + OIDC RootUrl).
       App__CorsOrigins: ${WEB_PUBLIC_URL:-http://localhost:8000}
       App__RedirectAllowedUrls: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      # 未注入时留空 = AbpAdminDbMigrationService 的 fail-fast 照旧生效（不设值不会静默降级）。
+      # 本行只是把这条口打通：compose 头注释与 fail-fast 报错都指向 Identity__AdminPassword，
+      # 但此前文件里没有插值点，Production 姿态的本机栈 up 必挂（2026-11-01 实测）。
+      Identity__AdminPassword: ${IDENTITY_ADMIN_PASSWORD:-}
       # 迁移器默认 Production（sectest b08 / 审计 TV-01 收口：默认 Development 会把
       # 公开默认口令 admin/1q2w3E* 与仓库内嵌密钥的 AbpAdmin_TestCli ROPC 客户端种进
       # 生产库）。Production 默认下未注入 Identity__AdminPassword 时
@@ -125,6 +132,12 @@ services:
       # X-Forwarded-Proto 处理（模块内既有接线，见 AbpAdminHttpApiHostModule 的
       # RequireHttpsMetadata 分支）。生产前端上 HTTPS 后保持默认 true 即可
       AuthServer__RequireHttpsMetadata: "false"
+      # 反代后的真实客户端 IP（安全审计 run-3）：web 边缘是唯一入口且默认追加
+      # X-Forwarded-For，但宿主只在钉了 KnownProxies 时才消费 XFF——不钉则所有
+      # IP 分区限流（登录/令牌端点/文件分享/GDPR/验证码等）折叠成"全站一个桶"，
+      # 任一匿名客户端可替全体用户烧光预算。172.16.0.0/12 覆盖 compose 默认网络
+      # （含 web 容器）；模块内钉后自动启用 XForwardedFor 处理（AbpAdminHttpApiHostModule）。
+      ForwardedHeaders__KnownProxies: "172.16.0.0/12"
       # Swagger 在非 Development 环境默认关闭，且 /swagger/ 不在前端反代清单里
       # （对外入口只暴露业务路径）。确需经前端访问 Swagger：给本服务加
       # App__EnableSwaggerInProduction=true 并在 web/nginx.conf + web/config/proxy.ts
