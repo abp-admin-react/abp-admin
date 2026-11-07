@@ -511,14 +511,17 @@ def a12_token_bruteforce_ratelimited():
 
 def a13_tenant_mismatch_guard():
     # 边界发现：nginx 默认丢弃带下划线的请求头（underscores_in_headers off），
-    # __tenant 头经 web 边界根本到不了宿主——转向攻击向量只存在于直连宿主/其他边界。
-    # 直连 host 的两种拦截形态都算防线生效：
+    # __tenant 头经 web 边缘根本到不了宿主——转向攻击向量只存在于直连宿主/其他边界。
+    # 直连 host 的三种拦截形态都算防线生效：
     # ① 403 tenant_mismatch（失配守卫）；② 401 session_revoked（会话校验按环境租户过滤，
-    #    他租上下文看不到本租会话——等效拒绝转向，且是更早的层）。
+    #    他租上下文看不到本租会话——等效拒绝转向，且是更早的层）；
+    # ③ 403 Client:Forbidden（client-errors 管线后的失配守卫新信封，run-3 审计判定为
+    #    刻意的形状变更而非失守——守卫照常 403 拦截，错误体走公开错误投影）。
     r = req(HOST, "GET", "/api/account/my-profile",
             token=Fx.per["tenantA_admin"], tenant="sectestb")
     body = r.text().lower()
-    blocked = r.status == 403 and "tenant" in body or r.status == 401 and "session" in body
+    blocked = (r.status == 403 and ("tenant" in body or "forbidden" in body)
+               or r.status == 401 and "session" in body)
     return blocked, f"direct={r.status}({r.text()[:70]})——403 失配守卫或 401 跨租会话不可见均为拦截"
 
 
