@@ -347,17 +347,24 @@ public class AbpAdminHttpApiHostModule : AbpModule
                 options.KnownIPNetworks.Clear();
                 options.KnownProxies.Clear();
 
-                // 读标量再切分数组：GetSection(...).Get<string[]>() 只按子键（0、1、…）绑定，
-                // 单标量 env（ForwardedHeaders__KnownProxies=172.16.0.0/12）会绑出空数组——
-                // 逗号分隔标量必须手工 Split（run-3 C-6 实测踩坑：空数组静默早退 = XFF 仍不处理）。
+                // 两种配置形态都收（code review D5）：env 单标量（逗号分隔）与 appsettings 数组
+                // （KnownProxies:0/:1/…）。GetSection(...).Get<string[]>() 只按子键绑定、绑不出
+                // 单标量；反向只 Split 标量又会让数组形态静默落空——两形态并集，谁配了都生效。
                 var knownProxies = (configuration["ForwardedHeaders:KnownProxies"] ?? string.Empty)
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Concat(configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? Array.Empty<string>())
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Select(p => p.Trim())
+                    .ToArray();
                 if (knownProxies.Length == 0)
                 {
                     return;
                 }
 
-                options.ForwardedHeaders |= ForwardedHeaders.XForwardedFor;
+                // 逐项解析；任何一项解析失败直接抛（code review F1）：ASP.NET Core 中间件在
+                // KnownProxies/KnownIPNetworks 双空时跳过已知代理校验、信任一切 XFF——静默丢掉
+                // 坏项 = fail-open 伪造面。信任边界配置写错必须在启动期炸出来，而不是带着
+                // trust-all 姿态悄悄跑。空列表已在上方早退；能走出循环即全部解析成功。
                 foreach (var proxy in knownProxies)
                 {
                     if (System.Net.IPAddress.TryParse(proxy, out var ip))
@@ -371,7 +378,15 @@ public class AbpAdminHttpApiHostModule : AbpModule
                         // .NET 10 的 KnownIPNetworks 收 System.Net.IPNetwork（HttpOverrides 旧类型已弃用）。
                         options.KnownIPNetworks.Add(network);
                     }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            $"ForwardedHeaders:KnownProxies 含不可解析项 '{proxy}'（期望单 IP 或 CIDR 网段）。" +
+                            "信任边界配置错误拒绝启动：中间件对双空已知代理列表按信任一切 XFF 处理，静默丢项即 fail-open。");
+                    }
                 }
+
+                options.ForwardedHeaders |= ForwardedHeaders.XForwardedFor;
             });
         }
 
