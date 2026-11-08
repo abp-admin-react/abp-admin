@@ -177,6 +177,14 @@ public class PublicErrorDefinitionRegistry : IPublicErrorDefinitionProvider, ISi
         });
         Register(new PublicErrorDefinition
         {
+            InternalCode = AbpAdminDomainErrorCodes.Payments.PrepaymentAccountIdRequired,
+            PublicCode = AbpAdminDomainErrorCodes.Payments.PrepaymentAccountIdRequired,
+            ResourceType = typeof(ClientErrorResource),
+            MessageKey = "PrepaymentAccountIdRequired",
+            Kind = PublicErrorKind.Validation,
+        });
+        Register(new PublicErrorDefinition
+        {
             InternalCode = AbpAdminDomainErrorCodes.Files.ContentMismatch,
             PublicCode = AbpAdminDomainErrorCodes.Files.ContentMismatch,
             ResourceType = typeof(ClientErrorResource),

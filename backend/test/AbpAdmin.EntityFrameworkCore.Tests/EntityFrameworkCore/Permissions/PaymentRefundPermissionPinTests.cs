@@ -42,11 +42,20 @@ public class PaymentRefundPermissionPinTests : AbpAdminEntityFrameworkCoreTestBa
         {
             var definition = await manager.GetAsync(name);
             definition.MultiTenancySide.ShouldBe(MultiTenancySides.Host,
-                $"{name} 必须为 Host 侧（租户 admin 凭种子授权即可经包端点 ChangeBalance/Withdraw 铸造钱包余额）");
+                $"{name} 必须为 Host 侧（租户 admin 凭种子授权即可经包端点 ChangeBalance/Withdraw 铸造钱包余额，"
+                + "或凭 Manage 枚举租户内全部钱包/提现申请）");
         }
 
         // RollbackRefund 同属钱面（恢复在途退款的可退余额，渠道可能仍打款）
         var rollback = await manager.GetAsync("EasyAbp.PaymentService.Payment.Manage.RollbackRefund");
         rollback.MultiTenancySide.ShouldBe(MultiTenancySides.Host);
+
+        // 读提权 Manage 必须在钉列表里（与写面同口径；漂移时上面循环已覆盖字面量）
+        PaymentRefundPermissionHostPinProvider.PrepaymentMoneyPermissionNames.ShouldContain(
+            "EasyAbp.PaymentService.Prepayment.Account.Manage");
+        PaymentRefundPermissionHostPinProvider.PrepaymentMoneyPermissionNames.ShouldContain(
+            "EasyAbp.PaymentService.Prepayment.WithdrawalRequest.Manage");
+        PaymentRefundPermissionHostPinProvider.PrepaymentMoneyPermissionNames.ShouldContain(
+            "EasyAbp.PaymentService.Prepayment.WithdrawalRecord.Manage");
     }
 }

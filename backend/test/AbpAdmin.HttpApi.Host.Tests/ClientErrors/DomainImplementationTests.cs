@@ -27,6 +27,7 @@ public class PublicErrorDefinitionRegistryTests
         codes.ShouldContain(AbpAdminDomainErrorCodes.Imaging.ImageProcessingBusy);
         codes.ShouldContain(AbpAdminDomainErrorCodes.RateLimiting.OperationRateLimitExceeded);
         codes.ShouldContain(AbpAdminDomainErrorCodes.Files.ContentMismatch);
+        codes.ShouldContain(AbpAdminDomainErrorCodes.Payments.PrepaymentAccountIdRequired);
         codes.ShouldContain("AbpAdmin:Export:SyncThresholdExceeded");
     }
 

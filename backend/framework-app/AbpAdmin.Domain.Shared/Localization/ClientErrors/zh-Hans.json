@@ -10,6 +10,7 @@
     "OperationFailed": "操作失败，请稍后重试。",
     "Unexpected": "系统繁忙，请稍后重试。",
     "FileContentMismatch": "上传被拒绝：文件内容与其扩展名不匹配，或包含不允许的脚本内容。",
+    "PrepaymentAccountIdRequired": "查询预存款流水必须指定账户 Id（AccountId）。",
     "SyncExportThresholdExceeded": "结果集超过同步导出上限，请使用异步导出。",
     "CannotCarryRole": "不允许写入权威类型（角色）的声明。",
     "RoleDataScopeEscalation": "该授予会越出你自身的权限范围。"

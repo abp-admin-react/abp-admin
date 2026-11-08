@@ -325,6 +325,13 @@ public static class AbpAdminDomainErrorCodes
         /// 实现名（Guard）与理由（Reason）。
         /// </summary>
         public const string RefundRefusedByGuard = "AbpAdmin:PaymentRefundRefusedByGuard";
+
+        /// <summary>
+        /// Prepayment 流水列表缺 AccountId。包实现会对 Guid.Empty 直接 GetAsync 账户，
+        /// 落成 EntityNotFound，再被客户错误管线展平成 Client:Unexpected/500。
+        /// 本码供应用层前置校验；公开目录 Kind=Validation → HTTP 400。
+        /// </summary>
+        public const string PrepaymentAccountIdRequired = "AbpAdmin:PrepaymentAccountIdRequired";
     }
 
     /// <summary>
@@ -473,6 +480,12 @@ public static class AbpAdminDomainErrorCodes
 
         /// <summary>发送目标用户列表为空（WithData("ParamName")）。</summary>
         public const string EmptyUserIds = "AbpAdmin:EmptyUserIds";
+
+        /// <summary>
+        /// 租户操作者试图通过 TenantId 切到其他租户发通知（仅宿主可 Change 进目标租户）。
+        /// WithData("TenantId")。
+        /// </summary>
+        public const string TenantScopeSwitchDenied = "AbpAdmin:NotificationTenantScopeSwitchDenied";
     }
 
     /// <summary>实体变更回滚（RestoreEntityChangeAsync）的业务错误码。测试按 Code 断言，与文案解耦。</summary>

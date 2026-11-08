@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "entries": [
     {
+      "code": "AbpAdmin:DataScope:RoleDataScopeEscalation",
+      "kind": "forbidden",
+      "httpStatuses": [
+        403
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
       "code": "AbpAdmin:Export:SyncThresholdExceeded",
       "kind": "business",
       "httpStatuses": [
@@ -21,6 +31,26 @@
         "correlationId",
         "fileName",
         "reason"
+      ]
+    },
+    {
+      "code": "AbpAdmin:IdentityClaimsCannotCarryRole",
+      "kind": "forbidden",
+      "httpStatuses": [
+        403
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "AbpAdmin:PrepaymentAccountIdRequired",
+      "kind": "validation",
+      "httpStatuses": [
+        400
+      ],
+      "dataFields": [
+        "correlationId"
       ]
     },
     {

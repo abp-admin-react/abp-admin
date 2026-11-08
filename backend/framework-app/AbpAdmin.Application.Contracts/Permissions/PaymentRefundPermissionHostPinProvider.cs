@@ -18,6 +18,11 @@ namespace AbpAdmin.Permissions;
 /// 的清理是 owner 动作（AbpPermissionGrants 里 EasyAbp.PaymentService.* 租户行）。
 /// 注意：Prepayment 权限住在独立分组 "EasyAbp.PaymentService.Prepayment"（13 个权限），
 /// 必须按组分别解析——只遍历主组会拿空（v3-25 沙箱实证）。
+///
+/// 读提权（sectest p24/p25）：包把 Account/WithdrawalRequest/WithdrawalRecord/Transaction 的
+/// *.Manage 也作为「看他人账户」门槛（反编译 GetList/Get 在 UserId≠当前用户时 Check Manage）。
+/// 未钉 Host 时租户 admin 凭种子 Manage 可枚举租户内全部钱包/提现申请/流水管理面；
+/// 与钱面写权限同口径钉 Host，自助 Default（看自己的账户/流水）仍留 Bilateral。
 /// </summary>
 public class PaymentRefundPermissionHostPinProvider : PermissionDefinitionProvider
 {
@@ -40,11 +45,14 @@ public class PaymentRefundPermissionHostPinProvider : PermissionDefinitionProvid
     // GetPermissionOrNull 返回 null 跳过，fail-safe 不炸启动，PaymentRefundPermissionPinTests 会红）
     public static readonly string[] PrepaymentMoneyPermissionNames =
     {
+        "EasyAbp.PaymentService.Prepayment.Account.Manage",
         "EasyAbp.PaymentService.Prepayment.Account.Manage.ChangeBalance",
         "EasyAbp.PaymentService.Prepayment.Account.Manage.ChangeLockedBalance",
         "EasyAbp.PaymentService.Prepayment.Account.TopUp",
         "EasyAbp.PaymentService.Prepayment.Account.Withdraw",
+        "EasyAbp.PaymentService.Prepayment.WithdrawalRequest.Manage",
         "EasyAbp.PaymentService.Prepayment.WithdrawalRequest.Review",
+        "EasyAbp.PaymentService.Prepayment.WithdrawalRecord.Manage",
         "EasyAbp.PaymentService.Prepayment.Transaction.Manage",
     };
 
