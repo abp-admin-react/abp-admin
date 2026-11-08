@@ -60,26 +60,44 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
         {
             await base.CreateOrUpdateApplicationAsync(applicationType, name, type, consentType, displayName,
                 secret, grantTypes, scopes, redirectUris, postLogoutRedirectUris, clientUri, logoUri);
-            return;
+            // 新建后重新取实体，供下方 PKCE 补挂复用，避免 Ensure 内再 Find。
+            application = await _applicationManager.FindByClientIdAsync(name);
         }
-
-        var same =
-            (await _applicationManager.GetClientTypeAsync(application)) == type
-            && (await _applicationManager.GetConsentTypeAsync(application)) == consentType
-            && (await _applicationManager.GetDisplayNameAsync(application)) == displayName
-            && (await _applicationManager.GetClientUriAsync(application)) == clientUri
-            && (await _applicationManager.GetLogoUriAsync(application)) == logoUri
-            && SameSet((await _applicationManager.GetPermissionsAsync(application)).Where(p => p.StartsWith("gt:", StringComparison.Ordinal)), grantTypes.Select(g => "gt:" + g))
-            && SameSet((await _applicationManager.GetPermissionsAsync(application)).Where(p => p.StartsWith(OpenIddictConstants.Permissions.Prefixes.Scope, StringComparison.Ordinal)), scopes.Select(s2 => OpenIddictConstants.Permissions.Prefixes.Scope + s2))
-            && SameUriSet(await _applicationManager.GetRedirectUrisAsync(application), redirectUris ?? [])
-            && SameUriSet(await _applicationManager.GetPostLogoutRedirectUrisAsync(application), postLogoutRedirectUris ?? []);
-        if (same)
+        else
         {
-            return;
+            var permissions = await _applicationManager.GetPermissionsAsync(application);
+            var same =
+                (await _applicationManager.GetClientTypeAsync(application)) == type
+                && (await _applicationManager.GetConsentTypeAsync(application)) == consentType
+                && (await _applicationManager.GetDisplayNameAsync(application)) == displayName
+                && (await _applicationManager.GetClientUriAsync(application)) == clientUri
+                && (await _applicationManager.GetLogoUriAsync(application)) == logoUri
+                && SameSet(permissions.Where(p => p.StartsWith("gt:", StringComparison.Ordinal)), grantTypes.Select(g => "gt:" + g))
+                && SameSet(permissions.Where(p => p.StartsWith(OpenIddictConstants.Permissions.Prefixes.Scope, StringComparison.Ordinal)), scopes.Select(s2 => OpenIddictConstants.Permissions.Prefixes.Scope + s2))
+                && SameUriSet(await _applicationManager.GetRedirectUrisAsync(application), redirectUris ?? [])
+                && SameUriSet(await _applicationManager.GetPostLogoutRedirectUrisAsync(application), postLogoutRedirectUris ?? []);
+            if (!same)
+            {
+                await base.CreateOrUpdateApplicationAsync(applicationType, name, type, consentType, displayName,
+                    secret, grantTypes, scopes, redirectUris, postLogoutRedirectUris, clientUri, logoUri);
+                // 基类 Update 写的是另一份 model 实例——必须重 Find，否则下方 EnsurePkce
+                // 用旧快照 Populate+Update 会把刚种入的 grants/scopes/URIs 冲掉。
+                application = await _applicationManager.FindByClientIdAsync(name);
+            }
         }
 
-        await base.CreateOrUpdateApplicationAsync(applicationType, name, type, consentType, displayName,
-            secret, grantTypes, scopes, redirectUris, postLogoutRedirectUris, clientUri, logoUri);
+        // 公共授权码客户端一律带 PKCE 要求（安全审计 run-3 C-5，code review D2 收敛）：
+        // 规则单点落在种子漏斗——与管理端 OpenIddictApplicationDescriptorBuilder 的
+        // isPublicClient && allowAuthorizationCode 判定同口径，未来新增任何公共授权码
+        // 客户端自动继承，不依赖每个种子块记得补调 EnsurePkceRequirementAsync。
+        // 现代 swagger-ui（>=5.x）默认发 code_challenge，强制不改变登录行为；
+        // AbpAdmin_TestCli 是机密 ROPC 客户端（无授权码），天然不进此分支。
+        if (application is not null &&
+            type == OpenIddictConstants.ClientTypes.Public &&
+            grantTypes.Contains(OpenIddictConstants.GrantTypes.AuthorizationCode))
+        {
+            await EnsurePkceRequirementAsync(application);
+        }
     }
 
     private static bool SameSet(IEnumerable<string> current, IEnumerable<string> target) =>
@@ -136,14 +154,9 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
     /// 用于公共授权码客户端（run-3 起含 AbpAdmin_Swagger：现代 swagger-ui 默认发
     /// code_challenge，与管理端 DescriptorBuilder 的强制口径一致）。
     /// </summary>
-    private async Task EnsurePkceRequirementAsync(string clientId)
+    /// <param name="application">已由调用方 Find 的客户端实体；不再二次 FindByClientId。</param>
+    private async Task EnsurePkceRequirementAsync(object application)
     {
-        var application = await _applicationManager.FindByClientIdAsync(clientId);
-        if (application is null)
-        {
-            return;
-        }
-
         var requirements = await _applicationManager.GetRequirementsAsync(application);
         if (requirements.Contains(OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange))
         {
@@ -301,13 +314,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                 logoUri: "/images/clients/angular.svg"
             );
 
-            // 公共客户端的授权码通道强制 PKCE（前端 oidc-client-ts 的 code flow
-            // 默认发出 code_challenge，服务端强制不改变现有登录行为，只封住「无
-            // code_challenge 兑换授权码」的劫持面；种子后 AbpAdmin_App 的
-            // requirePkce=true 已落库，authorize 无 challenge → 400）。ABP 10.6.1 的种子
-            // 基类没有 requirements 参数，种入后在这里幂等补挂（已带该 requirement 则
-            // 跳过，不产生写放大）。
-            await EnsurePkceRequirementAsync(appClientId!);
+            // PKCE 由 CreateOrUpdateApplicationAsync 漏斗统一补挂（public + authorization_code）；
             // 回调白名单以 Host Configuration（RootUrl + Extra*）为准整表覆盖，端口不写死在种子里。
             await EnsureRedirectUrisAsync(appClientId!, redirectUris, postLogoutRedirectUris);
         }
@@ -334,12 +341,7 @@ public class OpenIddictDataSeedContributor : OpenIddictDataSeedContributorBase, 
                 clientUri: swaggerRootUrl.EnsureEndsWith('/') + "swagger",
                 logoUri: "/images/clients/swagger.svg"
             );
-
-            // 公共授权码客户端一律带 PKCE 要求（安全审计 run-3，与管理端
-            // OpenIddictApplicationDescriptorBuilder 同口径）：被截获的授权码无
-            // verifier 不可兑换。现代 swagger-ui（>=5.x）默认发送 code_challenge，
-            // 强制不改变现有登录行为。种子后幂等补挂（已带则跳过，不产生写放大）。
-            await EnsurePkceRequirementAsync(swaggerClientId!);
+            // PKCE 由 CreateOrUpdateApplicationAsync 漏斗统一补挂，此处不再重复 Ensure。
         }
 
         // 脚本化/E2E 测试客户端（机密）：ROPC 从 SPA 客户端移除后，密码换令牌的唯一通道。
