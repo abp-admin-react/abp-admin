@@ -230,22 +230,23 @@ public class TokenGatewayTests(PgFixture pg) : GatewayTestBase(pg)
         // 旧实现只数 content：~2MB 计费输入仅预冻 ~20 token（比值 ~22,700:1 平台倒贴）。
         // 修复后逐消息整对象序列化计量，content=null 的 tool_calls 消息也计入质量。
         var tiny = JsonNode.Parse("""{"messages":[{"role":"user","content":"hi"}]}""")!.AsObject();
-        var argsHeavy = JsonNode.Parse($$"""
+        // $$""" 下连续 }} 会被当成插值结束符（CS9007）；大 payload 用 Replace 注入，避免与 JSON 对象闭合括号冲突。
+        var argsHeavy = JsonNode.Parse("""
             {
               "messages": [
                 {"role":"user","content":"hi"},
-                {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"{{new string('A', 100_000)}}"}}]},
+                {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"__HEAVY__"}}]},
                 {"role":"user","content":"go"}
               ],
               "max_tokens": 1
             }
-            """)!.AsObject();
+            """.Replace("__HEAVY__", new string('A', 100_000)))!.AsObject();
 
         var tinyEst = ChatBilling.EstimatePromptTokens(tiny);
         var heavyEst = ChatBilling.EstimatePromptTokens(argsHeavy);
         heavyEst.ShouldBeGreaterThan(tinyEst + 40_000,
             "tool_calls 质量必须按整消息序列化计入（~10 万字符 ⇒ ≥5 万 token 口径）");
-        ChatBilling.Cost(Opt.Aliases[0], heavyEst, 1).ShouldBeGreaterThan(50_000,
+        ChatBilling.Cost(Opt.Value.EffectiveAliases[0], heavyEst, 1).ShouldBeGreaterThan(50_000,
             "该形态的预占额必须随输入质量同步放大");
     }
 
