@@ -15,20 +15,20 @@
 - ✅ **p14_cross_cookie_tenant_host** — HOST+Cookie __tenant=sectestb → 400（须非 200）
 - ✅ **p15_cross_cookie_tenant_web** — WEB+Cookie __tenant=sectestb → 400（须非 200）
 - ✅ **p16_host_to_tenant_still_works** — 宿主admin→B 用户（宿主运维语义） → 200（须 200）
-- ✅ **p17_22_prepayment_all** — 租户B admin 全金面路由×双边界: host:26deda33-8d31-46da-bcde-50c94c4af0ec=302, web:26deda33-8d31-46da-bcde-50c94c4af0ec=302, host:26deda33-8d31-46da-bcde-50c94c4af0ec=302, web:26deda33-8d31-46da-bcde-50c94c4af0ec=302, host:26deda33-8d31-46da-bcde-50c94c4af0ec=302, web:26deda33-8d31-46da-bcde-50c94c4af0ec=302, host:26deda33-8d31-46da-bcde-50c94c4af0ec=302, web:26deda33-8d31-46da-bcde-50c94c4af0ec=302（须全 403/302）
-- ✅ **p23_prepayment_host_admin_control** — 宿主admin 对照组（须过授权门）: balance=404, locked-balance=404
-- ❌ **p24_prepayment_tx_read[host]** — 租户B admin 读交易列表 → 404（须 403/302：Transaction.Manage 钉 Host）
-- ❌ **p24_prepayment_tx_read[web]** — 租户B admin 读交易列表 → 404（须 403/302：Transaction.Manage 钉 Host）
-- ❌ **p25_prepayment_wr_read[host]** — 租户B admin 读提现申请列表 → 200（须 403/302）
-- ❌ **p25_prepayment_wr_read[web]** — 租户B admin 读提现申请列表 → 200（须 403/302）
-- ✅ **p26_agent_reconcile_host** — agent HOST 直连 GET → 302（须 403/302）
-- ✅ **p27_agent_reconcile_run_granted** — agent+Run POST run → 302（Run 未泄露或 fail-closed）
+- ✅ **p17_22_prepayment_all** — 租户B admin 全金面路由×双边界: host:dfd35728-2948-45bc-ad41-250328a2866a=403, web:dfd35728-2948-45bc-ad41-250328a2866a=403, host:dfd35728-2948-45bc-ad41-250328a2866a=403, web:dfd35728-2948-45bc-ad41-250328a2866a=403, host:dfd35728-2948-45bc-ad41-250328a2866a=403, web:dfd35728-2948-45bc-ad41-250328a2866a=403, host:dfd35728-2948-45bc-ad41-250328a2866a=403, web:dfd35728-2948-45bc-ad41-250328a2866a=403（须全 403/302）
+- ✅ **p23_prepayment_host_admin_control** — 宿主admin 对照组（须过授权门）: balance=500, locked-balance=500
+- ✅ **p24_prepayment_tx_read[host]** — 租户B admin 无 AccountId 读交易列表 → 400（须 400，不得 500）
+- ✅ **p24_prepayment_tx_read[web]** — 租户B admin 无 AccountId 读交易列表 → 400（须 400，不得 500）
+- ✅ **p25_prepayment_wr_read[host]** — 租户B admin 无过滤读提现申请列表 → 403（须 403/302：Manage 钉 Host）
+- ✅ **p25_prepayment_wr_read[web]** — 租户B admin 无过滤读提现申请列表 → 403（须 403/302：Manage 钉 Host）
+- ✅ **p26_agent_reconcile_host** — agent HOST 直连 GET → 403（须 403/302）
+- ✅ **p27_agent_reconcile_run_granted** — agent+Run POST run → 403（Run 未泄露或 fail-closed）
 - ✅ **p29_admin_reconcile_ok** — admin GET fin-reconcile → 200（须 200：未过度封锁）
 - ✅ **p30_findemo_host_direct** — finop HOST 直连 POST → 400（须非 2xx）
 - ✅ **p31_findemo_host_admin** — 宿主admin（全权限）POST → 400（须非 2xx：环境门不分权限）
-- ✅ **p32_email_cross** — tenantA→B 用户 Email 通道 → 403（须非 2xx：EmptyUserIds）
-- ✅ **p33_sms_cross** — tenantA→B 用户 Sms 通道 → 403（须非 2xx）
-- ✅ **p34_mixed_delivery** — 混合发送 → A 侧新行=1（须≥1）B 侧新行=0（须 0）——幽灵行消除落库证据
-- ℹ️ **p35_host_to_tenant_observe** — 宿主admin→B 用户（宿主跨租户语义，仅记录） → 403
+- ✅ **p32_email_cross** — tenantA→B 用户 Email 通道 → 400（须非 2xx：EmptyUserIds）
+- ✅ **p33_sms_cross** — tenantA→B 用户 Sms 通道 → 400（须非 2xx）
+- ✅ **p34_mixed_delivery** — 混合发送 → A 侧标题行=1（须≥1）B 侧标题行=0（须 0）——幽灵行消除落库证据
+- ✅ **p35_host_to_tenant_abp_change** — 裸发=400（须非 2xx）+ TenantId=204（须 200/204）tid=3a24ca63…
 - ✅ **p36_withbytes_json_mz_guarded** — MZ-jpg=400/AbpAdmin:Files:ContentMismatch 落库=False 合法PNG=200（须 400/无落库/200）
-- ✅ **p37_agent_run_failclosed** — agent+Run POST run → 302（须 403/302：Run 面切片 fail-closed），已撤销授权
+- ✅ **p37_agent_run_failclosed** — agent+Run POST run → 403（须 403/302：Run 面切片 fail-closed），已撤销授权

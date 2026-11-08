@@ -261,21 +261,25 @@ def p23_prepayment_host_admin_control():
 
 
 def p24_prepayment_transaction_read():
+    """缺 AccountId：包原实现对 Guid.Empty GetAsync→500；修复后须 400 校验。
+    不得再冒成 500（Client:Unexpected）。跨用户流水门槛 Transaction.Manage 已钉 Host，
+    另由 p17 写面与权限钉单测覆盖。"""
     for base, tag in ((HOST, "host"), (WEB, "web")):
         r = S.req(base, "GET", "/api/payment-service/prepayment/transaction?SkipCount=0&MaxResultCount=5",
                   token=tenantB)
-        denied = r.status in (401, 403, 302)
-        probe(f"p24_prepayment_tx_read[{tag}]", denied,
-              f"租户B admin 读交易列表 → {r.status}（须 403/302：Transaction.Manage 钉 Host）")
+        ok = r.status == 400
+        probe(f"p24_prepayment_tx_read[{tag}]", ok,
+              f"租户B admin 无 AccountId 读交易列表 → {r.status}（须 400，不得 500）")
 
 
 def p25_prepayment_withdrawal_request_read():
+    """无过滤 GetList = 租户内全量枚举，须 Manage（钉 Host）⇒ 租户 admin 403/302。"""
     for base, tag in ((HOST, "host"), (WEB, "web")):
         r = S.req(base, "GET", "/api/payment-service/prepayment/withdrawal-request?SkipCount=0&MaxResultCount=5",
                   token=tenantB)
         denied = r.status in (401, 403, 302)
         probe(f"p25_prepayment_wr_read[{tag}]", denied,
-              f"租户B admin 读提现申请列表 → {r.status}（须 403/302）")
+              f"租户B admin 无过滤读提现申请列表 → {r.status}（须 403/302：Manage 钉 Host）")
 
 
 # ---------------------------------------------------------------- b05 变体：切片操作员换面
@@ -359,30 +363,50 @@ def p33_sms_cross():
 
 def p34_mixed_delivery():
     """混合列表（A 自己 + B 跨租户）→ 发送须成功且只落在 A；
-    B 侧列表不得出现新行（幽灵行消除的落库证据）。"""
-    t0 = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 60))
-    r = _send(["InApp"], [AUID, BUID])
+    B 侧不得出现本探针标题行（幽灵行消除；不按时间窗计数，避免被 p35 宿主合法投递污染）。"""
+    marker = "sectest-probe-mixed-" + uuid.uuid4().hex[:8]
+    r = S.req(WEB, "POST", "/api/app/notification-management/send-to-users", token=tenantA, json_body={
+        "userIds": [AUID, BUID], "notificationMethods": ["InApp"],
+        "title": marker, "body": marker})
     if r.status not in (200, 204):
         probe("p34_mixed_delivery", False, f"混合列表发送被拒 {r.status} {r.text()[:120]}")
         return
     time.sleep(3)
-    la = S.req(WEB, "GET", f"/api/app/notification-management?SkipCount=0&MaxResultCount=50&CreationTimeStart={t0}",
-               token=tenantA).json
-    lb = S.req(WEB, "GET", f"/api/app/notification-management?SkipCount=0&MaxResultCount=50&CreationTimeStart={t0}",
-               token=tenantB).json
-    na = la.get("totalCount", -1) if isinstance(la, dict) else -1
-    nb = lb.get("totalCount", -1) if isinstance(lb, dict) else -1
-    ok = (na or 0) >= 1 and (nb or 0) == 0
+    # 列表 DTO 无 title：用唯一 marker 查 NotificationInfo.ExtraProperties（避免时间窗被 p35 污染）
+    qa = psql(
+        "select count(*) from \"EasyAbpNotificationServiceNotificationInfos\" "
+        f"where \"ExtraProperties\"::text like '%{marker}%' "
+        f"and \"TenantId\"=(select \"Id\" from \"AbpTenants\" where \"Name\"='sectesta');")
+    qb = psql(
+        "select count(*) from \"EasyAbpNotificationServiceNotificationInfos\" "
+        f"where \"ExtraProperties\"::text like '%{marker}%' "
+        f"and \"TenantId\"=(select \"Id\" from \"AbpTenants\" where \"Name\"='sectestb');")
+    na = int((qa or "0").strip().split()[0] or 0)
+    nb = int((qb or "0").strip().split()[0] or 0)
+    ok = na >= 1 and nb == 0
     probe("p34_mixed_delivery", ok,
-          f"混合发送 → A 侧新行={na}（须≥1）B 侧新行={nb}（须 0）——幽灵行消除落库证据")
+          f"混合发送 → A 侧标题行={na}（须≥1）B 侧标题行={nb}（须 0）——幽灵行消除落库证据")
 
 
-def p35_host_to_tenant_observe():
+def tenant_id(name):
+    out = psql(f"select \"Id\" from \"AbpTenants\" where \"Name\"='{name}';")
+    return out.strip().split("|")[0].strip()
+
+
+def p35_host_to_tenant_abp_change():
+    """ABP 官网口径：宿主须显式 TenantId（服务端 CurrentTenant.Change），裸 UserId 仍 EmptyUserIds。"""
+    tid = tenant_id("sectestb")
+    bare = S.req(WEB, "POST", "/api/app/notification-management/send-to-users", token=admin, json_body={
+        "userIds": [BUID], "notificationMethods": ["InApp"],
+        "title": "sectest-host-bare", "body": "sectest-host-bare"})
+    bare_ok = bare.status not in (200, 201, 204)
     r = S.req(WEB, "POST", "/api/app/notification-management/send-to-users", token=admin, json_body={
         "userIds": [BUID], "notificationMethods": ["InApp"],
-        "title": "sectest-host-probe", "body": "sectest-host-probe"})
-    probe("p35_host_to_tenant_observe", None,
-          f"宿主admin→B 用户（宿主跨租户语义，仅记录） → {r.status}")
+        "title": "sectest-host-tid", "body": "sectest-host-tid",
+        "tenantId": tid})
+    scoped_ok = r.status in (200, 204)
+    probe("p35_host_to_tenant_abp_change", bare_ok and scoped_ok,
+          f"裸发={bare.status}（须非 2xx）+ TenantId={r.status}（须 200/204）tid={tid[:8]}…")
 
 
 # ---------------------------------------------------------------- 修复回归锁（加压轮缺口关闭验证）
@@ -452,7 +476,7 @@ ALL = [p01_withbytes_json_mz, p03_many_withstream, p04_many_form, p05_case_path,
        p24_prepayment_transaction_read, p25_prepayment_withdrawal_request_read,
        p26_agent_reconcile_host, p27_agent_reconcile_run_granted, p29_admin_reconcile_ok,
        p30_findemo_host_direct, p31_findemo_host_admin,
-       p32_email_cross, p33_sms_cross, p34_mixed_delivery, p35_host_to_tenant_observe,
+       p32_email_cross, p33_sms_cross, p34_mixed_delivery, p35_host_to_tenant_abp_change,
        p36_withbytes_json_mz_guarded, p37_agent_run_failclosed]
 
 if __name__ == "__main__":
