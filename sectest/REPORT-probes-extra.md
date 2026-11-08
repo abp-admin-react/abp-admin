@@ -15,10 +15,12 @@
 - ✅ **p14_cross_cookie_tenant_host** — HOST+Cookie __tenant=sectestb → 400（须非 200）
 - ✅ **p15_cross_cookie_tenant_web** — WEB+Cookie __tenant=sectestb → 400（须非 200）
 - ✅ **p16_host_to_tenant_still_works** — 宿主admin→B 用户（宿主运维语义） → 200（须 200）
-- ✅ **p17_22_prepayment_all** — 租户B admin 全金面路由×双边界: host:dfd35728-2948-45bc-ad41-250328a2866a=403, web:dfd35728-2948-45bc-ad41-250328a2866a=403, host:dfd35728-2948-45bc-ad41-250328a2866a=403, web:dfd35728-2948-45bc-ad41-250328a2866a=403, host:dfd35728-2948-45bc-ad41-250328a2866a=403, web:dfd35728-2948-45bc-ad41-250328a2866a=403, host:dfd35728-2948-45bc-ad41-250328a2866a=403, web:dfd35728-2948-45bc-ad41-250328a2866a=403（须全 403/302）
+- ✅ **p17_22_prepayment_all** — 租户B admin 全金面路由×双边界: host:809e79c0-f74c-4aae-9628-1a573e748bba=403, web:809e79c0-f74c-4aae-9628-1a573e748bba=403, host:809e79c0-f74c-4aae-9628-1a573e748bba=403, web:809e79c0-f74c-4aae-9628-1a573e748bba=403, host:809e79c0-f74c-4aae-9628-1a573e748bba=403, web:809e79c0-f74c-4aae-9628-1a573e748bba=403, host:809e79c0-f74c-4aae-9628-1a573e748bba=403, web:809e79c0-f74c-4aae-9628-1a573e748bba=403（须全 403/302）
 - ✅ **p23_prepayment_host_admin_control** — 宿主admin 对照组（须过授权门）: balance=500, locked-balance=500
 - ✅ **p24_prepayment_tx_read[host]** — 租户B admin 无 AccountId 读交易列表 → 400（须 400，不得 500）
 - ✅ **p24_prepayment_tx_read[web]** — 租户B admin 无 AccountId 读交易列表 → 400（须 400，不得 500）
+- ✅ **p24b_prepayment_tx_missing[host]** — 租户B admin AccountId=随机 → 404 code=AbpAdmin:PrepaymentAccountNotFound（须 404/PrepaymentAccountNotFound，不得 500）
+- ✅ **p24b_prepayment_tx_missing[web]** — 租户B admin AccountId=随机 → 404 code=AbpAdmin:PrepaymentAccountNotFound（须 404/PrepaymentAccountNotFound，不得 500）
 - ✅ **p25_prepayment_wr_read[host]** — 租户B admin 无过滤读提现申请列表 → 403（须 403/302：Manage 钉 Host）
 - ✅ **p25_prepayment_wr_read[web]** — 租户B admin 无过滤读提现申请列表 → 403（须 403/302：Manage 钉 Host）
 - ✅ **p26_agent_reconcile_host** — agent HOST 直连 GET → 403（须 403/302）

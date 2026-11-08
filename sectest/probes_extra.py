@@ -261,15 +261,30 @@ def p23_prepayment_host_admin_control():
 
 
 def p24_prepayment_transaction_read():
-    """缺 AccountId：包原实现对 Guid.Empty GetAsync→500；修复后须 400 校验。
-    不得再冒成 500（Client:Unexpected）。跨用户流水门槛 Transaction.Manage 已钉 Host，
-    另由 p17 写面与权限钉单测覆盖。"""
+    """缺 AccountId 须 400 PrepaymentAccountIdRequired，不得 500。"""
     for base, tag in ((HOST, "host"), (WEB, "web")):
         r = S.req(base, "GET", "/api/payment-service/prepayment/transaction?SkipCount=0&MaxResultCount=5",
                   token=tenantB)
         ok = r.status == 400
         probe(f"p24_prepayment_tx_read[{tag}]", ok,
               f"租户B admin 无 AccountId 读交易列表 → {r.status}（须 400，不得 500）")
+
+
+def p24b_prepayment_transaction_missing_account():
+    """不存在的 AccountId 须 404 PrepaymentAccountNotFound，不得 500。"""
+    missing = str(uuid.uuid4())
+    for base, tag in ((HOST, "host"), (WEB, "web")):
+        r = S.req(base, "GET",
+                  f"/api/payment-service/prepayment/transaction?AccountId={missing}&MaxResultCount=1",
+                  token=tenantB)
+        code = ""
+        try:
+            code = (r.json or {}).get("error", {}).get("code") or ""
+        except Exception:
+            pass
+        ok = r.status == 404 and "PrepaymentAccountNotFound" in code
+        probe(f"p24b_prepayment_tx_missing[{tag}]", ok,
+              f"租户B admin AccountId=随机 → {r.status} code={code}（须 404/PrepaymentAccountNotFound，不得 500）")
 
 
 def p25_prepayment_withdrawal_request_read():
@@ -473,7 +488,8 @@ ALL = [p01_withbytes_json_mz, p03_many_withstream, p04_many_form, p05_case_path,
        p12_cross_no_tenant_header, p13_tenant_admin_to_host_user, p14_cross_cookie_tenant_host,
        p15_cross_cookie_tenant_web, p16_host_to_tenant_still_works,
        p17_22_prepayment_all, p23_prepayment_host_admin_control,
-       p24_prepayment_transaction_read, p25_prepayment_withdrawal_request_read,
+       p24_prepayment_transaction_read, p24b_prepayment_transaction_missing_account,
+       p25_prepayment_withdrawal_request_read,
        p26_agent_reconcile_host, p27_agent_reconcile_run_granted, p29_admin_reconcile_ok,
        p30_findemo_host_direct, p31_findemo_host_admin,
        p32_email_cross, p33_sms_cross, p34_mixed_delivery, p35_host_to_tenant_abp_change,

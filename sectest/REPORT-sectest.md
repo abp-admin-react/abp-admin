@@ -1,6 +1,6 @@
 # sectest 黑盒攻击验证报告（abpadmin-sectest 栈）
 
-时间：2026-11-08 10:11:09  web=http://127.0.0.1:18000 host=http://127.0.0.1:18081
+时间：2026-11-08 21:07:20  web=http://127.0.0.1:18000 host=http://127.0.0.1:18081
 
 ## A 组 · 修复面防线（必须 PASS）
 
@@ -17,7 +17,7 @@
 - ✅ **a11_sms_intranet_endpoint_blocked** — status=400 code=Client:OperationFailed leaked=False egress_attempt=False
 - ✅ **a13_tenant_mismatch_guard** — direct=403({"error":{"code":"Client:Forbidden","message":"You do not have permiss)——403 失配守卫或 401 跨租会话不可见均为拦截
 - ✅ **a14_anonymous_surface** — statuses={'/api/app/audit-log': 401, '/api/app/identity-user-admin': 401, '/api/setting-ui': 401, '/api/app/cache-monitor': 401, '/api/app/server-monitor': 401, '/api/app/background-job': 401, '/api/app/fin-manual-adjust': 401}
-- ✅ **a15_upload_content_guard** — mz-jpg=400/AbpAdmin:Files:ContentMismatch png=200/{"fileInfo":{"parentId":null,"fileContainerName":"admin","fileName":"ok(6).png",
+- ✅ **a15_upload_content_guard** — mz-jpg=400/AbpAdmin:Files:ContentMismatch png=200/{"fileInfo":{"parentId":null,"fileContainerName":"admin","fileName":"ok(7).png",
 - ✅ **a16_oidc_manageperms_gate** — admin=500 operator=403（operator 须 403/302，admin 须过门）
 - ✅ **a17_connstring_audit_exit** — update=204; audit 泄漏=False（已还原共享库）
 - ✅ **a12_token_bruteforce_ratelimited** — first 429 at attempt 6/25
