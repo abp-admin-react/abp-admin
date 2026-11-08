@@ -326,12 +326,11 @@ public static class AbpAdminDomainErrorCodes
         /// </summary>
         public const string RefundRefusedByGuard = "AbpAdmin:PaymentRefundRefusedByGuard";
 
-        /// <summary>
-        /// Prepayment 流水列表缺 AccountId。包实现会对 Guid.Empty 直接 GetAsync 账户，
-        /// 落成 EntityNotFound，再被客户错误管线展平成 Client:Unexpected/500。
-        /// 本码供应用层前置校验；公开目录 Kind=Validation → HTTP 400。
-        /// </summary>
+        /// <summary>流水列表缺 AccountId。公开目录 Validation → 400（避免包空 Id GetAsync → 500）。</summary>
         public const string PrepaymentAccountIdRequired = "AbpAdmin:PrepaymentAccountIdRequired";
+
+        /// <summary>流水列表 AccountId 不存在。公开目录 NotFound → 404（避免包 EntityNotFound → 500）。</summary>
+        public const string PrepaymentAccountNotFound = "AbpAdmin:PrepaymentAccountNotFound";
     }
 
     /// <summary>

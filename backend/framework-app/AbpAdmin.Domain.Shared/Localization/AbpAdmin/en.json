@@ -419,6 +419,7 @@
         "AbpAdmin:PasskeyAssertionFailed": "Passkey sign-in failed.",
         "AbpAdmin:PaymentRefundAmountInvalid": "Refund amount is invalid or exceeds the refundable balance.",
         "AbpAdmin:PrepaymentAccountIdRequired": "Prepayment transaction list requires AccountId.",
+        "AbpAdmin:PrepaymentAccountNotFound": "The prepayment account was not found.",
         "AbpAdmin:FileShareLinkExpired": "The share link does not exist, has expired, is not public, or has reached its download limit.",
         "AbpAdmin:FileShareLinkInvalid": "Invalid share parameters (expiry exceeds the cap, max downloads must be positive, or only public links are allowed).",
         "AbpAdmin:FileStorageQuotaExceeded": "Storage quota exceeded (used {Used} / quota {Quota} bytes).",

@@ -452,6 +452,7 @@
         "AbpAdmin:PasskeyAssertionFailed": "Passkey 登录失败。",
         "AbpAdmin:PaymentRefundAmountInvalid": "退款金额无效或超出可退余额。",
         "AbpAdmin:PrepaymentAccountIdRequired": "查询预存款流水必须指定账户 Id（AccountId）。",
+        "AbpAdmin:PrepaymentAccountNotFound": "预存款账户不存在。",
         "AbpAdmin:FileShareLinkExpired": "分享链接不存在、已过期、未公开或次数已用尽。",
         "AbpAdmin:FileShareLinkInvalid": "分享参数无效（过期时间超出上限、次数必须为正，或仅支持公开链接）。",
         "AbpAdmin:FileStorageQuotaExceeded": "存储配额不足（已用 {Used} / 上限 {Quota} 字节）。",

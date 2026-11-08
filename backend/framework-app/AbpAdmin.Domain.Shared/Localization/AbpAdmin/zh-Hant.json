@@ -8,6 +8,7 @@
     "UserImport:RoleBeyondAuthority": "第 {0} 行：角色「{1}」越出你自身的權限範圍——只能授予你自己已持有的角色（數據範圍為全部時除外）。",
     "UserImport:OuRoleBeyondAuthority": "第 {0} 行：組織單元「{1}」掛有越出你自身權限範圍的角色「{2}」——把用戶掛入該單元即等於授予該角色。",
     "AbpAdmin:NotificationTenantScopeSwitchDenied": "不能切換到其他租戶發送通知（僅宿主可指定目標租戶）。",
-    "AbpAdmin:PrepaymentAccountIdRequired": "查詢預存款流水必須指定帳戶 Id（AccountId）。"
+    "AbpAdmin:PrepaymentAccountIdRequired": "查詢預存款流水必須指定帳戶 Id（AccountId）。",
+    "AbpAdmin:PrepaymentAccountNotFound": "預存款帳戶不存在。"
   }
 }
