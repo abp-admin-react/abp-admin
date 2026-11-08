@@ -12,6 +12,7 @@ import { App, Modal, Progress } from 'antd';
 import React, { useState } from 'react';
 import { getRoles, getUsers } from '@/abp/identity';
 import { getOrganizationUnits } from '@/abp/identityAdmin';
+import { getTenantId } from '@/abp/tenant';
 import { useDictionary } from '@/hooks/useDictionary';
 import {
   type BroadcastInput,
@@ -105,6 +106,7 @@ const SendNotificationForm: React.FC<Props> = ({
             return true;
           }
 
+          // 宿主切到某租户后选用户：显式带 TenantId（ABP Change 口径；与 __tenant 头双保险）
           await sendNotificationToUsers({
             userIds: values.userIds ?? [],
             notificationMethods: methods,
@@ -112,6 +114,7 @@ const SendNotificationForm: React.FC<Props> = ({
             body: values.body,
             smsText: values.smsText || undefined,
             smsProperties,
+            tenantId: getTenantId(),
           });
           message.success('已提交发送');
           onOpenChange(false);

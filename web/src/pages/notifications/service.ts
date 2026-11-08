@@ -114,6 +114,8 @@ export async function sendNotificationToUsers(data: {
   body: string;
   smsText?: string;
   smsProperties?: Record<string, unknown>;
+  /** 宿主发往租户用户时显式传入（ABP CurrentTenant.Change）；有 `__tenant` 头时可省略 */
+  tenantId?: string;
 }) {
   return postApiAppNotificationManagementSendToUsers(data);
 }

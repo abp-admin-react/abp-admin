@@ -52,6 +52,14 @@ public class SendToUsersNotificationInput
     public string? SmsText { get; set; }
 
     public Dictionary<string, object>? SmsProperties { get; set; }
+
+    /// <summary>
+    /// 目标租户（ABP 官网 CurrentTenant.Change 口径）。
+    /// 宿主上下文发往租户用户时必须显式传入：服务端会 Change 进该租户再过滤/投递。
+    /// 省略则沿用 ambient CurrentTenant（租户操作者本侧发送；宿主省略且 UserIds 属租户 → EmptyUserIds）。
+    /// 租户操作者不得填入与当前租户不同的 Id。
+    /// </summary>
+    public Guid? TenantId { get; set; }
 }
 
 public class GetNotificationListInput : PagedAndSortedResultRequestDto

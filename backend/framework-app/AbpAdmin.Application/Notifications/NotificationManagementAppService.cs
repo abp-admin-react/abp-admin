@@ -12,6 +12,7 @@ using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Domain.Repositories;
 using AbpAdmin.OperationLogs;
+using Volo.Abp.Uow;
 
 namespace AbpAdmin.Notifications;
 
@@ -174,6 +175,27 @@ public class NotificationManagementAppService : ApplicationService, INotificatio
     [OperationLog("通知管理", "发送通知", Success = "向用户 {{user(input.userIds)}} 发送了通知「{{input.title}}」")]
     public virtual async Task SendToUsersAsync(SendToUsersNotificationInput input)
     {
+        // ABP 官网 Multi-Tenancy：宿主替租户操作须 CurrentTenant.Change(tenantId)，
+        // 不得在宿主上下文硬塞租户 UserId（过滤器看不到 → EmptyUserIds）。
+        // Change 在外、新 UoW 在内（与 BroadcastNotificationJob / 00-overview 6.5 同序）：
+        // 请求 ambient UoW 若已在宿主打开，中途 Change 后仍可能踩到旧 DbContext 过滤快照。
+        var switched = MustSwitchTenantScope(input.TenantId);
+        if (!switched)
+        {
+            await SendToUsersCoreAsync(input);
+            return;
+        }
+
+        using (CurrentTenant.Change(input.TenantId))
+        {
+            using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+            await SendToUsersCoreAsync(input);
+            await uow.CompleteAsync();
+        }
+    }
+
+    protected virtual async Task SendToUsersCoreAsync(SendToUsersNotificationInput input)
+    {
         foreach (var method in input.NotificationMethods)
         {
             switch (method)
@@ -207,6 +229,26 @@ public class NotificationManagementAppService : ApplicationService, INotificatio
                         .WithData("Methods", method);
             }
         }
+    }
+
+    /// <summary>
+    /// 是否需要宿主 Change 进目标租户。省略 / 已在目标租户 → false；
+    /// 租户指定其他 TenantId → 拒绝；宿主指定 TenantId → true。
+    /// </summary>
+    protected virtual bool MustSwitchTenantScope(Guid? tenantId)
+    {
+        if (!tenantId.HasValue || CurrentTenant.Id == tenantId)
+        {
+            return false;
+        }
+
+        if (CurrentTenant.IsAvailable)
+        {
+            throw new BusinessException(AbpAdminDomainErrorCodes.Notifications.TenantScopeSwitchDenied)
+                .WithData("TenantId", tenantId.Value);
+        }
+
+        return true;
     }
 
     public virtual async Task<NotificationBroadcastDto> GetBroadcastAsync(Guid id)
