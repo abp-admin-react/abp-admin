@@ -291,6 +291,58 @@ public class FileUploadContentGuardTests
         reached.ShouldBeFalse();
     }
 
+    [Fact]
+    public async Task With_bytes_duplicate_case_variant_fileName_slots_are_rejected()
+    {
+        // S1：收集器取首值、System.Text.Json 模型绑定取末值——
+        // {"fileName":"a.png","FileName":"evil.svg",...} 会让防线扫 benign、绑定落 malicious。
+        var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"fileName\":\"a.png\",\"FileName\":\"evil.svg\",\"content\":\"{png}\"}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "同名槽大小写变体重复必须整单拒绝（防 first-scan/last-bind 走私）");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task With_bytes_fileName_and_fileNames_cross_alias_are_rejected()
+    {
+        // fileName 与 fileNames 同属名字槽——同时出现即歧义（旧实现会合并两边值）。
+        var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"fileName\":\"a.png\",\"fileNames\":[\"b.png\"],\"content\":\"{png}\"}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "名字槽交叉别名（fileName+fileNames）必须整单拒绝");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task With_bytes_content_and_fileContents_cross_alias_are_rejected()
+    {
+        var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"fileName\":\"a.png\",\"content\":\"{png}\",\"fileContents\":[\"{png}\"]}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "字节槽交叉别名（content+fileContents）必须整单拒绝");
+        reached.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task With_bytes_duplicate_case_variant_content_slots_are_rejected()
+    {
+        var png = Convert.ToBase64String(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        var evil = Convert.ToBase64String(Encoding.UTF8.GetBytes("<script>alert(1)</script>"));
+        var body = JsonBody(
+            "{\"fileContainerName\":\"admin\",\"fileType\":2,\"generateUniqueFileName\":false," +
+            $"\"fileName\":\"x.svg\",\"content\":\"{png}\",\"Content\":\"{evil}\"}}");
+        var (status, reached) = await InvokeJsonAsync("/api/file-management/file/with-bytes", body);
+        status.ShouldBe(400, "字节槽大小写变体重复必须整单拒绝（防 first-scan/last-bind 走私）");
+        reached.ShouldBeFalse();
+    }
+
     private sealed class NullLogger : Microsoft.Extensions.Logging.ILogger<FileUploadContentGuardMiddleware>
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;

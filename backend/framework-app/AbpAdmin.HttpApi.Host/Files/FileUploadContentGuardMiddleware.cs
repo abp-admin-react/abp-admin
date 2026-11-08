@@ -140,7 +140,8 @@ public class FileUploadContentGuardMiddleware
         // 匿名并发放大；超上限直接拒绝（fail-closed），既防放大也不给超大 JSON 留绕过面。
         // SPA 与管理端只用 multipart 通道，JSON 通道面向程序化小文件上传，64MiB 足够。
         const int MaxJsonScanBytes = 64 * 1024 * 1024;
-        var buffered = new MemoryStream();
+        // await using：取消/拒绝/放行路径都释放缓冲；Parse 直接吃流，避免 ToArray 再拷一份 64MiB。
+        await using var buffered = new MemoryStream();
         var buffer = new byte[81920];
         try
         {
@@ -165,10 +166,11 @@ public class FileUploadContentGuardMiddleware
             throw;
         }
 
+        buffered.Position = 0;
         JsonDocument? doc;
         try
         {
-            doc = JsonDocument.Parse(buffered.ToArray());
+            doc = await JsonDocument.ParseAsync(buffered, cancellationToken: context.RequestAborted);
         }
         catch (Exception ex) when (ex is not OperationCanceledException &&
                                    !context.RequestAborted.IsCancellationRequested)
@@ -186,8 +188,19 @@ public class FileUploadContentGuardMiddleware
             // DTO（EasyAbp CreateManyFileInput）把名字与字节嵌在 fileInfos[*] 一层之下，
             // 只看根对象会让该通道完全绕过内容防线（对照面 with-bytes 400、嵌套面 200）。
             // 保持 64MiB 预读上限与大小写不敏感属性匹配语义不变。
+            //
+            // 复审补丁（code review S1）：同一对象内大小写不敏感重复的同槽属性名
+            // （fileName/fileName、FileName/fileName、content/content …）必须整单拒绝——
+            // 收集器若只取第一个匹配而 System.Text.Json 模型绑定对重复键取最后一个，
+            // 攻击者可用 {"fileName":"a.png","fileName":"evil.svg","content":"<png>",
+            // "content":"<script svg>"} 让防线扫 benign 配对、绑定器落 malicious 配对。
+            // 重复键在合法上传 JSON 中不存在（DTO 序列化不产生重复名），歧义即恶意。
             var pairs = new List<(string Name, byte[] Bytes)>();
-            WalkJson(doc.RootElement, pairs);
+            if (WalkJson(doc.RootElement, pairs, out var ambiguousSlot))
+            {
+                await RejectAsync(context, ambiguousSlot, "重复/歧义的上传属性名（同名槽多次出现）", path);
+                return true;
+            }
 
             foreach (var (fileName, content) in pairs)
             {
@@ -233,85 +246,128 @@ public class FileUploadContentGuardMiddleware
     }
 
     /// <summary>
-    /// JSON 属性名按忽略大小写查找。MVC 模型绑定不区分大小写，大小写敏感会让 FileName/Content 绕过扫描。
+    /// 深度优先遍历 JSON DOM：对每个对象做单趟属性扫描，按槽（名字槽 fileName/fileNames、
+    /// 字节槽 content/fileContents）收集值并配对（多字节少名字时最后一个名字兜底配对，
+    /// 与原根级配对语义一致），再递归子对象与数组元素。
+    /// 单趟扫描同时计数每个槽的大小写不敏感命中次数：同一槽被多个属性命中（重复/歧义键）
+    /// 即返回 true 整单拒绝——收集器取首值而模型绑定取末值，歧义键就是 benign-首值/
+    /// malicious-末值的走私通道（code review S1）。单趟也顺带消除旧实现每对象 4 次线性
+    /// 属性扫描与两个无条件 List 分配（code review P2：匿名 64MiB 载荷下的 GC 压力）。
     /// </summary>
-    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
+    /// <returns>true = 检出歧义重复槽，<paramref name="ambiguousSlot"/> 给出槽名用于拒绝留痕。</returns>
+    private static bool WalkJson(JsonElement element, List<(string Name, byte[] Bytes)> pairs, out string ambiguousSlot)
     {
-        value = default;
-        if (element.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        foreach (var property in element.EnumerateObject())
-        {
-            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
-            {
-                value = property.Value;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// 深度优先遍历 JSON DOM：对每个对象收集其自身的 (fileName, content) 配对（同名属性可单值或数组，
-    /// 多字节少名字时最后一个名字兜底配对，与原根级配对语义一致），再递归子对象与数组元素。
-    /// </summary>
-    private static void WalkJson(JsonElement element, List<(string Name, byte[] Bytes)> pairs)
-    {
+        ambiguousSlot = string.Empty;
         if (element.ValueKind == JsonValueKind.Object)
         {
-            var names = new List<string>();
-            var contents = new List<byte[]>();
-            CollectStrings(element, "fileName", names);
-            CollectStrings(element, "fileNames", names);
-            CollectByteArrays(element, "content", contents);
-            CollectByteArrays(element, "fileContents", contents);
+            var names = (List<string>?)null;
+            var contents = (List<byte[]>?)null;
+            var nameSlotHits = 0;
+            var byteSlotHits = 0;
 
-            for (var i = 0; i < contents.Count; i++)
+            foreach (var property in element.EnumerateObject())
             {
-                pairs.Add((names.Count > 0 ? names[Math.Min(i, names.Count - 1)] : string.Empty, contents[i]));
+                var isNameSlot = IsSlot(property.Name, "fileName") || IsSlot(property.Name, "fileNames");
+                var isByteSlot = IsSlot(property.Name, "content") || IsSlot(property.Name, "fileContents");
+                if (!isNameSlot && !isByteSlot)
+                {
+                    continue;
+                }
+
+                names ??= new List<string>();
+                contents ??= new List<byte[]>();
+                if (isNameSlot)
+                {
+                    if (++nameSlotHits > 1)
+                    {
+                        ambiguousSlot = property.Name;
+                        return true;
+                    }
+
+                    AddStringValues(property.Value, names);
+                }
+                else
+                {
+                    if (++byteSlotHits > 1)
+                    {
+                        ambiguousSlot = property.Name;
+                        return true;
+                    }
+
+                    AddByteValues(property.Value, contents);
+                }
+            }
+
+            if (contents is { Count: > 0 })
+            {
+                for (var i = 0; i < contents.Count; i++)
+                {
+                    pairs.Add((names is { Count: > 0 } ? names[Math.Min(i, names.Count - 1)] : string.Empty, contents[i]));
+                }
             }
 
             foreach (var property in element.EnumerateObject())
             {
-                WalkJson(property.Value, pairs);
+                if (WalkJson(property.Value, pairs, out ambiguousSlot))
+                {
+                    return true;
+                }
             }
         }
         else if (element.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in element.EnumerateArray())
             {
-                WalkJson(item, pairs);
+                if (WalkJson(item, pairs, out ambiguousSlot))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>槽名匹配（OrdinalIgnoreCase）——模型绑定同口径。</summary>
+    private static bool IsSlot(string propertyName, string slotName) =>
+        string.Equals(propertyName, slotName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>字符串槽值收集：单值或字符串数组（数组内多值合法，歧义只针对重复属性键）。</summary>
+    private static void AddStringValues(JsonElement value, List<string> into)
+    {
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            into.Add(value.GetString() ?? string.Empty);
+        }
+        else if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    into.Add(item.GetString() ?? string.Empty);
+                }
             }
         }
     }
 
-    /// <summary>从 JSON 元素收集指定属性的字节数组值（byte[] 以 base64 字符串进 JSON，可单值或数组）。</summary>
-    private static void CollectByteArrays(JsonElement element, string propertyName, List<byte[]> into)
+    /// <summary>字节槽值收集：base64 字符串单值或数组；非 base64 串交由后续模型绑定报错。</summary>
+    private static void AddByteValues(JsonElement value, List<byte[]> into)
     {
-        if (element.ValueKind != JsonValueKind.Object ||
-            !TryGetPropertyIgnoreCase(element, propertyName, out var prop))
-        {
-            return;
-        }
-
-        if (prop.ValueKind == JsonValueKind.String)
+        if (value.ValueKind == JsonValueKind.String)
         {
             try
             {
-                into.Add(prop.GetBytesFromBase64());
+                into.Add(value.GetBytesFromBase64());
             }
             catch (FormatException)
             {
                 // 非 base64 串交由后续模型绑定报错
             }
         }
-        else if (prop.ValueKind == JsonValueKind.Array)
+        else if (value.ValueKind == JsonValueKind.Array)
         {
-            foreach (var item in prop.EnumerateArray())
+            foreach (var item in value.EnumerateArray())
             {
                 if (item.ValueKind == JsonValueKind.String)
                 {
@@ -323,31 +379,6 @@ public class FileUploadContentGuardMiddleware
                     {
                         // 同上
                     }
-                }
-            }
-        }
-    }
-
-    /// <summary>从 JSON 元素收集指定属性的字符串值（可单值或数组）。</summary>
-    private static void CollectStrings(JsonElement element, string propertyName, List<string> into)
-    {
-        if (element.ValueKind != JsonValueKind.Object ||
-            !TryGetPropertyIgnoreCase(element, propertyName, out var prop))
-        {
-            return;
-        }
-
-        if (prop.ValueKind == JsonValueKind.String)
-        {
-            into.Add(prop.GetString() ?? string.Empty);
-        }
-        else if (prop.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in prop.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String)
-                {
-                    into.Add(item.GetString() ?? string.Empty);
                 }
             }
         }
