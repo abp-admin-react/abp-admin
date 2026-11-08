@@ -1,47 +1,29 @@
 using System;
 using Shouldly;
-using Volo.Abp;
 using Xunit;
 
 namespace AbpAdmin.Identity;
 
 /// <summary>
-/// 批量导入面授权等价回归锁（安全审计 run-3，run-2 C-2 守卫的通道补全）：
-/// IdentityUserAdminAppService 的 AssignRolesAsync（RoleNames 列）与
-/// AssignOrganizationUnitsAsync（OrganizationUnitCodes 列 → OU 现挂角色）在写入前
-/// 都逐项过 OrganizationUnitRoleConferralGuard——非 admin/非 IsAll 操作者经 CSV
-/// 导入不能授予自己不持有的角色，与交互面（AbpIdentity 模块
-/// FilterRolesByCurrentUserAsync / OrganizationUnitAppService 守卫）等价。
-/// 端到端（真实 PermissionChecker + UserManager）由 sectest 黑盒栈 a05/a07 变体覆盖。
+/// 批量导入通道与共享守卫的接线锁（安全审计 run-3）：
+/// Import 的 RoleNames / OU 派生角色路径调用 <see cref="OrganizationUnitRoleConferralGuard.IsRoleAttachable"/>
+/// （非 Ensure），拒绝形态是 UserFriendlyException + UserImport:*BeyondAuthority。
+/// 判定矩阵本身由 <see cref="OrganizationUnitRoleConferralGuardTests"/> 覆盖；本文件只锁
+/// 「导入面用的是 bool API + 特权短路」，避免再维护一份重复的角色矩阵。
+/// 行级 UFE 文案与受限操作者 ImportAsync 端到端由 sectest a05/a07 覆盖。
 /// </summary>
 public class UserImportConferralGuardTests
 {
     [Fact]
-    public void Role_Column_Beyond_Operator_Authority_Is_Rejected()
+    public void Import_Channel_Uses_IsRoleAttachable_Not_Ensure_Semantics()
     {
-        // 纯决策函数层：导入面复用同一守卫，admin/IsAll/己有之外的角色都会抛
-        Should.Throw<BusinessException>(() =>
-            OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("admin", ["helpdesk"], operatorSnapshotIsAll: false));
-    }
-
-    [Fact]
-    public void Role_Column_Operator_Own_Role_Is_Allowed()
-    {
-        OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("helpdesk", ["helpdesk"], operatorSnapshotIsAll: false);
-    }
-
-    [Fact]
-    public void Ou_Column_Attached_Role_Beyond_Operator_Authority_Is_Rejected()
-    {
-        // OU 列的等价判定：目标 OU 现挂的每个角色同样要落在操作者权限等价范围内
-        Should.Throw<BusinessException>(() =>
-            OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("finance-boss", ["helpdesk"], operatorSnapshotIsAll: false));
-    }
-
-    [Fact]
-    public void Admin_And_IsAll_Operators_Pass_Both_Columns()
-    {
-        OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("admin", ["admin"], operatorSnapshotIsAll: false);
-        OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("admin", ["helpdesk"], operatorSnapshotIsAll: true);
+        // 受限操作者：越权目标为 false（AppService 据此抛 UserFriendlyException）
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable("admin", ["helpdesk"], operatorSnapshotIsAll: false)
+            .ShouldBeFalse();
+        // 特权短路：与 AssignOrganizationUnitsAsync 的 IsPrivilegedOperator 跳过 GetRolesAsync 同口径
+        OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(["admin"], operatorSnapshotIsAll: false)
+            .ShouldBeTrue();
+        OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(["helpdesk"], operatorSnapshotIsAll: true)
+            .ShouldBeTrue();
     }
 }

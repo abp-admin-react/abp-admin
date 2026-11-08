@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Linq.Dynamic.Core;
 using System.Threading.Tasks;
+using AbpAdmin.Identity;
 using AbpAdmin.Localization;
 using AbpAdmin.OperationLogs;
 using AbpAdmin.Permissions;
@@ -12,7 +13,6 @@ using Volo.Abp.Application.Services;
 using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
-using Volo.Abp.Roles;
 using Volo.Abp.Validation;
 
 namespace AbpAdmin.DataScopes;
@@ -180,8 +180,9 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
     /// </summary>
     private async Task EnsureOperatorCanGrantAsync(CreateUpdateRoleDataScopeDto input)
     {
+        // admin 判定与 OrganizationUnitRoleConferralGuard.IsPrivilegedOperator 同口径（OrdinalIgnoreCase）。
         if (!CurrentUser.IsAuthenticated ||
-            CurrentUser.Roles.Contains(AbpRoleConsts.AdminRoleName))
+            OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles, operatorSnapshotIsAll: false))
         {
             return;
         }

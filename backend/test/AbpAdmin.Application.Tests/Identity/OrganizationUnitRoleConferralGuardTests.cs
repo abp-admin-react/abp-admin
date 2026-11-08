@@ -16,12 +16,16 @@ public class OrganizationUnitRoleConferralGuardTests
     [Fact]
     public void Admin_Operator_Can_Attach_Any_Role()
     {
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable("finance-boss", ["admin"], operatorSnapshotIsAll: false)
+            .ShouldBeTrue();
         OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("finance-boss", ["admin"], operatorSnapshotIsAll: false);
     }
 
     [Fact]
     public void IsAll_Snapshot_Operator_Can_Attach_Any_Role()
     {
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable("finance-boss", ["operator"], operatorSnapshotIsAll: true)
+            .ShouldBeTrue();
         OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("finance-boss", ["operator"], operatorSnapshotIsAll: true);
     }
 
@@ -29,24 +33,55 @@ public class OrganizationUnitRoleConferralGuardTests
     public void Restricted_Operator_Can_Attach_Own_Role()
     {
         // 与 SetRolesAsync「非 admin 只能授己有角色」等价口径
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable("operator", ["Operator"], operatorSnapshotIsAll: false)
+            .ShouldBeTrue();
         OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("operator", ["Operator"], operatorSnapshotIsAll: false);
     }
 
     [Fact]
     public void Restricted_Operator_Cannot_Attach_Role_Beyond_Own_Authority()
     {
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable("admin", ["operator"], operatorSnapshotIsAll: false)
+            .ShouldBeFalse();
+
         var ex = Should.Throw<BusinessException>(() =>
             OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("admin", ["operator"], operatorSnapshotIsAll: false));
         ex.Code.ShouldBe(AbpAdminDomainErrorCodes.DataScopes.RoleDataScopeEscalation);
-        ex.Data["ScopeType"]!.ToString()!.ShouldContain("OU role attach");
+        // ScopeType 前缀与通道无关（run-3 共用判定）：role conferral: {name}
+        ex.Data["ScopeType"]!.ToString()!.ShouldContain("role conferral");
+        ex.Data["ScopeType"]!.ToString()!.ShouldContain("admin");
+    }
+
+    [Fact]
+    public void Null_Or_Whitespace_Target_Is_Not_Attachable_For_Restricted_Operator()
+    {
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable(null, ["operator"], operatorSnapshotIsAll: false)
+            .ShouldBeFalse();
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable("  ", ["operator"], operatorSnapshotIsAll: false)
+            .ShouldBeFalse();
+    }
+
+    [Fact]
+    public void IsPrivilegedOperator_Reflects_Admin_And_IsAll()
+    {
+        OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(["admin"], operatorSnapshotIsAll: false)
+            .ShouldBeTrue();
+        OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(["helpdesk"], operatorSnapshotIsAll: true)
+            .ShouldBeTrue();
+        OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(["helpdesk"], operatorSnapshotIsAll: false)
+            .ShouldBeFalse();
     }
 
     [Fact]
     public void Role_Name_Comparison_Is_Case_Insensitive()
     {
         // CurrentUser.Roles 与角色名的大小写由规范化层保证；守卫自身按 OrdinalIgnoreCase 比较
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable("Finance-Boss", ["operator"], operatorSnapshotIsAll: false)
+            .ShouldBeFalse();
         Should.Throw<BusinessException>(() =>
             OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("Finance-Boss", ["operator"], operatorSnapshotIsAll: false));
+        OrganizationUnitRoleConferralGuard.IsRoleAttachable("Finance-Boss", ["FINANCE-BOSS"], operatorSnapshotIsAll: false)
+            .ShouldBeTrue();
         OrganizationUnitRoleConferralGuard.EnsureRoleAttachable("Finance-Boss", ["FINANCE-BOSS"], operatorSnapshotIsAll: false);
     }
 }

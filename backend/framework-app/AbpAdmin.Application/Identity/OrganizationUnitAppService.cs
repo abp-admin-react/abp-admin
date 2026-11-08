@@ -132,10 +132,17 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
         // 未认证上下文跳过（后台作业/种子/单测直连，与 RoleDataScope 守卫的豁免口径一致）。
         if (CurrentUser.IsAuthenticated)
         {
-            var snapshot = await _currentDataScopeProvider.GetAsync();
-            foreach (var role in await _organizationUnitRepository.GetRolesAsync(ou))
+            // admin 先短路（与 RoleDataScope EnsureOperatorCanGrant 同口径），避免无谓 GetAsync 缓存往返。
+            if (!OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles, operatorSnapshotIsAll: false))
             {
-                OrganizationUnitRoleConferralGuard.EnsureRoleAttachable(role.Name, CurrentUser.Roles, snapshot.IsAll);
+                var snapshot = await _currentDataScopeProvider.GetAsync();
+                if (!OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles, snapshot.IsAll))
+                {
+                    foreach (var role in await _organizationUnitRepository.GetRolesAsync(ou))
+                    {
+                        OrganizationUnitRoleConferralGuard.EnsureRoleAttachable(role.Name, CurrentUser.Roles, snapshot.IsAll);
+                    }
+                }
             }
         }
 
@@ -184,17 +191,33 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
         // EnsureOperatorCanGrantAsync 同一威胁模型。非 admin/非 IsAll 操作者只能挂自己
         // 已持有的角色（与 SetRolesAsync 的「非 admin 只能授己有角色」等价口径）。
         // 未认证上下文跳过（后台作业/种子/单测直连）。
+        var distinctRoleIds = roleIds.Distinct().ToList();
         if (CurrentUser.IsAuthenticated)
         {
-            var snapshot = await _currentDataScopeProvider.GetAsync();
-            foreach (var roleId in roleIds.Distinct())
+            // admin 先短路；再取快照判 IsAll——与 RoleDataScope 写面同口径。
+            if (!OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles, operatorSnapshotIsAll: false))
             {
-                var role = await _roleRepository.GetAsync(roleId);
-                OrganizationUnitRoleConferralGuard.EnsureRoleAttachable(role.Name, CurrentUser.Roles, snapshot.IsAll);
+                var snapshot = await _currentDataScopeProvider.GetAsync();
+                if (!OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles, snapshot.IsAll))
+                {
+                    // IIdentityRoleRepository 无谓词 GetList；角色表规模小，一次全量再按 id 过滤。
+                    var rolesById = (await _roleRepository.GetListAsync())
+                        .Where(r => distinctRoleIds.Contains(r.Id))
+                        .ToDictionary(r => r.Id);
+                    foreach (var roleId in distinctRoleIds)
+                    {
+                        if (!rolesById.TryGetValue(roleId, out var role))
+                        {
+                            throw new EntityNotFoundException(typeof(IdentityRole), roleId);
+                        }
+
+                        OrganizationUnitRoleConferralGuard.EnsureRoleAttachable(role.Name, CurrentUser.Roles, snapshot.IsAll);
+                    }
+                }
             }
         }
 
-        foreach (var roleId in roleIds.Distinct())
+        foreach (var roleId in distinctRoleIds)
         {
             await _organizationUnitManager.AddRoleToOrganizationUnitAsync(roleId, id);
         }

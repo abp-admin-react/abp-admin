@@ -17,25 +17,55 @@ namespace AbpAdmin.Identity;
 public static class OrganizationUnitRoleConferralGuard
 {
     /// <summary>
-    /// 校验「把 <paramref name="targetRoleName"/> 挂到 OU」是否在操作者权限等价范围内。
+    /// 操作者是否对任意角色授予均免检（持 admin 超管角色，或数据范围快照 IsAll）。
+    /// 调用方用此短路昂贵的角色/OU 角色列举，再对受限操作者走 <see cref="IsRoleAttachable"/>。
+    /// </summary>
+    public static bool IsPrivilegedOperator(IEnumerable<string> operatorRoleNames, bool operatorSnapshotIsAll)
+    {
+        if (operatorSnapshotIsAll)
+        {
+            return true;
+        }
+
+        foreach (var role in operatorRoleNames)
+        {
+            if (string.Equals(role, AbpRoleConsts.AdminRoleName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 校验「授予/挂接 <paramref name="targetRoleName"/>」是否在操作者权限等价范围内。
     /// 通过条件（任一）：操作者持 admin 超管角色；数据范围快照 IsAll；
-    /// 目标角色是操作者自己已持有的角色。否则抛 RoleDataScopeEscalation（同族错误码，
-    /// 语义同为「反提权」）。
+    /// 目标角色是操作者自己已持有的角色。
+    /// 覆盖通道（run-3 起含批量导入的 RoleNames 直授与 OU 挂接两条）共用同一判定。
+    /// </summary>
+    /// <remarks>布尔判定供调用方自选错误形态：交互面抛 403 语义、导入面落行级文案。</remarks>
+    public static bool IsRoleAttachable(string? targetRoleName, IEnumerable<string> operatorRoleNames, bool operatorSnapshotIsAll)
+    {
+        if (IsPrivilegedOperator(operatorRoleNames, operatorSnapshotIsAll))
+        {
+            return true;
+        }
+
+        var roles = new HashSet<string>(operatorRoleNames, StringComparer.OrdinalIgnoreCase);
+        return !string.IsNullOrWhiteSpace(targetRoleName) && roles.Contains(targetRoleName);
+    }
+
+    /// <summary>
+    /// <see cref="IsRoleAttachable"/> 的抛出形态：不通过即抛 RoleDataScopeEscalation
+    /// （同族错误码，语义同为「反提权」），供交互面（OU 管理）继续使用。
     /// </summary>
     public static void EnsureRoleAttachable(string? targetRoleName, IEnumerable<string> operatorRoleNames, bool operatorSnapshotIsAll)
     {
-        var roles = new HashSet<string>(operatorRoleNames, StringComparer.OrdinalIgnoreCase);
-        if (roles.Contains(AbpRoleConsts.AdminRoleName) || operatorSnapshotIsAll)
+        if (!IsRoleAttachable(targetRoleName, operatorRoleNames, operatorSnapshotIsAll))
         {
-            return;
+            throw new BusinessException(AbpAdminDomainErrorCodes.DataScopes.RoleDataScopeEscalation)
+                .WithData("ScopeType", $"role conferral: {targetRoleName}");
         }
-
-        if (!string.IsNullOrWhiteSpace(targetRoleName) && roles.Contains(targetRoleName))
-        {
-            return;
-        }
-
-        throw new BusinessException(AbpAdminDomainErrorCodes.DataScopes.RoleDataScopeEscalation)
-            .WithData("ScopeType", $"OU role attach: {targetRoleName}");
     }
 }
