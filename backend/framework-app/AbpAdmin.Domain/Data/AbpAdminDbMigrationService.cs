@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -47,10 +48,16 @@ public class AbpAdminDbMigrationService : ITransientDependency
     // 框架与业务建表走各工程自己的 EF Core 迁移（Migrations/ 目录），由各 IAbpAdminDbSchemaMigrator 按各自 History 表执行；脚本时代存量库由 EfCoreLegacySchemaBaseliner 自动打戳。
     public async Task MigrateAsync()
     {
+        var adminPassword = ResolveAdminPassword(_configuration);
+        if (adminPassword == AbpAdminConsts.AdminPasswordDefaultValue)
+        {
+            Logger.LogWarning("Using the public template administrator password for local development.");
+        }
+
         Logger.LogInformation("Started database migrations...");
 
         await MigrateDatabaseSchemaAsync();
-        await SeedDataAsync();
+        await SeedDataAsync(adminPassword);
 
         Logger.LogInformation($"Successfully completed host database migrations.");
 
@@ -83,7 +90,7 @@ public class AbpAdminDbMigrationService : ITransientDependency
                             }
                         }
 
-                        await SeedDataAsync(tenant);
+                        await SeedDataAsync(adminPassword, tenant);
                     }
 
                     Logger.LogInformation($"Successfully completed {tenant.Name} tenant database migrations.");
@@ -120,31 +127,47 @@ public class AbpAdminDbMigrationService : ITransientDependency
         }
     }
 
-    private async Task SeedDataAsync(Tenant? tenant = null)
+    internal static string ResolveAdminPassword(IConfiguration configuration)
+    {
+        var adminPassword = configuration["Identity:AdminPassword"];
+        if (!string.IsNullOrWhiteSpace(adminPassword) &&
+            adminPassword != AbpAdminConsts.AdminPasswordDefaultValue)
+        {
+            return adminPassword;
+        }
+
+        // Compose passes the actual frontend bind and its public OIDC origin.
+        // In Compose, a Development override must not bypass either loopback check.
+        var dockerBind = configuration["Identity:LocalDockerBindAddress"];
+        var allowDefault = dockerBind is null
+            ? configuration.GetValue<bool>("Identity:AllowDefaultAdminPassword")
+            : IsLoopbackAddress(dockerBind) &&
+              IsLoopbackOrigin(configuration["OpenIddict:Applications:AbpAdmin_App:RootUrl"]);
+
+        if (!allowDefault)
+        {
+            throw new AbpInitializationException(
+                "Identity:AdminPassword 必须设置为非模板口令。公开默认口令仅适用于回环 Docker 体验栈或显式允许的本地开发环境。");
+        }
+
+        return AbpAdminConsts.AdminPasswordDefaultValue;
+    }
+
+    private static bool IsLoopbackAddress(string host) =>
+        IPAddress.TryParse(host.Trim('[', ']'), out var address) && IPAddress.IsLoopback(address);
+
+    private static bool IsLoopbackOrigin(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var origin) &&
+        origin.Scheme is "http" or "https" &&
+        origin.UserInfo.Length == 0 &&
+        origin.AbsolutePath == "/" &&
+        origin.Query.Length == 0 &&
+        origin.Fragment.Length == 0 &&
+        (origin.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || IsLoopbackAddress(origin.Host));
+
+    private async Task SeedDataAsync(string adminPassword, Tenant? tenant = null)
     {
         Logger.LogInformation($"Executing {(tenant == null ? "host" : tenant.Name + " tenant")} database seed...");
-
-        // 问题12 修复：种子 admin 密码可由配置覆盖（Identity:AdminPassword，DbMigrator/Host 均可配）；
-        // 留空时回落模板默认值。生产部署必须注入强口令（公开默认值 = 任何人可登录）。
-        var adminPassword = _configuration["Identity:AdminPassword"];
-        if (string.IsNullOrWhiteSpace(adminPassword))
-        {
-            // C-1 fail-fast：模板默认口令全网公开，非开发环境绝不允许带着它建库。
-            // 开发环境的放行开关（Identity:AllowDefaultAdminPassword=true）只存在于
-            // appsettings.Development.json——生产部署加载不到它，走到这里就是事故：
-            // 什么都不注入直接起库，等于把 admin/1q2w3E* 播种进生产。
-            if (!_configuration.GetValue<bool>("Identity:AllowDefaultAdminPassword"))
-            {
-                throw new AbpInitializationException(
-                    "Identity:AdminPassword 未配置：种子 admin 将使用模板公开默认密码（全网已知），已拒绝继续。" +
-                    "生产部署请注入环境变量 Identity__AdminPassword（或 appsettings.secrets.json）。" +
-                    "仅本地开发可用 appsettings.Development.json 里的 Identity:AllowDefaultAdminPassword=true 显式放行。");
-            }
-
-            adminPassword = AbpAdminConsts.AdminPasswordDefaultValue;
-            Logger.LogWarning(
-                "Identity:AdminPassword 未配置，种子 admin 使用模板默认密码（公开已知，仅限开发环境）。生产部署请通过 appsettings.secrets.json 或环境变量 Identity__AdminPassword 注入强口令。");
-        }
 
         await _dataSeeder.SeedAsync(new DataSeedContext(tenant?.Id)
             .WithProperty(IdentityDataSeedContributor.AdminEmailPropertyName,

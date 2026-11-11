@@ -14,8 +14,7 @@
 # 可用 backend 同级（仓库根）.env 覆盖的变量（不入库）：
 #   POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
 #   IDENTITY_ADMIN_PASSWORD
-#     迁移器种子用的 admin 口令。不设值 = Production 姿态下 fail-fast 直接拒跑
-#     （见下方 migrator 服务注释），设了值才起得来——这是本机体验栈的必填项。
+#     首次初始化的 admin 登录口令。本机回环体验默认 1q2w3E*，对外绑定或地址必须自设口令。
 #   BIZ_TEMPLATE_SEED_SAMPLE_DATA（默认 false，设为 true 时创建业务模板示例项目）
 #   SEED_IDENTITY_UI_DEMO（默认 false，开启部门和声明类型演示）
 #   IDENTITY_UI_DEMO_PASSWORD（首次创建演示用户时使用的本地口令）
@@ -90,22 +89,16 @@ services:
       # Frontend port single source = WEB_PUBLIC_URL (CORS + redirect allowlist + OIDC RootUrl).
       App__CorsOrigins: ${WEB_PUBLIC_URL:-http://localhost:8000}
       App__RedirectAllowedUrls: ${WEB_PUBLIC_URL:-http://localhost:8000}
-      # 未注入时留空 = AbpAdminDbMigrationService 的 fail-fast 照旧生效（不设值不会静默降级）。
-      # 本行只是把这条口打通：compose 头注释与 fail-fast 报错都指向 Identity__AdminPassword，
-      # 但此前文件里没有插值点，Production 姿态的本机栈 up 必挂（2026-11-01 实测）。
       Identity__AdminPassword: ${IDENTITY_ADMIN_PASSWORD:-}
+      # 迁移器仅在前端绑定和公开地址都是回环地址时允许公开的初始口令。
+      Identity__LocalDockerBindAddress: ${WEB_BIND:-127.0.0.1}
       # 框架预览栈初始化基础配置。身份和财务演示数据由独立开发环境管理。
       App__SeedDemoData: "false"
       Finance__SeedDemoData: "false"
       App__SeedIdentityUiDemo: ${SEED_IDENTITY_UI_DEMO:-false}
       App__IdentityUiDemoPassword: ${IDENTITY_UI_DEMO_PASSWORD:-}
       BizTemplate__SeedSampleData: ${BIZ_TEMPLATE_SEED_SAMPLE_DATA:-false}
-      # 迁移器默认 Production（sectest b08 / 审计 TV-01 收口：默认 Development 会把
-      # 公开默认口令 admin/1q2w3E* 与仓库内嵌密钥的 AbpAdmin_TestCli ROPC 客户端种进
-      # 生产库）。Production 默认下未注入 Identity__AdminPassword 时
-      # AbpAdminDbMigrationService 对默认口令直接 fail-fast（安全失败优于静默弱凭据）；
-      # 本地体验栈要开发姿态种子时在 .env 显式设 MIGRATOR_DOTNET_ENVIRONMENT=Development
-      # 并自行承担开发凭据。
+      # 保持 Production，避免随 Development 初始化额外的测试客户端。
       DOTNET_ENVIRONMENT: ${MIGRATOR_DOTNET_ENVIRONMENT:-Production}
     depends_on:
       db:
@@ -186,11 +179,8 @@ services:
   web:
     build:
       context: ./web
-    # nginx 配置热挂载：X-Forwarded-Proto 修复（吸收姊妹仓 092cb310）即时生效免重建；
-    # 与镜像内烘焙同源，web 重建后可删可留。
-    volumes:
-      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./web/nginx-proxy-params.conf:/etc/nginx/proxy_params_backend.conf:ro
+    environment:
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-http://localhost:8000}
     ports:
       # 默认只绑宿主机回环：栈内置开发默认口令（postgres/postgres、dev-only-change-me），
       # 不应默认暴露给局域网。要 LAN/外部访问：.env 里 WEB_BIND=0.0.0.0（并自行改掉
@@ -200,7 +190,7 @@ services:
       host:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--header", "Host: abpadmin-health", "http://127.0.0.1/"]
       interval: 15s
       timeout: 5s
       retries: 5

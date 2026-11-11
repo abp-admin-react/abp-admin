@@ -112,3 +112,7 @@ jobs:
       - name: Build backend images (Host + DbMigrator)
         # 与本地 scripts/docker-build-check.ps1 同一实现（先闭包门禁再双镜像构建），不在 CI 里再抄一份
         run: pwsh scripts/docker-build-check.ps1
+      - name: Validate frontend Docker configuration
+        run: |
+          docker build -t abp-admin-web:ci ./web
+          docker run --rm --network none -e WEB_PUBLIC_URL=http://localhost:8100 abp-admin-web:ci nginx -t

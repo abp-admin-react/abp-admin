@@ -19,7 +19,7 @@
 | 前端 | React 19 · antd 6 · Ant Design Pro v6 · Umi Max 4 · pnpm 10 · Vitest · Biome |
 | 认证 | OpenIddict(OIDC,前后端分离,SPA 独立部署) |
 
-本地开发默认使用后端 `https://localhost:44395`、前端 `http://localhost:8000` 和 PostgreSQL。Docker 初始管理员为 `admin`，口令由本地 `.env` 提供。
+本地开发默认使用后端 `https://localhost:44395`、前端 `http://localhost:8000` 和 PostgreSQL。只在本机访问的 Docker 体验栈初始管理员为 `admin`，默认口令为 `1q2w3E*`。
 
 ## 内置能力
 
@@ -84,8 +84,9 @@ pnpm start                                             # http://localhost:8000
 
 使用 Docker 可从源码构建并启动前端、后端、PostgreSQL 16、Redis 7 和一次性数据库迁移器。默认访问地址为 [http://localhost:8000](http://localhost:8000)，API、OIDC 和 SignalR 由前端 nginx 统一代理。
 
-首次启动时，将仓库根目录的 `.env.example` 复制为 `.env`，分别填写
-`IDENTITY_ADMIN_PASSWORD`（管理员登录口令）和 `STRING_ENCRYPTION_PASSPHRASE`（用于加密设置的随机长字符串），再运行以下命令。初始化完成后，用 `admin` 和管理员登录口令登录。同一个数据库后续启动时继续使用原加密口令。
+首次启动时，将仓库根目录的 `.env.example` 复制为 `.env`，为
+`STRING_ENCRYPTION_PASSPHRASE` 填写用于加密设置的随机长字符串，再运行以下命令。同一个数据库后续启动时继续使用原加密口令。
+前端绑定和访问地址都在本机时，`IDENTITY_ADMIN_PASSWORD` 留空即可用 `admin` / `1q2w3E*` 登录；对外开放时须填写自设口令。已有数据库对外开放前，先在账号设置里更改现有管理员口令。
 
 ```bash
 docker compose up -d --build        # 起栈:db → 迁移/种子 → host → web(自动等待就绪)
@@ -95,7 +96,7 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 ```
 
 - 使用新数据卷时，默认只初始化框架基础数据，身份、财务和业务模板的演示数据默认关闭。想体验业务模板的示例项目，可在首次启动前将 `BIZ_TEMPLATE_SEED_SAMPLE_DATA` 设为 `true`。
-- 端口和口令通过仓库根目录的 `.env` 设置。修改端口时同步更新 `WEB_HOST_PORT` 和 `WEB_PUBLIC_URL`，后者也用于 OIDC 回调。修改 `OPENIDDICT_CERT_PASSPHRASE` 后须重建 host 镜像。前端默认绑定 `127.0.0.1`。其他变量见 Compose 文件头注释。
+- 端口和口令通过仓库根目录的 `.env` 设置。修改端口时同步更新 `WEB_HOST_PORT` 和 `WEB_PUBLIC_URL`，后者也用于 OIDC 回调。同端口的 `localhost` 与 `127.0.0.1` 会在登录前统一到配置的访问地址。修改 `OPENIDDICT_CERT_PASSPHRASE` 后须重建 host 镜像。前端默认绑定 `127.0.0.1`。其他变量见 Compose 文件头注释。
 - Swagger 不在这套栈的对外路径里(生产姿态默认关闭且反代清单未含 `/swagger/`);确需经前端访问,按 compose 文件头 `App__EnableSwaggerInProduction` 注释同步三处配置。
 - 后端跑 Production 姿态:Redis 缓存/分布式锁/DataProtection 密钥环/SignalR backplane、Quartz 持久化(`qrtz_*` 表由迁移器幂等建表)全部落在这套内联库上。
 - 临时排查内网服务:`docker compose exec db psql -U postgres -d abpadmin`;宿主机 `pnpm start`(dev 模式)仍可直接对接本地后端 `https://localhost:44395`。
@@ -123,7 +124,7 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 | --- | --- |
 | 服务地址、CORS、连接串、Redis、OpenIddict 客户端回调 | `backend/framework-app/AbpAdmin.HttpApi.Host/Configuration/` |
 | 后端启动 URL | `backend/framework-app/AbpAdmin.HttpApi.Host/Properties/launchSettings.json` |
-| 首次初始化的管理员口令 | Docker 使用 `.env` 的 `IDENTITY_ADMIN_PASSWORD`，直接运行迁移器使用 `Identity__AdminPassword` |
+| 首次初始化的管理员口令 | Docker 通过 `.env` 的 `IDENTITY_ADMIN_PASSWORD` 覆盖本机默认值，直接运行迁移器使用 `Identity__AdminPassword` |
 | 前端开发代理目标 | `web/config/proxy.ts` |
 | OIDC 授权地址 / ClientId / Scope | `web/src/abp/env.ts`(ClientId 须与 Host `OpenIddict` 节一致) |
 | 路由 / 菜单、布局主题 | `web/config/routes.ts`、`web/config/defaultSettings.ts` |

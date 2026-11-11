@@ -1,0 +1,13 @@
+# Use the origin registered by Compose for either same-port loopback alias.
+map "$http_host|${WEB_PUBLIC_URL}" $abpadmin_loopback_origin {
+    default "";
+    "~*^127[.]0[.]0[.]1(?<ipv4_port>(?::[0-9]+)?)[|](?<localhost_origin>https?://localhost\k<ipv4_port>)/?$" $localhost_origin;
+    "~*^localhost(?<localhost_port>(?::[0-9]+)?)[|](?<ipv4_origin>https?://127[.]0[.]0[.]1\k<localhost_port>)/?$" $ipv4_origin;
+}
+
+# Only move SPA navigation before it creates origin-scoped OIDC state.
+map "$request_method:$uri" $abpadmin_spa_redirect_origin {
+    default "";
+    "~^(?:GET|HEAD):/user/callback(?:/|$)" "";
+    "~^(?:GET|HEAD):" $abpadmin_loopback_origin;
+}

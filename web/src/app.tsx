@@ -38,7 +38,8 @@ import { errorConfig } from './requestErrorConfig';
 
 const loginPath = '/user/login';
 const forceChangePasswordPath = '/account/force-change-password';
-const publicPaths = [loginPath, '/user/callback', '/tenant-not-found'];
+// OpenIddict uses /Error for a failed authorization before a session exists.
+const publicPaths = [loginPath, '/user/callback', '/tenant-not-found', '/Error'];
 /** 需要登录但不需要检查密码过期的路径 */
 const skipPasswordCheckPaths = [forceChangePasswordPath];
 

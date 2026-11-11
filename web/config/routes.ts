@@ -36,6 +36,11 @@ export default [
     component: './tenant-not-found',
   },
   {
+    path: '/Error',
+    layout: false,
+    component: './exception/request-error',
+  },
+  {
     path: '/welcome',
     name: 'welcome',
     icon: 'smile',
