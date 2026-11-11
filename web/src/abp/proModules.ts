@@ -159,34 +159,23 @@ export async function restoreEntityChange(params: {
   });
 }
 
-/** 平均执行时长统计 */
-export async function getAuditLogAverageDuration(params?: {
-  startTime?: string;
-  endTime?: string;
-}) {
-  return request<any[]>(
-    '/api/app/audit-log/average-execution-duration-per-day',
-    {
-      method: 'GET',
-      params: {
-        StartTime: params?.startTime,
-        EndTime: params?.endTime,
-      },
-    },
-  );
-}
+type AuditLogErrorRateDto = {
+  totalCount: number;
+  errorCount: number;
+  errorRate: number;
+  dataPoints: {
+    date: string;
+    totalCount: number;
+    errorCount: number;
+    errorRate: number;
+  }[];
+};
 
-/** 错误率统计 */
-export async function getAuditLogErrorRate(params?: {
-  startTime?: string;
-  endTime?: string;
-}) {
-  return request<any>('/api/app/audit-log/error-rate', {
+/** 首页审计概况沿用服务端最近 7 天的统计窗口，失败在卡片内展示。 */
+export async function getAuditLogErrorRate() {
+  return request<AuditLogErrorRateDto>('/api/app/audit-log/error-rate', {
     method: 'GET',
-    params: {
-      StartTime: params?.startTime,
-      EndTime: params?.endTime,
-    },
+    skipErrorHandler: true,
   });
 }
 
