@@ -544,7 +544,6 @@ export default [
     : [
         {
           path: '/framework/customer-errors-demo',
-          name: 'customer-errors-demo',
           hideInMenu: true,
           component: './framework/customer-errors-demo',
         },

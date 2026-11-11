@@ -84,7 +84,8 @@ pnpm start                                             # http://localhost:8000
 
 使用 Docker 可从源码构建并启动前端、后端、PostgreSQL 16、Redis 7 和一次性数据库迁移器。默认访问地址为 [http://localhost:8000](http://localhost:8000)，API、OIDC 和 SignalR 由前端 nginx 统一代理。
 
-首次启动时，将仓库根目录的 `.env.example` 复制为 `.env`，填写必填的 `IDENTITY_ADMIN_PASSWORD`，再运行以下命令。初始化完成后，用 `admin` 和所填口令登录。
+首次启动时，将仓库根目录的 `.env.example` 复制为 `.env`，分别填写
+`IDENTITY_ADMIN_PASSWORD`（管理员登录口令）和 `STRING_ENCRYPTION_PASSPHRASE`（用于加密设置的随机长字符串），再运行以下命令。初始化完成后，用 `admin` 和管理员登录口令登录。同一个数据库后续启动时继续使用原加密口令。
 
 ```bash
 docker compose up -d --build        # 起栈:db → 迁移/种子 → host → web(自动等待就绪)

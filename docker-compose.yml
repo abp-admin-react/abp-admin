@@ -19,7 +19,8 @@
 #   BIZ_TEMPLATE_SEED_SAMPLE_DATA（默认 false，设为 true 时创建业务模板示例项目）
 #   SEED_IDENTITY_UI_DEMO（默认 false，开启部门和声明类型演示）
 #   IDENTITY_UI_DEMO_PASSWORD（首次创建演示用户时使用的本地口令）
-#   OPENIDDICT_CERT_PASSPHRASE / STRING_ENCRYPTION_PASSPHRASE
+#   STRING_ENCRYPTION_PASSPHRASE（必填，设置加密使用的随机长字符串；宿主拒绝公开默认值）
+#   OPENIDDICT_CERT_PASSPHRASE
 #     ⚠ 改 OPENIDDICT_CERT_PASSPHRASE 必须 docker compose build host 重建镜像——
 #     openiddict.pfx 在构建期用该口令烘焙加密，只改运行时会让容器拿新口令解旧证书，
 #     启动即失败。
