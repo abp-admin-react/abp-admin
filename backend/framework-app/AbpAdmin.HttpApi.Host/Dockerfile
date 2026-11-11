@@ -2,22 +2,13 @@
 # 构建上下文必须是 backend/（组合编排见仓库根 docker-compose.yml；手工构建：
 #   cd backend && docker build -f framework-app/AbpAdmin.HttpApi.Host/Dockerfile -t abp-admin-host . ）
 
-# ---- 构建：restore 单独成层（csproj 不变则命中缓存，不重下包） ----
-# 基础镜像浮动 tag（10.0 = .NET 10 LTS 补丁线内浮动，不用 latest 防跨大版本）。底座新鲜度
-# 由 scripts/auto-update-stack.ps1 保证：显式 docker pull（宿主已配 1ms.run 镜像源加速）
-# → digest 快照对比 → 有变化才构建；构建不带 --pull、吃刷好的本地 tag，单底座源故障不拖挂
-# 整个构建。docker build 默认吃本地 tag 缓存——历史"aspnet:10.0 长期停在 10.0.11
-# （2 CRITICAL + 11 HIGH）"即此假象，当年的 digest 钉版 + 手动刷新已废弃。
-# trivy 门禁两道不互替：自动更新内置单镜像扫（CRITICAL/HIGH，未装 trivy 自动跳过）；
-# scripts/security-scan.sh 仍是发布前三路全量门禁（.NET 依赖/前端生产树/镜像层）。
+# 使用 .NET 10 补丁标签。自动更新脚本先拉取基础镜像，再按 digest 判断是否重建。
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG CERT_PASSPHRASE=dev-only-change-me
 WORKDIR /src
 
-# restore 输入：中央包管理（Directory.Packages.props）、公共属性（common.props）、
-# NuGet 源声明（NuGet.Config，单源 nuget.org）+ 全部 csproj。
-# ⚠ restore 层 COPY 链必须覆盖引用闭包的全部 csproj——framework/、framework-app/ 与 modules/ 三区都要 COPY，
-#   漏拷一条 dotnet restore 在容器内直接断（工程挪区/新增业务模块时同步补链）。
+# restore 层复制公共 NuGet 配置和宿主项目的全部传递引用。
+# 修改 ProjectReference 后运行 scripts/check-docker-restore.ps1 同步清单，供 publish --no-restore 使用。
 COPY NuGet.Config common.props Directory.Packages.props ./
 COPY framework-app/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj framework-app/AbpAdmin.Domain.Shared/
 COPY framework-app/AbpAdmin.Domain/AbpAdmin.Domain.csproj framework-app/AbpAdmin.Domain/
@@ -27,7 +18,6 @@ COPY framework-app/AbpAdmin.EntityFrameworkCore/AbpAdmin.EntityFrameworkCore.csp
 COPY framework-app/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts.csproj framework-app/AbpAdmin.Application.Contracts/
 COPY framework-app/AbpAdmin.Application/AbpAdmin.Application.csproj framework-app/AbpAdmin.Application/
 COPY framework-app/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj framework-app/AbpAdmin.HttpApi/
-COPY framework-app/AbpAdmin.HttpApi.Client/AbpAdmin.HttpApi.Client.csproj framework-app/AbpAdmin.HttpApi.Client/
 COPY modules/platform/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj modules/platform/AbpAdmin.Webhooks/
 COPY modules/biz/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj modules/biz/AbpAdmin.Biz.Template/
 COPY modules/platform/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj modules/platform/AbpAdmin.Collection.Contracts/
@@ -36,7 +26,6 @@ COPY modules/platform/AbpAdmin.Ordering/AbpAdmin.Ordering.csproj modules/platfor
 COPY modules/platform/AbpAdmin.Ledger.Integration.Contracts/AbpAdmin.Ledger.Integration.Contracts.csproj modules/platform/AbpAdmin.Ledger.Integration.Contracts/
 COPY modules/platform/AbpAdmin.Ledger/AbpAdmin.Ledger.csproj modules/platform/AbpAdmin.Ledger/
 COPY modules/platform/AbpAdmin.TokenGateway/AbpAdmin.TokenGateway.csproj modules/platform/AbpAdmin.TokenGateway/
-COPY framework-app/AbpAdmin.DbMigrator/AbpAdmin.DbMigrator.csproj framework-app/AbpAdmin.DbMigrator/
 COPY framework-app/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj framework-app/AbpAdmin.HttpApi.Host/
 RUN dotnet restore framework-app/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj
 
@@ -44,15 +33,14 @@ COPY framework/ framework/
 COPY framework-app/ framework-app/
 COPY modules/ modules/
 
-# ---- 前端库还原：wwwroot/libs 不进库（ABP 模板约定），Razor 登录页的 ABP Bundling 需要
-# /libs 物理文件，缺了渲染即 500→302 死循环 = docker 部署登录流不可用。node 取自官方镜像
-# （sdk 基座不带）；abp CLI 走 dotnet 全局工具，install-libs 只做 npm 层搬运。jquery 按
-# 10.7 官方口径钉 resolutions.jquery=4.0.0（jQuery 4 + Migrate 4 唯一受支持组合，
-# abp.io/support/questions/10921），install-libs 自动产出正确一对。 ----
+# ABP CLI 安装并复制 Razor 登录页所需的静态库到 wwwroot/libs。
+# ABP 10.7 使用 jQuery 4 / Migrate 4，Yarn 会提示旧依赖声明的版本范围不匹配。
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=node:22-bookworm-slim /opt/yarn-v1.22.22 /opt/yarn-v1.22.22
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s /opt/yarn-v1.22.22/bin/yarn /usr/local/bin/yarn
 ENV PATH="${PATH}:/root/.dotnet/tools"
 RUN dotnet tool install --global Volo.Abp.Studio.Cli
 RUN abp install-libs -wd framework-app/AbpAdmin.HttpApi.Host
@@ -66,8 +54,7 @@ RUN dotnet publish framework-app/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csp
 RUN dotnet dev-certs https -ep /app/openiddict.pfx -p "$CERT_PASSPHRASE" \
     && chmod 644 /app/openiddict.pfx
 
-# ---- 运行时：仅携带 publish 产物 + 证书 + IP 归属地库 ----
-# 浮动 tag 策略同顶部说明：底座新鲜度靠 auto-update-stack.ps1 显式 pull，不靠手改 digest。
+# 运行时仅携带发布产物、证书和 IP 归属地库。
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
@@ -84,10 +71,8 @@ RUN mkdir -p /app/Logs && chown $APP_UID /app/Logs
 # 两个端口都只存在于 compose 内网：44395 HTTPS（自签，供直连/挂载场景），8080 HTTP
 # （web nginx 反代上游 + 容器内健康检查）。对外唯一入口是 web 服务（见 docker-compose.yml）。
 ENV ASPNETCORE_URLS=https://+:44395;http://+:8080 \
-    ASPNETCORE_Kestrel__Certificates__Default__Path=/app/openiddict.pfx \
-    ASPNETCORE_Kestrel__Certificates__Default__Password=dev-only-change-me
-# 两条 ENV 口令与 build ARG 同源：改口令 = compose 同一变量喂 build.args 与运行时，
-# 且必须 --build 重建（见上方证书段）。
+    ASPNETCORE_Kestrel__Certificates__Default__Path=/app/openiddict.pfx
+# Compose 在运行时传入 Kestrel 和 OpenIddict 的证书口令，均与构建时生成证书的口令一致。
 
 EXPOSE 44395 8080
 USER $APP_UID

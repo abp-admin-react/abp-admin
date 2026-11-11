@@ -2,9 +2,8 @@
 # 构建上下文必须是 backend/（同 framework-app/AbpAdmin.HttpApi.Host/Dockerfile 的约定；
 # 手工构建：cd backend && docker build -f framework-app/AbpAdmin.DbMigrator/Dockerfile -t abp-admin-migrator . ）。
 
-# ---- 构建：与 Host Dockerfile 同款分层，restore 挂在 csproj 层上 ----
-# ⚠ restore 层 COPY 链必须覆盖引用闭包的全部 csproj——framework/、framework-app/ 与 modules/ 三区都要 COPY，
-#   漏拷一条 dotnet restore 在容器内直接断（工程挪区/新增业务模块时同步补链）。
+# restore 层复制公共 NuGet 配置和迁移器项目的全部传递引用。
+# 修改 ProjectReference 后运行 scripts/check-docker-restore.ps1 同步清单，供 publish --no-restore 使用。
 # 基础镜像浮动 tag；底座新鲜度由 scripts/auto-update-stack.ps1 保证（显式 pull + digest
 # 快照对比，有变化才构建），机制见 HttpApi.Host/Dockerfile 顶部。
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -14,12 +13,8 @@ COPY NuGet.Config common.props Directory.Packages.props ./
 COPY framework-app/AbpAdmin.Domain.Shared/AbpAdmin.Domain.Shared.csproj framework-app/AbpAdmin.Domain.Shared/
 COPY framework-app/AbpAdmin.Domain/AbpAdmin.Domain.csproj framework-app/AbpAdmin.Domain/
 COPY framework/AbpAdmin.DynamicQueryable/AbpAdmin.DynamicQueryable.csproj framework/AbpAdmin.DynamicQueryable/
-COPY framework/AbpAdmin.Elasticsearch/AbpAdmin.Elasticsearch.csproj framework/AbpAdmin.Elasticsearch/
 COPY framework-app/AbpAdmin.EntityFrameworkCore/AbpAdmin.EntityFrameworkCore.csproj framework-app/AbpAdmin.EntityFrameworkCore/
 COPY framework-app/AbpAdmin.Application.Contracts/AbpAdmin.Application.Contracts.csproj framework-app/AbpAdmin.Application.Contracts/
-COPY framework-app/AbpAdmin.Application/AbpAdmin.Application.csproj framework-app/AbpAdmin.Application/
-COPY framework-app/AbpAdmin.HttpApi/AbpAdmin.HttpApi.csproj framework-app/AbpAdmin.HttpApi/
-COPY framework-app/AbpAdmin.HttpApi.Client/AbpAdmin.HttpApi.Client.csproj framework-app/AbpAdmin.HttpApi.Client/
 COPY modules/platform/AbpAdmin.Webhooks/AbpAdmin.Webhooks.csproj modules/platform/AbpAdmin.Webhooks/
 COPY modules/biz/AbpAdmin.Biz.Template/AbpAdmin.Biz.Template.csproj modules/biz/AbpAdmin.Biz.Template/
 COPY modules/platform/AbpAdmin.Collection.Contracts/AbpAdmin.Collection.Contracts.csproj modules/platform/AbpAdmin.Collection.Contracts/
