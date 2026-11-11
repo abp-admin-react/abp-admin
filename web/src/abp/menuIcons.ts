@@ -42,10 +42,7 @@ import {
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
 
-/**
- * 动态菜单图标映射：后端下发的 icon 字符串名 → antd 图标组件。
- * 名单与后端 MenuManager 模板定义及 config/routes.ts 的 icon 字段保持一致。
- */
+/** 服务端菜单和编辑器共用的 Ant Design 图标名称。 */
 const menuIcons: Record<string, ReactNode> = {
   smile: createElement(SmileOutlined),
   appstore: createElement(AppstoreOutlined),
@@ -69,7 +66,6 @@ const menuIcons: Record<string, ReactNode> = {
   menu: createElement(MenuOutlined),
   cluster: createElement(ClusterOutlined),
   history: createElement(HistoryOutlined),
-  // 菜单重排（ABP Pro 序）新增：收付款/财务/SaaS/示例组与既有模板中一直未注册的补齐
   dashboard: createElement(DashboardOutlined),
   shoppingCart: createElement(ShoppingCartOutlined),
   wallet: createElement(WalletOutlined),

@@ -89,68 +89,62 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         await CleanMenusAsync();
         await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
 
-        // 制造「存量旧布局」：saas 组挂回 administration + 旧序旧题、welcome 旧题旧序、
-        // biz-template-data-scope 顶层漂着（模板已收进 demos 组）
-        using (_dataFilter.Disable<IMultiTenant>())
+        // 模拟旧布局：SaaS 和示例是顶层组，设置在管理目录，收付款目录绑定订单权限。
+        var existingIdsByPath = await WithUnitOfWorkAsync(async () =>
         {
-            await WithUnitOfWorkAsync(async () =>
-            {
-                var all = await _menuRepository.GetListAsync();
-                var byPath = all.Where(x => x.Path != null).ToDictionary(x => x.Path!);
-                var administration = byPath["/administration"];
-                var saas = byPath["/administration/saas"];
-                saas.SetParent(administration.Id);
-                saas.SetOrderNo(5);
-                saas.SetTitle("SaaS旧名");
-                await _menuRepository.UpdateAsync(saas);
+            var all = await _menuRepository.GetListAsync();
+            var byPath = all.ToDictionary(x => x.Path!);
+            var administration = byPath["/administration"];
+            var saas = byPath["/administration/saas"];
+            saas.SetParent(null);
+            saas.SetOrderNo(60);
+            saas.SetTitle("SaaS");
+            await _menuRepository.UpdateAsync(saas);
 
-                var welcome = byPath["/welcome"];
-                welcome.SetTitle("欢迎");
-                welcome.SetOrderNo(1);
-                await _menuRepository.UpdateAsync(welcome);
+            var demos = byPath["/demos"];
+            demos.SetParent(null);
+            await _menuRepository.UpdateAsync(demos);
 
-                var demo = byPath["/biz-template/data-scope"];
-                demo.SetParent(null);
-                demo.SetOrderNo(40);
-                await _menuRepository.UpdateAsync(demo);
+            var settings = byPath["/administration/settings"];
+            settings.SetParent(administration.Id);
+            await _menuRepository.UpdateAsync(settings);
+            await _menuRepository.HardDeleteAsync(x => x.Path == "/administration/base-settings");
 
-                // 模板外自定义节点：同步不得误删
-                await _menuRepository.InsertAsync(new Menu(
-                    _guidGenerator.Create(), null, null, MenuTypeEnum.Menu,
-                    "自定义节点", "custom", "/custom-page", null, 999, false, isEnabled: true));
-            });
-        }
+            var collection = byPath["/collection"];
+            collection.SetParent(null);
+            collection.SetPermissionName("AbpAdmin.Ordering.Orders");
+            await _menuRepository.UpdateAsync(collection);
+
+            var custom = new Menu(
+                _guidGenerator.Create(), null, saas.Id, MenuTypeEnum.Menu,
+                "自定义节点", "custom", "/custom-page", null, 999, false, isEnabled: true);
+            await _menuRepository.InsertAsync(custom);
+            byPath.Add(custom.Path!, custom);
+            byPath.Remove("/administration/base-settings");
+            return byPath.ToDictionary(pair => pair.Key, pair => pair.Value.Id);
+        });
 
         await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
 
-        using (_dataFilter.Disable<IMultiTenant>())
+        await WithUnitOfWorkAsync(async () =>
         {
-            await WithUnitOfWorkAsync(async () =>
+            var all = await _menuRepository.GetListAsync();
+            var byPath = all.ToDictionary(x => x.Path!);
+            foreach (var (path, id) in existingIdsByPath)
             {
-                var all = await _menuRepository.GetListAsync();
-                var byPath = all.Where(x => x.Path != null).ToDictionary(x => x.Path!);
+                byPath[path].Id.ShouldBe(id);
+            }
 
-                // saas：回到顶层组、模板序、模板题
-                var saas = byPath["/administration/saas"];
-                saas.ParentId.ShouldBeNull();
-                saas.OrderNo.ShouldBe(
-                    MenuTemplateDefinition.All.Single(d => d.Key == "saas").OrderNo);
-                saas.Title.ShouldBe("SaaS");
-
-                // welcome：题/序回到模板
-                var welcome = byPath["/welcome"];
-                welcome.Title.ShouldBe("首页");
-                welcome.OrderNo.ShouldBe(
-                    MenuTemplateDefinition.All.Single(d => d.Key == "welcome").OrderNo);
-
-                // 业务模块数据范围示例重挂回 demos 组
-                var demos = byPath["/demos"];
-                byPath["/biz-template/data-scope"].ParentId.ShouldBe(demos.Id);
-
-                // 模板外自定义节点保留
-                byPath.ContainsKey("/custom-page").ShouldBeTrue();
-            });
-        }
+            var saas = byPath["/administration/saas"];
+            saas.ParentId.ShouldBe(byPath["/administration"].Id);
+            saas.OrderNo.ShouldBe(MenuTemplateDefinition.All.Single(d => d.Key == "saas").OrderNo);
+            saas.Title.ShouldBe("租户与功能");
+            byPath["/custom-page"].ParentId.ShouldBe(saas.Id);
+            byPath["/demos"].ParentId.ShouldBe(byPath["/system"].Id);
+            byPath["/administration/settings"].ParentId.ShouldBe(byPath["/administration/base-settings"].Id);
+            byPath["/collection"].ParentId.ShouldBe(byPath["/business"].Id);
+            byPath["/collection"].PermissionName.ShouldBeNull();
+        });
     }
 
     [Fact]
@@ -464,6 +458,45 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
 
         paths.ShouldNotContain(permissionMenu.Path);
         paths.ShouldContain(publicMenu.Path);
+    }
+
+    [Fact]
+    public async Task MyMenu_Keeps_Collection_Group_When_Only_Collection_Permission_Is_Granted()
+    {
+        await CleanMenusAsync();
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+
+        var checker = Substitute.For<IPermissionChecker>();
+        checker.IsGrantedAsync(Arg.Any<string[]>()).Returns(call =>
+        {
+            var grants = new MultiplePermissionGrantResult();
+            foreach (var name in call.Arg<string[]>())
+            {
+                grants.Result[name] = name == "AbpAdmin.Collection.Collections"
+                    ? PermissionGrantResult.Granted
+                    : PermissionGrantResult.Prohibited;
+            }
+
+            return Task.FromResult(grants);
+        });
+        var service = new MyMenuAppService(_menuRepository, _menuManager, checker)
+        {
+            LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>()
+        };
+
+        var myMenu = await WithUnitOfWorkAsync(() => service.GetAsync());
+        myMenu.Items.Select(x => x.Path).ShouldBe(new[] { "/welcome", "/business" });
+        var business = myMenu.Items.Single(x => x.Path == "/business");
+        var collection = business.Children.ShouldHaveSingleItem();
+        collection.Path.ShouldBe("/collection");
+        collection.Children.Select(x => x.Path).ShouldBe(new[]
+        {
+            "/collection/dashboard",
+            "/collection/deposits",
+            "/collection/sweeps",
+            "/collection/vault",
+            "/collection/member-funds"
+        });
     }
 
     [Fact]

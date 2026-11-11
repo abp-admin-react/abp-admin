@@ -1,5 +1,8 @@
-import type { Settings as LayoutSettings } from '@ant-design/pro-components';
-import { SettingDrawer } from '@ant-design/pro-components';
+import {
+  type MenuDataItem,
+  SettingDrawer,
+  type Settings as LayoutSettings,
+} from '@ant-design/pro-components';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { RequestConfig, RunTimeLayoutConfig } from '@umijs/max';
 import { history, Link } from '@umijs/max';
@@ -43,18 +46,13 @@ const publicPaths = [loginPath, '/user/callback', '/tenant-not-found', '/Error']
 /** 需要登录但不需要检查密码过期的路径 */
 const skipPasswordCheckPaths = [forceChangePasswordPath];
 
-/** 菜单 path 守卫（isSafeMenuPath）收口在 utils/redirect：与登录回跳同一套
- * 规范化 + 同源判定，第二道防线不弱于第一道。 */
-
-/** 后端动态菜单 → ProLayout MenuDataItem。
- * locale 键由本函数沿树拼完整链（menu.a.b.c）：节点因隐藏祖先上浮后树层级变化，
- * ProLayout 按 name 链自动拼的键会与语言包错位；显式传完整键 + name=title 兜底，
- * 有翻译用翻译、无翻译显示后端 Title（不再露出 name 尾段）。
- * 目录无 path 时合成占位 path（ProLayout 要求菜单项有 path 或 children）。 */
+/** 沿可见菜单树拼接翻译键，缺少词条时显示后端标题。
+ * 目录使用独立键，避免 ProLayout 按页面 URL 前缀误展开旧分组。 */
 function toMenuData(
   items: MyMenuItemDto[],
   parentLocaleKey = 'menu',
-): Record<string, unknown>[] {
+  parentPosition = '',
+): MenuDataItem[] {
   return items
     .filter(
       (item) =>
@@ -63,18 +61,22 @@ function toMenuData(
         isSafeMenuPath(item.path),
     )
     .map((item, index) => {
+      const position = `${parentPosition}.${index}`;
       const localeKey = item.name
         ? `${parentLocaleKey}.${item.name}`
         : `${parentLocaleKey}.x${index}`;
+      const children = item.children?.length
+        ? toMenuData(item.children, localeKey, position)
+        : undefined;
+      const path = children?.length ? undefined : (item.path ?? undefined);
+      const catalogKey = item.path ? encodeURIComponent(item.path) : position;
       return {
-        path:
-          item.path ?? `#catalog-${encodeURIComponent(item.title)}-${index}`,
+        path,
+        key: path ?? `catalog-${catalogKey}`,
         name: item.title,
         locale: localeKey,
         icon: toMenuIcon(item.icon),
-        children: item.children?.length
-          ? toMenuData(item.children, localeKey)
-          : undefined,
+        children,
       };
     });
 }
@@ -210,10 +212,8 @@ export const layout: RunTimeLayoutConfig = ({
   setInitialState,
 }) => {
   return {
-    // 动态菜单：服务端按绑定的 ABP 功能权限下发可见菜单树；
-    // 请求失败时 ProLayout 回退到 config/routes.ts 的静态菜单。
-    // 注意：运行时配置会整体覆盖默认 menu 对象，locale 必须显式带 true，
-    // 否则菜单标题的 menu.* 国际化会失效（ProLayout getMenuData 以 menu?.locale 判断）。
+    // 服务端按 ABP 权限下发菜单。尚未获得菜单树时，ProLayout 使用静态路由。
+    // 运行时 menu 覆盖默认配置，需显式保留 locale 才会读取 menu.* 词条。
     menu: {
       locale: true,
       params: {
@@ -225,6 +225,8 @@ export const layout: RunTimeLayoutConfig = ({
         return toMenuData(res.items);
       },
     },
+    // 目录无路由，面包屑只剩当前页时仍用它显示页头标题。
+    breadcrumbProps: { minLength: 1 },
     menuItemRender: (item, dom) => {
       if (item.path) {
         return (

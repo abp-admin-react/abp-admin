@@ -31,11 +31,7 @@ public record MenuDefinition(
     bool IsHide = false);
 
 /// <summary>
-/// 菜单域服务：Host 模板播种与租户懒拷贝。全局模板的节点定义（纯数据）抽在
-/// <see cref="MenuTemplateDefinition"/>，与本域行为分离。模板层级对齐 ABP Pro 官方口径
-/// （首页打头 → 业务域 → 管理治理 → SaaS → 系统，见 MenuTemplateDefinition），权限绑定与前端
-/// access.ts 的 grantedPolicies 映射一致。Domain 层不引用 Application.Contracts，权限名用字面量
-/// （与各模块 PermissionDefinitionProvider 注册名一致，稳定不变）。
+/// 同步宿主菜单模板，并按租户套餐创建或重置租户菜单。
 /// </summary>
 public class MenuManager : DomainService, ITransientDependency
 {
@@ -80,20 +76,13 @@ public class MenuManager : DomainService, ITransientDependency
     }
 
     /// <summary>
-    /// 播种 Host 全局模板（幂等且同步：先按模板顺序补缺节点，再把已有节点的
-    /// 父/序/题/图标/权限对齐到模板——模板重排后重跑 DbMigrator 即可让存量环境跟进，
-    /// 不再需要「删表重种」或菜单管理页手工对齐）。
-    /// 故意不同步的字段：Name/Path/Type（前端 i18n 键与 URL 的稳定面，模板侧也不改它们）；
-    /// 故意不删除：模板中已移除的节点保留在库中（管理员经菜单管理页添加的自定义项
-    /// 不会被框架升级吞掉，需要下线时在菜单管理页停用/删除）。租户侧菜单是首次访问时的
-    /// Host 快照拷贝，存量租户不自动跟随模板重排（租户菜单属租户资产）。
+    /// 按路径幂等同步宿主模板。已有节点保留 ID，仅更新父级、顺序、标题、图标和权限。
+    /// 模板外菜单和已有租户的菜单快照保留。
     /// </summary>
     public virtual async Task SeedHostTemplateAsync()
     {
         using (_dataFilter.Disable<IMultiTenant>())
         {
-            // 一次全表查询同时充当「已存在判定」与「已存在实体读取」（按 Path 分组防重复行），
-            // 避免循环内对每个已存在节点再查一次全表
             var hostMenusByPath = (await _menuRepository.GetListAsync(x => x.TenantId == null))
                 .Where(x => x.Path != null)
                 .GroupBy(x => x.Path!)
@@ -103,7 +92,7 @@ public class MenuManager : DomainService, ITransientDependency
             var keyToId = new Dictionary<string, Guid>();
             var existingByTemplateKey = new List<(MenuDefinition Def, Guid Id)>();
 
-            // 阶段一（按定义顺序，模板列表保证父在子前）：缺的插入、存在的记账待对齐
+            // 按父先子后补齐节点，并记录新旧节点的 ID。
             foreach (var def in definitions)
             {
                 if (def.Path != null && hostMenusByPath.TryGetValue(def.Path, out var existing))
@@ -132,8 +121,7 @@ public class MenuManager : DomainService, ITransientDependency
                 keyToId[def.Key] = menu.Id;
             }
 
-            // 阶段二：存量节点对齐模板（父/序/题/图标/权限）。全部 keyToId 已就绪，
-            // 新插组（如模板新增顶层组）也能作为旧节点的挂接目标。
+            // 全部 ID 已就绪，已有节点也能移到新目录。
             foreach (var (def, id) in existingByTemplateKey)
             {
                 var menu = await _menuRepository.GetAsync(id);
@@ -153,15 +141,8 @@ public class MenuManager : DomainService, ITransientDependency
     }
 
     /// <summary>
-    /// 租户懒拷贝：租户还没有任何菜单时，从 Host 模板拷贝一份。
-    /// allowedTemplateMenuIds 为 null 表示全量拷贝。
-    /// 租户已配置套餐（Tenant extra property PackageId）且未显式指定过滤集时，按套餐勾选过滤——
-    /// 让"套餐"成为数据：即使应用套餐的请求曾失败，租户首次访问也会按套餐收敛，
-    /// 而不是先看到全量菜单等管理员补救。
-    /// 并发首访：先短缓存、再计数双检，拷贝+提交整体由分布式锁串行（多实例安全，
-    /// ABP StaticPermissionSaver 同款范式：锁内开独立事务，提交先于锁释放）。
-    /// 锁超时裸拷贝的极端竞态由 (TenantId, Path) 唯一索引兜底——后提交方撞索引抛
-    /// DbUpdateException 以 500 暴露（宁可失败不可脏数据）。
+    /// 租户没有菜单时，从宿主模板复制。省略过滤集时读取租户套餐，无可用套餐勾选时复制全量。
+    /// 获锁后在独立事务内复查并提交。超时后再次复查，仍为空时无锁复制，由菜单路径唯一索引兜底。
     /// </summary>
     public virtual async Task EnsureTenantMenusAsync(Guid tenantId, HashSet<Guid>? allowedTemplateMenuIds = null)
     {
@@ -213,7 +194,7 @@ public class MenuManager : DomainService, ITransientDependency
                         else
                         {
                             Logger.LogDebug(
-                                "Tenant {TenantId} menus already exist (copied by another instance); skipping copy.",
+                                "Tenant {TenantId} menus already exist; skipping lazy copy.",
                                 tenantId);
                         }
 
@@ -238,8 +219,7 @@ public class MenuManager : DomainService, ITransientDependency
                 return;
             }
 
-            // 锁等待超时仍未拿到锁（持锁方拷贝异常缓慢）：重查一次，仍无数据就裸拷贝，
-            // 由唯一索引兜底（并发拷贝撞索引 → 500，宁可失败不可脏数据）
+            // 等锁期间可能已有请求完成复制，无锁复制前再次检查。
             if (await _menuRepository.CountAsync(x => true) > 0)
             {
                 MarkTenantSeeded(tenantId);
@@ -247,9 +227,8 @@ public class MenuManager : DomainService, ITransientDependency
             else
             {
                 Logger.LogWarning(
-                    "Distributed lock for tenant menu lazy-copy timed out ({LockTimeoutSeconds}s); " +
-                    "proceeding with an unlocked bare copy for tenant {TenantId}. " +
-                    "Concurrent copies collide on the (TenantId, Path) unique index and fail with 500.",
+                    "Timed out waiting {LockTimeoutSeconds}s for the menu copy lock; copying without the lock for tenant {TenantId}. " +
+                    "Concurrent inserts may conflict on the menu path unique index.",
                     CopyLockTimeoutSeconds, tenantId);
 
                 await CopyTemplateToTenantAsync(tenantId, allowedTemplateMenuIds);
@@ -354,9 +333,9 @@ public class MenuManager : DomainService, ITransientDependency
                 await _unitOfWorkManager.Current.SaveChangesAsync();
             }
 
-            // 实际落库的节点数 = 过滤（FilterWithAncestors）后的 templateMenus 数量
-            Logger.LogInformation(
-                "Lazy-copied {MenuCount} menu(s) from the host template to tenant {TenantId}.",
+            // 事务由调用方提交，此处只记录已准备的节点数。
+            Logger.LogDebug(
+                "Prepared {MenuCount} menu(s) from the host template for tenant {TenantId}.",
                 templateMenus.Count, tenantId);
         }
     }
@@ -372,8 +351,7 @@ public class MenuManager : DomainService, ITransientDependency
     /// </summary>
     public virtual async Task ResetTenantMenusAsync(Guid tenantId, HashSet<Guid>? allowedTemplateMenuIds)
     {
-        // 硬删全部菜单后必须清掉「已播种」短缓存，否则紧随其后的 EnsureTenantMenusAsync
-        // 会被缓存短路，租户菜单停留在空树（应用套餐场景）
+        // 重置可能改变租户菜单是否为空，先清除检查缓存。
         ClearSeededCheckCache(tenantId);
 
         await using (var handle = await _distributedLock.TryAcquireAsync(

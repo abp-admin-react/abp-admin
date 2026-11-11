@@ -1,11 +1,4 @@
-/**
- * 菜单层级参照 ABP 官方启动模板（https://abp.io/get-started）：
- * - 主菜单：Home + Administration（组内顺序 Saas(1) → Identity(2) → Settings(3)，见模板
- *   MyProjectNameMenuContributor），其余管理类模块（OpenIddict、本地化、文本模板、审计日志）同样挂在 Administration 下
- * - 项目自定义的运维页归入"系统"组，业务功能（文件/支付）挂在 Administration 末尾，
- *   业务示例保留独立路由，个人中心从头像菜单进入
- * - 历史路径（/identity/*、/saas/* 等）以 redirect 保留，兼容旧收藏夹
- */
+/** 页面路由、访问权限和历史地址跳转。运行时侧栏分组由 /api/app/my-menu 提供。 */
 export default [
   {
     path: '/user',
@@ -353,15 +346,12 @@ export default [
     ],
   },
   {
-    // 收付款域（AbpAdmin.Ordering + AbpAdmin.Collection）：只给 Host 用户，后端有 Host 守卫。
-    // 整域一个父组，子项按使用频率排：资金看板（默认落地）→ 订单 → 充值/归集/金库（运营监控）
-    // → 链网配置（高危运维，独立权限）。父组入口默认落在资金看板。
+    // 收付款路由仅供宿主使用，前端权限与后端宿主守卫分别校验。
     path: '/collection',
     name: 'collection',
     icon: 'payCircle',
     access: 'canViewTrade',
     routes: [
-      // 菜单重排：资金看板为收付款域默认落地页（总览先行，与菜单序一致）
       { path: '/collection', redirect: '/collection/dashboard' },
       {
         path: '/collection/dashboard',

@@ -35,9 +35,7 @@ public class MyMenuAppService : AbpAdminAppService, IMyMenuAppService
 
     public virtual async Task<ListResultDto<MyMenuItemDto>> GetAsync()
     {
-        // 租户首次访问：懒拷贝全局模板（租户已配套餐时由 MenuManager 按套餐过滤）。
-        // Host 侧不再做"空表即补种"兜底：管理员删光 Host 菜单是合法配置，
-        // 自动复活模板会静默回滚删除操作；播种是 DbMigrator/MenuDataSeedContributor 的职责。
+        // 租户首次访问时按套餐懒拷贝。宿主读取空菜单时直接返回，保留管理员配置。
         if (CurrentTenant.Id != null)
         {
             await _menuManager.EnsureTenantMenusAsync(CurrentTenant.Id.Value);
@@ -54,11 +52,7 @@ public class MyMenuAppService : AbpAdminAppService, IMyMenuAppService
         return new ListResultDto<MyMenuItemDto>(roots);
     }
 
-    /// <summary>
-    /// 权限检查（批量）：绑定权限的节点要求 ABP 权限已授予。
-    /// 逐名 IsGrantedAsync 会遍历全部 ValueProvider（约 27 个权限 × 角色+1 次缓存读取），
-    /// 批量重载一次往返拿全量结果。
-    /// </summary>
+    /// <summary>去重后批量检查菜单绑定的 ABP 权限，减少逐项调用权限提供器。</summary>
     private async Task<HashSet<string>> GetGrantedPermissionsAsync(IReadOnlyCollection<Menu> menus)
     {
         var permissionNames = menus
