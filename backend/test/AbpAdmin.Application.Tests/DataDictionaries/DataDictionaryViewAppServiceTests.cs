@@ -69,8 +69,8 @@ public abstract class DataDictionaryViewAppServiceTests<TStartupModule> : AbpAdm
             MaxResultCount = 5
         });
 
-        // 种子默认 12 个字典（6 手写 + 6 枚举同步），全部在 host 上下文
-        page.TotalCount.ShouldBe(12);
+        // 移除岗位状态后，host 种子保留 6 个手写字典和 5 个枚举字典。
+        page.TotalCount.ShouldBe(11);
         page.Items.Count.ShouldBe(5);
         // 列表项带 Id（前端 rowKey）与 isStatic，不带 Items
         page.Items.ShouldAllBe(i => i.Id != Guid.Empty);
@@ -82,7 +82,7 @@ public abstract class DataDictionaryViewAppServiceTests<TStartupModule> : AbpAdm
             SkipCount = 5,
             MaxResultCount = 100
         });
-        secondPage.Items.Count.ShouldBe(7);
+        secondPage.Items.Count.ShouldBe(6);
         secondPage.Items.Select(i => i.Code).ShouldNotContain(page.Items.Select(i => i.Code).First());
     }
 
