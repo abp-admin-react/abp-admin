@@ -27,16 +27,6 @@ public static class AbpAdminDomainErrorCodes
         /// <summary>目录类型必须有子菜单，菜单类型必须有路由地址。</summary>
         public const string MenuTypeMismatch = "AbpAdmin:MenuTypeMismatch";
 
-        /// <summary>分配菜单时角色不存在。</summary>
-        public const string MenuRoleNotFound = "AbpAdmin:MenuRoleNotFound";
-
-        /// <summary>
-        /// 菜单授权写入撞唯一索引（另一管理者并发改了同一角色的授权集）。
-        /// (MenuId, ProviderName, ProviderKey) 唯一索引把并发双写从「静默重复行」
-        /// 转成可捕获冲突；fail-closed 拒绝并提示刷新重试，绝不部分落库。
-        /// </summary>
-        public const string MenuGrantConflict = "AbpAdmin:MenuGrantConflict";
-
         /// <summary>租户上下文读不到宿主菜单模板（独立数据库租户或模板未播种）。</summary>
         public const string HostTemplateMissing = "AbpAdmin:MenuHostTemplateMissing";
 
@@ -382,18 +372,6 @@ public static class AbpAdminDomainErrorCodes
 
         /// <summary>扩展名不在白名单内。</summary>
         public const string InvalidImageExtension = "AbpAdmin:InvalidImageExtension";
-    }
-
-    /// <summary>
-    /// 岗位管理（对标 RuoYi sys_post）错误码。
-    /// </summary>
-    public static class Posts
-    {
-        /// <summary>岗位名已存在（WithData("Name")）。</summary>
-        public const string PostNameDuplicate = "AbpAdmin:PostNameDuplicate";
-
-        /// <summary>岗位编码已存在（WithData("Code")）。</summary>
-        public const string PostCodeDuplicate = "AbpAdmin:PostCodeDuplicate";
     }
 
     /// <summary>

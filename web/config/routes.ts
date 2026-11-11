@@ -3,7 +3,7 @@
  * - 主菜单：Home + Administration（组内顺序 Saas(1) → Identity(2) → Settings(3)，见模板
  *   MyProjectNameMenuContributor），其余管理类模块（OpenIddict、本地化、文本模板、审计日志）同样挂在 Administration 下
  * - 项目自定义的运维页归入"系统"组，业务功能（文件/支付）挂在 Administration 末尾，
- *   演示页与个人信息（当前会话）保持顶级
+ *   业务示例保留独立路由，个人中心从头像菜单进入
  * - 历史路径（/identity/*、/saas/* 等）以 redirect 保留，兼容旧收藏夹
  */
 export default [
@@ -95,12 +95,6 @@ export default [
             component: './identity/organization-units',
           },
           {
-            path: '/administration/identity/posts',
-            name: 'posts',
-            access: 'canManagePosts',
-            component: './identity/posts',
-          },
-          {
             path: '/administration/identity/claim-types',
             name: 'claim-types',
             access: 'canManageClaimTypes',
@@ -126,13 +120,6 @@ export default [
         icon: 'api',
         access: 'canManageWebhooks',
         component: './webhooks',
-      },
-      {
-        path: '/administration/permission-definitions',
-        name: 'permission-definitions',
-        icon: 'key',
-        access: 'canManagePermissionDefinitions',
-        component: './permission-definitions',
       },
       {
         path: '/administration/openiddict',
@@ -294,19 +281,11 @@ export default [
     ],
   },
   {
-    path: '/data-scope-demo',
-    name: 'data-scope-demo',
-    icon: 'database',
-    access: 'canManageDataScopeDemo',
-    component: './data-scope-demo',
-  },
-  {
-    // 业务模块数据权限示例：同一能力的自包含模块落地（AbpAdmin.Biz.Template），
-    // 与框架 data-scope-demo 并存（后者退役后由本页承接演示职责）
+    // 业务数据范围扩展配置与 Biz.Template 示例。
     path: '/biz-template/data-scope',
     name: 'biz-template-data-scope',
     icon: 'apartment',
-    access: 'canManageBizDataScopeDemo',
+    access: 'canOpenDataScopeExtension',
     component: './biz-template/data-scope',
   },
   {
@@ -434,12 +413,6 @@ export default [
         component: './collection/network',
       },
     ],
-  },
-  {
-    path: '/current-session',
-    name: 'current-session',
-    icon: 'user',
-    component: './current-session',
   },
   {
     path: '/account/center',
@@ -579,6 +552,6 @@ export default [
   {
     component: './exception/404',
     layout: false,
-    path: './*',
+    path: '/*',
   },
 ];

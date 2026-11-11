@@ -36,6 +36,7 @@ export type IdentityRoleDto = {
   isPublic?: boolean;
   isStatic?: boolean;
   concurrencyStamp?: string;
+  extraProperties?: { Remark?: string | null };
 };
 
 export type PagedResult<T> = {
@@ -138,10 +139,19 @@ export async function getAllRoles() {
   });
 }
 
+/** 当前操作者可分配的角色（Identity 官方用户端点，包含角色分配的防提权约束）。 */
+export async function getAssignableRoles() {
+  return request<{ items: IdentityRoleDto[] }>(
+    '/api/identity/users/assignable-roles',
+    { method: 'GET' },
+  );
+}
+
 export async function createRole(data: {
   name: string;
   isDefault?: boolean;
   isPublic?: boolean;
+  extraProperties?: IdentityRoleDto['extraProperties'];
 }) {
   return request<IdentityRoleDto>('/api/identity/roles', {
     method: 'POST',
@@ -156,6 +166,7 @@ export async function updateRole(
     isDefault?: boolean;
     isPublic?: boolean;
     concurrencyStamp?: string;
+    extraProperties?: IdentityRoleDto['extraProperties'];
   },
 ) {
   return request<IdentityRoleDto>(`/api/identity/roles/${id}`, {

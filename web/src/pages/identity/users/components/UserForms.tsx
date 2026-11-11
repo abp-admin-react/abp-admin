@@ -5,7 +5,7 @@ import {
   ProFormSwitch,
   ProFormText,
 } from '@ant-design/pro-components';
-import { App, Space } from 'antd';
+import { App, Collapse } from 'antd';
 import React, { useRef } from 'react';
 import {
   createUser,
@@ -128,42 +128,68 @@ export const UserForm: React.FC<{
   title: string;
   trigger: React.ReactElement;
   roles: IdentityRoleDto[];
+  canManageRoles?: boolean;
   record?: IdentityUserDto;
   hideActive?: boolean;
   onSuccess: () => void;
-}> = ({ title, trigger, roles, record, hideActive, onSuccess }) => {
+}> = ({
+  title,
+  trigger,
+  roles,
+  canManageRoles = false,
+  record,
+  hideActive,
+  onSuccess,
+}) => {
   const { message } = App.useApp();
+  const loadedRoles = useRef<Set<string> | undefined>(undefined);
   return (
     <ModalForm
       title={title}
       trigger={trigger}
+      width={560}
       modalProps={{ destroyOnHidden: true }}
       request={async () => {
+        loadedRoles.current = undefined;
         if (!record) {
           return { isActive: true, lockoutEnabled: true, roleNames: [] };
         }
-        const userRoles = await getUserRoles(record.id);
+        // ABP 返回有效角色，包含部门角色。资料编辑时只提交明确改过的角色选项。
+        const userRoles = canManageRoles
+          ? await getUserRoles(record.id)
+          : undefined;
+        const roleNames = userRoles?.items.map((item) => item.name);
+        if (roleNames) loadedRoles.current = new Set(roleNames);
         return {
           ...record,
-          roleNames: (userRoles.items || []).map((item) => item.name),
+          roleNames,
         };
       }}
       onFinish={async (values: UserFormValues) => {
         // required 规则已挡空值，这里按分支收窄给 DTO 的必填字段；
-        // 开关类字段的 undefined 按「未勾选」语义兜底为 false
+        // 未展开更多选项时保留已有开关值；没有角色管理权限时不回写角色。
         if (record) {
           if (!values.userName || !values.email) {
             return false;
           }
+          const previousRoles = loadedRoles.current;
+          const rolesChanged =
+            canManageRoles &&
+            previousRoles &&
+            values.roleNames &&
+            (previousRoles.size !== values.roleNames.length ||
+              values.roleNames.some((name) => !previousRoles.has(name)));
           await updateUser(record.id, {
             userName: values.userName,
             email: values.email,
             name: values.name,
             surname: values.surname,
             phoneNumber: values.phoneNumber,
-            isActive: hideActive ? record.isActive : (values.isActive ?? false),
-            lockoutEnabled: values.lockoutEnabled ?? false,
-            roleNames: values.roleNames,
+            isActive: hideActive
+              ? record.isActive
+              : (values.isActive ?? record.isActive),
+            lockoutEnabled: values.lockoutEnabled ?? record.lockoutEnabled,
+            ...(rolesChanged ? { roleNames: values.roleNames } : {}),
             concurrencyStamp: record.concurrencyStamp,
           });
         } else {
@@ -179,7 +205,7 @@ export const UserForm: React.FC<{
             phoneNumber: values.phoneNumber,
             isActive: values.isActive ?? false,
             lockoutEnabled: values.lockoutEnabled ?? false,
-            roleNames: values.roleNames,
+            ...(canManageRoles ? { roleNames: values.roleNames } : {}),
           });
         }
         message.success('已保存');
@@ -200,9 +226,6 @@ export const UserForm: React.FC<{
           { type: 'email', message: '邮箱格式不正确' },
         ]}
       />
-      <ProFormText name="name" label="名" />
-      <ProFormText name="surname" label="姓" />
-      <ProFormText name="phoneNumber" label="手机号" />
       {!record && (
         <ProFormText.Password
           name="password"
@@ -212,16 +235,40 @@ export const UserForm: React.FC<{
           fieldProps={{ autoComplete: 'new-password' }}
         />
       )}
-      <ProFormSelect
-        name="roleNames"
-        label="角色"
-        mode="multiple"
-        options={roles.map((item) => ({ label: item.name, value: item.name }))}
+      {canManageRoles && (
+        <ProFormSelect
+          name="roleNames"
+          label="角色"
+          mode="multiple"
+          options={roles.map((item) => ({
+            label: item.name,
+            value: item.name,
+          }))}
+          extra="部门授予的角色自动生效，在部门中调整。"
+        />
+      )}
+      {!hideActive && <ProFormSwitch name="isActive" label="启用账号" />}
+      <Collapse
+        items={[
+          {
+            key: 'more',
+            label: '更多选项',
+            forceRender: true,
+            children: (
+              <>
+                <ProFormText name="name" label="名" />
+                <ProFormText name="surname" label="姓" />
+                <ProFormText name="phoneNumber" label="手机号" />
+                <ProFormSwitch
+                  name="lockoutEnabled"
+                  label="允许登录失败锁定"
+                  extra="连续登录失败达到系统阈值时暂时锁定账号。"
+                />
+              </>
+            ),
+          },
+        ]}
       />
-      <Space>
-        {!hideActive && <ProFormSwitch name="isActive" label="启用" />}
-        <ProFormSwitch name="lockoutEnabled" label="允许锁定" />
-      </Space>
     </ModalForm>
   );
 };

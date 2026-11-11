@@ -9,9 +9,9 @@ import {
 import { useAccess, useModel } from '@umijs/max';
 import { App, Button, Popconfirm, Tag } from 'antd';
 import React, { useRef, useState } from 'react';
+import { getAllEditions } from '@/abp/proModules';
 import { applyTenantPackage } from '@/abp/tenantPackages';
 import { createTenant, deleteTenant, getTenants } from '@/abp/tenants';
-import { getAllEditions } from '@/abp/proModules';
 import type { CreateTenantInput, TenantDto } from '@/abp/types';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import FeatureModal from '@/components/FeatureModal';
@@ -96,7 +96,6 @@ const TenantsPage: React.FC = () => {
   const { message } = App.useApp();
   const { initialState } = useModel('@@initialState');
   const [featureTarget, setFeatureTarget] = useState<TenantDto>();
-  const [hostFeaturesOpen, setHostFeaturesOpen] = useState(false);
   // T3.4：激活状态的文案与颜色来自数据字典（字典项 Code 是枚举数值字符串）
   const activationDict = useDictionary('TenantActivationState');
   const activationByCode = new Map(
@@ -237,14 +236,6 @@ const TenantsPage: React.FC = () => {
           };
         }}
         toolBarRender={() => [
-          access.canManageHostFeatures ? (
-            <Button
-              key="host-features"
-              onClick={() => setHostFeaturesOpen(true)}
-            >
-              管理 Host 功能
-            </Button>
-          ) : null,
           <CreateTenantModal key="create" onSuccess={reload} />,
         ]}
       />
@@ -254,12 +245,6 @@ const TenantsPage: React.FC = () => {
         providerName="T"
         providerKey={featureTarget?.id}
         onClose={() => setFeatureTarget(undefined)}
-      />
-      <FeatureModal
-        open={hostFeaturesOpen}
-        title="Host 功能"
-        providerName="T"
-        onClose={() => setHostFeaturesOpen(false)}
       />
     </PageContainer>
   );

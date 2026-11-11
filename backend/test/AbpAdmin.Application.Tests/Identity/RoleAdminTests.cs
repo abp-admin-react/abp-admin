@@ -2,10 +2,10 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.DataScopes;
-using AbpAdmin.Menus;
 using Microsoft.AspNetCore.Identity;
 using Shouldly;
 using Volo.Abp;
+using Volo.Abp.Data;
 using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
@@ -17,8 +17,8 @@ namespace AbpAdmin.Identity;
 /* 角色管理自研扩展的应用服务级测试：
  * 1. 删除保护（AbpAdminRoleAppService 替换 IdentityRoleAppService）：角色下仍有用户时拒绝删除；
  * 2. 角色重命名级联（RoleRenamedCascadeHandler 订阅 IdentityRoleNameChangedEto）：
- *    MenuGrant.ProviderKey 与 RoleDataScope.RoleName 跟随新名，旧行不残留；
- * 3. 删除级联（RoleDeletedCascadeHandler）：无人使用的角色删除后两张自研表同步清理；
+ *    RoleDataScope.RoleName 跟随新名，旧行不残留；
+ * 3. 删除级联（RoleDeletedCascadeHandler）：无人使用的角色删除后自定义数据范围同步清理；
  * 4. 角色下用户只读查询（RoleUserAdminAppService）：分页/总数/非成员排除。
  */
 public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
@@ -28,8 +28,6 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
     private readonly IRoleUserAdminAppService _roleUserAppService;
     private readonly IIdentityRoleRepository _roleRepository;
     private readonly IdentityUserManager _userManager;
-    private readonly IRepository<Menu, Guid> _menuRepository;
-    private readonly IRepository<MenuGrant, Guid> _menuGrantRepository;
     private readonly IRepository<RoleDataScope, Guid> _roleDataScopeRepository;
 
     protected RoleAdminTests()
@@ -38,8 +36,6 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
         _roleUserAppService = GetRequiredService<IRoleUserAdminAppService>();
         _roleRepository = GetRequiredService<IIdentityRoleRepository>();
         _userManager = GetRequiredService<IdentityUserManager>();
-        _menuRepository = GetRequiredService<IRepository<Menu, Guid>>();
-        _menuGrantRepository = GetRequiredService<IRepository<MenuGrant, Guid>>();
         _roleDataScopeRepository = GetRequiredService<IRepository<RoleDataScope, Guid>>();
     }
 
@@ -48,19 +44,6 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
         var role = new Volo.Abp.Identity.IdentityRole(Guid.NewGuid(), roleName);
         await WithUnitOfWorkAsync(() => _roleRepository.InsertAsync(role, autoSave: true));
         return role;
-    }
-
-    private async Task<MenuGrant> CreateMenuGrantAsync(string roleName, string suffix)
-    {
-        var menu = new Menu(Guid.NewGuid(), null, null, MenuTypeEnum.Menu,
-            $"重命名级联-{suffix}", name: $"rn-cascade-{suffix}", path: $"/rn-cascade/{suffix}");
-        var grant = new MenuGrant(Guid.NewGuid(), menu.Id, null, MenuConsts.RoleProviderName, roleName);
-        await WithUnitOfWorkAsync(async () =>
-        {
-            await _menuRepository.InsertAsync(menu, autoSave: true);
-            await _menuGrantRepository.InsertAsync(grant, autoSave: true);
-        });
-        return grant;
     }
 
     private async Task CreateUsersInRoleAsync(string roleName, string suffix, int count)
@@ -87,6 +70,88 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
     }
 
     [Fact]
+    public async Task Role_Remark_Should_Round_Trip_And_Survive_Updates_From_Older_Clients()
+    {
+        var roleName = $"remark-{Guid.NewGuid():N}";
+        var create = new IdentityRoleCreateDto { Name = roleName };
+        create.SetProperty(RoleRemarkConsts.PropertyName, "负责审核订单");
+
+        var role = await _roleAppService.CreateAsync(create);
+        role.GetProperty<string>(RoleRemarkConsts.PropertyName).ShouldBe("负责审核订单");
+
+        var list = await _roleAppService.GetListAsync(new GetIdentityRolesInput { Filter = roleName });
+        list.Items.Single(item => item.Id == role.Id)
+            .GetProperty<string>(RoleRemarkConsts.PropertyName).ShouldBe("负责审核订单");
+
+        var detail = await _roleAppService.GetAsync(role.Id);
+        detail.GetProperty<string>(RoleRemarkConsts.PropertyName).ShouldBe("负责审核订单");
+
+        await _roleAppService.UpdateAsync(role.Id, new IdentityRoleUpdateDto
+        {
+            Name = detail.Name,
+            IsDefault = detail.IsDefault,
+            IsPublic = true,
+            ConcurrencyStamp = detail.ConcurrencyStamp
+        });
+
+        detail = await _roleAppService.GetAsync(role.Id);
+        detail.IsPublic.ShouldBeTrue();
+        detail.GetProperty<string>(RoleRemarkConsts.PropertyName).ShouldBe("负责审核订单");
+
+        var clear = new IdentityRoleUpdateDto
+        {
+            Name = detail.Name,
+            IsDefault = detail.IsDefault,
+            IsPublic = detail.IsPublic,
+            ConcurrencyStamp = detail.ConcurrencyStamp
+        };
+        clear.SetProperty(RoleRemarkConsts.PropertyName, string.Empty);
+        await _roleAppService.UpdateAsync(role.Id, clear);
+
+        (await _roleAppService.GetAsync(role.Id)).GetProperty<string>(RoleRemarkConsts.PropertyName)
+            .ShouldBe(string.Empty);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_Change_Only_The_Selected_Static_Role_Remark_When_Names_Match()
+    {
+        var roleName = $"static-remark-{Guid.NewGuid():N}";
+        var selectedRole = new Volo.Abp.Identity.IdentityRole(Guid.NewGuid(), roleName)
+        {
+            IsStatic = true,
+            IsDefault = true,
+            IsPublic = true
+        };
+        var otherRole = new Volo.Abp.Identity.IdentityRole(Guid.NewGuid(), roleName) { IsStatic = true };
+        otherRole.SetProperty(RoleRemarkConsts.PropertyName, "另一角色的备注");
+        // 模拟存量数据中宿主侧同名的系统角色，绕过创建新角色时的名称检查。
+        await WithUnitOfWorkAsync(async () =>
+        {
+            await _roleRepository.InsertAsync(selectedRole, autoSave: true);
+            await _roleRepository.InsertAsync(otherRole, autoSave: true);
+        });
+
+        var update = new IdentityRoleUpdateDto
+        {
+            Name = selectedRole.Name,
+            IsDefault = selectedRole.IsDefault,
+            IsPublic = selectedRole.IsPublic,
+            ConcurrencyStamp = selectedRole.ConcurrencyStamp
+        };
+        update.SetProperty(RoleRemarkConsts.PropertyName, "只改这个角色的备注");
+        await _roleAppService.UpdateAsync(selectedRole.Id, update);
+
+        var selected = await _roleAppService.GetAsync(selectedRole.Id);
+        selected.GetProperty<string>(RoleRemarkConsts.PropertyName).ShouldBe("只改这个角色的备注");
+        selected.Name.ShouldBe(roleName);
+        selected.IsStatic.ShouldBeTrue();
+        selected.IsDefault.ShouldBeTrue();
+        selected.IsPublic.ShouldBeTrue();
+        (await _roleAppService.GetAsync(otherRole.Id)).GetProperty<string>(RoleRemarkConsts.PropertyName)
+            .ShouldBe("另一角色的备注");
+    }
+
+    [Fact]
     public async Task DeleteAsync_Should_Reject_When_Role_Has_Users()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
@@ -108,7 +173,6 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var role = await CreateRoleAsync($"del-ok-{suffix}");
-        var grant = await CreateMenuGrantAsync(role.Name!, suffix);
         await WithUnitOfWorkAsync(() => _roleDataScopeRepository.InsertAsync(
             new RoleDataScope(Guid.NewGuid(), role.Name!, DataScopeTypeEnum.SelfOnly), autoSave: true));
 
@@ -117,19 +181,17 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
         await WithUnitOfWorkAsync(async () =>
         {
             (await _roleRepository.FindAsync(role.Id)).ShouldBeNull();
-            (await _menuGrantRepository.FindAsync(grant.Id)).ShouldBeNull();
             (await _roleDataScopeRepository.FirstOrDefaultAsync(x => x.RoleName == role.Name!)).ShouldBeNull();
         });
     }
 
     [Fact]
-    public async Task UpdateAsync_Rename_Should_Cascade_MenuGrant_And_RoleDataScope()
+    public async Task UpdateAsync_Rename_Should_Cascade_RoleDataScope()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var oldName = $"rn-old-{suffix}";
         var newName = $"rn-new-{suffix}";
         var role = await CreateRoleAsync(oldName);
-        var grant = await CreateMenuGrantAsync(oldName, suffix);
         await WithUnitOfWorkAsync(() => _roleDataScopeRepository.InsertAsync(
             new RoleDataScope(Guid.NewGuid(), oldName, DataScopeTypeEnum.SelfOnly), autoSave: true));
 
@@ -142,58 +204,12 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
             ConcurrencyStamp = role.ConcurrencyStamp
         });
 
-        // 两张以角色名为键的自研表都跟随新名，旧行不残留
+        // 以角色名为键的数据范围跟随新名，旧行不残留
         await WithUnitOfWorkAsync(async () =>
         {
-            var renamedGrant = await _menuGrantRepository.FindAsync(grant.Id);
-            renamedGrant.ShouldNotBeNull();
-            renamedGrant.ProviderKey.ShouldBe(newName);
-            (await _menuGrantRepository.GetListAsync(x => x.ProviderKey == oldName)).Count.ShouldBe(0);
-
             var renamedScope = await _roleDataScopeRepository.FirstOrDefaultAsync(x => x.RoleName == newName);
             renamedScope.ShouldNotBeNull();
             (await _roleDataScopeRepository.GetListAsync(x => x.RoleName == oldName)).Count.ShouldBe(0);
-        });
-    }
-
-    [Fact]
-    public async Task UpdateAsync_Rename_Should_Merge_Grants_When_Target_Name_Has_Orphan_Rows()
-    {
-        // 改名到「曾存在后又删除的角色」的名字：孤儿授权行（历史残留）与改后新名在同一
-        // 菜单上碰撞 (MenuId, ProviderName, ProviderKey) 唯一索引——级联必须走合并语义
-        // （删旧行、保留目标名行）而不是直接改键，否则整个改名 500。
-        var suffix = Guid.NewGuid().ToString("N")[..8];
-        var sourceName = $"rn-merge-src-{suffix}";
-        var targetName = $"rn-merge-tgt-{suffix}";
-        var role = await CreateRoleAsync(sourceName);
-        var menu = new Menu(Guid.NewGuid(), null, null, MenuTypeEnum.Menu,
-            $"合并-{suffix}", name: $"rn-merge-{suffix}", path: $"/rn-merge/{suffix}");
-        await WithUnitOfWorkAsync(async () =>
-        {
-            await _menuRepository.InsertAsync(menu, autoSave: true);
-            // 当前角色的授权行（应跟随新名）
-            await _menuGrantRepository.InsertAsync(
-                new MenuGrant(Guid.NewGuid(), menu.Id, null, MenuConsts.RoleProviderName, sourceName), autoSave: true);
-            // 目标名的孤儿授权行（角色已删但行残留）
-            await _menuGrantRepository.InsertAsync(
-                new MenuGrant(Guid.NewGuid(), menu.Id, null, MenuConsts.RoleProviderName, targetName), autoSave: true);
-        });
-
-        await _roleAppService.UpdateAsync(role.Id, new IdentityRoleUpdateDto
-        {
-            Name = targetName,
-            IsDefault = false,
-            IsPublic = false,
-            ConcurrencyStamp = role.ConcurrencyStamp
-        });
-
-        await WithUnitOfWorkAsync(async () =>
-        {
-            var rows = await _menuGrantRepository.GetListAsync(
-                x => x.MenuId == menu.Id && x.ProviderKey == targetName);
-            // 合并后目标名恰好一行（旧行删、孤行留），无重复无残留
-            rows.Count.ShouldBe(1);
-            (await _menuGrantRepository.GetListAsync(x => x.ProviderKey == sourceName)).ShouldBeEmpty();
         });
     }
 

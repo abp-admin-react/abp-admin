@@ -1,4 +1,3 @@
-import { LinkOutlined } from '@ant-design/icons';
 import type { Settings as LayoutSettings } from '@ant-design/pro-components';
 import { SettingDrawer } from '@ant-design/pro-components';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -37,7 +36,6 @@ import { isSafeMenuPath } from '@/utils/redirect';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
-const isDev = process.env.NODE_ENV === 'development';
 const loginPath = '/user/login';
 const forceChangePasswordPath = '/account/force-change-password';
 const publicPaths = [loginPath, '/user/callback', '/tenant-not-found'];
@@ -211,7 +209,7 @@ export const layout: RunTimeLayoutConfig = ({
   setInitialState,
 }) => {
   return {
-    // 动态菜单：服务端按混合授权（权限 + 角色勾选）下发可见菜单树；
+    // 动态菜单：服务端按绑定的 ABP 功能权限下发可见菜单树；
     // 请求失败时 ProLayout 回退到 config/routes.ts 的静态菜单。
     // 注意：运行时配置会整体覆盖默认 menu 对象，locale 必须显式带 true，
     // 否则菜单标题的 menu.* 国际化会失效（ProLayout getMenuData 以 menu?.locale 判断）。
@@ -281,14 +279,6 @@ export const layout: RunTimeLayoutConfig = ({
         );
       }
     },
-    links: isDev
-      ? [
-          <Link key="openapi" to="/umi/plugin/openapi" target="_blank">
-            <LinkOutlined />
-            <span>OpenAPI 文档</span>
-          </Link>,
-        ]
-      : [],
     ErrorBoundary,
     menuHeaderRender: undefined,
     childrenRender: (children) => {

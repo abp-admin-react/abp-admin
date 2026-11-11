@@ -16,10 +16,8 @@ public static class MenuTreeBuilder
     /// 平铺菜单实体 → MenuTreeDto 树。悬空 ParentId（父行不存在）的节点上浮为根，
     /// 与 my-menu 的上浮语义一致，管理端不会因脏数据丢节点。
     /// </summary>
-    public static List<MenuTreeDto> Build(IEnumerable<Menu> menus, IReadOnlyDictionary<Guid, List<string>>? grantedRolesByMenuId = null)
+    public static List<MenuTreeDto> Build(IEnumerable<Menu> menus)
     {
-        grantedRolesByMenuId ??= new Dictionary<Guid, List<string>>();
-
         var dtoById = menus.ToDictionary(
             x => x.Id,
             x => new MenuTreeDto
@@ -37,8 +35,7 @@ public static class MenuTreeBuilder
                 IsEnabled = x.IsEnabled,
                 PermissionName = x.PermissionName,
                 Remark = x.Remark,
-                ConcurrencyStamp = x.ConcurrencyStamp,
-                GrantedRoles = grantedRolesByMenuId.TryGetValue(x.Id, out var roles) ? roles : new List<string>()
+                ConcurrencyStamp = x.ConcurrencyStamp
             });
 
         var roots = new List<MenuTreeDto>();

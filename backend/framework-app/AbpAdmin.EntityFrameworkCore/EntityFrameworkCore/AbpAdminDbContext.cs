@@ -81,7 +81,6 @@ public class AbpAdminDbContext :
 
     public DbSet<RoleDataScope> RoleDataScopes { get; set; }
     public DbSet<RoleDataScopeOrganizationUnit> RoleDataScopeOrganizationUnits { get; set; }
-    public DbSet<DataScopeDemo> DataScopeDemos { get; set; }
 
     public DbSet<GdprRequest> GdprRequests { get; set; }
     public DbSet<GdprInfo> GdprInfos { get; set; }
@@ -98,13 +97,6 @@ public class AbpAdminDbContext :
     public DbSet<AbpAdmin.Files.FileShareLink> FileShareLinks { get; set; }
 
     public DbSet<AbpAdmin.Menus.Menu> Menus { get; set; }
-
-    public DbSet<AbpAdmin.Menus.MenuGrant> MenuGrants { get; set; }
-
-    // 岗位（对标 RuoYi sys_post / sys_user_post）
-    public DbSet<AbpAdmin.Posts.Post> Posts { get; set; }
-
-    public DbSet<AbpAdmin.Posts.IdentityUserPost> IdentityUserPosts { get; set; }
 
     // 语义化操作日志（对标 RuoYi system_operate_log）
     public DbSet<AbpAdmin.OperationLogs.OperationLog> OperationLogs { get; set; }
@@ -265,7 +257,6 @@ public class AbpAdminDbContext :
         builder.ApplyConfiguration(new LanguageTextConfig());
         builder.ApplyConfiguration(new RoleDataScopeConfig());
         builder.ApplyConfiguration(new RoleDataScopeOrganizationUnitConfig());
-        builder.ApplyConfiguration(new DataScopeDemoConfig());
         builder.ApplyConfiguration(new GdprRequestConfig());
         builder.ApplyConfiguration(new GdprInfoConfig());
         builder.ApplyConfiguration(new FileThumbnailConfig());
@@ -276,11 +267,8 @@ public class AbpAdminDbContext :
         builder.ApplyConfiguration(new DataDictionaryItemMetaConfig());
         builder.ApplyConfiguration(new NotificationBroadcastConfig());
         builder.ApplyConfiguration(new MenuConfig());
-        builder.ApplyConfiguration(new MenuGrantConfig());
         builder.ApplyConfiguration(new TenantPackageConfig());
         builder.ApplyConfiguration(new TenantPackageMenuConfig());
-        builder.ApplyConfiguration(new PostConfig());
-        builder.ApplyConfiguration(new IdentityUserPostConfig());
         builder.ApplyConfiguration(new UserExcelFileConfig());
         builder.ApplyConfiguration(new OperationLogConfig());
 

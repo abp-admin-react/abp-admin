@@ -34,8 +34,7 @@ public class MenuPermissionDataSeedContributor : IDataSeedContributor, ITransien
                 AbpAdminPermissions.Menus.Default,
                 AbpAdminPermissions.Menus.Create,
                 AbpAdminPermissions.Menus.Update,
-                AbpAdminPermissions.Menus.Delete,
-                AbpAdminPermissions.Menus.AssignRoles
+                AbpAdminPermissions.Menus.Delete
             },
             context.TenantId);
     }

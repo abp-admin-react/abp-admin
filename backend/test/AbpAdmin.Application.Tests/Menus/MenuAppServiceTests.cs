@@ -1,13 +1,15 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
+using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.Data;
+using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Guids;
-using Volo.Abp.Identity;
 using Volo.Abp.Modularity;
 using Volo.Abp.MultiTenancy;
 using Volo.Abp.Uow;
@@ -17,9 +19,9 @@ namespace AbpAdmin.Menus;
 
 /* 菜单管理（动态菜单）测试。
  * 覆盖：播种幂等、CRUD 校验（含 path 外链拒绝、Host-only 权限绑定拒绝、父级成环拒绝、
- * 删除后同 path 重建）、角色分配（含大小写规范存储）、my-menu 混合授权判定矩阵
- * （测试基建 AddAlwaysAllowAuthorization 使权限检查恒真，权限绑定节点据此断言为"可见"；
- * 角色勾选维度的隐藏仍由本文件直接验证）、停用子树剔除、隐藏节点子级上浮、空目录折叠、
+ * 删除后同 path 重建）、my-menu ABP 权限判定
+ * （默认测试基建 AddAlwaysAllowAuthorization；拒绝场景仅替换权限检查边界）、
+ * 停用子树剔除、隐藏节点子级上浮、空目录折叠、
  * 租户懒拷贝隔离。
  */
 public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
@@ -28,8 +30,6 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
     private readonly IMenuAppService _menuAppService;
     private readonly IMyMenuAppService _myMenuAppService;
     private readonly IRepository<Menu, Guid> _menuRepository;
-    private readonly IRepository<MenuGrant, Guid> _menuGrantRepository;
-    private readonly IIdentityRoleRepository _roleRepository;
     private readonly IGuidGenerator _guidGenerator;
     private readonly IDataFilter _dataFilter;
     private readonly ICurrentTenant _currentTenant;
@@ -40,8 +40,6 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         _menuAppService = GetRequiredService<IMenuAppService>();
         _myMenuAppService = GetRequiredService<IMyMenuAppService>();
         _menuRepository = GetRequiredService<IRepository<Menu, Guid>>();
-        _menuGrantRepository = GetRequiredService<IRepository<MenuGrant, Guid>>();
-        _roleRepository = GetRequiredService<IIdentityRoleRepository>();
         _guidGenerator = GetRequiredService<IGuidGenerator>();
         _dataFilter = GetRequiredService<IDataFilter>();
         _currentTenant = GetRequiredService<ICurrentTenant>();
@@ -54,22 +52,18 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         {
             await WithUnitOfWorkAsync(async () =>
             {
-                await _menuGrantRepository.DeleteAsync(_ => true);
                 await _menuRepository.DeleteAsync(_ => true);
             });
         }
     }
 
-    private async Task<IdentityRole> EnsureRoleAsync(string roleName)
+    private async Task<Menu> CreateMenuAsync(string title, string? path = null, int orderNo = 100)
     {
-        var existing = await _roleRepository.FindByNormalizedNameAsync(roleName.ToUpperInvariant());
-        if (existing != null)
-        {
-            return existing;
-        }
-
-        var role = new IdentityRole(_guidGenerator.Create(), roleName, _currentTenant.Id);
-        return await _roleRepository.InsertAsync(role, autoSave: true);
+        var menu = new Menu(_guidGenerator.Create(), null, null,
+            path == null ? MenuTypeEnum.Catalog : MenuTypeEnum.Menu,
+            title, name: null, path: path, orderNo: orderNo);
+        await WithUnitOfWorkAsync(() => _menuRepository.InsertAsync(menu, autoSave: true));
+        return menu;
     }
 
     [Fact]
@@ -96,7 +90,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
 
         // 制造「存量旧布局」：saas 组挂回 administration + 旧序旧题、welcome 旧题旧序、
-        // data-scope-demo 顶层漂着（模板已收进 demos 组）
+        // biz-template-data-scope 顶层漂着（模板已收进 demos 组）
         using (_dataFilter.Disable<IMultiTenant>())
         {
             await WithUnitOfWorkAsync(async () =>
@@ -115,7 +109,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
                 welcome.SetOrderNo(1);
                 await _menuRepository.UpdateAsync(welcome);
 
-                var demo = byPath["/data-scope-demo"];
+                var demo = byPath["/biz-template/data-scope"];
                 demo.SetParent(null);
                 demo.SetOrderNo(40);
                 await _menuRepository.UpdateAsync(demo);
@@ -149,9 +143,9 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
                 welcome.OrderNo.ShouldBe(
                     MenuTemplateDefinition.All.Single(d => d.Key == "welcome").OrderNo);
 
-                // data-scope-demo：重挂回 demos 组
+                // 业务模块数据范围示例重挂回 demos 组
                 var demos = byPath["/demos"];
-                byPath["/data-scope-demo"].ParentId.ShouldBe(demos.Id);
+                byPath["/biz-template/data-scope"].ParentId.ShouldBe(demos.Id);
 
                 // 模板外自定义节点保留
                 byPath.ContainsKey("/custom-page").ShouldBeTrue();
@@ -254,38 +248,6 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         (await _menuAppService.GetAsync(menu.Id)).Title.ShouldBe("旧客户端无戳更新");
     }
 
-    [Fact]
-    public async Task Delete_With_Role_Grants_Should_Remove_Grants()
-    {
-        await CleanMenusAsync();
-        var menu = await _menuAppService.CreateAsync(new MenuCreateDto
-        {
-            Type = MenuTypeEnum.Menu,
-            Title = "带授权的页",
-            Path = "/x/grant-cascade"
-        });
-        var role = await EnsureRoleAsync("menu-grant-cascade-role");
-        await _menuAppService.UpdateMenuRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
-        {
-            RoleNames = new[] { role.Name! }.ToList()
-        });
-
-        await _menuAppService.DeleteAsync(menu.Id);
-
-        // 应用层手工清理与 DB 级联外键（20260919130140）互为双防线，本测试钉住的是
-        // 两道防线的并集结果：菜单行消失后不允许残留任何授权孤儿行
-        // 菜单行已删（应用层 GetMenuAsync 抛 MenuNotFound 业务异常）
-        await Should.ThrowAsync<BusinessException>(async () => await _menuAppService.GetAsync(menu.Id));
-        using (_dataFilter.Disable<IMultiTenant>())
-        {
-            await WithUnitOfWorkAsync(async () =>
-            {
-                (await _menuGrantRepository.CountAsync(x => x.MenuId == menu.Id)).ShouldBe(0);
-                (await _menuRepository.FirstOrDefaultAsync(x => x.Id == menu.Id)).ShouldBeNull();
-            });
-        }
-    }
-
     /// <summary>
     /// 拷贝必须在锁内提交（ABP StaticPermissionSaver 范式的核心保证）：懒拷贝用独立事务
     /// 在锁内完成提交，不随调用方环境事务的成败而存亡。若回归为"拷贝参与环境事务"，
@@ -331,47 +293,6 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         });
 
         await Should.ThrowAsync<BusinessException>(async () => await _menuAppService.DeleteAsync(catalog.Id));
-    }
-
-    [Fact]
-    public async Task Role_Grants_Roundtrip_And_Invalid_Role_Rejected()
-    {
-        await CleanMenusAsync();
-        var menu = await _menuAppService.CreateAsync(new MenuCreateDto
-        {
-            Type = MenuTypeEnum.Menu,
-            Title = "受控页",
-            Path = "/x/granted"
-        });
-        var role = await EnsureRoleAsync("menu-test-role");
-
-        // 大小写变体输入：落库必须是角色的规范 Name（读取侧按原始 Name 精确匹配，
-        // 原样大小写入库会导致永远匹配不上）
-        await _menuAppService.UpdateMenuRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
-        {
-            RoleNames = new[] { role.Name!.ToUpperInvariant() }.ToList()
-        });
-
-        var granted = await _menuAppService.GetMenuRoleGrantsAsync(menu.Id);
-        granted.Items.ShouldContain(role.Name);
-
-        // 全量覆盖：换成另一个角色后旧角色消失
-        var role2 = await EnsureRoleAsync("menu-test-role-2");
-        await _menuAppService.UpdateMenuRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
-        {
-            RoleNames = new[] { role2.Name! }.ToList()
-        });
-        granted = await _menuAppService.GetMenuRoleGrantsAsync(menu.Id);
-        granted.Items.ShouldNotContain(role.Name);
-        granted.Items.ShouldContain(role2.Name);
-
-        await Should.ThrowAsync<BusinessException>(async () =>
-        {
-            await _menuAppService.UpdateMenuRoleGrantsAsync(menu.Id, new UpdateMenuGrantsDto
-            {
-                RoleNames = new[] { "no-such-role" }.ToList()
-            });
-        });
     }
 
     [Fact]
@@ -483,12 +404,12 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         var paths = Flatten(myMenu.Items).Select(x => x.Path).ToList();
 
         // 测试基建是 AlwaysAllowPermissionChecker（恒真）：权限绑定节点可见。
-        // 真实环境该节点是否可见由 IPermissionChecker 决定，deny-all 场景未在本仓库测试基建覆盖。
+        // 权限拒绝路径由 MyMenu_Permission_Bound_Node_Hidden_When_Abp_Permission_Denied 覆盖。
         paths.ShouldContain(permissionMenu.Path);
     }
 
     [Fact]
-    public async Task MyMenu_Public_Node_Visible_And_Grant_Controlled_Node_Hidden_Without_Role()
+    public async Task MyMenu_Unbound_And_Abp_Permission_Granted_Nodes_Are_Visible()
     {
         await CleanMenusAsync();
         var publicMenu = await _menuAppService.CreateAsync(new MenuCreateDto
@@ -500,20 +421,49 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         var controlled = await _menuAppService.CreateAsync(new MenuCreateDto
         {
             Type = MenuTypeEnum.Menu,
-            Title = "受控页",
-            Path = "/pub/controlled"
+            Title = "权限绑定页",
+            Path = "/pub/controlled",
+            PermissionName = "AbpAdmin.Menus"
         });
-        var role = await EnsureRoleAsync("menu-grant-role");
-        await _menuAppService.UpdateMenuRoleGrantsAsync(controlled.Id, new UpdateMenuGrantsDto
-        {
-            RoleNames = new[] { role.Name! }.ToList()
-        });
-
         var myMenu = await _myMenuAppService.GetAsync();
         var paths = Flatten(myMenu.Items).Select(x => x.Path).ToList();
 
         paths.ShouldContain(publicMenu.Path);
-        paths.ShouldNotContain(controlled.Path); // 测试用户无该角色 → 受控节点不可见
+        paths.ShouldContain(controlled.Path);
+    }
+
+    [Fact]
+    public async Task MyMenu_Permission_Bound_Node_Hidden_When_Abp_Permission_Denied()
+    {
+        await CleanMenusAsync();
+        var permissionMenu = await _menuAppService.CreateAsync(new MenuCreateDto
+        {
+            Type = MenuTypeEnum.Menu,
+            Title = "缺少权限的菜单",
+            Path = "/permission-denied",
+            PermissionName = "AbpAdmin.Menus"
+        });
+        var publicMenu = await CreateMenuAsync("登录可见菜单", "/public-menu");
+        // 仅替换权限检查边界：仍使用真实仓储、菜单管理器与用户菜单计算路径。
+        var checker = Substitute.For<IPermissionChecker>();
+        checker.IsGrantedAsync(Arg.Any<string[]>()).Returns(call =>
+        {
+            var grants = new MultiplePermissionGrantResult();
+            foreach (var name in call.Arg<string[]>())
+            {
+                grants.Result[name] = PermissionGrantResult.Prohibited;
+            }
+            return Task.FromResult(grants);
+        });
+        var service = new MyMenuAppService(_menuRepository, _menuManager, checker)
+        {
+            LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>()
+        };
+        var myMenu = await WithUnitOfWorkAsync(() => service.GetAsync());
+        var paths = Flatten(myMenu.Items).Select(x => x.Path).ToList();
+
+        paths.ShouldNotContain(permissionMenu.Path);
+        paths.ShouldContain(publicMenu.Path);
     }
 
     [Fact]
@@ -592,10 +542,10 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         using (_currentTenant.Change(tenantId))
         {
             var myMenu = await _myMenuAppService.GetAsync();
-            // 懒拷贝后：公开节点（欢迎/服务监控/当前会话）可见
+            // 懒拷贝包含现行模板节点，不包含已退役调试页。
             var paths = Flatten(myMenu.Items).Select(x => x.Path).ToList();
             paths.ShouldContain("/system/server-monitor");
-            paths.ShouldContain("/current-session");
+            paths.ShouldNotContain("/current-session");
 
             // 租户内删除一个节点不影响 Host 模板
             await WithUnitOfWorkAsync(async () =>
@@ -671,162 +621,4 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         return result;
     }
 
-    /* ===== 角色侧菜单授权（GetRoleMenuGrantsAsync / UpdateRoleMenuGrantsAsync）=====
-     * 反向视角：一棵树配好一个角色的可见菜单。语义钉住三点：
-     * 1) IsGranted=该角色显式授权；IsControlled=存在任一角色授权（未受控=公开，勾不勾不影响可见性）；
-     * 2) 差集保存只动该角色的授权——其它角色的授权与未受控状态不受影响；
-     * 3) 勾选集混入已删除菜单 id 时整单拒绝（fail-closed）。
-     */
-
-    private async Task<Menu> CreateMenuAsync(string title, string? path = null, int orderNo = 100)
-    {
-        var menu = new Menu(_guidGenerator.Create(), null, null,
-            path == null ? MenuTypeEnum.Catalog : MenuTypeEnum.Menu,
-            title, name: null, path: path, orderNo: orderNo);
-        await WithUnitOfWorkAsync(() => _menuRepository.InsertAsync(menu, autoSave: true));
-        return menu;
-    }
-
-    [Fact]
-    public async Task GetRoleMenuGrants_Should_Mark_Granted_And_Controlled()
-    {
-        await CleanMenusAsync();
-        var roleA = await EnsureRoleAsync($"rmg-a-{Guid.NewGuid():N}"[..32]);
-        var roleB = await EnsureRoleAsync($"rmg-b-{Guid.NewGuid():N}"[..32]);
-        var menu1 = await CreateMenuAsync("视图-受控菜单", "/rmg/m1");
-        var menu2 = await CreateMenuAsync("视图-公开菜单", "/rmg/m2");
-
-        await WithUnitOfWorkAsync(() => _menuGrantRepository.InsertAsync(
-            new MenuGrant(_guidGenerator.Create(), menu1.Id, null, MenuConsts.RoleProviderName, roleA.Name!)));
-        await WithUnitOfWorkAsync(() => _menuGrantRepository.InsertAsync(
-            new MenuGrant(_guidGenerator.Create(), menu1.Id, null, MenuConsts.RoleProviderName, roleB.Name!)));
-
-        var view = await _menuAppService.GetRoleMenuGrantsAsync(roleA.Id);
-        var items = view.Items.ToDictionary(x => x.Id);
-
-        items[menu1.Id].IsGranted.ShouldBeTrue();       // roleA 有显式授权
-        items[menu1.Id].IsControlled.ShouldBeTrue();    // 有任一角色授权 → 受控
-        items[menu2.Id].IsGranted.ShouldBeFalse();
-        items[menu2.Id].IsControlled.ShouldBeFalse();   // 无任何授权 → 公开
-    }
-
-    [Fact]
-    public async Task UpdateRoleMenuGrants_Should_OnlyTouchTargetRole_DiffSemantics()
-    {
-        await CleanMenusAsync();
-        var roleA = await EnsureRoleAsync($"rmg-diff-a-{Guid.NewGuid():N}"[..32]);
-        var roleB = await EnsureRoleAsync($"rmg-diff-b-{Guid.NewGuid():N}"[..32]);
-        var menu1 = await CreateMenuAsync("差集-旧授权", "/rmg/d1");
-        var menu2 = await CreateMenuAsync("差集-新授权1", "/rmg/d2");
-        var menu3 = await CreateMenuAsync("差集-新授权2", "/rmg/d3");
-
-        // 初始：menu1 同时授给 roleA 和 roleB
-        await WithUnitOfWorkAsync(async () =>
-        {
-            await _menuGrantRepository.InsertAsync(
-                new MenuGrant(_guidGenerator.Create(), menu1.Id, null, MenuConsts.RoleProviderName, roleA.Name!));
-            await _menuGrantRepository.InsertAsync(
-                new MenuGrant(_guidGenerator.Create(), menu1.Id, null, MenuConsts.RoleProviderName, roleB.Name!));
-        });
-
-        // roleA 的授权全集改为 [menu2, menu3]：menu1 撤销、menu2/3 新增
-        await _menuAppService.UpdateRoleMenuGrantsAsync(roleA.Id, new UpdateRoleMenuGrantsDto
-        {
-            MenuIds = new System.Collections.Generic.List<Guid> { menu2.Id, menu3.Id }
-        });
-
-        var allGrants = await WithUnitOfWorkAsync(() =>
-            _menuGrantRepository.GetListAsync(x => x.ProviderName == MenuConsts.RoleProviderName));
-        // 集合语义用有序投影断言：Shouldly 的 ShouldBe 对 HashSet 按枚举序逐元素比较，
-        // 枚举序随插入历史/桶布局变化（组合跑测试时即翻转），无序比较是随机 flake
-        var roleAGrants = allGrants
-            .Where(x => x.ProviderKey == roleA.Name)
-            .Select(x => x.MenuId)
-            .OrderBy(x => x)
-            .ToList();
-        var roleBGrants = allGrants
-            .Where(x => x.ProviderKey == roleB.Name)
-            .Select(x => x.MenuId)
-            .OrderBy(x => x)
-            .ToList();
-
-        roleAGrants.ShouldBe(new[] { menu2.Id, menu3.Id }.OrderBy(x => x).ToList());
-        // 其它角色（roleB 在 menu1 的授权）不受差集影响
-        roleBGrants.ShouldBe(new[] { menu1.Id }.OrderBy(x => x).ToList());
-    }
-
-    [Fact]
-    public async Task UpdateRoleMenuGrants_Should_Reject_Ghost_Menu_Id()
-    {
-        await CleanMenusAsync();
-        var role = await EnsureRoleAsync($"rmg-ghost-{Guid.NewGuid():N}"[..32]);
-
-        var ex = await Should.ThrowAsync<BusinessException>(() =>
-            _menuAppService.UpdateRoleMenuGrantsAsync(role.Id, new UpdateRoleMenuGrantsDto
-            {
-                MenuIds = new System.Collections.Generic.List<Guid> { Guid.NewGuid() }
-            }));
-        ex.Code.ShouldBe(AbpAdminDomainErrorCodes.Menus.MenuNotFound);
-        ex.Data["Count"]!.ToString().ShouldBe("1");
-    }
-
-    [Fact]
-    public async Task GetRoleMenuGrants_Should_Mark_OthersRoleGrant_As_NotGranted_But_Controlled()
-    {
-        // (IsGranted=false, IsControlled=true) 象限：菜单只授给了别的角色——本角色视图中
-        // 应显示「受限但未勾选」。若 IsControlled 被误改成只统计本角色授权，此象限会
-        // 坍缩成 (false,false)，徽标静默失真——此测试专门钉住该特性定义性语义。
-        await CleanMenusAsync();
-        var roleA = await EnsureRoleAsync($"rmg-ft-a-{Guid.NewGuid():N}"[..32]);
-        var roleB = await EnsureRoleAsync($"rmg-ft-b-{Guid.NewGuid():N}"[..32]);
-        var menu = await CreateMenuAsync("象限-仅他角授权", "/rmg/ft");
-
-        await WithUnitOfWorkAsync(() => _menuGrantRepository.InsertAsync(
-            new MenuGrant(_guidGenerator.Create(), menu.Id, null, MenuConsts.RoleProviderName, roleB.Name!)));
-
-        var view = await _menuAppService.GetRoleMenuGrantsAsync(roleA.Id);
-        var item = view.Items.Single(x => x.Id == menu.Id);
-        item.IsGranted.ShouldBeFalse();
-        item.IsControlled.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task UpdateRoleMenuGrants_With_Empty_Set_Should_Revoke_All_For_Target_Role_Only()
-    {
-        // 空勾选集（前端「清空」+ 保存）= 全撤销，是新 API 最具破坏性的路径；
-        // 同时验证空集下幽灵校验的 GetListAsync 空集 Contains 翻译不异常
-        await CleanMenusAsync();
-        var roleA = await EnsureRoleAsync($"rmg-empty-a-{Guid.NewGuid():N}"[..32]);
-        var roleB = await EnsureRoleAsync($"rmg-empty-b-{Guid.NewGuid():N}"[..32]);
-        var menu = await CreateMenuAsync("空集-既有授权", "/rmg/empty");
-
-        await WithUnitOfWorkAsync(async () =>
-        {
-            await _menuGrantRepository.InsertAsync(
-                new MenuGrant(_guidGenerator.Create(), menu.Id, null, MenuConsts.RoleProviderName, roleA.Name!));
-            await _menuGrantRepository.InsertAsync(
-                new MenuGrant(_guidGenerator.Create(), menu.Id, null, MenuConsts.RoleProviderName, roleB.Name!));
-        });
-
-        await _menuAppService.UpdateRoleMenuGrantsAsync(roleA.Id, new UpdateRoleMenuGrantsDto
-        {
-            MenuIds = new System.Collections.Generic.List<Guid>()
-        });
-
-        var allGrants = await WithUnitOfWorkAsync(() =>
-            _menuGrantRepository.GetListAsync(x => x.ProviderName == MenuConsts.RoleProviderName));
-        allGrants.Where(x => x.ProviderKey == roleA.Name).ShouldBeEmpty();
-        // 其它角色授权不受空集影响
-        allGrants.Where(x => x.ProviderKey == roleB.Name).ShouldNotBeEmpty();
-    }
-
-    [Fact]
-    public async Task GetRoleMenuGrants_Should_Throw_EntityNotFound_For_Unknown_Role()
-    {
-        // 角色不存在（含跨租户 id 被过滤器隔离的情形）→ EntityNotFoundException(404)，
-        // 不静默返回空视图——前端以 404 区分「未配置」与「读失败」
-        var ex = await Should.ThrowAsync<Volo.Abp.Domain.Entities.EntityNotFoundException>(() =>
-            _menuAppService.GetRoleMenuGrantsAsync(Guid.NewGuid()));
-        ex.EntityType.ShouldBe(typeof(Volo.Abp.Identity.IdentityRole));
-    }
 }

@@ -5,13 +5,13 @@ using System.Linq;
 namespace AbpAdmin.Menus;
 
 /// <summary>
-/// 用户可见菜单计算器（纯函数，从 MyMenuAppService.GetAsync 的 148 行长方法中提取）。
-/// 输入：全量菜单 + 用户角色 + 是否 admin + 已授予权限集 + 全量角色勾选记录；
+/// 用户可见菜单计算器（纯函数）。
+/// 输入：当前租户菜单 + 已授予的 ABP 权限集；
 /// 输出：组装后的 <see cref="MyMenuItemDto"/> 树。
 /// 与 <see cref="MenuTreeBuilder"/>（Application 层）互为补充：管理端全量树用后者，
 /// 用户端可见性过滤树用本类——两套遍历语义各集中一处，避免漂移。
-/// <para>可见性判定（混合授权）：IsEnabled 且非 IsHide，且（未绑定权限或权限已授予），
-/// 且（admin 或 未受角色勾选控制 或 用户角色命中勾选）；停用节点整棵子树剔除；
+/// <para>可见性判定：IsEnabled 且非 IsHide，且（未绑定权限或 ABP 权限已授予）；
+/// 停用节点整棵子树剔除；
 /// 隐藏节点自身不出现、子节点上浮到最近的可见祖先；目录子级全灭则整组折叠。</para>
 /// <para>三个内部方法（ComputeVisibleIds / BuildChildrenMap / Assemble）均为可单测的纯函数。</para>
 /// </summary>
@@ -22,26 +22,15 @@ public static class MenuVisibilityCalculator
 
     /// <summary>
     /// 计算并组装当前用户可见的菜单树。
-    /// roleGrants 传「该租户全部 ProviderName=R 的勾选记录」（与原实现一致：存在任一勾选记录的节点视为受控）。
     /// </summary>
     public static List<MyMenuItemDto> Build(
         IReadOnlyCollection<Menu> menus,
-        IReadOnlyCollection<string> roleNames,
-        bool isAdmin,
-        ISet<string> grantedPermissions,
-        IReadOnlyCollection<MenuGrant> roleGrants)
+        ISet<string> grantedPermissions)
     {
         var byId = menus.ToDictionary(x => x.Id);
 
-        var grantControlledMenuIds = roleGrants.Select(x => x.MenuId).ToHashSet();
-        var userGrantedMenuIds = roleGrants
-            .Where(x => roleNames.Contains(x.ProviderKey))
-            .Select(x => x.MenuId)
-            .ToHashSet();
-
         bool ConstraintPassed(Menu m) =>
-            (m.PermissionName == null || grantedPermissions.Contains(m.PermissionName)) &&
-            (isAdmin || !grantControlledMenuIds.Contains(m.Id) || userGrantedMenuIds.Contains(m.Id));
+            m.PermissionName == null || grantedPermissions.Contains(m.PermissionName);
 
         // 1) 可见集合：自身启用 + 祖先链完整且全启用 + 约束通过（断链视作不可见，保守）
         var visibleIds = ComputeVisibleIds(menus, byId, ConstraintPassed);
@@ -56,7 +45,7 @@ public static class MenuVisibilityCalculator
     }
 
     /// <summary>
-    /// 可见节点 Id 集：自身启用 + 祖先链完整且全部启用 + 混合授权约束通过。
+    /// 可见节点 Id 集：自身启用 + 祖先链完整且全部启用 + ABP 权限约束通过。
     /// 祖先链断链（ParentId 指向不存在的节点）时该节点不可见。
     /// </summary>
     internal static HashSet<Guid> ComputeVisibleIds(

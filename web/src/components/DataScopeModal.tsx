@@ -61,15 +61,18 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadedRoleName, setLoadedRoleName] = useState<string>();
   const [unconfigured, setUnconfigured] = useState(false);
   const [ouTree, setOuTree] = useState<DataNode[]>([]);
   // OU 树父子联动开关（芋道同款）：默认不联动=勾哪个是哪个（精确集，与后端
   // Custom 范围的逐 OU 语义一致）；打开后勾父自动勾子，方便整棵部门一次选入
   const [ouParentLinked, setOuParentLinked] = useState(false);
-  const [scopeType, setScopeType] = useState<DataScopeType>(DataScopeType.All);
+  const [scopeType, setScopeType] = useState<DataScopeType>();
   const [checkedOuIds, setCheckedOuIds] = useState<string[]>([]);
 
   const isCustom = scopeType === DataScopeType.Custom;
+  const canSave =
+    open && !!roleName && loadedRoleName === roleName && !loading && !saving;
 
   useEffect(() => {
     if (!open) {
@@ -82,43 +85,52 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
   }, [open, message]);
 
   useEffect(() => {
+    form.resetFields();
+    setLoadedRoleName(undefined);
+    setUnconfigured(false);
+    setScopeType(undefined);
+    setCheckedOuIds([]);
     if (!open || !roleName) {
-      form.resetFields();
-      setUnconfigured(false);
-      setScopeType(DataScopeType.All);
-      setCheckedOuIds([]);
       return;
     }
+    let cancelled = false;
     setLoading(true);
     getRoleDataScopeByRoleName(roleName)
       .then((data) => {
-        const st = data.scopeType ?? DataScopeType.All;
+        if (cancelled) return;
+        const st = data.scopeType;
         setUnconfigured(false);
         setScopeType(st);
         setCheckedOuIds(data.customOrganizationUnitIds || []);
         form.setFieldsValue({ scopeType: st });
+        setLoadedRoleName(roleName);
       })
       .catch((err) => {
-        // 仅 404（未配置）走默认表单；其它错误关闭弹窗——保存是按 roleName 全量覆盖，
-        // 读取失败时让管理员顺手保存会拿默认值盖掉真实配置（RoleGrantModal 同款防线）
+        if (cancelled) return;
+        // 仅 404（未配置）允许选择新范围；其它错误关闭弹窗——保存是按 roleName 全量覆盖，
+        // 读取失败时让管理员保存会拿新值盖掉未读到的真实配置。
         if (isNotFound(err)) {
           setUnconfigured(true);
-          setScopeType(DataScopeType.All);
-          setCheckedOuIds([]);
-          form.setFieldsValue({ scopeType: DataScopeType.All });
+          setLoadedRoleName(roleName);
           return;
         }
         message.error('读取数据范围失败，请重试');
         onClose();
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open, roleName, form]);
 
   const save = async () => {
-    if (!roleName) {
+    if (!canSave || !roleName) {
       return;
     }
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => undefined);
+    if (!values) return;
     if (
       values.scopeType === DataScopeType.Custom &&
       checkedOuIds.length === 0
@@ -150,6 +162,7 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
       onCancel={onClose}
       onOk={save}
       confirmLoading={saving}
+      okButtonProps={{ disabled: !canSave }}
       width={560}
       forceRender
     >
@@ -159,8 +172,8 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
             type="warning"
             showIcon
             style={{ marginBottom: 16 }}
-            message="该角色尚未配置数据范围"
-            description="未配置时其成员（admin 除外）在启用数据范围的业务数据上默认零行可见（fail-closed），保存后按所选范围生效。"
+            title="该角色尚未配置数据范围"
+            description="仅影响已接入数据范围的业务数据。未配置且没有其他角色授予范围时，普通成员看不到这些数据；请选择范围后保存。"
           />
         )}
         <Form form={form} layout="vertical">
@@ -170,6 +183,7 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
             rules={[{ required: true, message: '请选择数据范围类型' }]}
           >
             <Select
+              placeholder="请选择数据范围类型"
               options={Object.entries(DataScopeTypeLabels).map(
                 ([value, label]) => ({
                   value: Number(value) as DataScopeType,

@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using AbpAdmin.Editions;
+using AbpAdmin.Identity;
 using AbpAdmin.Tenants;
 using Volo.Abp.Identity;
 using Volo.Abp.ObjectExtending;
@@ -40,6 +41,13 @@ public static class AbpAdminModuleExtensionConfigurator
 
     private static void ConfigureExtraProperties()
     {
+        ObjectExtensionManager.Instance.Modules()
+            .ConfigureIdentity(identity => identity.ConfigureRole(role =>
+                role.AddOrUpdateProperty<string>(RoleRemarkConsts.PropertyName, property =>
+                {
+                    property.Attributes.Add(new StringLengthAttribute(RoleRemarkConsts.MaxLength));
+                })));
+
         // 租户激活状态三态与版本过期
         // 已验证：ConfigureTenantManagement 扩展方法在 Volo.Abp.TenantManagement.Domain.Shared 10.6 存在
         // 已验证：AddOrUpdateProperty 支持枚举类型与 DefaultValue

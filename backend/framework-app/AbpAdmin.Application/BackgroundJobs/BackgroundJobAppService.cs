@@ -17,14 +17,10 @@ namespace AbpAdmin.BackgroundJobs;
 public class BackgroundJobAppService : AbpAdminAppService, IBackgroundJobAppService
 {
     private readonly IRepository<BackgroundJobRecord, Guid> _jobRepository;
-    private readonly IBackgroundJobManager _backgroundJobManager;
 
-    public BackgroundJobAppService(
-        IRepository<BackgroundJobRecord, Guid> jobRepository,
-        IBackgroundJobManager backgroundJobManager)
+    public BackgroundJobAppService(IRepository<BackgroundJobRecord, Guid> jobRepository)
     {
         _jobRepository = jobRepository;
-        _backgroundJobManager = backgroundJobManager;
     }
 
     public virtual async Task<PagedResultDto<BackgroundJobDto>> GetListAsync(GetBackgroundJobListInput input)
@@ -107,17 +103,6 @@ public class BackgroundJobAppService : AbpAdminAppService, IBackgroundJobAppServ
         job.CompletionTime = null;
         job.NextTryTime = Clock.Now;
         await _jobRepository.UpdateAsync(job);
-    }
-
-    [Authorize(AbpAdminPermissions.BackgroundJobs.Enqueue)]
-    public virtual async Task EnqueueTestAsync(EnqueueTestBackgroundJobDto input)
-    {
-        await _backgroundJobManager.EnqueueAsync(new EmailSendingArgs
-        {
-            EmailAddress = input.EmailAddress,
-            Subject = input.Subject,
-            Body = input.Body
-        });
     }
 
     private static BackgroundJobDto Map(BackgroundJobRecord job)

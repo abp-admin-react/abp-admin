@@ -26,6 +26,7 @@ const ClaimTypesPage: React.FC = () => {
   const access = useAccess();
   const columns: ProColumns<ClaimTypeDto>[] = [
     { title: '名称', dataIndex: 'name' },
+    { title: '说明', dataIndex: 'description', ellipsis: true, search: false },
     {
       title: '必填',
       dataIndex: 'required',
@@ -50,7 +51,11 @@ const ClaimTypesPage: React.FC = () => {
             trigger={<a>编辑</a>}
             initialValues={record}
             onFinish={async (values) => {
-              await updateClaimType(record.id, values);
+              await updateClaimType(record.id, {
+                ...values,
+                name: record.name,
+                valueType: record.valueType,
+              });
               message.success('已更新');
               actionRef.current?.reload();
               return true;

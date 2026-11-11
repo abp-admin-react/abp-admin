@@ -5,12 +5,11 @@ import { toMenuIcon } from '@/abp/menuIcons';
 import { MENU_TYPE, type MenuTreeDto } from '@/abp/menus';
 
 type BuildMenuColumnsOptions = {
+  canCreateMenus: boolean;
   canUpdateMenus: boolean;
-  canAssignMenuRoles: boolean;
   canDeleteMenus: boolean;
   onEdit: (node: MenuTreeDto) => void;
   onAddChild: (node: MenuTreeDto) => void;
-  onRoles: (node: MenuTreeDto) => void;
   onDelete: (node: MenuTreeDto) => void | Promise<void>;
 };
 
@@ -18,7 +17,7 @@ type BuildMenuColumnsOptions = {
  * 全列定宽 + 表格 scroll.x：内容总宽超出窄视口时出横向滚动条，
  * 避免"名称逐字竖排/权限标签被裁没"这类挤压变形（宽屏下列宽照常拉伸）。
  * MENU_TABLE_SCROLL_X 必须等于下方各列 width 之和，增删列时同步维护。 */
-export const MENU_TABLE_SCROLL_X = 1180;
+export const MENU_TABLE_SCROLL_X = 1000;
 
 export function buildMenuColumns(
   opts: BuildMenuColumnsOptions,
@@ -62,14 +61,6 @@ export function buildMenuColumns(
           '-'
         ),
     },
-    {
-      title: '已分配角色',
-      dataIndex: 'grantedRoles',
-      width: 130,
-      ellipsis: true,
-      renderText: (_, record) =>
-        record.grantedRoles.length > 0 ? record.grantedRoles.join('、') : '-',
-    },
     { title: '排序', dataIndex: 'orderNo', width: 64 },
     {
       title: '状态',
@@ -85,9 +76,9 @@ export function buildMenuColumns(
     {
       title: '操作',
       valueType: 'option',
-      width: 206,
+      width: 156,
       // 按钮可见性与后端校验同口径：新增子级仅目录（后端无父类型强校验，UI 先挡）、
-      // 分配角色仅菜单类型、删除仅叶子节点（后端 MenuHasChildren 兜底）
+      // 删除仅叶子节点（后端 MenuHasChildren 兜底）
       render: (_, record) =>
         [
           opts.canUpdateMenus ? (
@@ -95,14 +86,9 @@ export function buildMenuColumns(
               编辑
             </a>
           ) : null,
-          opts.canUpdateMenus && record.type === MENU_TYPE.Catalog ? (
+          opts.canCreateMenus && record.type === MENU_TYPE.Catalog ? (
             <a key="add-child" onClick={() => opts.onAddChild(record)}>
               新增子级
-            </a>
-          ) : null,
-          opts.canAssignMenuRoles && record.type === MENU_TYPE.Menu ? (
-            <a key="roles" onClick={() => opts.onRoles(record)}>
-              分配角色
             </a>
           ) : null,
           opts.canDeleteMenus && record.children.length === 0 ? (

@@ -26,10 +26,17 @@ export default function access(
     canAdmin: !!policies['AbpIdentity.Users'],
     canManageUsers: !!policies['AbpIdentity.Users'],
     canManageRoles: !!policies['AbpIdentity.Roles'],
+    canCreateUsers: !!policies['AbpIdentity.Users.Create'],
+    canUpdateUsers: !!policies['AbpIdentity.Users.Update'],
+    canDeleteUsers: !!policies['AbpIdentity.Users.Delete'],
+    canManageUserRoles: !!policies['AbpIdentity.Users.Update.ManageRoles'],
+    canManageUserPermissions: !!policies['AbpIdentity.Users.ManagePermissions'],
     // 角色页按钮级权限（对齐 ABP 内置 AbpIdentity.Roles 权限树）
+    canCreateRoles: !!policies['AbpIdentity.Roles.Create'],
     canUpdateRoles: !!policies['AbpIdentity.Roles.Update'],
     canDeleteRoles: !!policies['AbpIdentity.Roles.Delete'],
-    // 角色数据范围入口（自研行级数据权限，RoleDataScopeAppService 类级 Manage 授权）
+    canManageRolePermissions: !!policies['AbpIdentity.Roles.ManagePermissions'],
+    // 数据范围示例的扩展配置；常规角色管理只使用 ABP 功能权限。
     canManageRoleDataScopes: !!policies['AbpAdmin.DataScopes.Manage'],
     canManageTenants: !!policies['AbpTenantManagement.Tenants'] && isHost,
     canManageHostFeatures:
@@ -42,12 +49,13 @@ export default function access(
     canManageLanguageTexts: !!policies['AbpAdmin.LanguageTexts'],
     canEditLanguageTexts: !!policies['AbpAdmin.LanguageTexts.Edit'],
     canManageOrganizationUnits: !!policies['AbpAdmin.OrganizationUnits'],
-    // 岗位管理（对标 RuoYi sys_post）
-    canManagePosts: !!policies['AbpAdmin.Posts'],
-    canCreatePosts: !!policies['AbpAdmin.Posts.Create'],
-    canUpdatePosts: !!policies['AbpAdmin.Posts.Update'],
-    canDeletePosts: !!policies['AbpAdmin.Posts.Delete'],
-    canManagePostMembers: !!policies['AbpAdmin.Posts.ManageMembers'],
+    canCreateOrganizationUnits: !!policies['AbpAdmin.OrganizationUnits.Create'],
+    canUpdateOrganizationUnits: !!policies['AbpAdmin.OrganizationUnits.Update'],
+    canDeleteOrganizationUnits: !!policies['AbpAdmin.OrganizationUnits.Delete'],
+    canManageOrganizationUnitMembers:
+      !!policies['AbpAdmin.OrganizationUnits.ManageMembers'],
+    canManageOrganizationUnitRoles:
+      !!policies['AbpAdmin.OrganizationUnits.ManageRoles'],
     canManageClaimTypes: !!policies['AbpAdmin.ClaimTypes'],
     // 声明类型页按钮级权限（对齐后端 AbpAdmin.ClaimTypes 权限树）
     canCreateClaimTypes: !!policies['AbpAdmin.ClaimTypes.Create'],
@@ -63,9 +71,6 @@ export default function access(
     canHandleAuditLogErrors: !!policies['AbpAdmin.AuditLogs.HandleErrors'],
     // 实体变更回滚：能看变更历史 ≠ 能改写业务数据，独立权限
     canRestoreEntityChange: !!policies['AbpAdmin.AuditLogs.Restore'],
-    // 权限定义运行时管理（Host 专属，后端 multiTenancySide=Host）
-    canManagePermissionDefinitions:
-      !!policies['AbpAdmin.PermissionDefinitions'] && isHost,
     // Webhook 管理（模块自持权限组 AbpAdmin.Webhooks.*）
     canManageWebhooks: !!policies['AbpAdmin.Webhooks.Subscriptions'],
     canCreateWebhookSubscriptions:
@@ -79,12 +84,6 @@ export default function access(
       !!policies['AbpAdmin.Webhooks.SendRecords.Resend'],
     canDeleteWebhookSendRecords:
       !!policies['AbpAdmin.Webhooks.SendRecords.Delete'],
-    canCreatePermissionDefinitions:
-      !!policies['AbpAdmin.PermissionDefinitions.Create'] && isHost,
-    canUpdatePermissionDefinitions:
-      !!policies['AbpAdmin.PermissionDefinitions.Update'] && isHost,
-    canDeletePermissionDefinitions:
-      !!policies['AbpAdmin.PermissionDefinitions.Delete'] && isHost,
     canManageOpenIddict: !!policies['AbpAdmin.OpenIddict'] && isHost,
     canManageOpenIddictApplications:
       !!policies['AbpAdmin.OpenIddict.Applications'] && isHost,
@@ -141,10 +140,12 @@ export default function access(
     // SettingUi 写权限（读写分离）：后端 AbpAdminSettingUiAppService 方法级 Authorize，
     // 前端只做按钮态联动，防线在后端
     canUpdateSettings: !!policies['AbpAdmin.SettingUi.Update'],
-    // 数据范围演示（T1.5）
-    canManageDataScopeDemo: !!policies['AbpAdmin.DataScopes.Demo'],
     // 业务模块数据权限示例（AbpAdmin.Biz.Template 自带权限组，/biz-template/data-scope）
     canManageBizDataScopeDemo: !!policies['BizTemplate.DataScopeDemo'],
+    canOpenDataScopeExtension:
+      !!policies['BizTemplate.DataScopeDemo'] ||
+      (!!policies['AbpAdmin.DataScopes.Manage'] &&
+        !!policies['AbpIdentity.Roles']),
     // 订单/收款模块（只给 Host 用户：后端应用服务有 Host 守卫，这里只管菜单可见性）
     canViewOrders: !!policies['AbpAdmin.Ordering.Orders'],
     canViewCollections: !!policies['AbpAdmin.Collection.Collections'],
@@ -176,12 +177,11 @@ export default function access(
     canManageNotifications:
       !!policies['EasyAbp.NotificationService.Notification.Manage'],
     canManagePayments: !!policies['AbpAdmin.Payments'],
-    // 动态菜单管理（菜单结构维护 + 角色分配）
+    // 动态菜单管理（结构维护；可见性跟随 ABP 功能权限）
     canManageMenus: !!policies['AbpAdmin.Menus'],
     canCreateMenus: !!policies['AbpAdmin.Menus.Create'],
     canUpdateMenus: !!policies['AbpAdmin.Menus.Update'],
     canDeleteMenus: !!policies['AbpAdmin.Menus.Delete'],
-    canAssignMenuRoles: !!policies['AbpAdmin.Menus.AssignRoles'],
     // 租户套餐（Host 专属）
     canManageTenantPackages: !!policies['AbpAdmin.TenantPackages'] && isHost,
     canCreateTenantPackages:

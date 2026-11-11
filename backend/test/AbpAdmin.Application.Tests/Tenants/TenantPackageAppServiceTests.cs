@@ -98,7 +98,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         }
 
         var usersNode = template.First(x => x.Path == "/administration/identity/users");
-        // 用 /system/server-monitor 作独立第二分支（负断言的对象是 /current-session 与 roles，互不冲突）
+        // 用 /system/server-monitor 作独立第二分支（负断言的对象是 /welcome 与 roles，互不冲突）
         var serverMonitor = template.First(x => x.Path == "/system/server-monitor");
         await _packageAppService.UpdateMenuSelectionAsync(package.Id, new UpdateTenantPackageMenusDto
         {
@@ -131,7 +131,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
         }
 
         // 勾选：服务监控 + 用户（两者的祖先链 /system 与 /administration/identity 应自动保留），
-        // 不勾 当前会话、角色 等
+        // 不勾 首页、角色 等
         var serverMonitor = template.First(x => x.Path == "/system/server-monitor");
         var usersNode = template.First(x => x.Path == "/administration/identity/users");
         await _packageAppService.UpdateMenuSelectionAsync(package.Id, new UpdateTenantPackageMenusDto
@@ -163,7 +163,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
             paths.ShouldContain("/administration/identity/users");
             paths.ShouldContain("/administration/identity"); // 祖先链
             paths.ShouldContain("/administration");
-            paths.ShouldNotContain("/current-session");
+            paths.ShouldNotContain("/welcome");
             paths.ShouldNotContain("/administration/identity/roles");
         }
     }
@@ -245,7 +245,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
             paths.ShouldNotContain("/custom-page"); // 破坏性重置清掉自定义菜单
             paths.ShouldContain("/system/server-monitor");
             paths.ShouldContain("/administration/identity/users");
-            paths.ShouldNotContain("/current-session");
+            paths.ShouldNotContain("/welcome");
         }
     }
 
@@ -278,7 +278,7 @@ public abstract class TenantPackageAppServiceTests<TStartupModule> : AbpAdminApp
             await WithUnitOfWorkAsync(() => _menuManager.EnsureTenantMenusAsync(tenantId));
             var paths = (await _menuRepository.GetListAsync()).Select(x => x.Path).ToList();
             paths.ShouldContain("/system/server-monitor");
-            paths.ShouldNotContain("/current-session"); // 懒拷贝直接按套餐收敛，而不是全量
+            paths.ShouldNotContain("/welcome"); // 懒拷贝直接按套餐收敛，而不是全量
         }
     }
 }

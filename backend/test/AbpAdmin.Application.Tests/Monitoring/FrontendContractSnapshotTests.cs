@@ -48,18 +48,12 @@ public class FrontendContractSnapshotTests
         // 实体变更回滚（web 抽屉回滚按钮消费 EntityRestoreResultDto；嵌套 Skipped DTO 自动递归）
         typeof(AbpAdmin.AuditLogs.RestoreEntityChangeInput),
         typeof(AbpAdmin.AuditLogs.EntityRestoreResultDto),
-        // 权限定义管理页（列表/创建表单消费；输入 DTO 的可空性是镜像层易漂移点）
-        typeof(AbpAdmin.PermissionManagement.PermissionGroupRecordDto),
-        typeof(AbpAdmin.PermissionManagement.PermissionDefinitionRecordDto),
-        typeof(AbpAdmin.PermissionManagement.CreatePermissionGroupInput),
-        typeof(AbpAdmin.PermissionManagement.CreatePermissionDefinitionInput),
         // 用户动态搜索（可用字段元数据 + 结果行；Masked 字段所在 DTO）
         typeof(AbpAdmin.Identity.DynamicSearchFieldDto),
         typeof(AbpAdmin.Identity.IdentityUserSearchItemDto),
-        // 菜单-角色授权双视角（角色页「菜单权限」弹窗消费视图项；parentId 可空是镜像层易漂移点；
-        // 输入 UpdateRoleMenuGrantsDto 的 MenuIds 列表可空性同样登记）
-        typeof(AbpAdmin.Menus.RoleMenuGrantItemDto),
-        typeof(AbpAdmin.Menus.UpdateRoleMenuGrantsDto),
+        // 动态菜单管理与套餐共用树形 DTO，parentId/PermissionName 的可空性在此钉住。
+        typeof(AbpAdmin.Menus.MenuTreeDto),
+        typeof(AbpAdmin.BackgroundJobs.BackgroundJobDto),
         typeof(AbpAdmin.ClientErrors.ClientFailureDto),
     };
 

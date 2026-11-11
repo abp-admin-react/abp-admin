@@ -58,7 +58,6 @@ public static class MenuTemplateDefinition
         new("identity-users", "identity", MenuTypeEnum.Menu, "用户", "users", "/administration/identity/users", null, 41, "AbpIdentity.Users"),
         new("identity-roles", "identity", MenuTypeEnum.Menu, "角色", "roles", "/administration/identity/roles", null, 42, "AbpIdentity.Roles"),
         new("identity-organization-units", "identity", MenuTypeEnum.Menu, "组织单元", "organization-units", "/administration/identity/organization-units", null, 43, "AbpAdmin.OrganizationUnits"),
-        new("identity-posts", "identity", MenuTypeEnum.Menu, "岗位", "posts", "/administration/identity/posts", null, 44, "AbpAdmin.Posts"),
         new("identity-claim-types", "identity", MenuTypeEnum.Menu, "声明类型", "claim-types", "/administration/identity/claim-types", null, 45, "AbpAdmin.ClaimTypes"),
         new("identity-security-logs", "identity", MenuTypeEnum.Menu, "安全日志", "security-logs", "/administration/identity/security-logs", null, 46, "AbpAdmin.SecurityLogs"),
         new("identity-sessions", "identity", MenuTypeEnum.Menu, "会话", "sessions", "/administration/identity/sessions", null, 47, "AbpAdmin.Sessions"),
@@ -96,10 +95,8 @@ public static class MenuTemplateDefinition
 
         // ===== 示例演示（置底区隔正式功能；路由保持顶层不变） =====
         new("demos", null, MenuTypeEnum.Catalog, "示例演示", "demos", "/demos", "experiment", 90),
-        new("data-scope-demo", "demos", MenuTypeEnum.Menu, "数据权限演示", "data-scope-demo", "/data-scope-demo", "database", 90, "AbpAdmin.DataScopes.Demo"),
         new("biz-template-data-scope", "demos", MenuTypeEnum.Menu, "业务模块·数据权限示例", "biz-template-data-scope", "/biz-template/data-scope", "apartment", 91, "BizTemplate.DataScopeDemo"),
 
         // ===== 个人项置底 =====
-        new("current-session", null, MenuTypeEnum.Menu, "当前会话", "current-session", "/current-session", "user", 100),
     };
 }

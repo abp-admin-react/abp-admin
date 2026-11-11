@@ -6,7 +6,7 @@ using Volo.Abp.EntityFrameworkCore.Modeling;
 namespace AbpAdmin.Biz.Template.Data;
 
 /// <summary>
-/// 数据权限示例实体表映射（Biz 前缀 + 模块内索引口径对齐框架 DataScopeDemoConfig）。
+/// 数据权限示例实体表映射（Biz 前缀 + 租户/组织复合索引）。
 /// </summary>
 public class BizDataScopeDemoConfig : IEntityTypeConfiguration<BizDataScopeDemo>
 {

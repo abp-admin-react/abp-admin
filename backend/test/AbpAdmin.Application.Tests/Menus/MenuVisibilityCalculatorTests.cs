@@ -7,16 +7,12 @@ using Xunit;
 namespace AbpAdmin.Menus;
 
 /* MenuVisibilityCalculator（my-menu 可见性算法）的纯函数单测：
- * 覆盖「隐藏上浮 / 停用剔除 / 空目录折叠 / 角色勾选 / admin 豁免 / 权限绑定 / 断链 / 排序」矩阵。
+ * 覆盖「隐藏上浮 / 停用剔除 / 空目录折叠 / ABP 权限绑定 / 断链 / 排序」矩阵。
  * 不依赖测试基建（纯静态类 + 内存构造实体），是对 MyMenuAppService.GetAsync 重构抽出的
  * 计算器的行为锚定；集成路径（含懒拷贝、真实权限检查器）由 MenuAppServiceTests 覆盖。
  */
 public class MenuVisibilityCalculatorTests
 {
-    private static readonly Guid Root = Guid.NewGuid();
-    private static readonly Guid Catalog = Guid.NewGuid();
-    private static readonly Guid Child = Guid.NewGuid();
-
     private static Menu NewMenu(
         Guid id,
         Guid? parentId = null,
@@ -28,23 +24,17 @@ public class MenuVisibilityCalculatorTests
         int orderNo = MenuConsts.DefaultOrderNo)
     {
         var finalPath = path ?? $"/{id:N}";
-        return new Menu(Guid.NewGuid(), tenantId: null, parentId, type, finalPath, null, finalPath,
+        return new Menu(id, tenantId: null, parentId, type, finalPath, null, finalPath,
             null, orderNo, isHide, isEnabled, permissionName);
     }
 
     private static List<MyMenuItemDto> Build(
         List<Menu> menus,
-        string[] roleNames,
-        bool isAdmin = false,
-        string[]? grantedPermissions = null,
-        MenuGrant[]? grants = null)
+        string[]? grantedPermissions = null)
     {
         return MenuVisibilityCalculator.Build(
             menus,
-            roleNames,
-            isAdmin,
-            grantedPermissions?.ToHashSet() ?? new HashSet<string>(),
-            grants ?? Array.Empty<MenuGrant>());
+            grantedPermissions?.ToHashSet() ?? new HashSet<string>());
     }
 
     private static List<string> FlattenPaths(List<MyMenuItemDto> items)
@@ -67,7 +57,7 @@ public class MenuVisibilityCalculatorTests
     public void Public_Node_Visible_Without_Any_Grant()
     {
         var menu = NewMenu(Guid.NewGuid());
-        var tree = Build(new List<Menu> { menu }, Array.Empty<string>());
+        var tree = Build(new List<Menu> { menu });
 
         FlattenPaths(tree).ShouldContain(menu.Path);
     }
@@ -80,7 +70,6 @@ public class MenuVisibilityCalculatorTests
 
         var tree = Build(
             new List<Menu> { grantedMenu, deniedMenu },
-            Array.Empty<string>(),
             grantedPermissions: new[] { "AbpAdmin.Menus" });
 
         var paths = FlattenPaths(tree);
@@ -89,28 +78,28 @@ public class MenuVisibilityCalculatorTests
     }
 
     [Fact]
-    public void Role_Controlled_Node_Follows_User_Roles()
+    public void Permission_Filtered_Ancestor_Does_Not_Hide_Granted_Descendant()
     {
-        var menu = NewMenu(Guid.NewGuid());
-        var grant = new MenuGrant(Guid.NewGuid(), menu.Id, null, MenuConsts.RoleProviderName, "operator");
+        var catalog = NewMenu(Guid.NewGuid(), type: MenuTypeEnum.Catalog,
+            path: "/parent", permissionName: "AbpAdmin.Parent");
+        var child = NewMenu(Guid.NewGuid(), parentId: catalog.Id,
+            path: "/parent/child", permissionName: "AbpAdmin.Child");
 
-        // 用户没有勾选角色 → 不可见（fail-closed）
-        FlattenPaths(Build(new List<Menu> { menu }, new[] { "other-role" }, grants: new[] { grant }))
-            .ShouldNotContain(menu.Path);
+        var tree = Build(new List<Menu> { catalog, child }, new[] { "AbpAdmin.Child" });
 
-        // 用户命中勾选角色 → 可见
-        FlattenPaths(Build(new List<Menu> { menu }, new[] { "operator" }, grants: new[] { grant }))
-            .ShouldContain(menu.Path);
+        tree.Count.ShouldBe(1);
+        tree[0].Path.ShouldBe(child.Path);
+        tree[0].Children.ShouldBeEmpty();
     }
 
     [Fact]
-    public void Admin_Bypasses_Role_Control()
+    public void Catalog_With_Only_Permission_Denied_Children_Is_Folded()
     {
-        var menu = NewMenu(Guid.NewGuid());
-        var grant = new MenuGrant(Guid.NewGuid(), menu.Id, null, MenuConsts.RoleProviderName, "operator");
+        var catalog = NewMenu(Guid.NewGuid(), type: MenuTypeEnum.Catalog, path: "/parent");
+        var child = NewMenu(Guid.NewGuid(), parentId: catalog.Id,
+            path: "/parent/child", permissionName: "AbpAdmin.Child");
 
-        FlattenPaths(Build(new List<Menu> { menu }, new[] { "unrelated" }, isAdmin: true, grants: new[] { grant }))
-            .ShouldContain(menu.Path);
+        Build(new List<Menu> { catalog, child }).ShouldBeEmpty();
     }
 
     [Fact]
@@ -119,7 +108,7 @@ public class MenuVisibilityCalculatorTests
         var disabledCatalog = NewMenu(Guid.NewGuid(), type: MenuTypeEnum.Catalog, path: "/disabled", isEnabled: false);
         var child = NewMenu(Guid.NewGuid(), parentId: disabledCatalog.Id, path: "/disabled/child");
 
-        var paths = FlattenPaths(Build(new List<Menu> { disabledCatalog, child }, Array.Empty<string>()));
+        var paths = FlattenPaths(Build(new List<Menu> { disabledCatalog, child }));
         paths.ShouldNotContain("/disabled");
         paths.ShouldNotContain("/disabled/child");
     }
@@ -130,7 +119,7 @@ public class MenuVisibilityCalculatorTests
         var hiddenCatalog = NewMenu(Guid.NewGuid(), type: MenuTypeEnum.Catalog, path: "/hidden", isHide: true);
         var child = NewMenu(Guid.NewGuid(), parentId: hiddenCatalog.Id, path: "/hidden/child");
 
-        var tree = Build(new List<Menu> { hiddenCatalog, child }, Array.Empty<string>());
+        var tree = Build(new List<Menu> { hiddenCatalog, child });
 
         // 隐藏目录自身不出现；子页上浮到根级
         var paths = FlattenPaths(tree);
@@ -147,7 +136,7 @@ public class MenuVisibilityCalculatorTests
         var mid = NewMenu(Guid.NewGuid(), parentId: root.Id, type: MenuTypeEnum.Catalog, path: "/root/mid", isHide: true);
         var leaf = NewMenu(Guid.NewGuid(), parentId: mid.Id, path: "/root/mid/leaf");
 
-        var tree = Build(new List<Menu> { root, mid, leaf }, Array.Empty<string>());
+        var tree = Build(new List<Menu> { root, mid, leaf });
 
         tree.Count.ShouldBe(1);
         tree[0].Path.ShouldBe("/root");
@@ -161,7 +150,7 @@ public class MenuVisibilityCalculatorTests
         var catalog = NewMenu(Guid.NewGuid(), type: MenuTypeEnum.Catalog, path: "/empty");
         var menu = NewMenu(Guid.NewGuid(), path: "/sibling");
 
-        var tree = Build(new List<Menu> { catalog, menu }, Array.Empty<string>());
+        var tree = Build(new List<Menu> { catalog, menu });
 
         FlattenPaths(tree).ShouldNotContain("/empty");
         FlattenPaths(tree).ShouldContain("/sibling");
@@ -174,7 +163,7 @@ public class MenuVisibilityCalculatorTests
         var catalog = NewMenu(Guid.NewGuid(), type: MenuTypeEnum.Catalog, path: "/keep");
         var child = NewMenu(Guid.NewGuid(), parentId: catalog.Id, path: "/keep/child");
 
-        var tree = Build(new List<Menu> { catalog, child }, Array.Empty<string>());
+        var tree = Build(new List<Menu> { catalog, child });
 
         tree.Count.ShouldBe(1);
         tree[0].Path.ShouldBe("/keep");
@@ -186,7 +175,7 @@ public class MenuVisibilityCalculatorTests
     {
         // ParentId 指向不存在的节点（悬空）→ 该节点不可见（保守语义）
         var orphan = new Menu(Guid.NewGuid(), null, Guid.NewGuid(), MenuTypeEnum.Menu, "孤儿", null, "/orphan");
-        var paths = FlattenPaths(Build(new List<Menu> { orphan }, Array.Empty<string>()));
+        var paths = FlattenPaths(Build(new List<Menu> { orphan }));
         paths.ShouldNotContain("/orphan");
     }
 
@@ -197,7 +186,7 @@ public class MenuVisibilityCalculatorTests
         var b = NewMenu(Guid.NewGuid(), path: "/b", orderNo: 10);
         var c = NewMenu(Guid.NewGuid(), path: "/c", orderNo: 10, type: MenuTypeEnum.Menu);
 
-        var tree = Build(new List<Menu> { a, b, c }, Array.Empty<string>());
+        var tree = Build(new List<Menu> { a, b, c });
         // 同 OrderNo 按 Title 序数比较："/b" < "/c"（路径作 Title 兜底场景）
         tree.Select(x => x.Path).ShouldBe(new[] { "/b", "/c", "/a" });
     }

@@ -40,7 +40,6 @@ public record MenuDefinition(
 public class MenuManager : DomainService, ITransientDependency
 {
     private readonly IRepository<Menu, Guid> _menuRepository;
-    private readonly IRepository<MenuGrant, Guid> _menuGrantRepository;
     private readonly IRepository<TenantPackage, Guid> _tenantPackageRepository;
     private readonly ITenantRepository _tenantRepository;
     private readonly IDataFilter _dataFilter;
@@ -66,7 +65,6 @@ public class MenuManager : DomainService, ITransientDependency
 
     public MenuManager(
         IRepository<Menu, Guid> menuRepository,
-        IRepository<MenuGrant, Guid> menuGrantRepository,
         IRepository<TenantPackage, Guid> tenantPackageRepository,
         ITenantRepository tenantRepository,
         IDataFilter dataFilter,
@@ -74,7 +72,6 @@ public class MenuManager : DomainService, ITransientDependency
         IAbpDistributedLock distributedLock)
     {
         _menuRepository = menuRepository;
-        _menuGrantRepository = menuGrantRepository;
         _tenantPackageRepository = tenantPackageRepository;
         _tenantRepository = tenantRepository;
         _dataFilter = dataFilter;
@@ -156,8 +153,8 @@ public class MenuManager : DomainService, ITransientDependency
     }
 
     /// <summary>
-    /// 租户懒拷贝：租户还没有任何菜单时，从 Host 模板整棵拷贝一份（角色授权留空——
-    /// 模板上的角色授权属于 Host 角色，不随拷贝）。allowedTemplateMenuIds 为 null 表示全量拷贝。
+    /// 租户懒拷贝：租户还没有任何菜单时，从 Host 模板拷贝一份。
+    /// allowedTemplateMenuIds 为 null 表示全量拷贝。
     /// 租户已配置套餐（Tenant extra property PackageId）且未显式指定过滤集时，按套餐勾选过滤——
     /// 让"套餐"成为数据：即使应用套餐的请求曾失败，租户首次访问也会按套餐收敛，
     /// 而不是先看到全量菜单等管理员补救。
@@ -366,7 +363,7 @@ public class MenuManager : DomainService, ITransientDependency
 
     /// <summary>
     /// 重置租户菜单为"按套餐过滤的模板拷贝"（租户套餐应用入口，也可不传套餐做全量重置）。
-    /// 破坏性操作：会删除该租户现有菜单及其角色勾选记录。菜单仓储在租户上下文调用。
+    /// 破坏性操作：会删除该租户现有菜单。菜单仓储在租户上下文调用。
     /// 用硬删除：软删除行仍占用 (TenantId, Path) 唯一索引，重拷同路径会撞唯一约束。
     /// 与懒拷贝共用同一把锁，且在锁内独立事务里"先删后拷、一次提交"（EnsureTenantMenusAsync
     /// 同款范式）：删除+重拷对外是原子单元——并发懒拷贝要么整体发生在重置前（随后被删除）、
@@ -418,7 +415,7 @@ public class MenuManager : DomainService, ITransientDependency
     }
 
     /// <summary>
-    /// 删光当前租户上下文的全部菜单与角色勾选（租户删除清理用，不重拷模板）。
+    /// 删光当前租户上下文的全部菜单（租户删除清理用，不重拷模板）。
     /// 必须在租户上下文调用（菜单仓储按 TenantId 过滤）——参数只用于清「已播种」短缓存，
     /// 删除范围由 ICurrentTenant 决定，故显式校验两者一致，防止在 Host 上下文误删全局模板。
     /// 硬删除理由同 ResetTenantMenusAsync。
@@ -440,14 +437,6 @@ public class MenuManager : DomainService, ITransientDependency
     private async Task DeleteTenantMenusCoreAsync()
     {
         var tenantMenus = await _menuRepository.GetListAsync(x => true);
-        var menuIds = tenantMenus.Select(x => x.Id).ToHashSet();
-
-        var grants = await _menuGrantRepository.GetListAsync(x => menuIds.Contains(x.MenuId));
-        foreach (var grant in grants)
-        {
-            await _menuGrantRepository.DeleteAsync(grant);
-        }
-
         foreach (var menu in tenantMenus)
         {
             await _menuRepository.HardDeleteAsync(menu);

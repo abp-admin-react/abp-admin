@@ -106,7 +106,7 @@ public class TenantPackageAppService : AbpAdminAppService, ITenantPackageAppServ
         var templateMenus = await GetHostTemplateMenusAsync();
 
         // 复用 MenuTreeBuilder：与菜单管理页（MenuAppService.GetTreeAsync）同一套树构建
-        // 与排序/悬空节点上浮语义，DTO 多出的 TenantId/Remark/GrantedRoles 字段对勾选树无影响
+        // 与排序/悬空节点上浮语义，DTO 多出的 TenantId/Remark 字段对勾选树无影响
         var roots = MenuTreeBuilder.Build(templateMenus);
 
         return new TenantPackageMenuSelectionDto

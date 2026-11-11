@@ -142,7 +142,7 @@ public class OperationLogActionFilterTests
         var (filter, writer) = Build();
         var id = Guid.NewGuid();
         var executing = ExecutingContext(nameof(StubController.Create), typeof(StubController),
-            new Dictionary<string, object?> { ["id"] = id, ["name"] = "岗位A" });
+            new Dictionary<string, object?> { ["id"] = id, ["name"] = "资源A" });
 
         await filter.OnActionExecutionAsync(executing, () =>
             Task.FromResult(ExecutedContext(executing, new StubResult { Value = "rv" })));
@@ -151,7 +151,7 @@ public class OperationLogActionFilterTests
         var entry = writer.Entries[0];
         entry.Success.ShouldBeTrue();
         entry.BizId.ShouldBe(id.ToString());
-        entry.Action.ShouldBe("创建了 岗位A（rv）");
+        entry.Action.ShouldBe("创建了 资源A（rv）");
         entry.RequestMethod.ShouldBe("POST");
         entry.CorrelationId.ShouldBe(TestCorrelationId);
         entry.Duration.ShouldBeGreaterThanOrEqualTo(0);

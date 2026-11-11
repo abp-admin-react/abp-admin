@@ -184,20 +184,6 @@ declare namespace API {
     avatarUrl?: string;
   };
 
-  type BackgroundJobDto = {
-    id?: string;
-    applicationName?: string;
-    jobName?: string;
-    jobArgs?: string;
-    tryCount?: number;
-    creationTime?: string;
-    nextTryTime?: string;
-    lastTryTime?: string;
-    isAbandoned?: boolean;
-    completionTime?: string;
-    priority?: number;
-  };
-
   type BatchUpdateDataDictionaryItemsMetaInput = {
     items?: UpdateDataDictionaryItemMetaItemInput[];
   };
@@ -360,12 +346,6 @@ declare namespace API {
     valueType?: IdentityClaimValueType;
   };
 
-  type CreateDataScopeDemoDto = {
-    name: string;
-    /** 显式指定组织单元。为 null 时由写入侧拦截器从当前数据范围快照自动填充。 */
-    organizationUnitId?: string;
-  };
-
   type CreateEditionDto = {
     displayName: string;
   };
@@ -465,14 +445,6 @@ declare namespace API {
   type CreateOrganizationUnitDto = {
     parentId?: string;
     displayName: string;
-  };
-
-  type CreatePostDto = {
-    name: string;
-    code: string;
-    sortOrder?: number;
-    status?: PostStatusEnum;
-    remark?: string;
   };
 
   type CreateScheduledJobDto = {
@@ -597,17 +569,6 @@ declare namespace API {
     items?: DataDictionaryItemViewDto[];
   };
 
-  type DataScopeDemoDto = {
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    tenantId?: string;
-    organizationUnitId?: string;
-    name?: string;
-  };
-
   type DataScopeTypeEnum = 0 | 1 | 2 | 3 | 4;
 
   type DateTimeFormatDto = {
@@ -638,19 +599,11 @@ declare namespace API {
     ProviderKey: string;
   };
 
-  type deleteApiAppBackgroundJobIdParams = {
-    id: string;
-  };
-
   type deleteApiAppCacheMonitorKeyParams = {
     key?: string;
   };
 
   type deleteApiAppClaimTypeIdParams = {
-    id: string;
-  };
-
-  type deleteApiAppDataScopeDemoIdParams = {
     id: string;
   };
 
@@ -669,10 +622,6 @@ declare namespace API {
   };
 
   type deleteApiAppLanguageIdParams = {
-    id: string;
-  };
-
-  type deleteApiAppMenuIdParams = {
     id: string;
   };
 
@@ -696,15 +645,6 @@ declare namespace API {
   type deleteApiAppOrganizationUnitIdRoleRoleIdParams = {
     id: string;
     roleId: string;
-  };
-
-  type deleteApiAppPostIdMemberUserIdParams = {
-    id: string;
-    userId: string;
-  };
-
-  type deleteApiAppPostIdParams = {
-    id: string;
   };
 
   type deleteApiAppRoleDataScopeIdParams = {
@@ -797,12 +737,6 @@ declare namespace API {
 
   type EnableAuthenticatorInput = {
     code: string;
-  };
-
-  type EnqueueTestBackgroundJobDto = {
-    emailAddress: string;
-    subject: string;
-    body?: string;
   };
 
   type EntityChangeDto = {
@@ -1122,19 +1056,6 @@ declare namespace API {
     MaxResultCount?: number;
   };
 
-  type getApiAppBackgroundJobIdParams = {
-    id: string;
-  };
-
-  type getApiAppBackgroundJobParams = {
-    JobName?: string;
-    IsAbandoned?: boolean;
-    HasCompleted?: boolean;
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
   type getApiAppCacheMonitorKeysParams = {
     prefix?: string;
     cursor?: number;
@@ -1153,12 +1074,6 @@ declare namespace API {
 
   type getApiAppDataDictionaryViewCodeParams = {
     code: string;
-  };
-
-  type getApiAppDataScopeDemoParams = {
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
   };
 
   type getApiAppEditionIdTenantCountParams = {
@@ -1257,14 +1172,6 @@ declare namespace API {
     MaxResultCount?: number;
   };
 
-  type getApiAppMenuIdParams = {
-    id: string;
-  };
-
-  type getApiAppMenuRoleGrantsMenuIdParams = {
-    menuId: string;
-  };
-
   type getApiAppMyNotificationParams = {
     SkipCount?: number;
     MaxResultCount?: number;
@@ -1360,27 +1267,6 @@ declare namespace API {
 
   type getApiAppOrganizationUnitIdRolesParams = {
     id: string;
-  };
-
-  type getApiAppPostIdMembersParams = {
-    id: string;
-    Filter?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiAppPostParams = {
-    /** 按名称/编码模糊过滤。 */
-    Filter?: string;
-    /** 按状态过滤；null 为全部。 */
-    Status?: PostStatusEnum;
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiAppPostPostsByUserUserIdParams = {
-    userId: string;
   };
 
   type getApiAppProfileAvatarIdParams = {
@@ -2135,14 +2021,6 @@ BaseCultureName 未传、key 不在基准文化里时为 null（前端显示为�
     items?: LanguageDto[];
   };
 
-  type ListResultDto1MenuTreeDto = {
-    items?: MenuTreeDto[];
-  };
-
-  type ListResultDto1MyMenuItemDto = {
-    items?: MyMenuItemDto[];
-  };
-
   type ListResultDto1OpenIddictScopeLookupDto = {
     items?: OpenIddictScopeLookupDto[];
   };
@@ -2153,14 +2031,6 @@ BaseCultureName 未传、key 不在基准文化里时为 null（前端显示为�
 
   type ListResultDto1PaymentMethodDto = {
     items?: PaymentMethodDto[];
-  };
-
-  type ListResultDto1PermissionOptionDto = {
-    items?: PermissionOptionDto[];
-  };
-
-  type ListResultDto1PostDto = {
-    items?: PostDto[];
   };
 
   type ListResultDto1ScheduledJobTypeDto = {
@@ -2204,42 +2074,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     note?: string;
   };
 
-  type MenuCreateDto = {
-    parentId?: string;
-    type?: MenuTypeEnum;
-    title: string;
-    name?: string;
-    path?: string;
-    icon?: string;
-    /** 排序值（前端限制 0-9999）。 */
-    orderNo?: number;
-    isHide?: boolean;
-    isEnabled?: boolean;
-    permissionName?: string;
-    remark?: string;
-  };
-
-  type MenuDto = {
-    id?: string;
-    tenantId?: string;
-    parentId?: string;
-    type?: MenuTypeEnum;
-    /** 默认显示名。 */
-    title?: string;
-    /** 国际化 key 尾段，可空。 */
-    name?: string;
-    path?: string;
-    icon?: string;
-    orderNo?: number;
-    isHide?: boolean;
-    isEnabled?: boolean;
-    permissionName?: string;
-    remark?: string;
-    /** 并发戳（乐观并发）：编辑表单携带加载时的值回传，服务端与库内当前值不一致即 409。
-实体上有该列（FullAuditedAggregateRoot），此前未下发导致编辑冲突被静默覆盖。 */
-    concurrencyStamp?: string;
-  };
-
   type MenuTreeDto = {
     id?: string;
     tenantId?: string;
@@ -2259,28 +2093,10 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     /** 并发戳（乐观并发）：编辑表单携带加载时的值回传，服务端与库内当前值不一致即 409。
 实体上有该列（FullAuditedAggregateRoot），此前未下发导致编辑冲突被静默覆盖。 */
     concurrencyStamp?: string;
-    grantedRoles?: string[];
     children?: MenuTreeDto[];
   };
 
   type MenuTypeEnum = 1 | 2;
-
-  type MenuUpdateDto = {
-    parentId?: string;
-    type?: MenuTypeEnum;
-    title: string;
-    name?: string;
-    path?: string;
-    icon?: string;
-    /** 排序值（前端限制 0-9999）。 */
-    orderNo?: number;
-    isHide?: boolean;
-    isEnabled?: boolean;
-    permissionName?: string;
-    remark?: string;
-    /** 并发戳：传了就校验（与库内当前值不一致抛 AbpDbConcurrencyException→409），不传跳过（兼容旧调用方）。 */
-    concurrencyStamp?: string;
-  };
 
   type MethodParameterApiDescriptionModel = {
     name?: string;
@@ -2318,14 +2134,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
   type MultiTenancyInfoDto = {
     isEnabled?: boolean;
     userSharingStrategy?: TenantUserSharingStrategy;
-  };
-
-  type MyMenuItemDto = {
-    title?: string;
-    name?: string;
-    path?: string;
-    icon?: string;
-    children?: MyMenuItemDto[];
   };
 
   type MyNotificationDto = {
@@ -2576,11 +2384,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     totalCount?: number;
   };
 
-  type PagedResultDto1BackgroundJobDto = {
-    items?: BackgroundJobDto[];
-    totalCount?: number;
-  };
-
   type PagedResultDto1ClaimTypeDto = {
     items?: ClaimTypeDto[];
     totalCount?: number;
@@ -2588,11 +2391,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
 
   type PagedResultDto1DataDictionaryDto = {
     items?: DataDictionaryDto[];
-    totalCount?: number;
-  };
-
-  type PagedResultDto1DataScopeDemoDto = {
-    items?: DataScopeDemoDto[];
     totalCount?: number;
   };
 
@@ -2693,16 +2491,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
 
   type PagedResultDto1PaymentRecordDto = {
     items?: PaymentRecordDto[];
-    totalCount?: number;
-  };
-
-  type PagedResultDto1PostDto = {
-    items?: PostDto[];
-    totalCount?: number;
-  };
-
-  type PagedResultDto1PostUserDto = {
-    items?: PostUserDto[];
     totalCount?: number;
   };
 
@@ -2898,12 +2686,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     permissions?: PermissionGrantInfoDto[];
   };
 
-  type PermissionOptionDto = {
-    name?: string;
-    displayName?: string;
-    parentName?: string;
-  };
-
   type PersonalDataDto = {
     userName?: string;
     email?: string;
@@ -2927,14 +2709,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
   };
 
   type postApiAppAuditLogIdUnmarkHandledParams = {
-    id: string;
-  };
-
-  type postApiAppBackgroundJobIdAbandonParams = {
-    id: string;
-  };
-
-  type postApiAppBackgroundJobIdRetryParams = {
     id: string;
   };
 
@@ -3021,10 +2795,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     id: string;
   };
 
-  type postApiAppPostIdMembersParams = {
-    id: string;
-  };
-
   type postApiAppScheduledJobIdSetEnabledParams = {
     id: string;
     isEnabled?: boolean;
@@ -3096,34 +2866,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
 
   type postApiSettingManagementTimezoneParams = {
     timezone?: string;
-  };
-
-  type PostDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    isDeleted?: boolean;
-    deleterId?: string;
-    deletionTime?: string;
-    name?: string;
-    code?: string;
-    sortOrder?: number;
-    status?: PostStatusEnum;
-    remark?: string;
-    memberCount?: number;
-  };
-
-  type PostStatusEnum = 0 | 1;
-
-  type PostUserDto = {
-    id?: string;
-    userName?: string;
-    name?: string;
-    email?: string;
-    isActive?: boolean;
   };
 
   type postWechatPayNotifyMchIdMchIdParams = {
@@ -3244,14 +2986,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     id: string;
   };
 
-  type putApiAppMenuIdParams = {
-    id: string;
-  };
-
-  type putApiAppMenuRoleGrantsMenuIdParams = {
-    menuId: string;
-  };
-
   type putApiAppOpenIddictApplicationIdParams = {
     id: string;
   };
@@ -3265,10 +2999,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
   };
 
   type putApiAppOrganizationUnitIdParams = {
-    id: string;
-  };
-
-  type putApiAppPostIdParams = {
     id: string;
   };
 
@@ -3903,10 +3633,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     value: string;
   };
 
-  type UpdateMenuGrantsDto = {
-    roleNames?: string[];
-  };
-
   type UpdateOpenIddictApplicationDto = {
     clientId: string;
     displayName: string;
@@ -3980,15 +3706,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
 
   type UpdatePermissionsDto = {
     permissions?: UpdatePermissionDto[];
-  };
-
-  type UpdatePostDto = {
-    /** 显示名同时服务操作日志 _diff 输出（【岗位名称】xx → yy）。 */
-    name: string;
-    code: string;
-    sortOrder?: number;
-    status?: PostStatusEnum;
-    remark?: string;
   };
 
   type UpdateProfileDto = {

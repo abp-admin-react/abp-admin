@@ -33,8 +33,7 @@ public class DataScopePermissionDataSeedContributor : IDataSeedContributor, ITra
             new[]
             {
                 AbpAdminPermissions.DataScopes.Default,
-                AbpAdminPermissions.DataScopes.Manage,
-                AbpAdminPermissions.DataScopes.Demo
+                AbpAdminPermissions.DataScopes.Manage
             },
             context.TenantId);
     }

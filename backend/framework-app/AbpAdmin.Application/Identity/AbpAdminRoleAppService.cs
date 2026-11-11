@@ -1,9 +1,12 @@
 using System;
 using System.Threading.Tasks;
 using AbpAdmin.OperationLogs;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Volo.Abp;
+using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
+using Volo.Abp.Domain.Entities;
 using Volo.Abp.Identity;
 
 namespace AbpAdmin.Identity;
@@ -12,7 +15,7 @@ namespace AbpAdmin.Identity;
 /// <see cref="IIdentityRoleAppService"/> 的应用服务替换：删除角色前校验「角色下仍有用户则拒绝」。
 /// ABP 原生删除（IdentityRoleManager.DeleteAsync）会静默清掉所有用户-角色关联，
 /// 用户权限无感丢失且无任何提示；借鉴 Admin.NET SysRoleService.DeleteRole（D1025）——
-/// 有人用的角色先改派再删，删除才是显式决定。级联清理（MenuGrant/RoleDataScope/PermissionGrants）
+/// 有人用的角色先改派再删，删除才是显式决定。级联清理（RoleDataScope/PermissionGrants）
 /// 不变，仍由各自的事件处理器负责。
 /// <para>替换方式按 ABP 官方服务替换模式（同 AbpAdminSettingUiAppService 先例）：
 /// [Dependency(ReplaceServices=true)] + [ExposeServices(接口+基类)]，Identity 模块的
@@ -47,6 +50,31 @@ public class AbpAdminRoleAppService : IdentityRoleAppService
         _httpContextAccessor = httpContextAccessor;
         // IHttpContextAccessor 由宿主 ASP.NET Core / 测试基座（AbpAdminApplicationTestModule）注册；
         // HttpContext 在无请求上下文（后台/测试）时为 null，取值处一律可空处理
+    }
+
+    [Authorize(IdentityPermissions.Roles.Update)]
+    public override async Task<IdentityRoleDto> UpdateAsync(Guid id, IdentityRoleUpdateDto input)
+    {
+        var remark = input.GetProperty<string>(RoleRemarkConsts.PropertyName);
+        if (remark is null)
+        {
+            // 旧客户端省略扩展属性时保留备注；显式传空字符串用于清空。
+            input.RemoveProperty(RoleRemarkConsts.PropertyName);
+            return await base.UpdateAsync(id, input);
+        }
+
+        var role = await RoleManager.GetByIdAsync(id);
+        if (input.Name != role.Name || input.IsDefault != role.IsDefault || input.IsPublic != role.IsPublic ||
+            input.ExtraProperties.Count != 1)
+        {
+            return await base.UpdateAsync(id, input);
+        }
+
+        // 备注按角色 ID 写入。已有同名角色仍可编辑备注，角色名称和其他属性的修改走 ABP 原流程。
+        role.SetConcurrencyStampIfNotNull(input.ConcurrencyStamp);
+        role.SetProperty(RoleRemarkConsts.PropertyName, remark);
+        await RoleRepository.UpdateAsync(role, autoSave: true);
+        return ObjectMapper.Map<IdentityRole, IdentityRoleDto>(role);
     }
 
     public override async Task DeleteAsync(Guid id)

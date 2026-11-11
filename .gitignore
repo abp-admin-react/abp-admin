@@ -304,6 +304,8 @@ decomp-*/
 # 本地数据库备份
 AbpAdmin.db.bak*
 AbpAdmin.db.backup*
+*.dump
+*.pgdump
 
 # AI 工具会话状态
 .mimosa/

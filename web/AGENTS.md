@@ -28,7 +28,7 @@ openapi 生成器已退役，前端 API 层不再有「生成物」，全部由 
 
 - **唯一主层是 `src/abp/**`**：新增端点只写进这里。写之前先读后端 `AbpAdmin.Application.Contracts` 里对应的 AppService 接口与 DTO（路由 = `/api/app/<service>/<method>` 按 ABP 动态 API 规则推导），函数用语义化命名（如 `moveOrganizationUnit`），类型就地定义或放 `src/abp/types.ts`。
 - URL 一律写**相对路径**（`/api/app/...`）、无 baseURL——开发请求走 umi 代理（`config/proxy.ts`），不要写死后端地址；**查询参数用 PascalCase**（`SkipCount` / `MaxResultCount`，ABP 模型绑定默认口径），camelCase→PascalCase 适配收在 `src/abp` 函数内，页面不感知。
-- **`src/services/abpadmin/` 是历史 openapi 生成物，已冻结**：不再新增、不再重新生成、页面不要再新接入。仅剩存量域仍在用（language/languageText、myNotification/notificationManagement、scheduledJob、textTemplate、virtualFileExplorer、dataScopeDemo，以及 `src/abp/settingUi.ts`、`dataDictionary.ts`、`proModules.ts` 的委托目标 auditLog/backgroundJob 等）——**哪个域要改动时，顺手整域迁入 `src/abp` 并删除对应生成文件**，逐步清空。
+- **`src/services/abpadmin/` 是历史 openapi 生成物，已冻结**：不再新增、不再重新生成、页面不要再新接入。仅剩存量域仍在用（language/languageText、myNotification/notificationManagement、scheduledJob、textTemplate、virtualFileExplorer，以及 `src/abp/settingUi.ts`、`dataDictionary.ts`、`proModules.ts` 的委托目标 auditLog 等）——**哪个域要改动时，顺手整域迁入 `src/abp` 并删除对应生成文件**，逐步清空。
 - `src/services/` 下 ant-design-pro / abp-admin-web 两套脚手架演示残留已随唯一消费者（table-list 演示页）一并删除，勿再引入。
 - **404 全局静默契约**：`requestErrorConfig` 对 404 不弹全局错误（业务语义：不存在/未配置）。页面层读端点存在该语义时**必须**用 `isNotFound` 分流降级（对照实现 `src/abp/dataScope.ts`），否则用户点了个"没反应"；其余错误码照常全局提示。全栈契约地图见仓库根 `docs/framework-contracts.md`。
 - **客户错误路径**：客户调用只走 `src/abp/customer`（独立 fetch，禁止导入 Umi `request` / `requestErrorConfig` / antd）。`skipErrorHandler` 只关闭展示，不能绕过归一。公开码快照是 `public-error-catalog.json`，由后端 `PublicErrorContractSnapshotTests` 写入；不要手改内部映射。示例页 `pages/framework/customer-errors-demo` 只在非 production 路由注册，生产构建产物不得包含该页。管理 404 静默不适用于客户库。

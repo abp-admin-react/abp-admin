@@ -1,9 +1,0 @@
-using AbpAdmin.PermissionManagement;
-using Xunit;
-
-namespace AbpAdmin.EntityFrameworkCore.Applications;
-
-[Collection(AbpAdminTestConsts.CollectionDefinitionName)]
-public class EfCorePermissionDefinitionManagementAppServiceTests : PermissionDefinitionManagementAppServiceTests<PermissionDefinitionManagementTestModule>
-{
-}

@@ -1,7 +1,7 @@
 namespace AbpAdmin.Menus;
 
 /// <summary>
-/// 菜单管理字段长度常量（表 AppMenus / AppMenuGrants）。EF 配置与实体校验共用同一份，避免漂移。
+/// 菜单管理字段长度常量（表 AppMenus）。EF 配置与实体校验共用同一份，避免漂移。
 /// </summary>
 public static class MenuConsts
 {
@@ -20,23 +20,8 @@ public static class MenuConsts
 
     public const int MaxRemarkLength = 256;
 
-    /// <summary>
-    /// 授权提供者键（ProviderName=R 时存角色名）。必须 ≥ ABP IdentityRole.Name 上限 256——
-    /// 宽度须容 65+ 字符的角色名（插入时撞列宽 500（宽度校验在 ABP 侧，本服务无法前置拦截）。
-    /// </summary>
-    public const int MaxProviderKeyLength = 256;
-
-    /// <summary>授权提供者名（代码常量 "R"/"U"），与键共用常量会让键放宽时跟着虚胖，单列。</summary>
-    public const int MaxProviderNameLength = 8;
-
     /// <summary>同一父级下建议的默认排序值（Admin.NET 惯例：100 起，数字小的在前）。</summary>
     public const int DefaultOrderNo = 100;
-
-    /// <summary>
-    /// 菜单角色授权的 Provider 名（对应 ABP PermissionGrants 的 "R" 约定，预留 "U"=用户）。
-    /// 读写两侧共用同一出处，避免字面量漂移。
-    /// </summary>
-    public const string RoleProviderName = "R";
 
     /// <summary>
     /// 沿父链向上遍历的最大步数（防环守卫）。菜单树实际深度 ≤ 4，64 已极宽松；

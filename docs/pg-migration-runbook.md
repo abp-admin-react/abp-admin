@@ -36,12 +36,10 @@
   备用手段（自动打戳不合意时）：schema 隔离（连接串追加 `;SearchPath=<新schema>`，先
   `CREATE SCHEMA IF NOT EXISTS <新schema>`，新旧表同库不同 schema 共存）。
 
-## 2. 本机/测试环境运行手册（192.168.10.250 实例）
+## 2. 本机与测试环境运行手册
 
-1. **凭据**：只放 `framework-app/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 的
-   `ConnectionStrings:Default`（入库的是开发样本；本机真实凭据改同文件后
-   `git update-index --skip-worktree` 屏蔽）。基底 appsettings.json 的 Default 已无意义，
-   会被 secrets 覆盖。
+1. 将连接串存放在 Git 忽略的宿主本地配置 `Configuration/Database.json` 或
+   `appsettings.secrets.json` 中，也可以通过 `ConnectionStrings__Default` 环境变量传入。
 2. **schema 隔离运行**（不动 public 旧表）：
    ```bash
    # 一次性：CREATE SCHEMA IF NOT EXISTS abp_admin_efm
@@ -49,15 +47,14 @@
    cd backend/framework-app/AbpAdmin.DbMigrator && dotnet run   # 建表+种子（幂等）
    cd backend/framework-app/AbpAdmin.HttpApi.Host && dotnet run
    ```
-3. **pg_hba 注意**：实例只放行 `abp_test2` 库给当前用户——**新建租户库/换库名会被
-   `no pg_hba.conf entry` 拒绝**。要多库租户（独立库模式），需服务器侧为用户加放行条目。
+3. 如果 PostgreSQL 仅允许用户访问指定的测试库，连接其他库可能收到
+   `no pg_hba.conf entry`。使用独立租户库时，为对应数据库配置服务器访问规则。
 
 ## 3. 测试环境的数据库策略
 
 | 测试域 | 策略 |
 | --- | --- |
 | Application/Domain/BizTemplate/EFCore 多数 | Testcontainers PostgreSQL（`AbpAdminTestPg`，每测试进程一个 `postgres:16` 容器、每程序集一个库）：测试模块注入容器连接串并对相应 DbContext 跑真迁移建表，用例间由测试基类 Respawn 清表隔离——运行期与测试同为 PG 单提供程序，无 provider 覆盖 |
-| 权限定义动态化 | `PermissionDefinitionManagementTestModule` 重开 `IsDynamicPermissionStoreEnabled`（被测能力本身） |
 | 实体回滚前滚闭环 | `EntityRestoreTestModule` 开 `EntityHistorySelectors.AddAllEntities()`（Host 同款） |
 | Saas 租户库接线 | `SaasTestsModule` 用记录式 Fake 替换 `ITenantDatabaseCreator`（Npgsql 建库语义不进被测面） |
 | Host 级（匿名端点扫查）/ 真库门控用例 | 容器默认库的专用 schema `abp_admin_hosttest`（测试自建+宿主自举迁移）；连接串由程序集加载时注入的 `ConnectionStrings__Default` 环境变量指向本进程容器（`RequiresHostDatabaseFact` 分层回落 secrets 仍可用）；**本组测试需要 Docker** |

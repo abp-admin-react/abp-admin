@@ -1,7 +1,6 @@
 using System;
 using System.Threading.Tasks;
 using AbpAdmin.Menus;
-using AbpAdmin.Posts;
 using AbpAdmin.ScheduledJobs;
 using AbpAdmin.Tenants;
 using Microsoft.Extensions.Caching.Distributed;
@@ -71,25 +70,6 @@ public class OrganizationUnitOperationLogParseFunction : OperationLogParseFuncti
 
     protected override async ValueTask<string?> FindNameAsync(Guid id)
         => (await _organizationUnitRepository.FindAsync(id))?.DisplayName;
-}
-
-/// <summary>岗位 ID → 岗位名。</summary>
-public class PostOperationLogParseFunction : OperationLogParseFunctionBase, ITransientDependency
-{
-    private readonly IRepository<Post, Guid> _postRepository;
-
-    public PostOperationLogParseFunction(
-        IDistributedCache<OperationLogNameCacheItem> cache,
-        IRepository<Post, Guid> postRepository)
-        : base(cache)
-    {
-        _postRepository = postRepository;
-    }
-
-    public override string Name => "post";
-
-    protected override async ValueTask<string?> FindNameAsync(Guid id)
-        => (await _postRepository.FindAsync(id))?.Name;
 }
 
 /// <summary>租户 ID → 租户名。</summary>

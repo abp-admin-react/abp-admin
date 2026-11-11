@@ -1,5 +1,5 @@
 /**
- * 身份管理扩展：组织单元、岗位、成员关系等（非标准 CRUD 的 Identity 旁路）。
+ * 身份管理扩展：组织单元与成员关系（标准用户/角色 CRUD 之外的接口）。
  *
  * ## 边界
  * - 路径前缀 `/api/app/organization-unit`、`/api/app/post` 等，与 Contracts 对齐。

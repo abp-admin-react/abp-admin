@@ -38,14 +38,6 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
             AbpAdminPermissions.SecurityLogs.Default,
             L("Permission:SecurityLogs"));
 
-        var posts = group.AddPermission(
-            AbpAdminPermissions.Posts.Default,
-            L("Permission:Posts"));
-        posts.AddChild(AbpAdminPermissions.Posts.Create, L("Permission:Create"));
-        posts.AddChild(AbpAdminPermissions.Posts.Update, L("Permission:Update"));
-        posts.AddChild(AbpAdminPermissions.Posts.Delete, L("Permission:Delete"));
-        posts.AddChild(AbpAdminPermissions.Posts.ManageMembers, L("Permission:ManageMembers"));
-
         var sessions = group.AddPermission(
             AbpAdminPermissions.Sessions.Default,
             L("Permission:Sessions"));
@@ -138,7 +130,6 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
         jobs.AddChild(AbpAdminPermissions.BackgroundJobs.Delete, L("Permission:Delete"), MultiTenancySides.Host);
         jobs.AddChild(AbpAdminPermissions.BackgroundJobs.Abandon, L("Permission:Abandon"), MultiTenancySides.Host);
         jobs.AddChild(AbpAdminPermissions.BackgroundJobs.Retry, L("Permission:Retry"), MultiTenancySides.Host);
-        jobs.AddChild(AbpAdminPermissions.BackgroundJobs.Enqueue, L("Permission:Enqueue"), MultiTenancySides.Host);
 
         var scheduledJobs = group.AddPermission(
             AbpAdminPermissions.ScheduledJobs.Default,
@@ -167,7 +158,6 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
             AbpAdminPermissions.DataScopes.Default,
             L("Permission:DataScopes"));
         dataScopes.AddChild(AbpAdminPermissions.DataScopes.Manage, L("Permission:DataScopes.Manage"));
-        dataScopes.AddChild(AbpAdminPermissions.DataScopes.Demo, L("Permission:DataScopes.Demo"));
 
         // 用户导入导出权限
         var identityUsers = group.AddPermission(
@@ -196,7 +186,6 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
         menus.AddChild(AbpAdminPermissions.Menus.Create, L("Permission:Menus.Create"));
         menus.AddChild(AbpAdminPermissions.Menus.Update, L("Permission:Menus.Update"));
         menus.AddChild(AbpAdminPermissions.Menus.Delete, L("Permission:Menus.Delete"));
-        menus.AddChild(AbpAdminPermissions.Menus.AssignRoles, L("Permission:Menus.AssignRoles"));
 
         var tenantPackages = group.AddPermission(
             AbpAdminPermissions.TenantPackages.Default,
@@ -209,14 +198,6 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
         // SettingUi 读写分离（模块五收口的对齐项）：写权限挂在上游 SettingUi 权限组下，
         // 与 ShowSettingPage（读）并列展示。模块依赖已声明 AbpSettingUiApplicationContractsModule，
         // 上游 provider 先执行，GetGroupOrNull 必中。
-        var permissionDefinitions = group.AddPermission(
-            AbpAdminPermissions.PermissionDefinitions.Default,
-            L("Permission:PermissionDefinitions"),
-            multiTenancySide: MultiTenancySides.Host);
-        permissionDefinitions.AddChild(AbpAdminPermissions.PermissionDefinitions.Create, L("Permission:Create"), MultiTenancySides.Host);
-        permissionDefinitions.AddChild(AbpAdminPermissions.PermissionDefinitions.Update, L("Permission:Update"), MultiTenancySides.Host);
-        permissionDefinitions.AddChild(AbpAdminPermissions.PermissionDefinitions.Delete, L("Permission:Delete"), MultiTenancySides.Host);
-
         var settingUiGroup = context.GetGroupOrNull(SettingUiPermissions.GroupName)
             ?? context.AddGroup(SettingUiPermissions.GroupName, L("Permission:SettingUi"));
         settingUiGroup.AddPermission(

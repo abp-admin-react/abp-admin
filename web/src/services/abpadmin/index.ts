@@ -11,14 +11,12 @@ import * as accountPasskey from "./accountPasskey";
 import * as accountSecurity from "./accountSecurity";
 import * as auditLog from "./auditLog";
 import * as auditLogExport from "./auditLogExport";
-import * as backgroundJob from "./backgroundJob";
 import * as cacheMonitor from "./cacheMonitor";
 import * as captchaImage from "./captchaImage";
 import * as claimType from "./claimType";
 import * as cookieConsent from "./cookieConsent";
 import * as dataDictionary from "./dataDictionary";
 import * as dataDictionaryView from "./dataDictionaryView";
-import * as dataScopeDemo from "./dataScopeDemo";
 import * as dynamicClaims from "./dynamicClaims";
 import * as edition from "./edition";
 import * as emailSettings from "./emailSettings";
@@ -34,8 +32,6 @@ import * as identityUserDelegation from "./identityUserDelegation";
 import * as language from "./language";
 import * as languageText from "./languageText";
 import * as login from "./login";
-import * as menu from "./menu";
-import * as myMenu from "./myMenu";
 import * as myNotification from "./myNotification";
 import * as notification from "./notification";
 import * as notificationInfo from "./notificationInfo";
@@ -49,7 +45,6 @@ import * as paymentAdmin from "./paymentAdmin";
 import * as paymentRecord from "./paymentRecord";
 import * as permissions from "./permissions";
 import * as personalData from "./personalData";
-import * as post from "./post";
 import * as profile from "./profile";
 import * as profileAvatar from "./profileAvatar";
 import * as refund from "./refund";
@@ -81,14 +76,12 @@ export default {
   accountSecurity,
   auditLog,
   auditLogExport,
-  backgroundJob,
   cacheMonitor,
   captchaImage,
   claimType,
   cookieConsent,
   dataDictionary,
   dataDictionaryView,
-  dataScopeDemo,
   dynamicClaims,
   edition,
   emailSettings,
@@ -104,8 +97,6 @@ export default {
   language,
   languageText,
   login,
-  menu,
-  myMenu,
   myNotification,
   notification,
   notificationInfo,
@@ -119,7 +110,6 @@ export default {
   paymentRecord,
   permissions,
   personalData,
-  post,
   profile,
   profileAvatar,
   refund,

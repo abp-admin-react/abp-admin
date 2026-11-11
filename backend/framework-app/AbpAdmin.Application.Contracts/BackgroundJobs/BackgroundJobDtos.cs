@@ -1,5 +1,4 @@
 using System;
-using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
@@ -17,8 +16,6 @@ public interface IBackgroundJobAppService : IApplicationService
     Task AbandonAsync(Guid id);
 
     Task RetryAsync(Guid id);
-
-    Task EnqueueTestAsync(EnqueueTestBackgroundJobDto input);
 }
 
 public class GetBackgroundJobListInput : PagedAndSortedResultRequestDto
@@ -51,17 +48,4 @@ public class BackgroundJobDto : EntityDto<Guid>
     public DateTime? CompletionTime { get; set; }
 
     public byte Priority { get; set; }
-}
-
-public class EnqueueTestBackgroundJobDto
-{
-    [Required]
-    [EmailAddress]
-    public string EmailAddress { get; set; } = default!;
-
-    [Required]
-    [StringLength(256)]
-    public string Subject { get; set; } = default!;
-
-    public string? Body { get; set; }
 }

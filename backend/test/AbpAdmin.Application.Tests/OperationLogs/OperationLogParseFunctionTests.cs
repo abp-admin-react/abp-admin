@@ -3,9 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.OperationLogs;
-using AbpAdmin.Posts;
 using Shouldly;
-using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Guids;
 using Volo.Abp.Identity;
 using Volo.Abp.Modularity;
@@ -22,32 +20,25 @@ public abstract class OperationLogParseFunctionTests<TStartupModule> : AbpAdminA
 {
     private readonly IGuidGenerator _guidGenerator;
     private readonly IIdentityUserRepository _userRepository;
-    private readonly IRepository<Post, Guid> _postRepository;
     private readonly UserOperationLogParseFunction _userFunction;
-    private readonly PostOperationLogParseFunction _postFunction;
 
     protected OperationLogParseFunctionTests()
     {
         _guidGenerator = GetRequiredService<IGuidGenerator>();
         _userRepository = GetRequiredService<IIdentityUserRepository>();
-        _postRepository = GetRequiredService<IRepository<Post, Guid>>();
         _userFunction = GetRequiredService<UserOperationLogParseFunction>();
-        _postFunction = GetRequiredService<PostOperationLogParseFunction>();
     }
 
     [Fact]
-    public async Task Should_Resolve_User_And_Post_Names()
+    public async Task Should_Resolve_User_Name()
     {
         var userId = _guidGenerator.Create();
-        var postId = _guidGenerator.Create();
         await WithUnitOfWorkAsync(async () =>
         {
             await _userRepository.InsertAsync(new IdentityUser(userId, "parse-fn-user", "parse-fn-user@test.local"));
-            await _postRepository.InsertAsync(new Post(postId, "解析函数测试岗位", "PF001"));
         });
 
         (await _userFunction.ResolveAsync(userId)).ShouldBe("parse-fn-user");
-        (await _postFunction.ResolveAsync(postId)).ShouldBe("解析函数测试岗位");
     }
 
     [Fact]

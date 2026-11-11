@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using AbpAdmin.DataScopes;
+using AbpAdmin.ClientErrors;
 using AbpAdmin.Permissions;
 using AbpAdmin.OperationLogs;
 using Microsoft.AspNetCore.Authorization;
@@ -35,7 +35,6 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
     private readonly IBlobContainer<UserExportBlobContainer> _blobContainer;
     private readonly IRepository<UserExcelFile, Guid> _excelFileRepository;
     private readonly IPermissionChecker _permissionChecker;
-    private readonly ICurrentDataScopeProvider _currentDataScopeProvider;
 
     public IdentityUserAdminAppService(
         IdentityUserManager userManager,
@@ -45,8 +44,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
         IBackgroundJobManager backgroundJobManager,
         IBlobContainer<UserExportBlobContainer> blobContainer,
         IRepository<UserExcelFile, Guid> excelFileRepository,
-        IPermissionChecker permissionChecker,
-        ICurrentDataScopeProvider currentDataScopeProvider)
+        IPermissionChecker permissionChecker)
     {
         _userManager = userManager;
         _roleRepository = roleRepository;
@@ -56,7 +54,6 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
         _backgroundJobManager = backgroundJobManager;
         _blobContainer = blobContainer;
         _excelFileRepository = excelFileRepository;
-        _currentDataScopeProvider = currentDataScopeProvider;
     }
 
     [OperationLog("身份管理", "锁定用户", BizNo = "{{id}}", Success = "锁定了用户 {{user(id)}}")]
@@ -147,9 +144,6 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
             .Select(r => r.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // 整次导入共用一份数据范围快照（操作者身份不变）——行内再 GetAsync 会把
-        // 5000×(generation+cache) 分布式往返叠在认证导入上。
-        var snapshot = CurrentUser.IsAuthenticated ? await _currentDataScopeProvider.GetAsync() : null;
         // OU→角色名懒缓存：同一 OU 跨行只 GetRolesAsync 一次（行 UoW 仍按 id Get 实体挂接）。
         var ouRoleNamesMemo = new Dictionary<Guid, IReadOnlyList<string>>();
 
@@ -161,7 +155,7 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
                 // 每行一个独立的工作单元
                 using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
                 await ImportSingleRowAsync(
-                    row, rowNumber, ouIdByCode, ouIdsByDisplayName, knownRoleNames, snapshot, ouRoleNamesMemo);
+                    row, rowNumber, ouIdByCode, ouIdsByDisplayName, knownRoleNames, ouRoleNamesMemo);
                 await uow.CompleteAsync();
                 result.SucceededCount++;
             }
@@ -286,14 +280,13 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
         IReadOnlyDictionary<string, Guid> ouIdByCode,
         IReadOnlyDictionary<string, List<Guid>> ouIdsByDisplayName,
         IReadOnlySet<string> knownRoleNames,
-        DataScopeSnapshot? snapshot,
         Dictionary<Guid, IReadOnlyList<string>> ouRoleNamesMemo)
     {
         await ValidateRowAsync(row, rowNumber);
         var organizationUnitIds = ResolveOrganizationUnitIds(row, rowNumber, ouIdByCode, ouIdsByDisplayName);
         var user = await CreateUserAsync(row, rowNumber);
-        await AssignRolesAsync(user, row, rowNumber, knownRoleNames, snapshot);
-        await AssignOrganizationUnitsAsync(user, organizationUnitIds, rowNumber, snapshot, ouRoleNamesMemo);
+        await AssignRolesAsync(user, row, rowNumber, knownRoleNames);
+        await AssignOrganizationUnitsAsync(user, organizationUnitIds, rowNumber, ouRoleNamesMemo);
     }
 
     /// <summary>
@@ -354,19 +347,17 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
     /// 反提权守卫（安全审计 run-3）：OU 派生角色 = 完整角色成员资格——把导入用户挂进挂着
     /// 超越操作者自身权限角色的 OU，等价于向其授予那个角色。与 OrganizationUnitAppService
     /// .AddMembersAsync 同口径（run-2 C-2 守卫），批量导入面不得成为无守卫的平行通道。
-    /// <paramref name="snapshot"/> 由 ImportAsync 整次导入一次取入；null = 未认证豁免。
-    /// admin / IsAll 跳过角色列举；受限路径经 <paramref name="ouRoleNamesMemo"/> 跨行复用 GetRolesAsync。
+    /// 仅 admin 跳过角色列举；其他操作者经 <paramref name="ouRoleNamesMemo"/> 跨行复用 GetRolesAsync。
     /// 挂接仍按行 UoW 主键 Get 实体（不跨 UoW 复用文件级实体，防并发删除半截态）。
     /// </summary>
     protected virtual async Task AssignOrganizationUnitsAsync(
         Volo.Abp.Identity.IdentityUser user,
         IReadOnlyList<Guid> organizationUnitIds,
         int rowNumber,
-        DataScopeSnapshot? snapshot,
         Dictionary<Guid, IReadOnlyList<string>> ouRoleNamesMemo)
     {
-        var mustCheckOuRoles = snapshot != null &&
-            !OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles, snapshot.IsAll);
+        var mustCheckOuRoles = CurrentUser.IsAuthenticated &&
+            !OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles);
 
         foreach (var organizationUnitId in organizationUnitIds)
         {
@@ -383,11 +374,12 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
 
                 foreach (var roleName in roleNames)
                 {
-                    if (!OrganizationUnitRoleConferralGuard.IsRoleAttachable(roleName, CurrentUser.Roles, snapshot!.IsAll))
+                    if (!OrganizationUnitRoleConferralGuard.IsRoleAttachable(roleName, CurrentUser.Roles))
                     {
                         // 行级文案（code review D1）：点名行号/OU/越权角色，与 RoleBeyondAuthority 同风格
                         throw new UserFriendlyException(
-                            L["UserImport:OuRoleBeyondAuthority", rowNumber, unit.Code, roleName]);
+                            L["UserImport:OuRoleBeyondAuthority", rowNumber, unit.Code, roleName],
+                            code: ClientErrorCodes.Forbidden);
                     }
                 }
             }
@@ -541,14 +533,12 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
     /// <summary>
     /// 解析并分配角色。角色名合法性对照 <paramref name="knownRoleNames"/>（ImportAsync 文件级解析一次传入），
     /// 替代逐行全表查询。
-    /// <paramref name="snapshot"/> 由 ImportAsync 整次导入一次取入；null = 未认证豁免。
     /// </summary>
     protected virtual async Task AssignRolesAsync(
         Volo.Abp.Identity.IdentityUser user,
         UserImportRowDto row,
         int rowNumber,
-        IReadOnlySet<string> knownRoleNames,
-        DataScopeSnapshot? snapshot)
+        IReadOnlySet<string> knownRoleNames)
     {
         if (string.IsNullOrWhiteSpace(row.RoleNames))
         {
@@ -573,17 +563,18 @@ public class IdentityUserAdminAppService : AbpAdminAppService, IIdentityUserAdmi
 
         // 反提权守卫（安全审计 run-3）：SetRolesAsync 直呼绕过 ABP 模块面的
         // FilterRolesByCurrentUserAsync（非 admin 操作者只能授自己已有的角色）。
-        // 导入面必须与交互面权限等价：admin/IsAll/己有角色之外的角色逐个拒绝。
+        // 导入面必须与交互面权限等价：admin/己有角色之外的角色逐个拒绝。
         // 拒绝以行级 UserFriendlyException 抛出（code review D1）：守卫裸 BusinessException
         // 在失败报表里会塌成通用"失败"，操作者无从区分越权拒绝与系统故障。
         // 未认证上下文跳过（后台作业/种子/单测直连，与 OU 守卫豁免口径一致）。
-        if (snapshot != null)
+        if (CurrentUser.IsAuthenticated)
         {
             foreach (var roleName in roleNames)
             {
-                if (!OrganizationUnitRoleConferralGuard.IsRoleAttachable(roleName, CurrentUser.Roles, snapshot.IsAll))
+                if (!OrganizationUnitRoleConferralGuard.IsRoleAttachable(roleName, CurrentUser.Roles))
                 {
-                    throw new UserFriendlyException(L["UserImport:RoleBeyondAuthority", rowNumber, roleName]);
+                    throw new UserFriendlyException(L["UserImport:RoleBeyondAuthority", rowNumber, roleName],
+                        code: ClientErrorCodes.Forbidden);
                 }
             }
         }

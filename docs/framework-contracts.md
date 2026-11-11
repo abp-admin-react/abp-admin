@@ -63,13 +63,34 @@
   启动，由 `HostServiceGraphValidationTests` 钉住。
 - 生产模板（appsettings.Production.json）：`SignalR:UseRedisBackplane` + `Redis:IsEnabled`
   + `Quartz:UsePersistentStore` 三件套全开，`Redis__Configuration` 由部署环境注入。
-- 本机部署状态（Redis/ES 端点与凭据）一律放 `appsettings.secrets.json`
-  （入库的是公开安全的开发样本；本机真实凭据以 skip-worktree 屏蔽，
-  "as it ships" 的测试形态刻意不加载它）。
+- 本机 Redis/ES 端点与凭据放在 Git 忽略的 `appsettings.secrets.json` 中。
+  出厂配置测试使用仓库内的配置。
 - 多机房（异地灾备）超出本节单集群范围：铁律见 §7，操作手册见 [dr-runbook.md](dr-runbook.md)。
 
 ## 5. 已知取舍登记（有意为之，勿当缺陷修）
 
+- **身份管理使用 ABP 功能权限作为授权主线**：只保留用户、角色与部门三个业务概念。
+  角色统一授予功能权限，用户维护账号并分配直接角色，部门维护归属与成员；
+  部门统一角色是可选的批量授予。岗位模块及其菜单、权限、接口已移除，
+  `20261110115501_RemovePosts` 迁移清理两张岗位表及精确匹配的旧菜单、权限记录。
+  本次仅生成并在隔离库验证；后续升级仍按宿主的迁移开关执行，回滚只能恢复表结构。
+  部门和用户导入的角色授予与 ABP 保持一致：只有 admin 可授予任意角色，
+  其他操作者只能授予自己持有的角色；业务数据范围不再作为角色授予的豁免条件。
+  权限弹窗按 ABP 分组展示，全选/清空只作用于当前组，不修改不可编辑的授权。
+  菜单只按启用/隐藏、结构与绑定的功能权限计算。角色菜单勾选的管理 API 和存储已移除。
+  `MenuVisibilityCalculatorTests` 与 `MenuAppServiceTests` 钉住“有功能权限即可见、
+  无功能权限不能靠旧菜单勾选获得可见性”。
+- **重复管理入口已收敛**：角色与用户弹窗管理 ABP 权限授予，权限定义由模块维护。
+  升级保留存量业务权限和授权记录。全局功能在功能管理页配置，默认语言在语言管理页设置，
+  测试邮件从系统设置发送。身份管理中的会话页面用于查看与撤销登录会话。
+  `20261111022011_RemoveUnusedAdminFeatures` 升级时删除旧菜单授权、框架演示数据表，
+  并按精确路径和名称清理退役菜单及权限。执行前应按宿主升级流程备份。
+  仅依赖旧角色勾选的菜单会隐藏。需要重新展示时，在菜单管理中绑定功能权限并取消隐藏。
+- **通用数据范围为业务扩展能力**：不作为新建角色的必配项，配置入口位于
+  `/biz-template/data-scope` 业务示例。只影响实现 `IHasDataScope` 的实体，
+  不会自动约束所有业务列表；已有范围配置与过滤行为保留。首次读取无配置返回
+  已登记的 `Client:NotFound`（404），表单要求主动选择，不默认授予全部数据。
+  业务模板保留一份可运行示例，框架筛选器由隔离测试覆盖。
 - **404 全局静默（仅管理端 axios）**：`requestErrorConfig` 对 404 不弹全局错误（业务语义：不存在/未配置）。
   页面层读端点存在该语义时**必须**用 `isNotFound` 分流（对照实现：`dataScope.ts`）；
   开发期有 console 痕迹。改全局策略前先盘全仓 404 语义调用点。
@@ -99,9 +120,6 @@
 通常要改：`App:SelfUrl`/`CorsOrigins`/`RedirectAllowedUrls`、OpenIddict 客户端清单
 （appsettings `OpenIddict` 节）、菜单模板（`MenuTemplateDefinition.cs`）、Logo/标题、
 业务模块（`AbpAdmin.Biz.*`）；部署时设 `App:InstanceDiscriminator`（共享 Redis 场景）。
-
-克隆时可整体剔除的模板遗留（不影响框架能力）：`web/cloudflare-worker`（antd pro 演示
-mock API，前端无引用，见其目录 README）。
 
 **Payment 三件套（EasyAbp PaymentService/Prepayment/WeChatPay）已不可整体剔除**：
 收款模块（AbpAdmin.Collection）依赖其中的微信支付能力（Payment/PaymentItem 行、

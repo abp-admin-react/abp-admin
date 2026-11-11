@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using AbpAdmin.ClientErrors;
+using AbpAdmin.HttpApi.ClientErrors;
+using Microsoft.AspNetCore.Http;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.Data;
@@ -15,7 +18,7 @@ using Xunit;
 
 namespace AbpAdmin.DataScopes;
 
-/* 角色数据范围配置（RoleDataScopeAppService）写入侧测试。
+/* 角色数据范围配置（RoleDataScopeAppService）读取与写入侧测试。
  * 重点回归：Create 的唯一性检查必须用规范角色名——
  * 混合大小写输入不得绕过应用层查重、落库成规范名后直撞唯一索引变成原始 500。
  *
@@ -73,6 +76,65 @@ public abstract class RoleDataScopeAppServiceTests<TStartupModule> : AbpAdminApp
         claims.AddRange(roleNames.Select(r => new Claim(AbpClaimTypes.Role, r)));
 
         return _principalAccessor.Change(new ClaimsPrincipal(new ClaimsIdentity(claims, "Testing")));
+    }
+
+    [Fact]
+    public async Task GetByRoleNameAsync_Should_Project_Unconfigured_Role_As_NotFound()
+    {
+        var roleName = await EnsureRoleAsync($"ds-unconfigured-{Guid.NewGuid():N}");
+
+        using (AsOperator("admin"))
+        {
+            var exception = await Should.ThrowAsync<Exception>(() =>
+                _appService.GetByRoleNameAsync(roleName));
+
+            // 前端只有收到 404 才显示首次配置表单。必须经过生产投影器验证，
+            // 只断言 EntityNotFoundException 会漏掉它被错误管线转换为 500 的回归。
+            var projector = new ClientErrorHttpProjector(
+                GetRequiredService<IClientErrorProjectionCore>(),
+                new AdminErrorEligibilityResolver());
+            var projection = await projector.ProjectAsync(new ClientErrorHttpProjectionContext
+            {
+                HttpContext = new DefaultHttpContext { RequestServices = ServiceProvider },
+                Exception = exception,
+            });
+
+            projection.ShouldNotBeNull();
+            projection.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+            projection.Body.PublicCode.ShouldBe(ClientErrorCodes.NotFound);
+            exception.ShouldBeOfType<BusinessException>().Code.ShouldBe(ClientErrorCodes.NotFound);
+
+            // 读取不能偷偷创建默认 All 配置；无配置仍按既有 fail-closed 规则生效。
+            await WithUnitOfWorkAsync(async () =>
+                (await _scopeRepository.CountAsync(x => x.RoleName == roleName)).ShouldBe(0));
+        }
+    }
+
+    [Fact]
+    public async Task GetByRoleNameAsync_Should_Return_Configured_Scope_And_Custom_OrganizationUnits()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var roleName = await EnsureRoleAsync($"ds-read-{suffix}");
+        var ouA = new OrganizationUnit(Guid.NewGuid(), $"OU-read-A-{suffix}");
+        var ouB = new OrganizationUnit(Guid.NewGuid(), $"OU-read-B-{suffix}");
+        var scope = CreateCustomScope(roleName, ouA.Id, ouB.Id);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            await _ouManager.CreateAsync(ouA);
+            await _ouManager.CreateAsync(ouB);
+            await _scopeRepository.InsertAsync(scope, autoSave: true);
+        });
+
+        using (AsOperator("admin"))
+        {
+            var result = await _appService.GetByRoleNameAsync(roleName);
+
+            result.Id.ShouldBe(scope.Id);
+            result.RoleName.ShouldBe(roleName);
+            result.ScopeType.ShouldBe(DataScopeTypeEnum.Custom);
+            result.CustomOrganizationUnitIds.OrderBy(id => id)
+                .ShouldBe(new[] { ouA.Id, ouB.Id }.OrderBy(id => id));
+        }
     }
 
     [Fact]

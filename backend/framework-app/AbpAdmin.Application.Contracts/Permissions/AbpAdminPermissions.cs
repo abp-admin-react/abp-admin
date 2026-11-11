@@ -29,16 +29,6 @@ public static class AbpAdminPermissions
         public const string Default = GroupName + ".SecurityLogs";
     }
 
-    /// <summary>岗位管理（对标 RuoYi sys_post）：职务维度，与组织单元（部门维度）互补。</summary>
-    public static class Posts
-    {
-        public const string Default = GroupName + ".Posts";
-        public const string Create = Default + ".Create";
-        public const string Update = Default + ".Update";
-        public const string Delete = Default + ".Delete";
-        public const string ManageMembers = Default + ".ManageMembers";
-    }
-
     public static class Sessions
     {
         public const string Default = GroupName + ".Sessions";
@@ -143,7 +133,6 @@ public static class AbpAdminPermissions
         public const string Delete = Default + ".Delete";
         public const string Abandon = Default + ".Abandon";
         public const string Retry = Default + ".Retry";
-        public const string Enqueue = Default + ".Enqueue";
     }
 
     public static class ScheduledJobs
@@ -177,7 +166,6 @@ public static class AbpAdminPermissions
     {
         public const string Default = GroupName + ".DataScopes";
         public const string Manage = Default + ".Manage";
-        public const string Demo = Default + ".Demo";
     }
 
     public static class Identity
@@ -214,7 +202,6 @@ public static class AbpAdminPermissions
         public const string Create = Default + ".Create";
         public const string Update = Default + ".Update";
         public const string Delete = Default + ".Delete";
-        public const string AssignRoles = Default + ".AssignRoles";
     }
 
     /// <summary>租户套餐（Host 专属）：打包全局菜单模板子集，创建租户时按套餐下发菜单。</summary>
@@ -235,18 +222,6 @@ public static class AbpAdminPermissions
     public static class SettingUi
     {
         public const string Update = GroupName + ".SettingUi.Update";
-    }
-
-    /// <summary>
-    /// 权限定义运行时管理（Host 专属）：动态权限定义的增删改查。
-    /// 持有写权限 ≈ 能为任意角色授予新权限，等同安全敏感操作，收敛到 Host。
-    /// </summary>
-    public static class PermissionDefinitions
-    {
-        public const string Default = GroupName + ".PermissionDefinitions";
-        public const string Create = Default + ".Create";
-        public const string Update = Default + ".Update";
-        public const string Delete = Default + ".Delete";
     }
 
     // 问题15 修复：已删除无调用方的 GetAll()——它会把 GroupName（"AbpAdmin"）与

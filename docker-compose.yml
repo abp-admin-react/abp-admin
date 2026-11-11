@@ -16,6 +16,9 @@
 #   IDENTITY_ADMIN_PASSWORD
 #     迁移器种子用的 admin 口令。不设值 = Production 姿态下 fail-fast 直接拒跑
 #     （见下方 migrator 服务注释），设了值才起得来——这是本机体验栈的必填项。
+#   BIZ_TEMPLATE_SEED_SAMPLE_DATA（默认 false，设为 true 时创建业务模板示例项目）
+#   SEED_IDENTITY_UI_DEMO（默认 false，开启部门和声明类型演示）
+#   IDENTITY_UI_DEMO_PASSWORD（首次创建演示用户时使用的本地口令）
 #   OPENIDDICT_CERT_PASSPHRASE / STRING_ENCRYPTION_PASSPHRASE
 #     ⚠ 改 OPENIDDICT_CERT_PASSPHRASE 必须 docker compose build host 重建镜像——
 #     openiddict.pfx 在构建期用该口令烘焙加密，只改运行时会让容器拿新口令解旧证书，
@@ -90,6 +93,12 @@ services:
       # 本行只是把这条口打通：compose 头注释与 fail-fast 报错都指向 Identity__AdminPassword，
       # 但此前文件里没有插值点，Production 姿态的本机栈 up 必挂（2026-11-01 实测）。
       Identity__AdminPassword: ${IDENTITY_ADMIN_PASSWORD:-}
+      # 框架预览栈初始化基础配置。身份和财务演示数据由独立开发环境管理。
+      App__SeedDemoData: "false"
+      Finance__SeedDemoData: "false"
+      App__SeedIdentityUiDemo: ${SEED_IDENTITY_UI_DEMO:-false}
+      App__IdentityUiDemoPassword: ${IDENTITY_UI_DEMO_PASSWORD:-}
+      BizTemplate__SeedSampleData: ${BIZ_TEMPLATE_SEED_SAMPLE_DATA:-false}
       # 迁移器默认 Production（sectest b08 / 审计 TV-01 收口：默认 Development 会把
       # 公开默认口令 admin/1q2w3E* 与仓库内嵌密钥的 AbpAdmin_TestCli ROPC 客户端种进
       # 生产库）。Production 默认下未注入 Identity__AdminPassword 时

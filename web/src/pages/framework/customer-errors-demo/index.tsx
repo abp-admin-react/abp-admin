@@ -46,7 +46,7 @@ function describeError(error: unknown): string {
 export default function CustomerErrorsDemoPage() {
   const { message } = App.useApp();
   const [last, setLast] = useState<string>('尚未调用');
-  const tokenRef = useRef<string | undefined>();
+  const tokenRef = useRef<string | undefined>(undefined);
   const demoAuth = useMemo<CustomerAuthAdapter>(
     () => ({
       getSnapshot: () => ({ sessionGeneration: 1, tenantId: null }),

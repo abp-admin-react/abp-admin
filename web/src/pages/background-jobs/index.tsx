@@ -1,16 +1,9 @@
-import {
-  type ActionType,
-  ModalForm,
-  PageContainer,
-  ProFormText,
-  ProFormTextArea,
-} from '@ant-design/pro-components';
-import { App, Button, Popconfirm, Tag } from 'antd';
+import { type ActionType, PageContainer } from '@ant-design/pro-components';
+import { App, Popconfirm, Tag } from 'antd';
 import React, { useRef } from 'react';
 import {
   abandonBackgroundJob,
   deleteBackgroundJob,
-  enqueueTestBackgroundJob,
   getBackgroundJobs,
   retryBackgroundJob,
 } from '@/abp/proModules';
@@ -123,39 +116,6 @@ const BackgroundJobsPage: React.FC = () => {
             success: true,
           };
         }}
-        toolBarRender={() => [
-          <ModalForm
-            key="enqueue"
-            title="入队测试邮件作业"
-            trigger={<Button type="primary">入队测试作业</Button>}
-            modalProps={{ destroyOnHidden: true }}
-            onFinish={async (values) => {
-              await enqueueTestBackgroundJob({
-                emailAddress: values.emailAddress,
-                subject: values.subject,
-                body: values.body,
-              });
-              message.success('已入队');
-              actionRef.current?.reload();
-              return true;
-            }}
-          >
-            <ProFormText
-              name="emailAddress"
-              label="收件人"
-              rules={[
-                { required: true, message: '请输入收件人' },
-                { type: 'email', message: '邮箱格式不正确' },
-              ]}
-            />
-            <ProFormText
-              name="subject"
-              label="主题"
-              rules={[{ required: true, message: '请输入主题' }]}
-            />
-            <ProFormTextArea name="body" label="正文" />
-          </ModalForm>,
-        ]}
       />
     </PageContainer>
   );

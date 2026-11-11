@@ -34,7 +34,6 @@ export type MenuDto = {
 };
 
 export type MenuTreeDto = MenuDto & {
-  grantedRoles: string[];
   children: MenuTreeDto[];
 };
 
@@ -82,22 +81,6 @@ export async function deleteMenu(id: string) {
   return request(`${BASE}/${id}`, { method: 'DELETE' });
 }
 
-export async function getMenuRoleGrants(menuId: string) {
-  return request<{ items: string[] }>(`${BASE}/menu-role-grants/${menuId}`, {
-    method: 'GET',
-  });
-}
-
-export async function updateMenuRoleGrants(
-  menuId: string,
-  roleNames: string[],
-) {
-  return request(`${BASE}/menu-role-grants/${menuId}`, {
-    method: 'PUT',
-    data: { roleNames },
-  });
-}
-
 export async function getPermissionOptions() {
   return request<{ items: PermissionOptionDto[] }>(
     `${BASE}/permission-options`,
@@ -105,40 +88,6 @@ export async function getPermissionOptions() {
       method: 'GET',
     },
   );
-}
-
-/** 角色侧菜单授权视图项：IsGranted=该角色显式授权；IsControlled=受任一角色控制（false=公开） */
-export type RoleMenuGrantItemDto = {
-  id: string;
-  parentId?: string | null;
-  type: number;
-  title: string;
-  orderNo: number;
-  isEnabled: boolean;
-  /** 隐藏菜单：自身不出现在用户侧边栏，勾选树如实透出避免「勾了却不生效」的误导 */
-  isHide: boolean;
-  isGranted: boolean;
-  isControlled: boolean;
-};
-
-/** 角色侧授权视图（角色页「菜单权限」弹窗数据源，平铺列表前端组树） */
-export async function getRoleMenuGrantView(roleId: string) {
-  return request<{ items: RoleMenuGrantItemDto[] }>(
-    `${BASE}/role-menu-grants/${roleId}`,
-    { method: 'GET' },
-  );
-}
-
-/** 以勾选集为该角色的菜单授权全集做差集更新（勾上=插入，勾掉=撤销；其它角色与公开菜单不受影响）。
- *  命名刻意区别于 updateMenuRoleGrants（菜单侧、方向相反）：…GrantSet 尾缀避免换位词对。 */
-export async function updateRoleMenuGrantSet(
-  roleId: string,
-  menuIds: string[],
-) {
-  return request(`${BASE}/role-menu-grants/${roleId}`, {
-    method: 'PUT',
-    data: { menuIds },
-  });
 }
 
 /** 当前登录用户可见菜单树（动态菜单数据源）。 */

@@ -12,27 +12,27 @@ namespace AbpAdmin.DataScopes;
 
 /* 验证 行级数据权限的 5 种范围类型全局筛选器行为。
  * 测试策略：直接操作 ICurrentDataScopeState.Change 模拟不同用户的数据范围快照，
- * 然后查询 DataScopeDemo 验证全局筛选器是否正确过滤。
+ * 然后查询测试专用 FrameworkDataScopeRecord 验证框架全局筛选器是否正确过滤。
  *
  * 语义定死：
  * 1. CurrentOu = 用户所属全部 OU
  * 2. 可见组织集合为空 = 零行可见（fail-closed）
- * 3. OrganizationUnitId == null 的行只对 IsAll 可见
+ * 3. null 组织不命中机构集合，只能由 All 或本人创建分支放行
  * 4. SelfOnly 与机构范围是「或」关系
  * 5. 范围合并必须可交换、可结合
- * 6. 全局筛选器的覆写不得被复制到第二个 DbContext
+ * 6. 测试派生 DbContext 继承生产过滤器，不复制谓词
  * 7. RoleDataScope、OrganizationUnit、IdentityUser 绝不能实现 IHasDataScope
  */
 public abstract class DataScopeFilterTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
     where TStartupModule : IAbpModule
 {
-    private readonly IRepository<DataScopeDemo, Guid> _demoRepository;
+    private readonly IRepository<FrameworkDataScopeRecord, Guid> _demoRepository;
     private readonly ICurrentDataScopeState _dataScopeState;
     private readonly IDataFilter _dataFilter;
 
     protected DataScopeFilterTests()
     {
-        _demoRepository = GetRequiredService<IRepository<DataScopeDemo, Guid>>();
+        _demoRepository = GetRequiredService<IRepository<FrameworkDataScopeRecord, Guid>>();
         _dataScopeState = GetRequiredService<ICurrentDataScopeState>();
         _dataFilter = GetRequiredService<IDataFilter>();
     }
@@ -53,9 +53,9 @@ public abstract class DataScopeFilterTests<TStartupModule> : AbpAdminApplication
             // 禁用筛选器插入测试数据
             using (_dataFilter.Disable<IDataScopeEnabled>())
             {
-                await _demoRepository.InsertAsync(new DataScopeDemo(demoAId, "Demo-A", ouAId));
-                await _demoRepository.InsertAsync(new DataScopeDemo(demoBId, "Demo-B", ouBId));
-                await _demoRepository.InsertAsync(new DataScopeDemo(demoNullId, "Demo-Null", null));
+                await _demoRepository.InsertAsync(new FrameworkDataScopeRecord(demoAId, "Record-A", ouAId));
+                await _demoRepository.InsertAsync(new FrameworkDataScopeRecord(demoBId, "Record-B", ouBId));
+                await _demoRepository.InsertAsync(new FrameworkDataScopeRecord(demoNullId, "Record-Null", null));
             }
         });
 

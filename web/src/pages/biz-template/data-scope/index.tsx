@@ -4,16 +4,30 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
-import { App, Alert, Button, Card, Form, Input, Modal, Select, Space, Tag,  } from 'antd';
+import { useAccess } from '@umijs/max';
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Tag,
+} from 'antd';
 import React, { useEffect, useState } from 'react';
-import { getOrganizationUnits } from '@/abp/identityAdmin';
 import {
   type BizDataScopeDemoDto,
   createBizDataScopeDemo,
   deleteBizDataScopeDemo,
   getBizDataScopeDemos,
 } from '@/abp/bizDataScopeDemo';
+import { getAllRoles, type IdentityRoleDto } from '@/abp/identity';
+import { getOrganizationUnits } from '@/abp/identityAdmin';
 import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
+import DataScopeModal from '@/components/DataScopeModal';
 
 type OrganizationUnitItem = {
   id: string;
@@ -22,13 +36,16 @@ type OrganizationUnitItem = {
 };
 
 /**
- * 业务模块数据权限示例（AbpAdmin.Biz.Template）：后端实体实现 IHasDataScope +
- * 模块 DbContext 数据范围筛选器，列表接口零过滤代码——这里看到的行数/行集
- * 就是当前登录用户数据范围内的可见集。与框架 data-scope-demo 演示同一能力，
- * 差别只在实现落在自包含业务模块里（复制模块即带走数据权限姿势）。
+ * 业务数据范围配置与 Biz.Template 示例，列表展示当前用户范围内的数据。
  */
 const BizDataScopeDemoPage: React.FC = () => {
+  const access = useAccess();
   const { message, modal } = App.useApp();
+  const [roles, setRoles] = useState<IdentityRoleDto[]>([]);
+  const [scopeRoleName, setScopeRoleName] = useState<string>();
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const canConfigureScope =
+    access.canManageRoleDataScopes && access.canManageRoles;
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<BizDataScopeDemoDto[]>([]);
   const [total, setTotal] = useState(0);
@@ -37,6 +54,7 @@ const BizDataScopeDemoPage: React.FC = () => {
   const [form] = Form.useForm();
 
   const fetchData = async () => {
+    if (!access.canManageBizDataScopeDemo) return;
     setLoading(true);
     try {
       const res = await getBizDataScopeDemos({
@@ -62,9 +80,27 @@ const BizDataScopeDemoPage: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!access.canManageBizDataScopeDemo) return;
     fetchData();
     fetchOuList();
-  }, []);
+  }, [access.canManageBizDataScopeDemo]);
+
+  useEffect(() => {
+    if (!canConfigureScope) return;
+    let cancelled = false;
+    getAllRoles()
+      .then((result) => {
+        if (!cancelled) {
+          setRoles([
+            ...new Map(result.items.map((role) => [role.name, role])).values(),
+          ]);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [canConfigureScope]);
 
   const handleCreate = async (values: any) => {
     try {
@@ -99,7 +135,7 @@ const BizDataScopeDemoPage: React.FC = () => {
 
   // 组织名映射依赖框架组织单元接口（getOrganizationUnits）的返回；受限角色可能未授该接口
   // 权限（fetchOuList 静默失败，ouList 为空），此时回退显示原始 GUID——数据可见性不受影响，
-  // 仅该列展示降级（与框架 data-scope-demo 页同款取舍）。
+  // 仅该列展示降级。
   const getOuName = (ouId?: string) => {
     if (!ouId) return <Tag>无组织</Tag>;
     const ou = ouList.find((o) => o.id === ouId);
@@ -147,51 +183,81 @@ const BizDataScopeDemoPage: React.FC = () => {
           style={{ marginBottom: 16 }}
           type="info"
           showIcon
-          message="业务模块数据权限示例"
-          description="本页数据来自 AbpAdmin.Biz.Template 模块（后端零过滤代码，可见性由角色的数据范围决定）。要体验不同范围的过滤效果：到「身份管理 → 角色 → 数据权限」调整当前账号所属角色的数据范围，再回本页刷新。"
+          title="业务数据范围扩展示例"
+          description="数据范围只影响本示例等已接入的业务数据，不是创建角色的必配项。日常功能授权请到角色页配置。"
         />
-        <div
-          style={{
-            marginBottom: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 8,
-          }}
-        >
-          <Space>
-            <span>当前可见数据条数：</span>
-            <Tag color="green" style={{ fontSize: 16 }}>
-              {total}
-            </Tag>
-          </Space>
-          <Space>
-            <Button key="refresh" icon={<ReloadOutlined />} onClick={fetchData}>
-              刷新
-            </Button>
+        {canConfigureScope && (
+          <Space wrap style={{ marginBottom: 16 }}>
+            <Select
+              aria-label="示例角色"
+              placeholder="选择要配置的角色"
+              value={scopeRoleName}
+              onChange={setScopeRoleName}
+              showSearch={{ optionFilterProp: 'label' }}
+              options={roles.map((role) => ({
+                label: role.name,
+                value: role.name,
+              }))}
+              style={{ minWidth: 220 }}
+            />
             <Button
-              key="create"
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setCreateModalOpen(true)}
+              disabled={!scopeRoleName}
+              onClick={() => setScopeOpen(true)}
             >
-              新建
+              配置业务数据范围
             </Button>
           </Space>
-        </div>
-        <ResizableTable
-          rowKey="id"
-          loading={loading}
-          columns={columns}
-          dataSource={data}
-          pagination={false}
-        />
+        )}
+        {access.canManageBizDataScopeDemo && (
+          <>
+            <div
+              style={{
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 8,
+              }}
+            >
+              <Space>
+                <span>当前可见数据条数：</span>
+                <Tag color="green" style={{ fontSize: 16 }}>
+                  {total}
+                </Tag>
+              </Space>
+              <Space>
+                <Button
+                  key="refresh"
+                  icon={<ReloadOutlined />}
+                  onClick={fetchData}
+                >
+                  刷新
+                </Button>
+                <Button
+                  key="create"
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setCreateModalOpen(true)}
+                >
+                  新建
+                </Button>
+              </Space>
+            </div>
+            <ResizableTable
+              rowKey="id"
+              loading={loading}
+              columns={columns}
+              dataSource={data}
+              pagination={false}
+            />
+          </>
+        )}
       </Card>
 
       <Modal
         title="新建示例数据"
-        open={createModalOpen}
+        open={createModalOpen && access.canManageBizDataScopeDemo}
         onCancel={() => setCreateModalOpen(false)}
         onOk={() => form.submit()}
       >
@@ -218,6 +284,12 @@ const BizDataScopeDemoPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      <DataScopeModal
+        open={scopeOpen && canConfigureScope}
+        title={`业务数据范围 - ${scopeRoleName || ''}`}
+        roleName={scopeRoleName}
+        onClose={() => setScopeOpen(false)}
+      />
     </PageContainer>
   );
 };

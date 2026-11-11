@@ -28,7 +28,7 @@ namespace AbpAdmin.Biz.Template.DataScopes;
  * 5. IDataFilter.Disable<IDataScopeEnabled> 旁路（种子/后台作业姿势）
  * 6. AppService 查询同样吃到过滤（业务面零过滤代码）
  * 7. 写入侧：快照可算出组织 → 自动填充；显式赋值不覆盖；算不出 → 抛业务异常
- * 8. 写入侧防线（比框架演示夹具严）：显式组织必须在当前范围内（All 校验存在性）
+ * 8. 写入侧防线：显式组织必须在当前范围内（All 校验存在性）
  * 9. 多租户筛选器与 OU 筛选器组合后仍按（租户 ∩ OU）正确过滤
  */
 public class BizDataScopeDemoFilterTests : BizTemplateTestBase

@@ -2,7 +2,7 @@
  * 浏览器存储键名唯一真源（localStorage / sessionStorage）。
  *
  * - 干什么：所有本应用写入浏览器存储的键都从这里取，统一带前缀 `abpadmin:`。
- * - 为什么要前缀：同一源（如 http://localhost:8000）上常跑多个项目（MobileDot、exchange 等），
+ * - 为什么要前缀：本地开发时，多个应用可能轮流使用同一源（如 http://localhost:8000），
  *   不带前缀的 `abp.tenant`、`oidc.user:...` 会互相覆盖/串号（拿到别的项目的 token 或租户）。
  * - 可配：只改 STORAGE_PREFIX；格式建议 `<项目名>:`，必须以冒号结尾、全小写。
  * - 默认：`abpadmin:`。

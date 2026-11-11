@@ -4,7 +4,7 @@ using Xunit;
 namespace AbpAdmin.EntityFrameworkCore.Applications;
 
 [Collection(AbpAdminTestConsts.CollectionDefinitionName)]
-public class EfCoreDataScopeFilterTests : DataScopeFilterTests<AbpAdminEntityFrameworkCoreTestModule>
+public class EfCoreDataScopeFilterTests : DataScopeFilterTests<FrameworkDataScopeFilterTestModule>
 {
 
 }

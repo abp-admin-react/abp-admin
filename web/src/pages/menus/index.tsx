@@ -14,7 +14,6 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { getAllRoles, type IdentityRoleDto } from '@/abp/identity';
 import {
   deleteMenu,
   getMenuTree,
@@ -30,7 +29,6 @@ import {
   type TreeSelectNode,
   toMenuTreeSelectData,
 } from './components/menuTypes';
-import RoleGrantModal from './components/RoleGrantModal';
 
 /** 收集整棵树的全部节点 id（加载后默认全展开 / 展开折叠总开关用）。 */
 function collectAllKeys(nodes: MenuTreeDto[]): React.Key[] {
@@ -48,8 +46,6 @@ const MenuManagement: React.FC = () => {
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [editTarget, setEditTarget] = useState<MenuEditTarget>();
   const [permissions, setPermissions] = useState<PermissionOptionDto[]>([]);
-  const [roles, setRoles] = useState<IdentityRoleDto[]>([]);
-  const [roleTarget, setRoleTarget] = useState<MenuTreeDto>();
   const allRowKeys = useMemo(() => collectAllKeys(tree), [tree]);
   const allExpanded = allRowKeys.length > 0 && expandedRowKeys.length >= allRowKeys.length;
 
@@ -77,9 +73,6 @@ const MenuManagement: React.FC = () => {
     getPermissionOptions()
       .then((res) => setPermissions(res.items))
       .catch(() => undefined);
-    getAllRoles()
-      .then((res) => setRoles(res.items))
-      .catch(() => undefined);
   }, [access.canManageMenus]);
 
   const menuTreeData = useMemo<TreeSelectNode[]>(
@@ -100,12 +93,11 @@ const MenuManagement: React.FC = () => {
   const columns = useMemo(
     () =>
       buildMenuColumns({
+        canCreateMenus: !!access.canCreateMenus,
         canUpdateMenus: !!access.canUpdateMenus,
-        canAssignMenuRoles: !!access.canAssignMenuRoles,
         canDeleteMenus: !!access.canDeleteMenus,
         onEdit: (node) => setEditTarget({ mode: 'edit', node }),
         onAddChild: (node) => setEditTarget({ mode: 'create', parent: node }),
-        onRoles: (node) => setRoleTarget(node),
         onDelete: async (node) => {
           await deleteMenu(node.id);
           message.success('菜单已删除');
@@ -125,14 +117,11 @@ const MenuManagement: React.FC = () => {
             <Tooltip
               title={
                 <div style={{ lineHeight: 1.8 }}>
-                  在此页改名、排序（OrderNo）、隐藏（IsHide）、启停、勾选角色后
-                  <b>立即写库生效</b>，用户下次刷新侧边栏即见，无需改代码或重启后端。
+                  在此维护菜单名称、顺序、隐藏和启停状态。修改保存后，用户刷新页面即可看到。
                   <br />
-                  可见性 = 启用 且 未隐藏 且（未绑权限或权限已授予）且（admin 或
-                  未受角色勾选控制 或 角色命中勾选）——停用整棵子树剔除，隐藏节点子级上浮。
+                  菜单随绑定的功能权限显示；到角色页配置功能权限，无需再为菜单分配角色。
                   <br />
-                  本页只改运行态数据库；代码里的 MenuTemplateDefinition 仅供新环境首次播种，
-                  两边不会自动同步（新环境出厂默认以模板为准）。
+                  停用目录会隐藏其全部子菜单；隐藏目录自身时，有权限的子菜单仍可显示。
                 </div>
               }
             >
@@ -185,12 +174,6 @@ const MenuManagement: React.FC = () => {
         onSaved={reload}
       />
 
-      <RoleGrantModal
-        target={roleTarget}
-        roles={roles}
-        onClose={() => setRoleTarget(undefined)}
-        onSaved={reload}
-      />
     </PageContainer>
   );
 };

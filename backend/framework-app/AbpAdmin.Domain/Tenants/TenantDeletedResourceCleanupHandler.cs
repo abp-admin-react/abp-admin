@@ -12,9 +12,9 @@ namespace AbpAdmin.Tenants;
 
 /// <summary>
 /// 租户删除后的资源清理（删租户若只删 AbpTenants 聚合，共享库内
-/// 挂在租户名下的功能值、菜单、菜单角色勾选全部成为孤儿数据）：
+/// 挂在租户名下的功能值与菜单全部成为孤儿数据）：
 /// - 功能值：AbpFeatureValues 中 ProviderName="T"、ProviderKey=租户 Id 的行；
-/// - 菜单与菜单授权：AppMenus / AppMenuGrants 中 TenantId=租户 Id 的行（硬删除，
+/// - 菜单：AppMenus 中 TenantId=租户 Id 的行（硬删除，
 ///   软删行会占用 (TenantId, Path) 唯一索引，同 Id 重建租户后懒拷贝会撞约束）。
 ///
 /// 与 Pro 的边界一致：不 drop 独立租户数据库（数据库可能还有备份价值，删除是运维决策）；

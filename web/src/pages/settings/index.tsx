@@ -9,9 +9,8 @@ import {
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Empty, Spin } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
-import { getLanguageSettings, updateLanguageSettings } from '@/abp/proModules';
+import { App, Collapse, Empty, Spin } from 'antd';
+import React, { useCallback, useEffect, useId, useState } from 'react';
 import {
   getEmailSettings,
   getTimezone,
@@ -26,6 +25,7 @@ import SettingGroupPanel from './SettingGroupPanel';
 const SettingsPage: React.FC = () => {
   const access = useAccess();
   const { message } = App.useApp();
+  const formId = useId();
 
   // SettingUi 通用设置分组（T1.4）
   const [settingGroups, setSettingGroups] = useState<API.SettingGroup[]>([]);
@@ -55,7 +55,7 @@ const SettingsPage: React.FC = () => {
     children: <SettingGroupPanel group={group} onChanged={loadSettingGroups} />,
   }));
 
-  // 保留的自定义区（邮件/时区/语言不是 SettingUi 管的）
+  // ABP 标准邮件与时区设置；语言统一在语言管理页维护。
   const customItems = [
     access.canManageEmailing
       ? {
@@ -64,8 +64,12 @@ const SettingsPage: React.FC = () => {
           children: (
             <>
               <ProForm
+                formKey={`${formId}-email`}
                 request={getEmailSettings}
-                submitter={{ searchConfig: { submitText: '保存邮件设置' } }}
+                submitter={{
+                  searchConfig: { submitText: '保存邮件设置' },
+                  resetButtonProps: { style: { display: 'none' } },
+                }}
                 onFinish={async (values) => {
                   await updateEmailSettings(values);
                   message.success('邮件设置已保存');
@@ -122,44 +126,55 @@ const SettingsPage: React.FC = () => {
                 </ProCard>
               </ProForm>
               {access.canManageEmailingTest ? (
-                <ProForm
-                  submitter={{ searchConfig: { submitText: '发送测试邮件' } }}
-                  onFinish={async (values) => {
-                    await sendTestEmail({
-                      senderEmailAddress: values.senderEmailAddress,
-                      targetEmailAddress: values.targetEmailAddress,
-                      subject: values.subject,
-                      body: values.body,
-                    });
-                    message.success('测试邮件已发送');
-                    return true;
-                  }}
-                >
-                  <ProCard title="发送测试邮件" size="small" headerBordered>
-                    <ProFormText
-                      name="senderEmailAddress"
-                      label="发件人"
-                      rules={[
-                        { required: true, message: '请输入发件人' },
-                        { type: 'email', message: '邮箱格式不正确' },
-                      ]}
-                    />
-                    <ProFormText
-                      name="targetEmailAddress"
-                      label="收件人"
-                      rules={[
-                        { required: true, message: '请输入收件人' },
-                        { type: 'email', message: '邮箱格式不正确' },
-                      ]}
-                    />
-                    <ProFormText
-                      name="subject"
-                      label="主题"
-                      rules={[{ required: true, message: '请输入主题' }]}
-                    />
-                    <ProFormTextArea name="body" label="正文" />
-                  </ProCard>
-                </ProForm>
+                <Collapse
+                  items={[
+                    {
+                      key: 'test-email',
+                      label: '发送测试邮件',
+                      children: (
+                        <ProForm
+                          submitter={{
+                            searchConfig: { submitText: '发送测试邮件' },
+                            resetButtonProps: { style: { display: 'none' } },
+                          }}
+                          onFinish={async (values) => {
+                            await sendTestEmail({
+                              senderEmailAddress: values.senderEmailAddress,
+                              targetEmailAddress: values.targetEmailAddress,
+                              subject: values.subject,
+                              body: values.body,
+                            });
+                            message.success('测试邮件已发送');
+                            return true;
+                          }}
+                        >
+                          <ProFormText
+                            name="senderEmailAddress"
+                            label="发件人"
+                            rules={[
+                              { required: true, message: '请输入发件人' },
+                              { type: 'email', message: '邮箱格式不正确' },
+                            ]}
+                          />
+                          <ProFormText
+                            name="targetEmailAddress"
+                            label="收件人"
+                            rules={[
+                              { required: true, message: '请输入收件人' },
+                              { type: 'email', message: '邮箱格式不正确' },
+                            ]}
+                          />
+                          <ProFormText
+                            name="subject"
+                            label="主题"
+                            rules={[{ required: true, message: '请输入主题' }]}
+                          />
+                          <ProFormTextArea name="body" label="正文" />
+                        </ProForm>
+                      ),
+                    },
+                  ]}
+                />
               ) : null}
             </>
           ),
@@ -171,10 +186,14 @@ const SettingsPage: React.FC = () => {
           label: '时区',
           children: (
             <ProForm
+              formKey={`${formId}-timezone`}
               request={async () => ({
                 timezone: (await getTimezone()) || 'Unspecified',
               })}
-              submitter={{ searchConfig: { submitText: '保存时区' } }}
+              submitter={{
+                searchConfig: { submitText: '保存时区' },
+                resetButtonProps: { style: { display: 'none' } },
+              }}
               onFinish={async (values) => {
                 await updateTimezone(values.timezone || 'Unspecified');
                 message.success('时区已保存');
@@ -194,43 +213,6 @@ const SettingsPage: React.FC = () => {
                       value: item.name || item.value,
                     })),
                   ];
-                }}
-              />
-            </ProForm>
-          ),
-        }
-      : null,
-    access.canManageLanguages
-      ? {
-          key: 'language',
-          label: '语言',
-          children: (
-            <ProForm
-              request={async () => {
-                const result = await getLanguageSettings();
-                return {
-                  defaultLanguage: result.defaultLanguage,
-                  languages: result.languages,
-                };
-              }}
-              submitter={{ searchConfig: { submitText: '保存语言设置' } }}
-              onFinish={async (values) => {
-                await updateLanguageSettings({
-                  defaultLanguage: values.defaultLanguage,
-                });
-                message.success('语言设置已保存');
-                return true;
-              }}
-            >
-              <ProFormSelect
-                name="defaultLanguage"
-                label="默认语言"
-                request={async () => {
-                  const result = await getLanguageSettings();
-                  return (result.languages || []).map((item) => ({
-                    label: `${item.displayName} (${item.cultureName})`,
-                    value: item.cultureName,
-                  }));
                 }}
               />
             </ProForm>

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using AbpAdmin.OperationLogs;
-using AbpAdmin.Posts;
 using Shouldly;
 using Xunit;
 
@@ -38,9 +37,9 @@ public class OperationLogTemplatesTests
     [Fact]
     public async Task Should_Resolve_Argument_And_Nested_Property()
     {
-        var args = Args(("input", new { Name = "董事长", Code = "CEO" }));
-        (await OperationLogTemplates.RenderAsync("创建了岗位「{{input.name}}」（{{input.code}}）", args))
-            .ShouldBe("创建了岗位「董事长」（CEO）");
+        var args = Args(("input", new { Name = "示例资源", Code = "DEMO" }));
+        (await OperationLogTemplates.RenderAsync("创建了资源「{{input.name}}」（{{input.code}}）", args))
+            .ShouldBe("创建了资源「示例资源」（DEMO）");
     }
 
     [Fact]
@@ -82,11 +81,11 @@ public class OperationLogTemplatesTests
     [Fact]
     public void Diff_Should_Use_OperationLogField_DisplayNames()
     {
-        var oldDto = new UpdatePostDto { Name = "旧岗位", Code = "OLD", SortOrder = 1, Status = PostStatusEnum.Enabled };
-        var newDto = new UpdatePostDto { Name = "新岗位", Code = "OLD", SortOrder = 2, Status = PostStatusEnum.Enabled };
+        var oldDto = new OperationLogSampleInput { Name = "旧资源", Code = "OLD", SortOrder = 1 };
+        var newDto = new OperationLogSampleInput { Name = "新资源", Code = "OLD", SortOrder = 2 };
 
         OperationLogDiffer.Diff(oldDto, newDto)
-            .ShouldBe("【岗位名称】旧岗位 → 新岗位；【显示顺序】1 → 2");
+            .ShouldBe("【名称】旧资源 → 新资源；【显示顺序】1 → 2");
     }
 
     [Fact]
@@ -103,11 +102,11 @@ public class OperationLogTemplatesTests
         try
         {
             OperationLogScope.Begin();
-            OperationLogScope.Set("old", new UpdatePostDto { Name = "A", Code = "A1", SortOrder = 0, Status = PostStatusEnum.Enabled });
-            var input = new UpdatePostDto { Name = "B", Code = "A1", SortOrder = 0, Status = PostStatusEnum.Enabled };
+            OperationLogScope.Set("old", new OperationLogSampleInput { Name = "A", Code = "A1", SortOrder = 0 });
+            var input = new OperationLogSampleInput { Name = "B", Code = "A1", SortOrder = 0 };
 
             (await OperationLogTemplates.RenderAsync("更新：{{_diff(old,input)}}", Args(("input", input))))
-                .ShouldBe("更新：【岗位名称】A → B");
+                .ShouldBe("更新：【名称】A → B");
         }
         finally
         {
@@ -124,7 +123,7 @@ public class OperationLogTemplatesTests
     [Fact]
     public async Task Diff_With_Unresolvable_Operand_Keeps_Raw_Token()
     {
-        var input = new UpdatePostDto { Name = "B", Code = "B1", SortOrder = 0, Status = PostStatusEnum.Enabled };
+        var input = new OperationLogSampleInput { Name = "B", Code = "B1", SortOrder = 0 };
         (await OperationLogTemplates.RenderAsync("{{_diff(missing,input)}}", Args(("input", input))))
             .ShouldBe("{{_diff(missing,input)}}");
     }
@@ -229,4 +228,23 @@ public class OperationLogTemplatesTests
         (await OperationLogTemplates.RenderAsync("{{_diff(a,b)}}", Args(("a", "x"), ("b", "y")), functions))
             .ShouldBe("x → y");
     }
+}
+
+// 日志机制的独立 DTO 夹具，避免通用日志测试依赖可移除的业务模块。
+internal sealed class OperationLogSampleInput
+{
+    [OperationLogField("名称")]
+    public string Name { get; set; } = string.Empty;
+
+    [OperationLogField("编码")]
+    public string Code { get; set; } = string.Empty;
+
+    [OperationLogField("显示顺序")]
+    public int SortOrder { get; set; }
+
+    [OperationLogField("状态")]
+    public int Status { get; set; }
+
+    [OperationLogField("备注")]
+    public string? Remark { get; set; }
 }

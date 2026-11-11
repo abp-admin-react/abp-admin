@@ -14,16 +14,15 @@ namespace AbpAdmin.ClientErrors;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 初步扫描：49 个构造点（11 个文件）：
-/// - AuditLogAppService: 11 处（全部带 code）
-/// - IdentityUserAdminAppService: 12 处（无 code）
-/// - PermissionDefinitionManagementAppService: 8 处（无 code）
+/// 当前清单：43 个构造点（10 个文件）：
+/// - AuditLogAppService: 11 处（无显式 code）
+/// - IdentityUserAdminAppService: 14 处（2 处带 code）
 /// - CacheMonitorAppService: 5 处（无 code）
 /// - 其他：13 处
 /// </para>
 /// <para>
-/// 带 code：1 处（GdprRequestAppService:298）
-/// 其余 48 处未显式 code。
+/// 带 code：3 处（导入越权 2 处，GDPR 1 处）。
+/// 其余 40 处未显式 code。
 /// </para>
 /// <para>
 /// P0 不把报告中的数量写成固定门禁，而是记录实际盘点结果。
@@ -41,7 +40,7 @@ public class UserFriendlyExceptionInventoryTests
         {
             GeneratedAt = DateTime.UtcNow,
             SchemaVersion = 1,
-            TotalCount = 49,
+            TotalCount = 43,
             Files =
             [
                 new UserFriendlyExceptionFileInventory
@@ -56,20 +55,11 @@ public class UserFriendlyExceptionInventoryTests
                 new UserFriendlyExceptionFileInventory
                 {
                     FilePath = "AbpAdmin.Application/Identity/IdentityUserAdminAppService.cs",
-                    Count = 12,
-                    WithCode = 0,
+                    Count = 14,
+                    WithCode = 2,
                     WithoutCode = 12,
                     HasDataInterpolation = false,
-                    Notes = "用户导入错误，使用本地化资源",
-                },
-                new UserFriendlyExceptionFileInventory
-                {
-                    FilePath = "AbpAdmin.Application/PermissionManagement/PermissionDefinitionManagementAppService.cs",
-                    Count = 8,
-                    WithCode = 0,
-                    WithoutCode = 8,
-                    HasDataInterpolation = false,
-                    Notes = "权限定义管理错误",
+                    Notes = "用户导入错误，角色和部门授予越权使用 Client:Forbidden",
                 },
                 new UserFriendlyExceptionFileInventory
                 {
@@ -147,14 +137,14 @@ public class UserFriendlyExceptionInventoryTests
         };
 
         // 验证总数
-        inventory.TotalCount.ShouldBe(49);
-        inventory.Files.Count.ShouldBe(11);
+        inventory.TotalCount.ShouldBe(43);
+        inventory.Files.Count.ShouldBe(10);
 
         // 验证分组
         var withCode = inventory.Files.Sum(f => f.WithCode);
         var withoutCode = inventory.Files.Sum(f => f.WithoutCode);
-        withCode.ShouldBe(1);
-        withoutCode.ShouldBe(48);
+        withCode.ShouldBe(3);
+        withoutCode.ShouldBe(40);
 
         // 不把数量当固定门禁
         // 未来代码变更会导致数量变化，测试只验证清单结构正确

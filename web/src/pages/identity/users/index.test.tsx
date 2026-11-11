@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as identity from '@/abp/identity';
@@ -9,6 +9,17 @@ let mockAccess: Record<string, boolean> = {
   canImportUsers: true,
   canExportUsers: true,
 };
+const fullAccess = {
+  canImportUsers: true,
+  canExportUsers: true,
+  canCreateUsers: true,
+  canUpdateUsers: true,
+  canDeleteUsers: true,
+  canManageUserRoles: true,
+  canManageUserPermissions: true,
+};
+let mockRow: identity.IdentityUserDto | undefined;
+let mockColumnsState: any;
 
 vi.mock('@umijs/max', () => ({
   useAccess: () => mockAccess,
@@ -22,7 +33,7 @@ vi.mock('@/abp/identity', async () => {
   return {
     ...actual,
     getUsers: vi.fn(),
-    getAllRoles: vi.fn(),
+    getAssignableRoles: vi.fn(),
     exportUsers: vi.fn(),
     enqueueExportUsers: vi.fn(),
     importUsers: vi.fn(),
@@ -43,7 +54,8 @@ vi.mock('@ant-design/pro-components', () => ({
   PageContainer: ({ children }: any) => (
     <div data-testid="page-container">{children}</div>
   ),
-  ProTable: ({ columns, toolBarRender, request }: any) => {
+  ProTable: ({ columns, toolBarRender, request, columnsState }: any) => {
+    mockColumnsState = columnsState;
     request?.({ current: 1, pageSize: 10 }, {}, {});
     return (
       <div data-testid="pro-table">
@@ -55,6 +67,20 @@ vi.mock('@ant-design/pro-components', () => ({
           ))}
         </div>
         {toolBarRender && <div data-testid="toolbar">{toolBarRender()}</div>}
+        {mockRow && (
+          <>
+            <div data-testid="row-actions">
+              {columns
+                .find((col: any) => col.valueType === 'option')
+                .render(undefined, mockRow)}
+            </div>
+            <div data-testid="two-factor-status">
+              {columns
+                .find((col: any) => col.dataIndex === 'twoFactorEnabled')
+                .render(undefined, mockRow)}
+            </div>
+          </>
+        )}
       </div>
     );
   },
@@ -76,12 +102,15 @@ vi.mock('@ant-design/pro-components', () => ({
 describe('UsersPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAccess = { canImportUsers: true, canExportUsers: true };
+    mockAccess = { ...fullAccess };
+    mockRow = undefined;
     vi.mocked(identity.getUsers).mockResolvedValue({
       items: [],
       totalCount: 0,
     } as never);
-    vi.mocked(identity.getAllRoles).mockResolvedValue({ items: [] } as never);
+    vi.mocked(identity.getAssignableRoles).mockResolvedValue({
+      items: [],
+    } as never);
     vi.mocked(identity.getTwoFactorStatuses).mockResolvedValue([] as never);
   });
 
@@ -99,7 +128,7 @@ describe('UsersPage', () => {
       );
     });
     await waitFor(() => {
-      expect(identity.getAllRoles).toHaveBeenCalled();
+      expect(identity.getAssignableRoles).toHaveBeenCalled();
     });
   });
 
@@ -118,7 +147,11 @@ describe('UsersPage', () => {
   });
 
   it('无导入导出权限时按钮隐藏', async () => {
-    mockAccess = { canImportUsers: false, canExportUsers: false };
+    mockAccess = {
+      ...fullAccess,
+      canImportUsers: false,
+      canExportUsers: false,
+    };
     const { default: Page } = await import('./index');
     render(
       <AntdApp>
@@ -158,6 +191,11 @@ describe('UsersPage', () => {
 
     const columns = await screen.findByTestId('table-columns');
     expect(columns.textContent).toContain('双因素');
+    expect(mockColumnsState.defaultValue).toMatchObject({
+      emailConfirmed: { show: false },
+      twoFactorEnabled: { show: false },
+      accessFailedCount: { show: false },
+    });
 
     await waitFor(() => {
       expect(identity.getTwoFactorStatuses).toHaveBeenCalledWith([
@@ -165,5 +203,61 @@ describe('UsersPage', () => {
         'u-2',
       ]);
     });
+  });
+
+  it('常用操作只展示编辑和重置密码，额外权限及账号安全操作收进更多', async () => {
+    mockRow = {
+      id: 'u-1',
+      userName: 'alice',
+      email: 'a@t.com',
+      isActive: true,
+      lockoutEnabled: true,
+    };
+    const { default: Page } = await import('./index');
+    render(
+      <AntdApp>
+        <Page />
+      </AntdApp>,
+    );
+    const actions = screen.getByTestId('row-actions');
+    expect(actions.textContent).toContain('编辑');
+    expect(actions.textContent).toContain('重置密码');
+    expect(actions.textContent).not.toContain('额外权限');
+    expect(actions.textContent).not.toContain('冻结');
+    fireEvent.click(screen.getByText('更多'));
+    expect(await screen.findByText('额外权限')).toBeTruthy();
+    expect(screen.getByText('通常通过角色授权')).toBeTruthy();
+    expect(screen.getByText('删除用户')).toBeTruthy();
+    fireEvent.click(screen.getByText('删除用户'));
+    expect((await screen.findByRole('dialog')).textContent).toContain(
+      '确认删除该用户？',
+    );
+  });
+
+  it('只有查看权限时不显示写操作，也不读取角色候选和2FA管理端点', async () => {
+    mockAccess = {};
+    mockRow = {
+      id: 'u-1',
+      userName: 'alice',
+      email: 'a@t.com',
+      isActive: true,
+      lockoutEnabled: true,
+    };
+    vi.mocked(identity.getUsers).mockResolvedValue({
+      items: [mockRow],
+      totalCount: 1,
+    });
+    const { default: Page } = await import('./index');
+    render(
+      <AntdApp>
+        <Page />
+      </AntdApp>,
+    );
+    expect(screen.getByTestId('row-actions').textContent).toBe('');
+    expect(screen.getByTestId('two-factor-status').textContent).toBe('—');
+    expect(screen.getByTestId('toolbar').textContent).not.toContain('新建用户');
+    await waitFor(() => expect(identity.getUsers).toHaveBeenCalled());
+    expect(identity.getAssignableRoles).not.toHaveBeenCalled();
+    expect(identity.getTwoFactorStatuses).not.toHaveBeenCalled();
   });
 });

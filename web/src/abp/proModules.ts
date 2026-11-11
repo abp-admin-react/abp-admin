@@ -5,13 +5,6 @@ import {
   postApiAppAuditLogIdMarkHandled,
   postApiAppAuditLogIdUnmarkHandled,
 } from '@/services/abpadmin/auditLog';
-import {
-  deleteApiAppBackgroundJobId,
-  getApiAppBackgroundJob,
-  postApiAppBackgroundJobEnqueueTest,
-  postApiAppBackgroundJobIdAbandon,
-  postApiAppBackgroundJobIdRetry,
-} from '@/services/abpadmin/backgroundJob';
 import type { PagedResult } from './identity';
 
 export async function getAuditLogs(params: {
@@ -257,18 +250,19 @@ export async function setTenantEdition(tenantId: string, editionId?: string) {
 // 文本模板与虚拟文件浏览器的 API 封装已删除：
 // 页面统一改用 OpenAPI 生成客户端（services/abpadmin/textTemplate.ts、virtualFileExplorer.ts）
 
-export async function getLanguageSettings() {
-  return request<{
-    defaultLanguage?: string;
-    languages: { cultureName: string; displayName: string }[];
-  }>('/api/app/language', { method: 'GET' });
-}
-
-export async function updateLanguageSettings(data: {
-  defaultLanguage?: string;
-}) {
-  return request('/api/app/language', { method: 'PUT', data });
-}
+export type BackgroundJobDto = {
+  id: string;
+  applicationName: string | null;
+  jobName: string;
+  jobArgs: string;
+  tryCount: number;
+  creationTime: string;
+  nextTryTime: string;
+  lastTryTime: string | null;
+  isAbandoned: boolean;
+  completionTime: string | null;
+  priority: number;
+};
 
 export async function getBackgroundJobs(params: {
   current?: number;
@@ -278,121 +272,27 @@ export async function getBackgroundJobs(params: {
 }) {
   const maxResultCount = params.pageSize ?? 10;
   const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
-  return getApiAppBackgroundJob({
-    SkipCount: skipCount,
-    MaxResultCount: maxResultCount,
-    JobName: params.jobName,
-    IsAbandoned: params.isAbandoned,
+  return request<PagedResult<BackgroundJobDto>>('/api/app/background-job', {
+    method: 'GET',
+    params: {
+      SkipCount: skipCount,
+      MaxResultCount: maxResultCount,
+      JobName: params.jobName,
+      IsAbandoned: params.isAbandoned,
+    },
   });
 }
 
 export async function abandonBackgroundJob(id: string) {
-  return postApiAppBackgroundJobIdAbandon({ id });
+  return request(`/api/app/background-job/${id}/abandon`, { method: 'POST' });
 }
 
 export async function retryBackgroundJob(id: string) {
-  return postApiAppBackgroundJobIdRetry({ id });
+  return request(`/api/app/background-job/${id}/retry`, { method: 'POST' });
 }
 
 export async function deleteBackgroundJob(id: string) {
-  return deleteApiAppBackgroundJobId({ id });
-}
-
-export async function enqueueTestBackgroundJob(data: {
-  emailAddress: string;
-  subject: string;
-  body?: string;
-}) {
-  return postApiAppBackgroundJobEnqueueTest(data);
-}
-
-/* ========== 岗位管理（对标 RuoYi sys_post） ========== */
-
-export type PostDto = {
-  id: string;
-  name: string;
-  code: string;
-  sortOrder: number;
-  status: number; // 0 启用 1 停用
-  remark?: string;
-  memberCount?: number;
-};
-
-export async function getPosts(params?: {
-  current?: number;
-  pageSize?: number;
-  filter?: string;
-  status?: number;
-}) {
-  const maxResultCount = params?.pageSize ?? 20;
-  const skipCount = ((params?.current ?? 1) - 1) * maxResultCount;
-  return request<PagedResult<PostDto>>('/api/app/post', {
-    method: 'GET',
-    params: {
-      Filter: params?.filter,
-      Status: params?.status,
-      SkipCount: skipCount,
-      MaxResultCount: maxResultCount,
-    },
-  });
-}
-
-export async function getAllEnabledPosts() {
-  return request<{ items: PostDto[] }>('/api/app/post/lookup', {
-    method: 'GET',
-  });
-}
-
-export async function createPost(data: Omit<PostDto, 'id' | 'memberCount'>) {
-  return request<PostDto>('/api/app/post', { method: 'POST', data });
-}
-
-export async function updatePost(
-  id: string,
-  data: Omit<PostDto, 'id' | 'memberCount'>,
-) {
-  return request<PostDto>(`/api/app/post/${id}`, { method: 'PUT', data });
-}
-
-export async function deletePost(id: string) {
-  return request(`/api/app/post/${id}`, { method: 'DELETE' });
-}
-
-export async function getPostMembers(
-  id: string,
-  params?: { current?: number; pageSize?: number; filter?: string },
-) {
-  const maxResultCount = params?.pageSize ?? 20;
-  const skipCount = ((params?.current ?? 1) - 1) * maxResultCount;
-  return request<
-    PagedResult<{
-      id: string;
-      userName: string;
-      name?: string;
-      email?: string;
-      isActive: boolean;
-    }>
-  >(`/api/app/post/${id}/members`, {
-    method: 'GET',
-    params: {
-      Filter: params?.filter,
-      SkipCount: skipCount,
-      MaxResultCount: maxResultCount,
-    },
-  });
-}
-
-export async function addPostMembers(id: string, userIds: string[]) {
-  return request(`/api/app/post/${id}/members`, {
-    method: 'POST',
-    data: userIds,
-  });
-}
-
-export async function removePostMember(id: string, userId: string) {
-  return request(`/api/app/post/${id}/members/${userId}`, {
-    method: 'DELETE',
-  });
+  return request(`/api/app/background-job/${id}`, { method: 'DELETE' });
 }
 
 /* ========== 服务监控 / 缓存监控（Host 专属） ========== */

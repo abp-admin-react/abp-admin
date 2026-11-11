@@ -2,7 +2,6 @@ using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using AbpAdmin.Posts;
 using AbpAdmin.RateLimiting;
 using Shouldly;
 using Volo.Abp;
@@ -17,7 +16,7 @@ using Xunit;
 namespace AbpAdmin.RateLimiting;
 
 /* 防重复提交测试：窗口语义对标 RuoYi @RepeatSubmit，抢占/释放机制对标 ruoyi-vue-pro @Idempotent。
- * 以 PostAppService.CreateAsync 为参照实现 + PreventDuplicateSubmitTestService 定向夹具。
+ * 使用独立 PreventDuplicateSubmitTestService 夹具，不耦合具体业务模块。
  * 覆盖：同参数窗口内二次提交被拒（错误码 + 窗口秒数值）、不同参数不受影响、
  * 业务异常默认立即释放窗口（可马上重试，且首抛错误码被断言）、
  * DeleteKeyOnException=false 回到"进入即标记"、
@@ -35,13 +34,11 @@ public abstract class PreventDuplicateSubmitTests<TStartupModule> : AbpAdminAppl
 {
     private const string SimulatedFailureCode = "AbpAdmin:Test:SimulatedFailure";
 
-    private readonly IPostAppService _postAppService;
     private readonly PreventDuplicateSubmitTestService _testService;
     private readonly ICurrentPrincipalAccessor _currentPrincipalAccessor;
 
     protected PreventDuplicateSubmitTests()
     {
-        _postAppService = GetRequiredService<IPostAppService>();
         _testService = GetRequiredService<PreventDuplicateSubmitTestService>();
         _currentPrincipalAccessor = GetRequiredService<ICurrentPrincipalAccessor>();
     }
@@ -56,23 +53,17 @@ public abstract class PreventDuplicateSubmitTests<TStartupModule> : AbpAdminAppl
             new Claim(AbpClaimTypes.UserName, "user-" + userId.ToString("N")[..8]),
         })));
 
-    private static CreatePostDto CreateInput(string suffix) => new()
-    {
-        Name = "防重岗位" + suffix,
-        Code = "DUP" + suffix,
-        SortOrder = 0,
-        Status = PostStatusEnum.Enabled
-    };
+    private static DuplicateSubmitTestInput CreateInput(string suffix) => new("资源" + suffix, "DUP" + suffix);
 
     [Fact]
     public async Task Same_Arguments_Second_Submit_Should_Be_Rejected()
     {
         var input = CreateInput(RandomArg());
 
-        var first = await _postAppService.CreateAsync(input);
-        first.ShouldNotBeNull();
+        var first = await _testService.CreateAsync(input);
+        first.ShouldNotBe(Guid.Empty);
 
-        var second = await Should.ThrowAsync<BusinessException>(() => _postAppService.CreateAsync(input));
+        var second = await Should.ThrowAsync<BusinessException>(() => _testService.CreateAsync(input));
         second.Code.ShouldBe(AbpAdminDomainErrorCodes.RateLimiting.DuplicateSubmit);
         // 窗口秒数值与特性配置（默认 5）一致，防止报给客户端的等待时间与实际窗口脱节
         second.Data["IntervalSeconds"].ShouldBe(5);
@@ -81,12 +72,12 @@ public abstract class PreventDuplicateSubmitTests<TStartupModule> : AbpAdminAppl
     [Fact]
     public async Task Different_Arguments_Should_Not_Interfere()
     {
-        var first = await _postAppService.CreateAsync(CreateInput(RandomArg()));
-        var second = await _postAppService.CreateAsync(CreateInput(RandomArg()));
+        var first = await _testService.CreateAsync(CreateInput(RandomArg()));
+        var second = await _testService.CreateAsync(CreateInput(RandomArg()));
 
-        first.ShouldNotBeNull();
-        second.ShouldNotBeNull();
-        first.Id.ShouldNotBe(second.Id);
+        first.ShouldNotBe(Guid.Empty);
+        second.ShouldNotBe(Guid.Empty);
+        first.ShouldNotBe(second);
     }
 
     [Fact]
@@ -261,6 +252,12 @@ public class PreventDuplicateSubmitTestService : ApplicationService
 {
     private int _failCalls;
 
+    [PreventDuplicateSubmit]
+    public virtual Task<Guid> CreateAsync(DuplicateSubmitTestInput input)
+    {
+        return Task.FromResult(Guid.NewGuid());
+    }
+
     [PreventDuplicateSubmit(2)]
     public virtual Task OkAsync(string arg)
     {
@@ -324,3 +321,5 @@ public class PreventDuplicateSubmitTestService : ApplicationService
         return Task.CompletedTask;
     }
 }
+
+public sealed record DuplicateSubmitTestInput(string Name, string Code);

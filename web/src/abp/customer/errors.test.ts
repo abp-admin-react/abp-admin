@@ -38,8 +38,12 @@ describe('public-error-catalog', () => {
   it('只包含公开码、分类与字段，不含内部映射或文案', () => {
     expect(catalog.schemaVersion).toBe(PUBLIC_ERROR_CONTRACT_SCHEMA_VERSION);
     expect(catalog.entries.map((entry) => entry.code)).toEqual([
+      'AbpAdmin:DataScope:RoleDataScopeEscalation',
       'AbpAdmin:Export:SyncThresholdExceeded',
       'AbpAdmin:Files:ContentMismatch',
+      'AbpAdmin:IdentityClaimsCannotCarryRole',
+      'AbpAdmin:PrepaymentAccountIdRequired',
+      'AbpAdmin:PrepaymentAccountNotFound',
       'BizTemplate:Public:ProjectUnavailable',
       'Client:AuthenticationRequired',
       'Client:Conflict',

@@ -5,7 +5,7 @@ import {
   ProFormText,
 } from '@ant-design/pro-components';
 import { App } from 'antd';
-import React from 'react';
+import React, { useState } from 'react';
 import {
   type ClaimValueDto,
   getAllClaimTypes,
@@ -16,18 +16,20 @@ import {
 } from '@/abp/identityAdmin';
 
 const ClaimModal: React.FC<{
-  open: boolean;
   title: string;
   userId?: string;
   roleId?: string;
   onClose: () => void;
-}> = ({ open, title, userId, roleId, onClose }) => {
+}> = ({ title, userId, roleId, onClose }) => {
   const { message } = App.useApp();
+  const [claimTypeOptions, setClaimTypeOptions] = useState<
+    { label: string; value: string }[]
+  >([]);
 
   return (
     <ModalForm
       title={title}
-      open={open}
+      open
       modalProps={{ destroyOnHidden: true, onCancel: onClose }}
       request={async () => {
         const [types, claims] = await Promise.all([
@@ -38,11 +40,10 @@ const ClaimModal: React.FC<{
               ? getRoleClaims(roleId)
               : Promise.resolve([]),
         ]);
-        return {
-          claims: claims.length
-            ? claims
-            : [{ claimType: types[0]?.name, claimValue: '' }],
-        };
+        setClaimTypeOptions(
+          types.map(({ name }) => ({ label: name, value: name })),
+        );
+        return { claims };
       }}
       onFinish={async (values) => {
         const claims = ((values.claims || []) as ClaimValueDto[]).filter(
@@ -68,13 +69,7 @@ const ClaimModal: React.FC<{
           name="claimType"
           label="类型"
           width="sm"
-          request={async () => {
-            const types = await getAllClaimTypes();
-            return types.map((type) => ({
-              label: type.name,
-              value: type.name,
-            }));
-          }}
+          options={claimTypeOptions}
           rules={[{ required: true, message: '请选择声明类型' }]}
         />
         <ProFormText name="claimValue" label="值" width="md" />

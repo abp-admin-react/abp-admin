@@ -56,11 +56,3 @@ public partial class RoleDataScopeMappers : MapperBase<RoleDataScope, RoleDataSc
     private List<Guid> ToOrganizationUnitIds(ICollection<RoleDataScopeOrganizationUnit> source)
         => source.Select(x => x.OrganizationUnitId).ToList();
 }
-
-[Mapper(RequiredMappingStrategy = RequiredMappingStrategy.Target)]
-public partial class DataScopeDemoMappers : MapperBase<DataScopeDemo, DataScopeDemoDto>
-{
-    public override partial DataScopeDemoDto Map(DataScopeDemo source);
-
-    public override partial void Map(DataScopeDemo source, DataScopeDemoDto destination);
-}

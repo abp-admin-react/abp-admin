@@ -23,9 +23,9 @@ namespace AbpAdmin.Biz.Template.Services;
 /// 数据权限示例的最小 AppService：演示业务模块消费框架数据范围基建。
 /// 实体实现 IHasDataScope + 模块 DbContext 的数据范围筛选器后，这里的查询无需写任何
 /// 过滤条件——GetListAsync 返回的就是当前用户数据范围内可见的行（范围由角色的
-/// RoleDataScope 配置决定，配置入口在框架「身份管理 → 角色 → 数据权限」）。
+/// RoleDataScope 配置决定，配置入口位于本业务示例页）。
 /// Auto API：/api/app/biz-data-scope-demo。
-/// 写入侧比框架演示夹具多一道防线（<see cref="EnsureOrganizationUnitAllowedAsync"/>）：
+/// 写入侧校验显式指定的归属组织（<see cref="EnsureOrganizationUnitAllowedAsync"/>）：
 /// 本模块是可复制的业务样板，客户端提交的 organizationUnitId 不可信。
 /// </summary>
 [Authorize(BizTemplatePermissions.DataScopeDemo.Default)]

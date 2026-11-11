@@ -18,8 +18,8 @@ namespace AbpAdmin.DataDictionaries;
 
 /* 数据字典种子与枚举同步的集成测试。
  * 覆盖验收标准：
- * - 12 个初始字典（6 手写 + 6 枚举同步：TenantActivationState / FileThumbnailState /
- *   DataScopeType / MenuType / PostStatus / MaskKind），
+ * - 11 个初始字典（6 手写 + 5 枚举同步：TenantActivationState / FileThumbnailState /
+ *   DataScopeType / MenuType / MaskKind），
  *   全部 IsStatic = true，项的 Code 是数值字符串、DisplayText 是 [Description] 中文、Description 是成员名；
  * - 幂等：再跑一遍行数与内容完全不变；
  * - 清理：枚举字典里多余的项被删掉、无对应枚举的静态字典被删掉、孤儿元数据被清掉；
@@ -52,9 +52,10 @@ public abstract class DataDictionarySeedTests<TStartupModule> : AbpAdminApplicat
     {
         var dicts = await WithUnitOfWorkAsync(() => _dictionaryRepository.GetListAsync(includeDetails: true));
 
-        // 6 个手写 + 6 个枚举同步（TenantActivationState / FileThumbnailState / DataScopeType /
-        // MenuType / PostStatus / MaskKind）
-        dicts.Count.ShouldBe(12);
+        // 6 个手写 + 5 个枚举同步（TenantActivationState / FileThumbnailState / DataScopeType /
+        // MenuType / MaskKind）
+        dicts.Count.ShouldBe(11);
+        dicts.ShouldNotContain(d => d.Code == "PostStatus");
         dicts.ShouldAllBe(d => d.IsStatic);
 
         foreach (var code in AbpAdminDictionaryCodes.All)
@@ -302,8 +303,8 @@ public abstract class DataDictionarySeedTests<TStartupModule> : AbpAdminApplicat
             await RunSeedContributorsAsync(tenantId);
 
             var tenantDicts = await WithUnitOfWorkAsync(() => _dictionaryRepository.GetListAsync(includeDetails: true));
-            // 租户拿到全套 12 个字典（模块无租户回落，必须逐租户种）
-            tenantDicts.Count.ShouldBe(12);
+            // 租户拿到全套 11 个字典（模块无租户回落，必须逐租户种）
+            tenantDicts.Count.ShouldBe(11);
             tenantDicts.ShouldAllBe(d => d.TenantId == tenantId);
         }
 
@@ -337,7 +338,7 @@ public abstract class DataDictionarySeedTests<TStartupModule> : AbpAdminApplicat
         using (_currentTenant.Change(tenantId))
         {
             var dicts = await WithUnitOfWorkAsync(() => _dictionaryRepository.GetListAsync());
-            dicts.Count.ShouldBe(12); // 6 手写 + 6 枚举同步，口径同上
+            dicts.Count.ShouldBe(11); // 6 手写 + 5 枚举同步，口径同上
             dicts.ShouldAllBe(d => d.TenantId == tenantId);
         }
     }

@@ -1,7 +1,6 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using AbpAdmin.Posts;
 using Shouldly;
 using Volo.Abp.Identity;
 using Volo.Abp.Modularity;
@@ -11,8 +10,8 @@ using Xunit;
 namespace AbpAdmin.Identity;
 
 /// <summary>
-/// 组织×岗位×角色×用户组合演示种子的结构锁（DemoIdentitySeedContributor.SeedOrgComboDemoAsync）：
-/// 四个演示人物的「部门/岗位/角色来源」对照是页面问号说明的活样例，结构漂移会让说明与数据脱节。
+/// 组织、角色与用户组合演示种子的结构锁（DemoIdentitySeedContributor.SeedOrgComboDemoAsync）：
+/// 四个演示人物的「部门/角色来源」对照是页面问号说明的活样例，结构漂移会让说明与数据脱节。
 /// 权限「来自 OU 绑定角色」的声明解析是 ABP 框架行为（登录时把 OU 角色并入 claims），
 /// 这里锁数据面：绑定关系存在 + 李工无直接角色 + 张智多部门/王财复用财务角色/赵营销直接分配。
 /// </summary>
@@ -23,7 +22,6 @@ public abstract class DemoOrgComboSeedTests<TStartupModule> : AbpAdminApplicatio
     private readonly IIdentityRoleRepository _roles;
     private readonly IOrganizationUnitRepository _ous;
     private readonly OrganizationUnitManager _ouManager;
-    private readonly IPostRepository _posts;
     private readonly IdentityUserManager _userManager;
 
     /// <summary>直调种子并连跑两遍：测试宿主环境钉 Production，自动播种被门控关闭
@@ -44,7 +42,6 @@ public abstract class DemoOrgComboSeedTests<TStartupModule> : AbpAdminApplicatio
         _roles = GetRequiredService<IIdentityRoleRepository>();
         _ous = GetRequiredService<IOrganizationUnitRepository>();
         _ouManager = GetRequiredService<OrganizationUnitManager>();
-        _posts = GetRequiredService<IPostRepository>();
         _userManager = GetRequiredService<IdentityUserManager>();
     }
 
@@ -69,7 +66,7 @@ public abstract class DemoOrgComboSeedTests<TStartupModule> : AbpAdminApplicatio
     }
 
     [Fact]
-    public async Task Li_Dev_Has_No_Direct_Role_But_In_Rd_Ou_With_Two_Posts()
+    public async Task Li_Dev_Has_No_Direct_Role_But_Inherits_Employee_From_Rd_Ou()
     {
         await SeedTwiceAsync();
         var li = await _users.FindByNormalizedUserNameAsync("LI.DEV");
@@ -91,9 +88,6 @@ public abstract class DemoOrgComboSeedTests<TStartupModule> : AbpAdminApplicatio
         var ousOfLi = await _userManager.GetOrganizationUnitsAsync(li);
         ousOfLi.ShouldContain(x => x.DisplayName == "研发部");
 
-        var postsOfLi = await _posts.GetListByUserIdAsync(li.Id);
-        postsOfLi.Select(x => x.Code).OrderBy(x => x).ToArray()
-            .ShouldBe(new[] { "DEV", "SRE" }, "一人兼岗：开发工程师 + 运维工程师");
     }
 
     [Fact]

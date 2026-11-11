@@ -160,14 +160,12 @@ async function main() {
     await page.getByText('修改密码').first().waitFor({ timeout: 15000 });
     await shot(page, 'm03-account-center');
 
-    console.log('5) tenants host features');
-    await page.goto(`${FRONT}/tenants`);
-    await page.getByRole('button', { name: '管理 Host 功能' }).waitFor({ timeout: 30000 });
-    await page.getByRole('button', { name: '管理 Host 功能' }).click();
-    await page.locator('.ant-modal').waitFor({ state: 'visible', timeout: 15000 });
-    await page.waitForTimeout(800);
+    console.log('5) host features');
+    await page.goto(`${FRONT}/administration/features`);
+    const hostFeatures = page.getByRole('dialog', { name: 'Host 功能' });
+    await hostFeatures.waitFor({ state: 'visible', timeout: 30000 });
     await shot(page, 'm04-host-features');
-    await page.locator('.ant-modal-close').click();
+    await hostFeatures.locator('.ant-modal-close').click();
 
     console.log('6) users lock');
     await page.goto(`${FRONT}/identity/users`);

@@ -38,7 +38,7 @@ public class Menu : FullAuditedAggregateRoot<Guid>, IMultiTenant
 
     public virtual bool IsEnabled { get; protected set; }
 
-    /// <summary>绑定的 ABP 权限名（可选）。混合授权：绑定了权限则要求权限已授予。</summary>
+    /// <summary>绑定的 ABP 权限名（可选）。绑定后仅在当前用户已获该权限时显示。</summary>
     public virtual string? PermissionName { get; protected set; }
 
     public virtual string? Remark { get; set; }

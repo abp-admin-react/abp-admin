@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Linq.Dynamic.Core;
 using System.Threading.Tasks;
+using AbpAdmin.ClientErrors;
 using AbpAdmin.Identity;
 using AbpAdmin.Localization;
 using AbpAdmin.OperationLogs;
@@ -10,7 +11,6 @@ using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
-using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 using Volo.Abp.Validation;
@@ -88,8 +88,10 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
         var entity = await AsyncExecuter.FirstOrDefaultAsync(queryable.Where(x => x.RoleName == roleName));
         if (entity == null)
         {
-            // 未配置过数据范围的角色视为「全部数据」，返回 404 让前端走默认逻辑
-            throw new EntityNotFoundException(typeof(RoleDataScope), roleName);
+            // 未配置时返回已登记的 NotFound，供前端显示首次配置表单。
+            // EntityNotFoundException 无公开错误码，会被当前错误管线投影为 500；
+            // 此处不创建默认范围，非 admin 的无配置角色仍按既有规则零行可见。
+            throw new BusinessException(ClientErrorCodes.NotFound);
         }
         return MapToDto(entity);
     }
@@ -113,8 +115,8 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
         await EnsureOperatorCanGrantAsync(input);
 
         // 角色名必须是当前租户真实存在的角色，防止「拼错即失效」的脏配置；
-        // 落库用角色的规范 Name（而非客户端原样大小写）——与 MenuAppService.UpdateMenuRoleGrantsAsync
-        // 同一口径：读取侧 CurrentDataScopeProvider 用角色 claim 的原始 Name 做精确匹配，
+        // 落库用角色的规范 Name（而非客户端原样大小写）：
+        // 读取侧 CurrentDataScopeProvider 用角色 claim 的原始 Name 做精确匹配，
         // 原样存入会在大小写不一致时永远匹配不上（fail-closed 零行可见）
         var entity = new RoleDataScope(
             GuidGenerator.Create(),
@@ -182,7 +184,7 @@ public class RoleDataScopeAppService : ApplicationService, IRoleDataScopeAppServ
     {
         // admin 判定与 OrganizationUnitRoleConferralGuard.IsPrivilegedOperator 同口径（OrdinalIgnoreCase）。
         if (!CurrentUser.IsAuthenticated ||
-            OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles, operatorSnapshotIsAll: false))
+            OrganizationUnitRoleConferralGuard.IsPrivilegedOperator(CurrentUser.Roles))
         {
             return;
         }

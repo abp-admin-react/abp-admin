@@ -1,6 +1,5 @@
 using System;
 using AbpAdmin.OperationLogs;
-using AbpAdmin.Posts;
 using Shouldly;
 using Xunit;
 
@@ -20,11 +19,11 @@ public class OperationLogDifferDiagnosisTests
     public void Diff_Anonymous_Old_With_Dto_New_Should_Show_Old_Values()
     {
         var old = new { Name = "旧名", Code = "BROWSER1", SortOrder = 1, Status = 0, Remark = (string?)null };
-        var @new = new UpdatePostDto { Name = "新名", Code = "BROWSER1", SortOrder = 2, Status = 0 };
+        var @new = new OperationLogSampleInput { Name = "新名", Code = "BROWSER1", SortOrder = 2, Status = 0 };
 
         var result = OperationLogDiffer.Diff(old, @new);
 
-        result!.ShouldContain("【岗位名称】旧名 → 新名");
+        result!.ShouldContain("【名称】旧名 → 新名");
         result!.ShouldContain("【显示顺序】1 → 2");
         result!.ShouldNotContain("(空)");
     }
@@ -33,7 +32,7 @@ public class OperationLogDifferDiagnosisTests
     public void Diff_Named_Snapshot_Should_Also_Work()
     {
         var old = new Snapshot();
-        var @new = new UpdatePostDto { Name = "新名", Code = "BROWSER1", SortOrder = 1, Status = 0 };
+        var @new = new OperationLogSampleInput { Name = "新名", Code = "BROWSER1", SortOrder = 1, Status = 0 };
 
         OperationLogDiffer.Diff(old, @new)!.ShouldContain("旧名 → 新名");
     }

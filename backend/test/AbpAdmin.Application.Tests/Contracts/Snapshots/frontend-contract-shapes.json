@@ -54,6 +54,55 @@
       }
     }
   },
+  "AbpAdmin.BackgroundJobs.BackgroundJobDto": {
+    "kind": "dto",
+    "properties": {
+      "ApplicationName": {
+        "type": "string",
+        "nullable": true
+      },
+      "CompletionTime": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "IsAbandoned": {
+        "type": "bool",
+        "nullable": false
+      },
+      "JobArgs": {
+        "type": "string",
+        "nullable": false
+      },
+      "JobName": {
+        "type": "string",
+        "nullable": false
+      },
+      "LastTryTime": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "NextTryTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Priority": {
+        "type": "byte",
+        "nullable": false
+      },
+      "TryCount": {
+        "type": "short",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.ClientErrors.ClientFailureDto": {
     "kind": "dto",
     "properties": {
@@ -137,28 +186,36 @@
       }
     }
   },
-  "AbpAdmin.Menus.RoleMenuGrantItemDto": {
+  "AbpAdmin.Menus.MenuTreeDto": {
     "kind": "dto",
     "properties": {
-      "Id": {
-        "type": "Guid",
+      "Children": {
+        "type": "List\u003CMenuTreeDto\u003E",
         "nullable": false
       },
-      "IsControlled": {
-        "type": "bool",
+      "ConcurrencyStamp": {
+        "type": "string",
+        "nullable": true
+      },
+      "Icon": {
+        "type": "string",
+        "nullable": true
+      },
+      "Id": {
+        "type": "Guid",
         "nullable": false
       },
       "IsEnabled": {
         "type": "bool",
         "nullable": false
       },
-      "IsGranted": {
-        "type": "bool",
-        "nullable": false
-      },
       "IsHide": {
         "type": "bool",
         "nullable": false
+      },
+      "Name": {
+        "type": "string",
+        "nullable": true
       },
       "OrderNo": {
         "type": "int",
@@ -168,21 +225,28 @@
         "type": "Guid?",
         "nullable": true
       },
+      "Path": {
+        "type": "string",
+        "nullable": true
+      },
+      "PermissionName": {
+        "type": "string",
+        "nullable": true
+      },
+      "Remark": {
+        "type": "string",
+        "nullable": true
+      },
+      "TenantId": {
+        "type": "Guid?",
+        "nullable": true
+      },
       "Title": {
         "type": "string",
         "nullable": false
       },
       "Type": {
         "type": "MenuTypeEnum",
-        "nullable": false
-      }
-    }
-  },
-  "AbpAdmin.Menus.UpdateRoleMenuGrantsDto": {
-    "kind": "dto",
-    "properties": {
-      "MenuIds": {
-        "type": "List\u003CGuid\u003E",
         "nullable": false
       }
     }
@@ -397,102 +461,6 @@
       },
       "WorkingSetBytes": {
         "type": "long",
-        "nullable": false
-      }
-    }
-  },
-  "AbpAdmin.PermissionManagement.CreatePermissionDefinitionInput": {
-    "kind": "dto",
-    "properties": {
-      "DisplayName": {
-        "type": "string",
-        "nullable": false
-      },
-      "GroupName": {
-        "type": "string",
-        "nullable": false
-      },
-      "IsEnabled": {
-        "type": "bool",
-        "nullable": false
-      },
-      "Name": {
-        "type": "string",
-        "nullable": false
-      },
-      "ParentName": {
-        "type": "string",
-        "nullable": true
-      }
-    }
-  },
-  "AbpAdmin.PermissionManagement.CreatePermissionGroupInput": {
-    "kind": "dto",
-    "properties": {
-      "DisplayName": {
-        "type": "string",
-        "nullable": false
-      },
-      "Name": {
-        "type": "string",
-        "nullable": false
-      }
-    }
-  },
-  "AbpAdmin.PermissionManagement.PermissionDefinitionRecordDto": {
-    "kind": "dto",
-    "properties": {
-      "DisplayName": {
-        "type": "string",
-        "nullable": false
-      },
-      "DisplayNameLocalized": {
-        "type": "string",
-        "nullable": false
-      },
-      "GroupName": {
-        "type": "string",
-        "nullable": true
-      },
-      "Id": {
-        "type": "Guid",
-        "nullable": false
-      },
-      "IsEnabled": {
-        "type": "bool",
-        "nullable": false
-      },
-      "MultiTenancySide": {
-        "type": "byte",
-        "nullable": false
-      },
-      "Name": {
-        "type": "string",
-        "nullable": false
-      },
-      "ParentName": {
-        "type": "string",
-        "nullable": true
-      }
-    }
-  },
-  "AbpAdmin.PermissionManagement.PermissionGroupRecordDto": {
-    "kind": "dto",
-    "properties": {
-      "DisplayName": {
-        "type": "string",
-        "nullable": false
-      },
-      "DisplayNameLocalized": {
-        "type": "string",
-        "nullable": false
-      },
-      "Id": {
-        "type": "Guid",
-        "nullable": false
-      },
-      "Name": {
-        "type": "string",
         "nullable": false
       }
     }

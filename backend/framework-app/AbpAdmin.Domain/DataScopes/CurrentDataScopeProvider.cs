@@ -84,7 +84,7 @@ public class CurrentDataScopeProvider : ICurrentDataScopeProvider, ITransientDep
 
         // admin 超管豁免：出厂不会为 admin 配 RoleDataScope 行，若走常规解析，
         // 快照为空集合 = 任何 IHasDataScope 实体对 admin 零行可见（fail-closed 变成超管自锁）。
-        // 与 MyMenuAppService 的 admin 豁免、Admin.NET 超管绕过数据范围同口径。
+        // 与 Admin.NET 超管绕过数据范围同口径。
         // OrdinalIgnoreCase：与 OrganizationUnitRoleConferralGuard.IsPrivilegedOperator 同口径，
         // 避免 "Admin"/"admin" 漂移导致超管走空快照自锁。
         if (roleNames.Contains(AbpRoleConsts.AdminRoleName, StringComparer.OrdinalIgnoreCase))

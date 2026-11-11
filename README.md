@@ -19,7 +19,7 @@
 | 前端 | React 19 · antd 6 · Ant Design Pro v6 · Umi Max 4 · pnpm 10 · Vitest · Biome |
 | 认证 | OpenIddict(OIDC,前后端分离,SPA 独立部署) |
 
-默认开发环境:后端 API `https://localhost:44395`,前端 `http://localhost:8000`,数据库 PostgreSQL(连接串在 `backend/framework-app/AbpAdmin.HttpApi.Host/appsettings.secrets.json` 开发样本中指向本地默认库,本机真实凭据直接改该文件并用 skip-worktree 屏蔽,见文件头注释)。默认管理员 `admin` / `1q2w3E*`。
+本地开发默认使用后端 `https://localhost:44395`、前端 `http://localhost:8000` 和 PostgreSQL。Docker 初始管理员为 `admin`，口令由本地 `.env` 提供。
 
 ## 内置能力
 
@@ -59,6 +59,8 @@ ABP 官方 Layered 模板的 **Host + 独立 SPA 变体**(以 `HttpApi.Host` 承
 
 环境要求:[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet)、[Node.js 22+](https://nodejs.org/)、[pnpm 10](https://pnpm.io/zh/installation)(`corepack enable`);可选 [ABP CLI](https://abp.io/docs/latest/cli)(`abp install-libs` 安装 LeptonX 等客户端静态库)。首次跑 HTTPS 后端建议先 `dotnet dev-certs https --trust`。
 
+直接运行后端前，创建本地 PostgreSQL 数据库，将宿主 `Configuration/Database.json.example` 复制为同目录的 `Database.json` 并填写连接串。也可设置环境变量 `ConnectionStrings__Default`。
+
 ```bash
 # 1) 后端(backend/ 为解决方案根目录)
 cd backend
@@ -80,7 +82,9 @@ pnpm start                                             # http://localhost:8000
 
 ### Docker 一键起栈(全栈,前端唯一对外)
 
-不想本机装 PostgreSQL/Redis/.NET/Node,只要 Docker: 仓库根 `docker-compose.yml` 编排五个服务——web 前端(nginx,SPA + 后端反代)、HttpApi.Host、PostgreSQL 16、Redis 7、一次性迁移种子(DbMigrator)。**只有前端对外(默认 http://localhost:8000)**,数据库/缓存/后端全部收在 compose 内网:浏览器只面对前端源,API/OIDC/SignalR 由前端 nginx 反代进内网(路径契约= `web/config/proxy.ts` 的 dev 代理清单;OIDC 授权地址动态取 `window.location.origin`,前端代码零改动)。源码直接出镜像(无需先 `dotnet publish`/`pnpm build`):
+使用 Docker 可从源码构建并启动前端、后端、PostgreSQL 16、Redis 7 和一次性数据库迁移器。默认访问地址为 [http://localhost:8000](http://localhost:8000)，API、OIDC 和 SignalR 由前端 nginx 统一代理。
+
+首次启动时，将仓库根目录的 `.env.example` 复制为 `.env`，填写必填的 `IDENTITY_ADMIN_PASSWORD`，再运行以下命令。初始化完成后，用 `admin` 和所填口令登录。
 
 ```bash
 docker compose up -d --build        # 起栈:db → 迁移/种子 → host → web(自动等待就绪)
@@ -89,30 +93,36 @@ docker compose logs -f migrator host    # 迁移种子与后端日志
 docker compose down                # 停栈(数据卷保留); -v 连数据一起删
 ```
 
-- 连接参数与 CI、`appsettings.secrets.json` 开发样本同参(`abpadmin`/`postgres`/`postgres`);端口/口令用仓库根 `.env` 覆盖(可用变量见 compose 文件头注释)。改前端端口时 `WEB_HOST_PORT` 与 `WEB_PUBLIC_URL` 必须成对改(OIDC 回调以 `WEB_PUBLIC_URL` 为基准种入);改 `OPENIDDICT_CERT_PASSPHRASE` 后必须 `--build` 重建 host 镜像。前端端口默认只绑 `127.0.0.1`(栈内置开发默认口令,不默认暴露局域网;`WEB_BIND=0.0.0.0` 放开)。
+- 使用新数据卷时，默认只初始化框架基础数据，身份、财务和业务模板的演示数据默认关闭。想体验业务模板的示例项目，可在首次启动前将 `BIZ_TEMPLATE_SEED_SAMPLE_DATA` 设为 `true`。
+- 端口和口令通过仓库根目录的 `.env` 设置。修改端口时同步更新 `WEB_HOST_PORT` 和 `WEB_PUBLIC_URL`，后者也用于 OIDC 回调。修改 `OPENIDDICT_CERT_PASSPHRASE` 后须重建 host 镜像。前端默认绑定 `127.0.0.1`。其他变量见 Compose 文件头注释。
 - Swagger 不在这套栈的对外路径里(生产姿态默认关闭且反代清单未含 `/swagger/`);确需经前端访问,按 compose 文件头 `App__EnableSwaggerInProduction` 注释同步三处配置。
 - 后端跑 Production 姿态:Redis 缓存/分布式锁/DataProtection 密钥环/SignalR backplane、Quartz 持久化(`qrtz_*` 表由迁移器幂等建表)全部落在这套内联库上。
 - 临时排查内网服务:`docker compose exec db psql -U postgres -d abpadmin`;宿主机 `pnpm start`(dev 模式)仍可直接对接本地后端 `https://localhost:44395`。
 - 生产部署提示见文末「生产部署」;compose 栈面向本机体验。
 
+#### 体验部门与声明类型
+
+在本机 `.env` 里将 `SEED_IDENTITY_UI_DEMO` 设为 `true`，为 `IDENTITY_UI_DEMO_PASSWORD`
+填写仅用于演示账号的强口令，再运行 `docker compose up -d --build`。
+
+- 在「身份管理 → 部门」展开「演示·示例公司」。研发部通过统一角色让 `ou-demo-dev` 可以查看部门和成员，运营部的 `ou-demo-ops` 可用于对照。两个账号使用你设置的演示口令登录。
+- 在「身份管理 → 声明类型」查看 `demo.project_code`、`demo.support_region` 和 `demo.badge_label`。在用户页打开 `ou-demo-dev` 的「更多 → 声明（高级）」，可查看示例值。这些值用于演示身份属性，功能权限仍在角色中配置。
+
+演示开关默认关闭。关闭开关会停止写入演示数据，已创建的记录可在管理页面清理。
+
 ### 配置单一来源
 
-`Database:Provider` 与 `ConnectionStrings:Default` 只维护在 `backend/framework-app/AbpAdmin.HttpApi.Host/appsettings.json`(真实凭证放同目录 `appsettings.secrets.json`:入库的是公开安全的开发样本,本机真实凭据改同文件后 `git update-index --skip-worktree` 屏蔽);DbMigrator 与 EF 设计时工具自动跟随读取。生效顺序(后者覆盖前者):
+`backend/framework-app/AbpAdmin.HttpApi.Host/` 集中管理基础设施配置。仓库提供 `Configuration/Database.json.example` 和 `Configuration/Security.json.example`。本地可按模板创建 `Database.json`、`Security.json`，或用宿主目录下的 `appsettings.secrets.json` 覆盖。三个本地文件均由 Git 忽略。
 
-1. `HttpApi.Host/appsettings.json`(共享基座)
-2. `HttpApi.Host/appsettings.secrets.json`(共享凭证)
-3. `DbMigrator/appsettings.json`(迁移器专属)
-4. 环境变量(最高,生产/CI 一律走此通道:`Database__Provider` / `ConnectionStrings__Default`)
-
-切 PostgreSQL 只改 Host 一份:`"Database": { "Provider": "PostgreSql" }` + 连接串。Redis 默认关闭(`Redis:IsEnabled: false`),本地开发可不启。
+宿主和迁移器先读取宿主 `appsettings.json` 和 `Configuration/*.json`，再叠加各自的环境或程序配置。迁移器和 EF 设计时工具可读取宿主的本地连接串。容器和 CI 通过环境变量传入连接串 `ConnectionStrings__Default`。直接运行宿主时，Redis 默认关闭，可在 `Configuration/Cache.json` 中查看相关设置。
 
 ### 常用配置位置
 
 | 要改什么 | 文件 |
 | --- | --- |
-| 端口、CORS、连接串、Redis、OpenIddict 客户端回调 | `backend/framework-app/AbpAdmin.HttpApi.Host/appsettings.json` |
+| 服务地址、CORS、连接串、Redis、OpenIddict 客户端回调 | `backend/framework-app/AbpAdmin.HttpApi.Host/Configuration/` |
 | 后端启动 URL | `backend/framework-app/AbpAdmin.HttpApi.Host/Properties/launchSettings.json` |
-| 管理员默认密码 | `backend/framework-app/AbpAdmin.Domain/AbpAdminConsts.cs`(改后需重跑 Migrator) |
+| 首次初始化的管理员口令 | Docker 使用 `.env` 的 `IDENTITY_ADMIN_PASSWORD`，直接运行迁移器使用 `Identity__AdminPassword` |
 | 前端开发代理目标 | `web/config/proxy.ts` |
 | OIDC 授权地址 / ClientId / Scope | `web/src/abp/env.ts`(ClientId 须与 Host `OpenIddict` 节一致) |
 | 路由 / 菜单、布局主题 | `web/config/routes.ts`、`web/config/defaultSettings.ts` |
@@ -194,7 +204,7 @@ pnpm tsc        # 类型检查
 ## 生产部署
 
 - 生产环境需要 OpenIddict 签名证书(`openiddict.pfx`,口令对应 `AuthServer:CertificatePassPhrase`;生成方式见 [OpenIddict 证书配置](https://documentation.openiddict.com/configuration/encryption-and-signing-credentials.html))
-- 连接串/证书口令等敏感配置走环境变量或 `appsettings.secrets.json`(本机真实凭据以 skip-worktree 屏蔽,不入库)
+- 生产连接串和证书口令通过环境变量注入。本地覆盖配置可放在 Git 忽略的 `appsettings.secrets.json`。
 - 多实例部署:打开 `Redis:IsEnabled`(分布式锁与 DataProtection 密钥依赖 Redis),`Database:AutoMigrateOnStartup` 置 false,由 DbMigrator/CI 负责迁移
 - 多机房(异地灾备)部署:铁律见 [docs/framework-contracts.md §7](docs/framework-contracts.md),操作手册见 [docs/dr-runbook.md](docs/dr-runbook.md)
 - 其余见 [ABP Deployment](https://abp.io/docs/latest/Deployment/Index)

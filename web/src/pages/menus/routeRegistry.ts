@@ -17,7 +17,7 @@ export const routeRegistry: RouteRegistryItem[] = [
   { path: '/administration/identity/roles', label: '身份管理 / 角色' },
   {
     path: '/administration/identity/organization-units',
-    label: '身份管理 / 组织单元',
+    label: '身份管理 / 部门',
   },
   {
     path: '/administration/identity/claim-types',
@@ -54,9 +54,7 @@ export const routeRegistry: RouteRegistryItem[] = [
   { path: '/system/notifications', label: '系统 / 通知' },
   { path: '/system/data-dictionary', label: '系统 / 数据字典' },
   { path: '/system/virtual-file-explorer', label: '系统 / 虚拟文件浏览' },
-  { path: '/data-scope-demo', label: '数据权限演示' },
   { path: '/biz-template/data-scope', label: '业务模块·数据权限示例' },
-  { path: '/current-session', label: '当前会话' },
 ];
 
 /** 目录类型的挂载点（只用作上级选择提示）。 */

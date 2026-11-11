@@ -1,6 +1,6 @@
-import { App, Modal, Spin } from 'antd';
+import { Alert, App, Empty, Modal, Spin, Tabs } from 'antd';
 import type { DataNode } from 'antd/es/tree';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import TreePanel from '@/components/TreePanel';
 import {
   getPermissions,
@@ -53,93 +53,120 @@ const PermissionModal: React.FC<PermissionModalProps> = ({
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [readFailed, setReadFailed] = useState(false);
+  const [loadedTarget, setLoadedTarget] = useState<{
+    providerName: string;
+    providerKey: string;
+  }>();
+  const targetVersion = useRef(0);
   const [groups, setGroups] = useState<PermissionGroup[]>([]);
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
 
   useEffect(() => {
+    const version = ++targetVersion.current;
+    let cancelled = false;
+    setGroups([]);
+    setCheckedKeys([]);
+    setLoadedTarget(undefined);
+    setReadFailed(false);
+    setSaving(false);
+    setLoading(false);
     if (!open || !providerKey) {
       return;
     }
     setLoading(true);
     getPermissions(providerName, providerKey)
       .then((result) => {
-        setGroups(result.groups || []);
-        const granted = (result.groups || []).flatMap((group) =>
+        if (cancelled) return;
+        const nextGroups = (result.groups || []).filter(
+          (group) => group.permissions?.length,
+        );
+        setGroups(nextGroups);
+        const granted = nextGroups.flatMap((group) =>
           (group.permissions || [])
             .filter((item) => item.isGranted)
             .map((item) => item.name),
         );
         setCheckedKeys(granted);
+        setLoadedTarget({ providerName, providerKey });
       })
-      .catch(() => message.error('加载权限失败'))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) setReadFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      if (targetVersion.current === version) ++targetVersion.current;
+    };
   }, [open, providerName, providerKey, message]);
 
-  const treeData = useMemo<DataNode[]>(
+  const permissions = useMemo(
+    () => groups.flatMap((group) => group.permissions),
+    [groups],
+  );
+  const groupsWithTrees = useMemo(
     () =>
       groups.map((group) => ({
-        key: `group:${group.name}`,
-        title: group.displayName,
-        children: buildPermissionTree(group.permissions || []),
+        group,
+        treeData: buildPermissionTree(group.permissions),
       })),
     [groups],
   );
+  const grantedNames = useMemo(() => new Set(checkedKeys), [checkedKeys]);
+  const loaded =
+    loadedTarget?.providerName === providerName &&
+    loadedTarget?.providerKey === providerKey;
+  const canSave =
+    open &&
+    !!providerKey &&
+    loaded &&
+    !loading &&
+    !saving &&
+    permissions.length > 0;
 
-  const allPermissionNames = useMemo(
-    () =>
-      groups.flatMap((group) =>
-        (group.permissions || []).map((item) => item.name),
-      ),
-    [groups],
-  );
-
-  // isEditable=false 的项（disableCheckbox）不可交互修改：全选/清空必须保持其加载时的
-  // 授予状态，否则工具条按钮会绕过复选框守卫、把不可编辑项的授权一并改掉
-  const editableNames = useMemo(
-    () =>
-      new Set(
-        groups.flatMap((group) =>
-          (group.permissions || [])
-            .filter((item) => item.isEditable !== false)
-            .map((item) => item.name),
-        ),
-      ),
-    [groups],
-  );
-
-  const lockedGrantedNames = useMemo(
-    () =>
-      new Set(
-        groups.flatMap((group) =>
-          (group.permissions || [])
-            .filter((item) => item.isEditable === false && item.isGranted)
-            .map((item) => item.name),
-        ),
-      ),
-    [groups],
-  );
+  const setGroupChecks = (group: PermissionGroup, keys: React.Key[]) => {
+    if (!canSave) return;
+    const editable = new Set(
+      group.permissions
+        .filter((permission) => permission.isEditable !== false)
+        .map((permission) => permission.name),
+    );
+    // 只替换当前组可编辑的勾选，其他组与锁定项始终保留。
+    setCheckedKeys((previous) => [
+      ...previous.filter((name) => !editable.has(name)),
+      ...keys.map(String).filter((name) => editable.has(name)),
+    ]);
+  };
 
   const save = async () => {
-    if (!providerKey) {
+    if (!canSave || !providerKey) {
       return;
     }
+    const version = targetVersion.current;
     setSaving(true);
     try {
       const granted = new Set(checkedKeys);
       await updatePermissions(
         providerName,
         providerKey,
-        allPermissionNames.map((name) => ({
-          name,
-          isGranted: granted.has(name),
+        permissions.map((permission) => ({
+          name: permission.name,
+          isGranted:
+            permission.isEditable === false
+              ? permission.isGranted
+              : granted.has(permission.name),
         })),
       );
-      message.success('权限已保存');
-      onClose();
+      if (targetVersion.current === version) {
+        message.success('权限已保存');
+        onClose();
+      }
     } catch {
-      message.error('保存权限失败');
+      if (targetVersion.current === version) message.error('保存权限失败');
     } finally {
-      setSaving(false);
+      if (targetVersion.current === version) setSaving(false);
     }
   };
 
@@ -150,34 +177,51 @@ const PermissionModal: React.FC<PermissionModalProps> = ({
       onCancel={onClose}
       onOk={save}
       confirmLoading={saving}
-      width={640}
+      okButtonProps={{ disabled: !canSave }}
+      width={840}
       destroyOnHidden
     >
       <Spin spinning={loading}>
-        <TreePanel
-          checkable
-          expandAllOnDataReady
-          checkedKeys={checkedKeys}
-          treeData={treeData}
-          onCheck={(keys) => {
-            setCheckedKeys(
-              keys.map(String).filter((key) => !key.startsWith('group:')),
-            );
-          }}
-          onCheckAll={(allKeys) => {
-            // 全选只覆盖可编辑项；不可编辑项保持加载时的授予状态
-            setCheckedKeys((prev) => [
-              ...prev.filter((name) => !editableNames.has(name)),
-              ...allKeys
-                .map(String)
-                .filter(
-                  (key) =>
-                    !key.startsWith('group:') && editableNames.has(key),
-                ),
-            ]);
-          }}
-          onClearAll={() => setCheckedKeys([...lockedGrantedNames])}
-        />
+        <div style={{ minHeight: 420 }}>
+          {readFailed && (
+            <Alert type="error" title="加载权限失败，请关闭后重试" showIcon />
+          )}
+          {loaded &&
+            (groups.length ? (
+              <Tabs
+                tabPlacement="start"
+                destroyOnHidden
+                style={{ height: 420 }}
+                items={groupsWithTrees.map(({ group, treeData }) => ({
+                  key: group.name,
+                  label: group.displayName,
+                  children: (
+                    <TreePanel
+                      checkable
+                      disabled={saving}
+                      expandAllOnDataReady
+                      height={360}
+                      checkedKeys={group.permissions
+                        .filter((permission) =>
+                          grantedNames.has(permission.name),
+                        )
+                        .map((permission) => permission.name)}
+                      treeData={treeData}
+                      toolbarExtra="仅当前组"
+                      onCheck={(keys) => setGroupChecks(group, keys)}
+                      onCheckAll={(keys) => setGroupChecks(group, keys)}
+                      onClearAll={() => setGroupChecks(group, [])}
+                    />
+                  ),
+                }))}
+              />
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="没有可配置的权限"
+              />
+            ))}
+        </div>
       </Spin>
     </Modal>
   );

@@ -6,7 +6,7 @@ using Volo.Abp.EntityFrameworkCore.Modeling;
 namespace AbpAdmin.EntityFrameworkCore.Configs;
 
 /// <summary>
-/// 动态菜单与菜单授权实体映射（自 AbpAdminDbContext.OnModelCreating 拆出，模型零差异搬移）。
+/// 动态菜单实体映射。
 /// </summary>
 public class MenuConfig : IEntityTypeConfiguration<Menu>
 {
@@ -24,28 +24,5 @@ public class MenuConfig : IEntityTypeConfiguration<Menu>
         b.Property(x => x.Remark).HasMaxLength(MenuConsts.MaxRemarkLength);
         b.HasIndex(x => new { x.TenantId, x.Path }).IsUnique();
         b.HasIndex(x => new { x.TenantId, x.ParentId });
-    }
-}
-
-public class MenuGrantConfig : IEntityTypeConfiguration<MenuGrant>
-{
-    public void Configure(EntityTypeBuilder<MenuGrant> b)
-    {
-        b.ToTable(AbpAdminConsts.DbTablePrefix + "MenuGrants", AbpAdminConsts.DbSchema);
-        b.ConfigureByConvention();
-        b.Property(x => x.ProviderName).IsRequired().HasMaxLength(MenuConsts.MaxProviderNameLength);
-        b.Property(x => x.ProviderKey).IsRequired().HasMaxLength(MenuConsts.MaxProviderKeyLength);
-        // 唯一索引是授权表三条写路径（角色侧差集 / 菜单侧全量覆盖 / 角色级联清理）的
-        // 并发守卫：并发双写同一 (菜单, 角色) 授权时后者撞索引失败（应用层转
-        // MenuGrantConflict 业务错），而不是静默产生重复行。
-        // TenantId 前缀索引服务角色侧读路径（GetRoleMenuGrantsAsync / 级联按角色名清理）。
-        b.HasIndex(x => new { x.MenuId, x.ProviderName, x.ProviderKey }).IsUnique();
-        b.HasIndex(x => new { x.TenantId, x.ProviderName, x.ProviderKey });
-        // 外键级联：授权行随菜单行生灭（应用层手工删除之外补 DB 层防线——
-        // 任何绕过应用层的删除都不再留下孤儿授权行）。菜单删除是硬删除，级联可生效。
-        b.HasOne<Menu>()
-            .WithMany()
-            .HasForeignKey(x => x.MenuId)
-            .OnDelete(DeleteBehavior.Cascade);
     }
 }
