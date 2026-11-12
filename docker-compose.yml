@@ -92,8 +92,9 @@ services:
       Identity__AdminPassword: ${IDENTITY_ADMIN_PASSWORD:-}
       # 迁移器仅在前端绑定和公开地址都是回环地址时允许公开的初始口令。
       Identity__LocalDockerBindAddress: ${WEB_BIND:-127.0.0.1}
-      # 框架预览栈初始化基础配置。身份和财务演示数据由独立开发环境管理。
-      App__SeedDemoData: "false"
+      # 本机新卷默认写入身份演示数据：部门树、角色、用户（口令与 admin 相同）。
+      # 财务账簿演示仍关闭。声明类型那组演示仍由 SEED_IDENTITY_UI_DEMO 单独打开。
+      App__SeedDemoData: "true"
       Finance__SeedDemoData: "false"
       App__SeedIdentityUiDemo: ${SEED_IDENTITY_UI_DEMO:-false}
       App__IdentityUiDemoPassword: ${IDENTITY_UI_DEMO_PASSWORD:-}

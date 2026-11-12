@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading.Tasks;
 using Volo.Abp;
 using Volo.Abp.Data;
@@ -370,13 +369,20 @@ public class DemoIdentitySeedContributor : IDataSeedContributor, ITransientDepen
             var existing = await _users.FindByNormalizedUserNameAsync(userName.ToUpperInvariant());
             if (existing is not null)
             {
+                if (string.IsNullOrWhiteSpace(existing.Name))
+                {
+                    existing.Name = display;
+                    (await _userManager.UpdateAsync(existing)).CheckErrors();
+                }
+
                 return existing;
             }
 
-            var user = new IdentityUser(_guids.Create(), userName, email, tenantId);
+            var user = new IdentityUser(_guids.Create(), userName, email, tenantId)
+            {
+                Name = display,
+            };
             (await _userManager.CreateAsync(user, DemoPassword)).CheckErrors();
-            // display claim：演示账号的中文展示名（角色/用户列表与审批单展示申请人时读取）
-            (await _userManager.AddClaimAsync(user, new Claim("display", display))).CheckErrors();
             if (permissions is { Length: > 0 })
             {
                 // tenantId 显式传（与 _currentTenant.Change 的上下文一致）——见

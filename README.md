@@ -96,7 +96,7 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 
 本机体验栈初始化完成后，直接用 `admin` / `1q2w3E*` 登录。
 
-- 使用新数据卷时，默认只初始化框架基础数据，身份、财务和业务模板的演示数据默认关闭。想体验业务模板的示例项目，可在首次启动前将 `BIZ_TEMPLATE_SEED_SAMPLE_DATA` 设为 `true`。
+- 使用新数据卷时，迁移器会写入身份演示数据：部门树（演示集团）、角色（部门经理、普通员工、财务角色）和用户（`zhang.cto`、`li.dev`、`wang.fm`、`zhao.mkt`、`fin-viewer`，口令与 admin 相同）。财务账簿和业务模板示例仍默认关闭。想预填业务模板示例项目，可在首次启动前将 `BIZ_TEMPLATE_SEED_SAMPLE_DATA` 设为 `true`。
 - 端口和口令通过仓库根目录的 `.env` 设置。修改端口时同步更新 `WEB_HOST_PORT` 和 `WEB_PUBLIC_URL`，后者也用于 OIDC 回调。同端口的 `localhost` 与 `127.0.0.1` 会在登录前统一到配置的访问地址。修改 `OPENIDDICT_CERT_PASSPHRASE` 后须重建 host 镜像。前端默认绑定 `127.0.0.1`。其他变量见 Compose 文件头注释。
 - 对外开放时，设置自用的 `IDENTITY_ADMIN_PASSWORD`。已有数据库对外开放前，先在账号设置里更改现有管理员口令。
 - Swagger 不在这套栈的对外路径里(生产姿态默认关闭且反代清单未含 `/swagger/`);确需经前端访问,按 compose 文件头 `App__EnableSwaggerInProduction` 注释同步三处配置。
