@@ -307,10 +307,12 @@ AbpAdmin.db.backup*
 *.dump
 *.pgdump
 
-# AI 工具会话状态
+# AI 工具会话状态 / 本地巡检截图（重跑即重建，勿入库）
 .mimosa/
 .playwright-mcp/
 .zcode/
+.workbuddy/
+gui-test-screenshots/
 # 运行时输出目录（勿入库）：FileEmlEmailSender 开发邮件（密码重置链接/验证码 .eml）、
 # FileSystem blob 上传落盘。路径无关写法——宿主从 backend/src 迁到 backend/framework 后
 # 旧的字面量规则失效过一次（与 secrets 规则同类事故，run-2 C-6 修复）。
