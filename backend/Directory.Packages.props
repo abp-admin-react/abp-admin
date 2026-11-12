@@ -19,10 +19,10 @@
          旧主题 bundle 缺 jquery-migrate，Razor 页渲染即 500） -->
     <AbpLeptonXLiteVersion>5.7.1</AbpLeptonXLiteVersion>
     <AbpStudioVersion>3.0.10</AbpStudioVersion>
-    <!-- 与运行时对齐：aspnet 10.0.11 带 2 CRITICAL + 11 HIGH（trivy），修复版本
-         10.0.13（= 微软 2026-10 Patch Tuesday 服务版本）。DataProtection 同版对齐后
-         System.Security.Cryptography.Xml 的 8 条 high 一并消解（无需单钉）。 -->
-    <MicrosoftVersion>10.0.13</MicrosoftVersion>
+    <!-- 与运行时对齐：10.0.15 = 微软 2026-11 Patch Tuesday（GHSA-wr8v-9x5q-ggcm /
+         CVE-2026-114147 SignalR Redis backplane DoS）。此前 10.0.13 消解了
+         aspnet 10.0.11 的 CRITICAL/HIGH 与 DataProtection→Cryptography.Xml 链。 -->
+    <MicrosoftVersion>10.0.15</MicrosoftVersion>
     <SerilogAspNetCoreVersion>9.0.0</SerilogAspNetCoreVersion>
     <HealthChecksVersion>9.0.0</HealthChecksVersion>
 
@@ -174,7 +174,7 @@
     <!-- DataProtection 密钥持久化到 Redis（多实例令牌互验；版本同样跟主线走） -->
     <PackageVersion Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="$(MicrosoftVersion)" />
     <!-- EF 设计时工具（dotnet ef）：与 EF Core 10 运行时对齐 -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="$(MicrosoftVersion)" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="$(MicrosoftVersion)" />
     <!-- ABP 10.7.x 的 EF PostgreSQL 提供器传递底线 >= 10.0.3 -->
@@ -300,22 +300,33 @@
 
     <!-- ===== 传递依赖钉版（CentralPackageTransitivePinningEnabled=true，
          以下条目直接抬升传递解析结果） ===== -->
-    <!-- MessagePack 3.1.9：GHSA-qhrr-8q5h-9q3h / CVE-2026-92707
-         「嵌套数组可越过 buffer 上限」。由 MagicOnion 7.10.2 引入，
-         而 MagicOnion 是服务端反序列化客户端可控数据的通道，故按可达对待。 -->
-    <PackageVersion Include="MessagePack" Version="3.1.9" />
-    <PackageVersion Include="MessagePack.Annotations" Version="3.1.9" />
+    <!-- MessagePack 3.1.12：覆盖 GHSA-qhrr-8q5h-9q3h（嵌套数组）、
+         GHSA-fx6j-x9m5-vmrf（AssemblyName 正则灾难回溯）、
+         GHSA-7rj2-5w9w-r9jx（LZ4 解压整数溢出 DoS，修于 3.1.11）。
+         由 MagicOnion 引入，服务端反序列化客户端可控数据，按可达对待。 -->
+    <PackageVersion Include="MessagePack" Version="3.1.12" />
+    <PackageVersion Include="MessagePack.Annotations" Version="3.1.12" />
     <!-- AWSSDK.Core 4.0.102.3：覆盖 GHSA-9cvc-h2w8-phrp / CVE-2026-22611，同时满足
          ABP 10.7.x BlobStoring.Aws 的传递底线 >= 4.0.102。由 AWSSDK.S3 /
          AWSSDK.SecurityToken（文件管理 S3 存储链）引入 -->
     <PackageVersion Include="AWSSDK.Core" Version="4.0.102.3" />
     <!-- Pkcs 由 MimeKit 4.17.0 以最低版本约束引入（解析到 10.0.0），
          抬到与运行时同版以免图上继续挂 CVE-2026-84008(high)/CVE-2026-70162(medium) -->
-    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
-    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.13" />
-    <!-- KubernetesClient 15.0.1（GHSA-w7r3-mgwf-4mqq / CVE-2025-9708, moderate）暂不抬：
-         修复版 17.0.14 是跨大版本，且它由 AspNetCore.HealthChecks.UI 9.0.0 传递引入，
-         正解是升 HealthChecks 主版本（一并解决 host 镜像里 HealthCheckReportCollector
-         打 [::]:44395 稳定刷异常的问题）。留待独立评估，勿在此静默改动。 -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="$(MicrosoftVersion)" />
+    <!-- 传递依赖钉到 ASP.NET / EF 服务版，避免 ABP 认证/缓存/EF 链卡在 10.0.11 -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="$(MicrosoftVersion)" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="$(MicrosoftVersion)" />
+    <!-- KubernetesClient：GHSA-w7r3-mgwf-4mqq / CVE-2025-9708。
+         并非本仓在用 K8s——它是 AspNetCore.HealthChecks.UI 9.0.0 的传递依赖（K8s Discovery）。
+         开源 abpframework/abp 的 app 模板不含 HealthChecks.UI；Studio 分层/微服务模板才带。
+         ABP Studio 口径（release notes）：
+           2.0.1 把模板里的 KubernetesClient 更新到 18.0.5；
+           2.0.2 在其后显式加 IdentityModel（补 UI ReportCollector 的 BasicAuthenticationHeaderValue，
+           因 K8s≥17 不再传递 IdentityModel）。本仓已有 IdentityModel 7.0.0 直接引用，与 2.0.2 同构。
+         Xabaril 上游仍无新 HealthChecks.UI 发行（PR #2435 open）。
+         [::]:44395 刷异常是相对 URI 问题，已用 App:HealthUiCheckUrl 规避，与本钉版无关。 -->
+    <PackageVersion Include="KubernetesClient" Version="18.0.5" />
   </ItemGroup>
 </Project>
