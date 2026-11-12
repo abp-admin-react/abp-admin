@@ -51,6 +51,34 @@ public class IdentityUiDemoSeedContributorTests
     }
 
     [Fact]
+    public async Task Should_Refuse_To_Adopt_Host_Records_Without_Demo_Marker()
+    {
+        var configuration = GetRequiredService<IConfiguration>();
+        configuration[EnabledKey] = "true";
+        configuration[PasswordKey] = $"Aa!9{Guid.NewGuid():N}";
+
+        var users = GetRequiredService<IIdentityUserRepository>();
+        var userManager = GetRequiredService<IdentityUserManager>();
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var foreign = new IdentityUser(Guid.NewGuid(), "ou-demo-dev", "ou-demo-dev@example.test")
+            {
+                Name = "外来同名账号",
+            };
+            // 故意不打 AbpAdmin.IdentityUiDemo 标记——种子必须 fail-closed，禁止接管。
+            (await userManager.CreateAsync(foreign, configuration[PasswordKey]!)).Succeeded.ShouldBeTrue();
+        });
+
+        var contributor = GetRequiredService<IdentityUiDemoSeedContributor>();
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => contributor.SeedAsync(new DataSeedContext()));
+        ex.Message.ShouldContain("not owned by the identity UI demo seed");
+
+        var kept = await users.FindByNormalizedUserNameAsync("OU-DEMO-DEV");
+        kept.ShouldNotBeNull();
+        kept.GetProperty<bool>("AbpAdmin.IdentityUiDemo").ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Should_Create_Demo_Once_And_Preserve_An_Existing_Claim_Value()
     {
         var configuration = GetRequiredService<IConfiguration>();
