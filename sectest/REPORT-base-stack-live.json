@@ -1,0 +1,72 @@
+[
+  {
+    "id": "p01",
+    "ok": true,
+    "detail": "status=200 ct=text/html sec=DENY/object-src 'none'; form-action 'self'; f"
+  },
+  {
+    "id": "p02-edge",
+    "ok": true,
+    "detail": "status=200 is_spa=True is_json=False"
+  },
+  {
+    "id": "p02-api",
+    "ok": true,
+    "detail": "status=401"
+  },
+  {
+    "id": "p03-/swagger",
+    "ok": false,
+    "detail": "200"
+  },
+  {
+    "id": "p03-/swagger/index.html",
+    "ok": false,
+    "detail": "200"
+  },
+  {
+    "id": "p03-/swagger/v1/swagger.json",
+    "ok": false,
+    "detail": "200"
+  },
+  {
+    "id": "p-xss-q",
+    "ok": true,
+    "detail": "status=200"
+  },
+  {
+    "id": "p-trav",
+    "ok": true,
+    "detail": "400"
+  },
+  {
+    "id": "p09-null",
+    "ok": true,
+    "detail": "status=500 err={'error': 'server_error', 'error_description': 'An unexpected error occurred. Please try again later.'}"
+  },
+  {
+    "id": "p10",
+    "ok": true,
+    "detail": "fails=3/3"
+  },
+  {
+    "id": "p11",
+    "ok": true,
+    "detail": "status=400 token=False err=unauthorized_client"
+  },
+  {
+    "id": "p-xff",
+    "ok": true,
+    "detail": "status=200 ACAO=None"
+  },
+  {
+    "id": "p-openredir",
+    "ok": true,
+    "detail": "status=200 loc=''"
+  },
+  {
+    "id": "p-signalr",
+    "ok": true,
+    "detail": "302 b''"
+  }
+]

@@ -1,0 +1,282 @@
+{
+  "base": "http://127.0.0.1:8000",
+  "passed": 29,
+  "total": 38,
+  "failed": [
+    {
+      "id": "p01",
+      "title": "SPA root reachable",
+      "detail": "status=302"
+    },
+    {
+      "id": "p02",
+      "title": "health anonymous OK, no stack leak",
+      "detail": "status=302 body_snip='<html>\\r\\n<head><title>302 Found</title></head>\\r\\n<body>\\r\\n<center><h1>302 Found</h1></center>\\r\\n<hr><center>nginx/1.29.8</ce'"
+    },
+    {
+      "id": "p05-appconfig",
+      "title": "anonymous app-config trimmed / no secrets",
+      "detail": "status=200 keys=['localization', 'auth', 'setting', 'currentUser', 'features', 'globalFeatures', 'multiTenancy', 'currentTenant']"
+    },
+    {
+      "id": "p08-TRACK",
+      "title": "TRACK disabled",
+      "detail": "status=401"
+    },
+    {
+      "id": "p08-DEBUG",
+      "title": "DEBUG disabled",
+      "detail": "status=401"
+    },
+    {
+      "id": "p09-admin\u0000",
+      "title": "malicious login rejected",
+      "detail": "status=500 token=False"
+    },
+    {
+      "id": "p10-bruteforce-fail",
+      "title": "wrong passwords fail closed",
+      "detail": "fails=4/6"
+    },
+    {
+      "id": "p11-admin-login",
+      "title": "admin password grant works (or SPA-only client blocks ROPC — then 400 expected)",
+      "detail": "status=429 has_token=False err=slow_down"
+    },
+    {
+      "id": "p17-anon-upload",
+      "title": "anonymous with-bytes upload denied",
+      "detail": "status=400"
+    }
+  ],
+  "cases": [
+    {
+      "id": "p01",
+      "title": "SPA root reachable",
+      "ok": false,
+      "detail": "status=302"
+    },
+    {
+      "id": "p02",
+      "title": "health anonymous OK, no stack leak",
+      "ok": false,
+      "detail": "status=302 body_snip='<html>\\r\\n<head><title>302 Found</title></head>\\r\\n<body>\\r\\n<center><h1>302 Found</h1></center>\\r\\n<hr><center>nginx/1.29.8</ce'"
+    },
+    {
+      "id": "p03-/swagger",
+      "title": "Swagger not exposed on web edge",
+      "ok": true,
+      "detail": "status=302"
+    },
+    {
+      "id": "p03-/swagger/index.html",
+      "title": "Swagger not exposed on web edge",
+      "ok": true,
+      "detail": "status=302"
+    },
+    {
+      "id": "p03-/swagger/v1/swagger.json",
+      "title": "Swagger not exposed on web edge",
+      "ok": true,
+      "detail": "status=302"
+    },
+    {
+      "id": "p04-/health-ui",
+      "title": "health UI/api not anonymously usable",
+      "ok": true,
+      "detail": "status=302"
+    },
+    {
+      "id": "p04-/health-api",
+      "title": "health UI/api not anonymously usable",
+      "ok": true,
+      "detail": "status=302"
+    },
+    {
+      "id": "p04-/healthchecks-webhooks",
+      "title": "health UI/api not anonymously usable",
+      "ok": true,
+      "detail": "status=302"
+    },
+    {
+      "id": "p06-/api/identity/users",
+      "title": "auth required",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p06-/api/identity/roles",
+      "title": "auth required",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p05-appconfig",
+      "title": "anonymous app-config trimmed / no secrets",
+      "ok": false,
+      "detail": "status=200 keys=['localization', 'auth', 'setting', 'currentUser', 'features', 'globalFeatures', 'multiTenancy', 'currentTenant']"
+    },
+    {
+      "id": "p05b-appconfig-secrets",
+      "title": "anonymous settings hide secrets",
+      "ok": true,
+      "detail": "suspect=[]"
+    },
+    {
+      "id": "p06-/api/account/my-profile",
+      "title": "auth required",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p06-/api/permission-management/permissions",
+      "title": "auth required",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p06-/api/setting-management",
+      "title": "auth required",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p06-/api/app/audit-log",
+      "title": "auth required",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p06-/api/file-management/file",
+      "title": "auth required",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p06-/api/app/fin-reconcile/run",
+      "title": "auth required",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p07-/api/../../../etc/passwd",
+      "title": "path abuse does not dump data",
+      "ok": true,
+      "detail": "status=400"
+    },
+    {
+      "id": "p07-/api/identity/users/%2e%2e/%2e%2e/etc/pa",
+      "title": "path abuse does not dump data",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p07-/api/identity/users/..%2f..%2f",
+      "title": "path abuse does not dump data",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p07-//api/identity/users",
+      "title": "path abuse does not dump data",
+      "ok": true,
+      "detail": "status=302"
+    },
+    {
+      "id": "p07-/API/identity/users",
+      "title": "path abuse does not dump data",
+      "ok": true,
+      "detail": "status=302"
+    },
+    {
+      "id": "p07-/api/identity/users/",
+      "title": "path abuse does not dump data",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p07-/api/identity/users?;",
+      "title": "path abuse does not dump data",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "id": "p08-TRACE",
+      "title": "TRACE disabled",
+      "ok": true,
+      "detail": "status=405"
+    },
+    {
+      "id": "p08-TRACK",
+      "title": "TRACK disabled",
+      "ok": false,
+      "detail": "status=401"
+    },
+    {
+      "id": "p08-DEBUG",
+      "title": "DEBUG disabled",
+      "ok": false,
+      "detail": "status=401"
+    },
+    {
+      "id": "p09-admin' OR '1'='1",
+      "title": "malicious login rejected",
+      "ok": true,
+      "detail": "status=400 token=False"
+    },
+    {
+      "id": "p09-admin",
+      "title": "malicious login rejected",
+      "ok": true,
+      "detail": "status=400 token=False"
+    },
+    {
+      "id": "p09-<script>alert(1)</script",
+      "title": "malicious login rejected",
+      "ok": true,
+      "detail": "status=400 token=False"
+    },
+    {
+      "id": "p09-admin\u0000",
+      "title": "malicious login rejected",
+      "ok": false,
+      "detail": "status=500 token=False"
+    },
+    {
+      "id": "p09-../../admin",
+      "title": "malicious login rejected",
+      "ok": true,
+      "detail": "status=400 token=False"
+    },
+    {
+      "id": "p10-bruteforce-fail",
+      "title": "wrong passwords fail closed",
+      "ok": false,
+      "detail": "fails=4/6"
+    },
+    {
+      "id": "p11-admin-login",
+      "title": "admin password grant works (or SPA-only client blocks ROPC — then 400 expected)",
+      "ok": false,
+      "detail": "status=429 has_token=False err=slow_down"
+    },
+    {
+      "id": "p15-cors-evil-origin",
+      "title": "evil Origin not reflected as * with credentials casually",
+      "ok": true,
+      "detail": "status=200 ACAO=None"
+    },
+    {
+      "id": "p16-empty-token",
+      "title": "empty token body rejected",
+      "ok": true,
+      "detail": "status=400"
+    },
+    {
+      "id": "p17-anon-upload",
+      "title": "anonymous with-bytes upload denied",
+      "ok": false,
+      "detail": "status=400"
+    }
+  ]
+}
