@@ -231,13 +231,6 @@ public class UserFriendlyExceptionInventoryTests
         {
             new()
             {
-                ResourceKey = "UserImport:*",
-                Consumer = "IdentityUserAdminAppService",
-                FieldType = "error message",
-                LocalizationSource = "AbpAdminResource",
-            },
-            new()
-            {
                 ResourceKey = "AuditLogs:*",
                 Consumer = "AuditLogAppService",
                 FieldType = "error message",
@@ -259,7 +252,7 @@ public class UserFriendlyExceptionInventoryTests
             },
         };
 
-        consumers.Count.ShouldBe(4);
+        consumers.Count.ShouldBe(3);
     }
 
     /// <summary>

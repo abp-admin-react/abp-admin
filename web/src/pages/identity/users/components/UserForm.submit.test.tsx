@@ -1,9 +1,10 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createUser,
-  getUserRoles,
+  getUserDirectRoleNames,
+  getUserEffectiveRoleNames,
   type IdentityUserDto,
   updateUser,
 } from '@/abp/identity';
@@ -11,7 +12,8 @@ import {
 const harness = vi.hoisted(() => ({ form: vi.fn() }));
 vi.mock('@/abp/identity', () => ({
   createUser: vi.fn(),
-  getUserRoles: vi.fn(),
+  getUserDirectRoleNames: vi.fn(),
+  getUserEffectiveRoleNames: vi.fn(),
   updateUser: vi.fn(),
   resetUserPassword: vi.fn(),
 }));
@@ -68,7 +70,7 @@ describe('用户表单角色与更多选项', () => {
         roleNames: ['inherited-role'],
       }),
     );
-    expect(getUserRoles).not.toHaveBeenCalled();
+    expect(getUserDirectRoleNames).not.toHaveBeenCalled();
     expect(screen.getByText('更多选项')).toBeTruthy();
     expect(screen.queryByText('高级安全选项')).toBeNull();
     expect(screen.queryByLabelText('角色')).toBeNull();
@@ -81,17 +83,21 @@ describe('用户表单角色与更多选项', () => {
     );
   });
 
-  it('资料编辑不回写有效角色，修改角色选择时才提交', async () => {
-    vi.mocked(getUserRoles).mockResolvedValue({
-      items: [{ id: 'ou-role', name: 'ou-role' }],
+  it('资料编辑只种子直接角色，修改角色选择时才提交（不把部门角色固化）', async () => {
+    vi.mocked(getUserDirectRoleNames).mockResolvedValue({
+      items: ['direct-role'],
     });
+    vi.mocked(getUserEffectiveRoleNames).mockResolvedValue(['ou-role']);
     const { UserForm } = await import('./UserForms');
     render(
       <App>
         <UserForm
           title="编辑用户"
           trigger={<a>编辑</a>}
-          roles={[{ id: 'ou-role', name: 'ou-role' }]}
+          roles={[
+            { id: 'direct-role', name: 'direct-role' },
+            { id: 'ou-role', name: 'ou-role' },
+          ]}
           record={record}
           canManageRoles
           onSuccess={vi.fn()}
@@ -99,14 +105,20 @@ describe('用户表单角色与更多选项', () => {
       </App>,
     );
     const form = harness.form.mock.calls[0][0];
-    expect(await form.request()).toMatchObject({ roleNames: ['ou-role'] });
-    expect(getUserRoles).toHaveBeenCalledWith('u-1');
-    expect(screen.getByText(/部门授予的角色自动生效/)).toBeTruthy();
+    let seeded: { roleNames?: string[] } = {};
+    await act(async () => {
+      seeded = await form.request();
+    });
+    expect(seeded).toMatchObject({ roleNames: ['direct-role'] });
+    expect(getUserDirectRoleNames).toHaveBeenCalledWith('u-1');
+    await waitFor(() => {
+      expect(screen.getByText(/不能在此勾选：ou-role/)).toBeTruthy();
+    });
     await act(() =>
       form.onFinish({
         userName: 'alice',
         email: 'alice@t.com',
-        roleNames: ['ou-role'],
+        roleNames: ['direct-role'],
         isActive: false,
         lockoutEnabled: false,
       }),
@@ -125,7 +137,33 @@ describe('用户表单角色与更多选项', () => {
       form.onFinish({
         userName: 'alice',
         email: 'alice@t.com',
-        roleNames: [],
+        roleNames: ['direct-role', 'ou-role'],
+      }),
+    );
+    // ou-role 只来自部门：提交时丢掉，避免一次「看起来改了角色、其实写不进去」。
+    expect(updateUser).toHaveBeenLastCalledWith(
+      'u-1',
+      expect.not.objectContaining({ roleNames: expect.anything() }),
+    );
+    await act(() =>
+      form.onFinish({
+        userName: 'alice',
+        email: 'alice@t.com',
+        roleNames: ['direct-role', 'another-direct'],
+      }),
+    );
+    expect(updateUser).toHaveBeenLastCalledWith(
+      'u-1',
+      expect.objectContaining({
+        roleNames: ['direct-role', 'another-direct'],
+      }),
+    );
+    // ProForm 清空多选常为 undefined：必须提交 []，不能静默跳过 roleNames。
+    await act(() =>
+      form.onFinish({
+        userName: 'alice',
+        email: 'alice@t.com',
+        roleNames: undefined,
       }),
     );
     expect(updateUser).toHaveBeenLastCalledWith(

@@ -23,7 +23,6 @@ import {
   Tree,
 } from 'antd';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import { getAllRoles, getUsers } from '@/abp/identity';
 import {
   addOrganizationUnitMembers,
@@ -39,6 +38,7 @@ import {
   removeOrganizationUnitRole,
   updateOrganizationUnit,
 } from '@/abp/identityAdmin';
+import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 
 const OrganizationUnitsPage: React.FC = () => {
   const access = useAccess();
@@ -285,6 +285,7 @@ const OrganizationUnitsPage: React.FC = () => {
               />
               <Collapse
                 key={`roles-${selected.id}`}
+                destroyOnHidden
                 items={[
                   {
                     key: 'roles',

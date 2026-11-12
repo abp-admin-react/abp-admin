@@ -99,18 +99,30 @@ export async function deleteUser(id: string) {
   return request(`/api/identity/users/${id}`, { method: 'DELETE' });
 }
 
-export async function getUserRoles(id: string) {
-  return request<{ items: IdentityRoleDto[] }>(
-    `/api/identity/users/${id}/roles`,
+/**
+ * 仅直接角色名（不含组织单元派生）。编辑框的已选值只能来自这里。
+ * ABP 的 SetRolesAsync 用「直接 ∪ 部门」做差集，把部门角色名再提交也不会插入 AbpUserRoles；
+ * 所以这里不要改成官方 GET /users/{id}/roles，否则勾选状态和离开部门后的权限会对不上。
+ */
+export async function getUserDirectRoleNames(id: string) {
+  return request<{ items: string[] }>(
+    `/api/app/identity-user-admin/${id}/direct-role-names`,
     { method: 'GET' },
   );
 }
 
-export async function updateUserRoles(id: string, roleNames: string[]) {
-  return request(`/api/identity/users/${id}/roles`, {
-    method: 'PUT',
-    data: { roleNames },
-  });
+/**
+ * 官方有效角色（直接成员 ∪ 部门角色），只用于标出「来自部门、离开即失效」。
+ * 这些名字不能写进 updateUser.roleNames：ABP 不会据此建成直接成员，勾选会看起来保存成功、下次又空。
+ */
+export async function getUserEffectiveRoleNames(id: string) {
+  const result = await request<{ items?: IdentityRoleDto[] }>(
+    `/api/identity/users/${id}/roles`,
+    { method: 'GET' },
+  );
+  return (result.items ?? [])
+    .map((item) => item.name)
+    .filter((name): name is string => !!name);
 }
 
 export async function getRoles(params: {
@@ -287,25 +299,11 @@ export async function resetUserPassword(
   });
 }
 
-// ==================== T2.6 用户导入导出 ====================
+// ==================== 用户导出 ====================
 
 export type UserExportResultDto = {
   isQueued: boolean;
   message?: string;
-};
-
-export type UserImportRowErrorDto = {
-  rowNumber: number;
-  userName?: string;
-  errorMessage?: string;
-};
-
-export type UserImportResultDto = {
-  totalCount: number;
-  succeededCount: number;
-  failedCount: number;
-  failureReportId?: string;
-  errors: UserImportRowErrorDto[];
 };
 
 /** 同步导出用户（≤1000 条时直接下载文件） */
@@ -326,35 +324,6 @@ export async function enqueueExportUsers(filter?: string) {
       method: 'POST',
       params: { filter },
     },
-  );
-}
-
-/** 下载导入模板 */
-export function downloadImportTemplate() {
-  window.open(
-    '/api/app/identity-user-admin/import-template',
-    '_blank',
-    'noopener,noreferrer',
-  );
-}
-
-/** 导入用户 */
-export async function importUsers(file: File) {
-  const formData = new FormData();
-  formData.append('file', file);
-  return request<UserImportResultDto>('/api/app/identity-user-admin/import', {
-    method: 'POST',
-    data: formData,
-    requestType: 'form',
-  });
-}
-
-/** 下载导入失败明细 */
-export function downloadImportFailureReport(id: string) {
-  window.open(
-    `/api/app/identity-user-admin/import-failure-report/${id}`,
-    '_blank',
-    'noopener,noreferrer',
   );
 }
 

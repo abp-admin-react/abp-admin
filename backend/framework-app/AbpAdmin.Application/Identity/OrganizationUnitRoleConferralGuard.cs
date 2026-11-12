@@ -33,12 +33,9 @@ public static class OrganizationUnitRoleConferralGuard
     }
 
     /// <summary>
-    /// 校验「授予/挂接 <paramref name="targetRoleName"/>」是否在操作者权限等价范围内。
-    /// 通过条件（任一）：操作者持 admin 超管角色；
-    /// 目标角色是操作者自己已持有的角色。
-    /// 覆盖通道（run-3 起含批量导入的 RoleNames 直授与 OU 挂接两条）共用同一判定。
+    /// 部门挂角色是否允许：操作者是 admin，或目标角色是操作者已持有的角色。
+    /// 用户编辑的可授名单在 FilterRolesByCurrentUserAsync，不经过本守卫。
     /// </summary>
-    /// <remarks>布尔判定供调用方自选错误形态：交互面抛 403 语义、导入面落行级文案。</remarks>
     public static bool IsRoleAttachable(string? targetRoleName, IEnumerable<string> operatorRoleNames)
     {
         if (IsPrivilegedOperator(operatorRoleNames))

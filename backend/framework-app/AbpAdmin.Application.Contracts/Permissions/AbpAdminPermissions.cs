@@ -175,7 +175,6 @@ public static class AbpAdminPermissions
         public static class Users
         {
             public const string Default = Identity.Default + ".Users";
-            public const string Import = Default + ".Import";
             public const string Export = Default + ".Export";
         }
     }

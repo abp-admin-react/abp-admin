@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Threading.Tasks;
 using AbpAdmin.AuditLogs;
 using AbpAdmin.ClientErrors;
@@ -9,7 +7,6 @@ using AbpAdmin.Identity;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using MiniExcelLibs;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.BlobStoring;
@@ -24,7 +21,6 @@ public class UserExportController : AbpController
 {
     private readonly IIdentityUserRepository _userRepository;
     private readonly IUserExcelBuilder _excelBuilder;
-    private readonly IUserImportTemplateBuilder _importTemplateBuilder;
     private readonly IRepository<UserExcelFile, Guid> _excelFileRepository;
     private readonly IBlobContainer<UserExportBlobContainer> _blobContainer;
     private readonly IPermissionChecker _permissionChecker;
@@ -32,14 +28,12 @@ public class UserExportController : AbpController
     public UserExportController(
         IIdentityUserRepository userRepository,
         IUserExcelBuilder excelBuilder,
-        IUserImportTemplateBuilder importTemplateBuilder,
         IRepository<UserExcelFile, Guid> excelFileRepository,
         IBlobContainer<UserExportBlobContainer> blobContainer,
         IPermissionChecker permissionChecker)
     {
         _userRepository = userRepository;
         _excelBuilder = excelBuilder;
-        _importTemplateBuilder = importTemplateBuilder;
         _excelFileRepository = excelFileRepository;
         _blobContainer = blobContainer;
         _permissionChecker = permissionChecker;
@@ -77,23 +71,6 @@ public class UserExportController : AbpController
     }
 
     /// <summary>
-    /// 下载导入模板。表头 + 示例行 + 数据验证下拉：
-    /// 布尔列（是否启用/是否外部用户）硬校验「是/否」；角色/组织单元咨询式下拉（参考数据见隐藏 sheet）。
-    /// 生成逻辑在 IUserImportTemplateBuilder（ClosedXML）；表头列名与导入解析共用 UserImportColumnNames。
-    /// </summary>
-    [HttpGet("import-template")]
-    [Authorize(AbpAdminPermissions.Identity.Users.Import)]
-    public async Task<IActionResult> GetImportTemplate()
-    {
-        var bytes = await _importTemplateBuilder.BuildAsync();
-
-        return File(
-            bytes,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "user-import-template.xlsx");
-    }
-
-    /// <summary>
     /// 下载导出文件（按 ID）。
     /// </summary>
     [HttpGet("export-file/{id}")]
@@ -103,29 +80,6 @@ public class UserExportController : AbpController
         var excelFile = await _excelFileRepository.GetAsync(id);
 
         // 跨用户不可下别人的导出结果
-        if (excelFile.CreatorId != CurrentUser.GetId())
-        {
-            return ClientErrorActionResults.EmptyForbidden();
-        }
-
-        var bytes = await _blobContainer.GetAllBytesAsync(id.ToString());
-
-        return File(
-            bytes,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            excelFile.FileName);
-    }
-
-    /// <summary>
-    /// 下载导入失败明细文件。
-    /// </summary>
-    [HttpGet("import-failure-report/{id}")]
-    [Authorize(AbpAdminPermissions.Identity.Users.Import)]
-    public async Task<IActionResult> GetImportFailureReportAsync(Guid id)
-    {
-        var excelFile = await _excelFileRepository.GetAsync(id);
-
-        // 跨用户不可下别人的导入结果
         if (excelFile.CreatorId != CurrentUser.GetId())
         {
             return ClientErrorActionResults.EmptyForbidden();

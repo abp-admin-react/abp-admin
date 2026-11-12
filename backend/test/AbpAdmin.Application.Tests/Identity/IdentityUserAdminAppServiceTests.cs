@@ -13,14 +13,8 @@ using Xunit;
 
 namespace AbpAdmin.Identity;
 
-/* Identity Pro 缺口集成测试。
- * 覆盖场景：
- * 1. 密码有效期：GetCurrentAccountStatusAsync 返回正确状态
- * 2. 强制改密：RequireChangePasswordOnNextLoginAsync 设置标志
- *
- * 导入导出与周期改密用例已按规格要求归拢到同目录 UserImportExportTests.cs。
- *
- * 测试环境 FakeCurrentPrincipalAccessor 固定当前用户为 admin
+/* 密码有效期与强制改密。直接角色见本类后半；导出与周期改密在 UserImportExportTests。
+ * FakeCurrentPrincipalAccessor 固定当前用户为 admin
  * (Id: 2e701e62-0953-4dd3-910b-dc6cc93ccb0d)。
  */
 public abstract class IdentityUserAdminAppServiceTests<TStartupModule> : AbpAdminApplicationTestBase<TStartupModule>
@@ -288,4 +282,253 @@ public abstract class IdentityUserAdminAppServiceTests<TStartupModule> : AbpAdmi
     }
 
     #endregion
+
+    [Fact]
+    public async Task GetDirectRoleNamesAsync_Should_Throw_When_User_Not_Found()
+    {
+        await Should.ThrowAsync<Volo.Abp.Domain.Entities.EntityNotFoundException>(() =>
+            _identityUserAdminAppService.GetDirectRoleNamesAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task GetDirectRoleNamesAsync_Should_Return_Empty_When_User_Has_Only_Ou_Derived_Roles()
+    {
+        var roleManager = GetRequiredService<IdentityRoleManager>();
+        var ouRepository = GetRequiredService<IOrganizationUnitRepository>();
+        var ouManager = GetRequiredService<OrganizationUnitManager>();
+        var ouRoleName = "ou-only-" + Guid.NewGuid().ToString("N")[..8];
+        var testUserId = await CreateTestUserAsync(
+            "ou-only-" + Guid.NewGuid().ToString("N")[..6],
+            "ou-only@test.com",
+            "Test@123456");
+
+        Guid? ouId = null;
+        Guid? ouRoleId = null;
+        try
+        {
+            // CreateAsync 与 AddRole 分 UoW：同事务内 AddRole 会再 Get OU，未提交则 EntityNotFound。
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var ouRole = new IdentityRole(Guid.NewGuid(), ouRoleName);
+                (await roleManager.CreateAsync(ouRole)).Succeeded.ShouldBeTrue();
+                ouRoleId = ouRole.Id;
+
+                var ou = new OrganizationUnit(Guid.NewGuid(), "ou-only-dept-" + Guid.NewGuid().ToString("N")[..6]);
+                await ouManager.CreateAsync(ou);
+                ouId = ou.Id;
+            });
+            await WithUnitOfWorkAsync(async () =>
+            {
+                await ouManager.AddRoleToOrganizationUnitAsync(ouRoleId!.Value, ouId!.Value);
+                var user = await _userManager.GetByIdAsync(testUserId);
+                var ou = await ouRepository.GetAsync(ouId.Value);
+                await _userManager.AddToOrganizationUnitAsync(user, ou);
+            });
+
+            var effective = await WithUnitOfWorkAsync(async () =>
+                await _userManager.GetRolesAsync(await _userManager.GetByIdAsync(testUserId)));
+            effective.ShouldContain(ouRoleName);
+
+            var direct = await _identityUserAdminAppService.GetDirectRoleNamesAsync(testUserId);
+            direct.Items.ShouldBeEmpty();
+        }
+        finally
+        {
+            await CleanupTestUserAsync(testUserId);
+            // 先删角色再删 OU：RoleManager.Delete 会扫 OU 成员缓存，OU 已删会 EntityNotFound。
+            await WithUnitOfWorkAsync(async () =>
+            {
+                if (ouRoleId is Guid or)
+                {
+                    var role = await roleManager.FindByIdAsync(or.ToString());
+                    if (role != null)
+                    {
+                        await roleManager.DeleteAsync(role);
+                    }
+                }
+            });
+            await WithUnitOfWorkAsync(async () =>
+            {
+                if (ouId is Guid id)
+                {
+                    var ou = await ouRepository.FindAsync(id);
+                    if (ou != null)
+                    {
+                        await ouManager.DeleteAsync(ou.Id);
+                    }
+                }
+            });
+        }
+    }
+
+    [Fact]
+    public async Task GetDirectRoleNamesAsync_Should_Exclude_Organization_Unit_Derived_Roles()
+    {
+        var roleManager = GetRequiredService<IdentityRoleManager>();
+        var ouRepository = GetRequiredService<IOrganizationUnitRepository>();
+        var ouManager = GetRequiredService<OrganizationUnitManager>();
+        var directRoleName = "direct-only-" + Guid.NewGuid().ToString("N")[..8];
+        var ouRoleName = "ou-derived-" + Guid.NewGuid().ToString("N")[..8];
+        var testUserId = await CreateTestUserAsync(
+            "direct-roles-" + Guid.NewGuid().ToString("N")[..6],
+            "direct-roles@test.com",
+            "Test@123456");
+
+        Guid? ouId = null;
+        Guid? directRoleId = null;
+        Guid? ouRoleId = null;
+        try
+        {
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var directRole = new IdentityRole(Guid.NewGuid(), directRoleName);
+                var ouRole = new IdentityRole(Guid.NewGuid(), ouRoleName);
+                (await roleManager.CreateAsync(directRole)).Succeeded.ShouldBeTrue();
+                (await roleManager.CreateAsync(ouRole)).Succeeded.ShouldBeTrue();
+                directRoleId = directRole.Id;
+                ouRoleId = ouRole.Id;
+
+                var ou = new OrganizationUnit(Guid.NewGuid(), "direct-roles-ou-" + Guid.NewGuid().ToString("N")[..6]);
+                await ouManager.CreateAsync(ou);
+                ouId = ou.Id;
+            });
+            await WithUnitOfWorkAsync(async () =>
+            {
+                await ouManager.AddRoleToOrganizationUnitAsync(ouRoleId!.Value, ouId!.Value);
+                var user = await _userManager.GetByIdAsync(testUserId);
+                (await _userManager.AddToRoleAsync(user, directRoleName)).Succeeded.ShouldBeTrue();
+                var ou = await ouRepository.GetAsync(ouId.Value);
+                await _userManager.AddToOrganizationUnitAsync(user, ou);
+            });
+
+            // UserManager.GetRolesAsync 含 OU 并集；管理端编辑表单必须只见直接角色。
+            var effective = await WithUnitOfWorkAsync(async () =>
+                await _userManager.GetRolesAsync(await _userManager.GetByIdAsync(testUserId)));
+            effective.ShouldContain(directRoleName);
+            effective.ShouldContain(ouRoleName);
+
+            var direct = await _identityUserAdminAppService.GetDirectRoleNamesAsync(testUserId);
+            direct.Items.ShouldBe(new[] { directRoleName }, ignoreOrder: true);
+        }
+        finally
+        {
+            await CleanupTestUserAsync(testUserId);
+            await WithUnitOfWorkAsync(async () =>
+            {
+                if (directRoleId is Guid dr)
+                {
+                    var role = await roleManager.FindByIdAsync(dr.ToString());
+                    if (role != null)
+                    {
+                        await roleManager.DeleteAsync(role);
+                    }
+                }
+
+                if (ouRoleId is Guid or)
+                {
+                    var role = await roleManager.FindByIdAsync(or.ToString());
+                    if (role != null)
+                    {
+                        await roleManager.DeleteAsync(role);
+                    }
+                }
+            });
+            await WithUnitOfWorkAsync(async () =>
+            {
+                if (ouId is Guid id)
+                {
+                    var ou = await ouRepository.FindAsync(id);
+                    if (ou != null)
+                    {
+                        await ouManager.DeleteAsync(ou.Id);
+                    }
+                }
+            });
+        }
+    }
+
+    [Fact]
+    public async Task UpdateRoles_Should_Not_Bake_Organization_Unit_Roles_Into_Direct_Membership()
+    {
+        var users = GetRequiredService<IIdentityUserAppService>();
+        var lookup = GetRequiredService<IUserDirectRoleNameLookup>();
+        var roleManager = GetRequiredService<IdentityRoleManager>();
+        var ouRepository = GetRequiredService<IOrganizationUnitRepository>();
+        var ouManager = GetRequiredService<OrganizationUnitManager>();
+        var directRoleName = "keep-direct-" + Guid.NewGuid().ToString("N")[..8];
+        var ouRoleName = "echo-ou-" + Guid.NewGuid().ToString("N")[..8];
+        var testUserId = await CreateTestUserAsync(
+            "echo-roles-" + Guid.NewGuid().ToString("N")[..6],
+            "echo-roles@test.com",
+            "Test@123456");
+
+        Guid? ouId = null;
+        Guid? directRoleId = null;
+        Guid? ouRoleId = null;
+        try
+        {
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var directRole = new IdentityRole(Guid.NewGuid(), directRoleName);
+                var ouRole = new IdentityRole(Guid.NewGuid(), ouRoleName);
+                (await roleManager.CreateAsync(directRole)).Succeeded.ShouldBeTrue();
+                (await roleManager.CreateAsync(ouRole)).Succeeded.ShouldBeTrue();
+                directRoleId = directRole.Id;
+                ouRoleId = ouRole.Id;
+                var ou = new OrganizationUnit(Guid.NewGuid(), "echo-ou-" + Guid.NewGuid().ToString("N")[..6]);
+                await ouManager.CreateAsync(ou);
+                ouId = ou.Id;
+            });
+            await WithUnitOfWorkAsync(async () =>
+            {
+                await ouManager.AddRoleToOrganizationUnitAsync(ouRoleId!.Value, ouId!.Value);
+                var user = await _userManager.GetByIdAsync(testUserId);
+                (await _userManager.AddToRoleAsync(user, directRoleName)).Succeeded.ShouldBeTrue();
+                await _userManager.AddToOrganizationUnitAsync(user, await ouRepository.GetAsync(ouId.Value));
+            });
+
+            // 默认测试主体是 admin。回写有效并集（含部门角色）不得写入 AbpUserRoles。
+            await users.UpdateRolesAsync(testUserId, new IdentityUserUpdateRolesDto
+            {
+                RoleNames = [directRoleName, ouRoleName],
+            });
+
+            var direct = await lookup.GetAsync(testUserId);
+            direct.ShouldBe(new[] { directRoleName }, ignoreOrder: true);
+            var effective = await WithUnitOfWorkAsync(async () =>
+                await _userManager.GetRolesAsync(await _userManager.GetByIdAsync(testUserId)));
+            effective.ShouldContain(ouRoleName);
+        }
+        finally
+        {
+            await CleanupTestUserAsync(testUserId);
+            await WithUnitOfWorkAsync(async () =>
+            {
+                foreach (var id in new[] { directRoleId, ouRoleId })
+                {
+                    if (id is not Guid roleId)
+                    {
+                        continue;
+                    }
+
+                    var role = await roleManager.FindByIdAsync(roleId.ToString());
+                    if (role != null)
+                    {
+                        await roleManager.DeleteAsync(role);
+                    }
+                }
+            });
+            await WithUnitOfWorkAsync(async () =>
+            {
+                if (ouId is Guid id)
+                {
+                    var ou = await ouRepository.FindAsync(id);
+                    if (ou != null)
+                    {
+                        await ouManager.DeleteAsync(ou.Id);
+                    }
+                }
+            });
+        }
+    }
 }

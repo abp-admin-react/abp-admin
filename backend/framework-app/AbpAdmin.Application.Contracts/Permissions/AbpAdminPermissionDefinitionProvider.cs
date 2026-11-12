@@ -159,11 +159,10 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
             L("Permission:DataScopes"));
         dataScopes.AddChild(AbpAdminPermissions.DataScopes.Manage, L("Permission:DataScopes.Manage"));
 
-        // 用户导入导出权限
+        // 用户导出权限
         var identityUsers = group.AddPermission(
             AbpAdminPermissions.Identity.Users.Default,
             L("Permission:Identity.Users"));
-        identityUsers.AddChild(AbpAdminPermissions.Identity.Users.Import, L("Permission:Identity.Users.Import"));
         identityUsers.AddChild(AbpAdminPermissions.Identity.Users.Export, L("Permission:Identity.Users.Export"));
 
         // 模拟登录权限

@@ -1,25 +1,15 @@
-import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined } from '@ant-design/icons';
 import {
   type ActionType,
   PageContainer,
   type ProColumns,
 } from '@ant-design/pro-components';
 import { useAccess, useModel } from '@umijs/max';
-import {
-  App,
-  Button,
-  Dropdown,
-  type MenuProps,
-  Modal,
-  Tag,
-  Upload,
-} from 'antd';
+import { App, Button, Dropdown, type MenuProps, Tag } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
 import { impersonateUser } from '@/abp/account';
 import {
   deleteUser,
-  downloadImportFailureReport,
-  downloadImportTemplate,
   enqueueExportUsers,
   exportUsers,
   getAssignableRoles,
@@ -27,18 +17,15 @@ import {
   getUsers,
   type IdentityRoleDto,
   type IdentityUserDto,
-  importUsers,
   isUserLocked,
   lockUser,
   requireChangePasswordOnNextLogin,
   setUserTwoFactorEnabled,
-  type UserImportResultDto,
   unlockUser,
 } from '@/abp/identity';
 import { applyImpersonatedTokens } from '@/abp/oidc';
 import { sorterToAbpSorting } from '@/abp/sorting';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 import ClaimModal from '@/components/ClaimModal';
 import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import PermissionModal from '@/components/PermissionModal';
@@ -61,8 +48,6 @@ const UsersPage: React.FC = () => {
   const [roles, setRoles] = useState<IdentityRoleDto[]>([]);
   const [permissionTarget, setPermissionTarget] = useState<IdentityUserDto>();
   const [claimTarget, setClaimTarget] = useState<IdentityUserDto>();
-  const [importResult, setImportResult] = useState<UserImportResultDto>();
-  const [importModalOpen, setImportModalOpen] = useState(false);
   // 搜索表单引用：导出时读取当前 filter（与列表 request 的 filter: params.userName 同一来源）
 
   useEffect(() => {
@@ -104,25 +89,6 @@ const UsersPage: React.FC = () => {
 
     exportUsers(filter);
     message.success('导出文件已开始下载');
-  };
-
-  const handleImport = async (file: File) => {
-    try {
-      const result = await importUsers(file);
-      setImportResult(result);
-      setImportModalOpen(true);
-      if (result.failedCount === 0) {
-        message.success(`全部 ${result.totalCount} 条导入成功`);
-      } else {
-        message.warning(
-          `导入完成：成功 ${result.succeededCount} 条，失败 ${result.failedCount} 条`,
-        );
-      }
-      actionRef.current?.reload();
-    } catch {
-      message.error('导入失败，请检查文件格式');
-    }
-    return false; // 阻止 Upload 默认上传行为
   };
 
   // 列头筛选受控状态：导出与列表同口径（导出读同一份状态）
@@ -435,25 +401,6 @@ const UsersPage: React.FC = () => {
               导出
             </Button>
           ),
-          access.canImportUsers && (
-            <Upload
-              key="import"
-              // .xls（BIFF 老格式）MiniExcel 不支持、服务端明确拒绝：不再宣告，避免选中即整单失败
-              accept=".xlsx,.csv"
-              showUploadList={false}
-              beforeUpload={(file) => {
-                handleImport(file);
-                return false;
-              }}
-            >
-              <Button icon={<UploadOutlined />}>导入</Button>
-            </Upload>
-          ),
-          access.canImportUsers && (
-            <Button key="template" onClick={downloadImportTemplate}>
-              下载模板
-            </Button>
-          ),
           access.canCreateUsers && (
             <UserForm
               key="create"
@@ -481,62 +428,6 @@ const UsersPage: React.FC = () => {
           onClose={() => setClaimTarget(undefined)}
         />
       )}
-      <Modal
-        title="导入结果"
-        open={importModalOpen}
-        onCancel={() => setImportModalOpen(false)}
-        footer={[
-          importResult?.failureReportId && (
-            <Button
-              key="download-failures"
-              onClick={() => {
-                if (importResult?.failureReportId) {
-                  downloadImportFailureReport(importResult.failureReportId);
-                }
-              }}
-            >
-              下载失败明细
-            </Button>
-          ),
-          <Button
-            key="close"
-            type="primary"
-            onClick={() => setImportModalOpen(false)}
-          >
-            关闭
-          </Button>,
-        ]}
-        width={640}
-      >
-        {importResult && (
-          <>
-            <p>
-              共 {importResult.totalCount} 条，成功{' '}
-              <span style={{ color: '#52c41a' }}>
-                {importResult.succeededCount}
-              </span>{' '}
-              条，失败{' '}
-              <span style={{ color: '#ff4d4f' }}>
-                {importResult.failedCount}
-              </span>{' '}
-              条
-            </p>
-            {importResult.errors.length > 0 && (
-              <ResizableTable
-                dataSource={importResult.errors}
-                rowKey="rowNumber"
-                size="small"
-                pagination={false}
-                columns={[
-                  { title: '行号', dataIndex: 'rowNumber', width: 60 },
-                  { title: '用户名', dataIndex: 'userName', width: 120 },
-                  { title: '失败原因', dataIndex: 'errorMessage' },
-                ]}
-              />
-            )}
-          </>
-        )}
-      </Modal>
     </PageContainer>
   );
 };

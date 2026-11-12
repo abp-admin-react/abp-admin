@@ -13,15 +13,6 @@ public static class AbpAdminAccountConsts
     /// <summary>防枚举延迟区间（毫秒）。</summary>
     public const int AntiEnumerationDelayMaxMs = 500;
 
-    /// <summary>用户导入结果只向前端返回前 N 条错误，完整明细走失败报告文件。</summary>
-    public const int ImportErrorDisplayLimit = 50;
-
-    /// <summary>
-    /// 用户导入行数硬上限：无上限时一个高压缩比 xlsx（zip 解压放大）可让
-    /// MiniExcel 一次性物化数百万行 DTO 造成内存/CPU 峰值（全局 200MB 请求体上限拦不住解压后的行数）。
-    /// </summary>
-    public const int ImportMaxRowCount = 5000;
-
     /// <summary>管理员冻结用户时的锁定年限（近似永久）。</summary>
     public const int LockoutDurationYears = 100;
 

@@ -6,11 +6,9 @@ import * as identity from '@/abp/identity';
 // T2.6 验收：「补充导入导出按钮的权限控制断言」。
 // 权限可变的 mock：默认全量权限，单个用例可覆盖
 let mockAccess: Record<string, boolean> = {
-  canImportUsers: true,
   canExportUsers: true,
 };
 const fullAccess = {
-  canImportUsers: true,
   canExportUsers: true,
   canCreateUsers: true,
   canUpdateUsers: true,
@@ -36,9 +34,6 @@ vi.mock('@/abp/identity', async () => {
     getAssignableRoles: vi.fn(),
     exportUsers: vi.fn(),
     enqueueExportUsers: vi.fn(),
-    importUsers: vi.fn(),
-    downloadImportTemplate: vi.fn(),
-    downloadImportFailureReport: vi.fn(),
     getTwoFactorStatuses: vi.fn(),
     setUserTwoFactorEnabled: vi.fn(),
   };
@@ -132,7 +127,7 @@ describe('UsersPage', () => {
     });
   });
 
-  it('有导入导出权限时显示 导出/导入/下载模板 按钮', async () => {
+  it('有导出权限时显示导出按钮', async () => {
     const { default: Page } = await import('./index');
     render(
       <AntdApp>
@@ -142,14 +137,12 @@ describe('UsersPage', () => {
 
     const toolbar = await screen.findByTestId('toolbar');
     expect(toolbar.textContent).toContain('导出');
-    expect(toolbar.textContent).toContain('导入');
-    expect(toolbar.textContent).toContain('下载模板');
+    expect(toolbar.textContent).not.toContain('导入');
   });
 
-  it('无导入导出权限时按钮隐藏', async () => {
+  it('无导出权限时导出按钮隐藏', async () => {
     mockAccess = {
       ...fullAccess,
-      canImportUsers: false,
       canExportUsers: false,
     };
     const { default: Page } = await import('./index');
@@ -162,7 +155,6 @@ describe('UsersPage', () => {
     const toolbar = await screen.findByTestId('toolbar');
     expect(toolbar.textContent).not.toContain('导出');
     expect(toolbar.textContent).not.toContain('导入');
-    expect(toolbar.textContent).not.toContain('下载模板');
     // 与权限无关的入口仍在
     expect(toolbar.textContent).toContain('新建用户');
   });

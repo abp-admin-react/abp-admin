@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
-using Volo.Abp.Content;
 
 namespace AbpAdmin.Identity;
 
@@ -13,15 +13,16 @@ public interface IIdentityUserAdminAppService : IApplicationService
     Task UnlockAsync(Guid id);
 
     /// <summary>
+    /// 直接角色名（AbpUserRoles），不含组织单元派生。
+    /// 编辑表单的已选值走这里。官方 GET /api/identity/users/{id}/roles 是有效并集，只用来标出部门授予。
+    /// </summary>
+    Task<ListResultDto<string>> GetDirectRoleNamesAsync(Guid id);
+
+    /// <summary>
     /// 异步导出用户。转后台作业，完成后发邮件通知。
     /// 同步导出请走 Controller 的 GET /api/app/identity-user-admin/export。
     /// </summary>
     Task<UserExportResultDto> EnqueueExportAsync(string? filter);
-
-    /// <summary>
-    /// 导入用户。逐行校验，部分成功语义。
-    /// </summary>
-    Task<UserImportResultDto> ImportAsync(IRemoteStreamContent file);
 
     /// <summary>
     /// 批量获取用户双因素认证状态（Volo 开源用户列表契约不含 twoFactorEnabled，列表页据此补齐）。

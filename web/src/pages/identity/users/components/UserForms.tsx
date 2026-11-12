@@ -6,10 +6,11 @@ import {
   ProFormText,
 } from '@ant-design/pro-components';
 import { App, Collapse } from 'antd';
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   createUser,
-  getUserRoles,
+  getUserDirectRoleNames,
+  getUserEffectiveRoleNames,
   type IdentityRoleDto,
   type IdentityUserDto,
   resetUserPassword,
@@ -143,6 +144,8 @@ export const UserForm: React.FC<{
 }) => {
   const { message } = App.useApp();
   const loadedRoles = useRef<Set<string> | undefined>(undefined);
+  const inheritedRoles = useRef<Set<string>>(new Set());
+  const [inheritedList, setInheritedList] = useState<string[]>([]);
   return (
     <ModalForm
       title={title}
@@ -151,15 +154,30 @@ export const UserForm: React.FC<{
       modalProps={{ destroyOnHidden: true }}
       request={async () => {
         loadedRoles.current = undefined;
+        inheritedRoles.current = new Set();
+        setInheritedList([]);
         if (!record) {
           return { isActive: true, lockoutEnabled: true, roleNames: [] };
         }
-        // ABP 返回有效角色，包含部门角色。资料编辑时只提交明确改过的角色选项。
-        const userRoles = canManageRoles
-          ? await getUserRoles(record.id)
-          : undefined;
-        const roleNames = userRoles?.items.map((item) => item.name);
-        if (roleNames) loadedRoles.current = new Set(roleNames);
+        // 已选只放直接角色。部门角色放进多选会让人以为勾上就能离开部门后保留，
+        // 但 ABP SetRolesAsync 看到「已经通过部门持有」就不会写入 AbpUserRoles。
+        if (!canManageRoles) {
+          return { ...record, roleNames: undefined };
+        }
+        const [directRoles, effectiveNames] = await Promise.all([
+          getUserDirectRoleNames(record.id),
+          getUserEffectiveRoleNames(record.id),
+        ]);
+        const roleNames = directRoles.items ?? [];
+        const directKeys = new Set(roleNames.map((name) => name.toLowerCase()));
+        const inherited = effectiveNames.filter(
+          (name) => !directKeys.has(name.toLowerCase()),
+        );
+        inheritedRoles.current = new Set(
+          inherited.map((name) => name.toLowerCase()),
+        );
+        setInheritedList(inherited);
+        loadedRoles.current = new Set(roleNames);
         return {
           ...record,
           roleNames,
@@ -173,12 +191,17 @@ export const UserForm: React.FC<{
             return false;
           }
           const previousRoles = loadedRoles.current;
+          // ProForm 多选清空常得到 undefined 而非 []；用 ?? [] 才能把「清空全部」交给 SetRolesAsync。
+          // 部门授予的名字即使被塞进表单也不提交：服务端会丢掉，勾选不会变成直接成员。
+          const nextRoles = (values.roleNames ?? []).filter(
+            (name) => !inheritedRoles.current.has(name.toLowerCase()),
+          );
           const rolesChanged =
             canManageRoles &&
-            previousRoles &&
-            values.roleNames &&
-            (previousRoles.size !== values.roleNames.length ||
-              values.roleNames.some((name) => !previousRoles.has(name)));
+            !!previousRoles &&
+            (previousRoles.size !== nextRoles.length ||
+              nextRoles.some((name) => !previousRoles.has(name)) ||
+              [...previousRoles].some((name) => !nextRoles.includes(name)));
           await updateUser(record.id, {
             userName: values.userName,
             email: values.email,
@@ -189,7 +212,7 @@ export const UserForm: React.FC<{
               ? record.isActive
               : (values.isActive ?? record.isActive),
             lockoutEnabled: values.lockoutEnabled ?? record.lockoutEnabled,
-            ...(rolesChanged ? { roleNames: values.roleNames } : {}),
+            ...(rolesChanged ? { roleNames: nextRoles } : {}),
             concurrencyStamp: record.concurrencyStamp,
           });
         } else {
@@ -240,11 +263,21 @@ export const UserForm: React.FC<{
           name="roleNames"
           label="角色"
           mode="multiple"
-          options={roles.map((item) => ({
-            label: item.name,
-            value: item.name,
-          }))}
-          extra="部门授予的角色自动生效，在部门中调整。"
+          options={roles.map((item) => {
+            const fromDepartment = inheritedList.some(
+              (name) => name.toLowerCase() === item.name.toLowerCase(),
+            );
+            return {
+              label: fromDepartment ? `${item.name}（部门授予）` : item.name,
+              value: item.name,
+              disabled: fromDepartment,
+            };
+          })}
+          extra={
+            inheritedList.length > 0
+              ? `部门授予、离开部门即失效，不能在此勾选：${inheritedList.join('、')}`
+              : '部门授予的角色自动生效，在部门中调整，不会变成这个人的直接角色。'
+          }
         />
       )}
       {!hideActive && <ProFormSwitch name="isActive" label="启用账号" />}

@@ -61,10 +61,13 @@ public class AbpAdminEntityFrameworkCoreModule : AbpModule
                 /* Remove "includeAllEntities: true" to create
                  * default repositories only for aggregate roots */
             options.AddDefaultRepositories(includeAllEntities: true);
-            // 复合键连接表（UserId+OrganizationUnitId）不在默认仓储注册范围内，
-            // UserExcelBuilder 的 OU 批量查询需要无键 IRepository<TEntity>，显式补注册
+            // 复合键连接表不在默认仓储注册范围内，显式补无键 IRepository<TEntity>：
+            // - IdentityUserOrganizationUnit：UserExcelBuilder OU 批量查询
+            // - IdentityUserRole：UserDirectRoleNameLookup（直接角色，不含 OU 派生）
             options.AddRepository<IdentityUserOrganizationUnit,
                 EfCoreRepository<AbpAdminDbContext, IdentityUserOrganizationUnit>>();
+            options.AddRepository<IdentityUserRole,
+                EfCoreRepository<AbpAdminDbContext, IdentityUserRole>>();
         });
 
         if (AbpStudioAnalyzeHelper.IsInAnalyzeMode)

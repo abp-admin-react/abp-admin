@@ -157,8 +157,7 @@ export default function access(
     canAdminNetwork: !!policies['AbpAdmin.Collection.Network.Admin'],
     // 提现管理（资金出账高危动作，Host 专用独立权限）
     canAdminWithdrawals: !!policies['AbpAdmin.Collection.WithdrawAdmin'],
-    // T2.6 Identity Pro 缺口：用户导入导出
-    canImportUsers: !!policies['AbpAdmin.Identity.Users.Import'],
+    // 用户导出
     canExportUsers: !!policies['AbpAdmin.Identity.Users.Export'],
     // T2.7 Account Pro 缺口：模拟登录（租户模拟仅 host）
     canImpersonateTenants:

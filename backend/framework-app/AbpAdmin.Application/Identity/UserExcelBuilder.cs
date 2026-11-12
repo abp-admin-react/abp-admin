@@ -17,7 +17,7 @@ namespace AbpAdmin.Identity;
 /// <summary>
 /// 用户导出 Excel 构建器（同步导出与后台作业共用）。
 /// 导出列：用户名、名、姓、邮箱、邮箱已确认、手机号、手机号已确认、是否启用、
-/// 锁定截止时间、角色（分号分隔）、组织单元（分号分隔）、创建时间、最后密码修改时间。
+/// 锁定截止时间、角色（分号分隔，仅直接成员）、组织单元（分号分隔）、创建时间、最后密码修改时间。
 /// 列名集中在 <see cref="UserExportColumnNames"/>。
 /// </summary>
 public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
@@ -37,17 +37,20 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
     private const int OuMembershipBatchSize = 1000;
 
     private readonly IIdentityUserRepository _userRepository;
+    private readonly IUserDirectRoleNameLookup _directRoleNameLookup;
     private readonly IRepository<IdentityUserOrganizationUnit> _userOuRepository;
     private readonly IOrganizationUnitRepository _organizationUnitRepository;
     private readonly IDataDictionaryRenderer _dataDictionaryRenderer;
 
     public UserExcelBuilder(
         IIdentityUserRepository userRepository,
+        IUserDirectRoleNameLookup directRoleNameLookup,
         IRepository<IdentityUserOrganizationUnit> userOuRepository,
         IOrganizationUnitRepository organizationUnitRepository,
         IDataDictionaryRenderer dataDictionaryRenderer)
     {
         _userRepository = userRepository;
+        _directRoleNameLookup = directRoleNameLookup;
         _userOuRepository = userOuRepository;
         _organizationUnitRepository = organizationUnitRepository;
         _dataDictionaryRenderer = dataDictionaryRenderer;
@@ -95,14 +98,16 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
             }
         }
 
-        // 角色名：仓储批量接口一次查询（与 UserManager.GetRolesAsync 同源：含组织单元派生角色）
+        // 角色列只读 AbpUserRoles。GetRolesAsync 含部门派生，写进这一列会把部门角色显示成直接成员。
         var userIds = users.Select(u => u.Id).ToList();
-        var roleNamesById = (await _userRepository.GetRoleNamesAsync(userIds, cancellationToken))
-            .ToDictionary(x => x.Id, x => (IList<string>)x.RoleNames.ToList());
+        var directRoleMap = await _directRoleNameLookup.GetManyAsync(userIds, cancellationToken);
+        var roleNamesById = userIds.ToDictionary(
+            id => id,
+            id => (IList<string>)directRoleMap[id].ToList());
 
         // OU 归属：IIdentityUserRepository 没有「按用户列表批量取 OU」的接口
-        // （GetOrganizationUnitsAsync 是单用户签名），直接查身份模块连接表
-        // IdentityUserOrganizationUnit，按 1000 一批避免超长 IN 列表（SQL Server 参数上限）
+        // （GetOrganizationUnitsAsync 是单用户签名），直接查连接表
+        // IdentityUserOrganizationUnit，按 1000 一批，避免 IN 列表过长。
         var ouIdsByUserId = new Dictionary<Guid, List<Guid>>();
         foreach (var userIdChunk in userIds.Chunk(OuMembershipBatchSize))
         {
@@ -160,13 +165,13 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
             [UserExportColumnNames.Email] = maskSensitive
                 ? StringMasker.Mask(x.Email, EmailMaskSpec)
                 : SpreadsheetTextSanitizer.Sanitize(x.Email),
-            [UserExportColumnNames.EmailConfirmed] = x.EmailConfirmed ? UserImportBooleanTexts.Yes : UserImportBooleanTexts.No,
+            [UserExportColumnNames.EmailConfirmed] = x.EmailConfirmed ? UserExportBooleanTexts.Yes : UserExportBooleanTexts.No,
             [UserExportColumnNames.PhoneNumber] = maskSensitive
                 ? StringMasker.Mask(x.PhoneNumber, MobileMaskSpec)
                 : SpreadsheetTextSanitizer.Sanitize(x.PhoneNumber),
-            [UserExportColumnNames.PhoneNumberConfirmed] = x.PhoneNumberConfirmed ? UserImportBooleanTexts.Yes : UserImportBooleanTexts.No,
-            // 字典渲染失败时回退到导入端可解析的「是/否」（词汇单一出处，见 UserImportBooleanTexts）
-            [UserExportColumnNames.IsActive] = r.IsActiveText ?? (x.IsActive ? UserImportBooleanTexts.Yes : UserImportBooleanTexts.No),
+            [UserExportColumnNames.PhoneNumberConfirmed] = x.PhoneNumberConfirmed ? UserExportBooleanTexts.Yes : UserExportBooleanTexts.No,
+            // 字典渲染失败时回退到「是/否」（UserExportBooleanTexts）。
+            [UserExportColumnNames.IsActive] = r.IsActiveText ?? (x.IsActive ? UserExportBooleanTexts.Yes : UserExportBooleanTexts.No),
             [UserExportColumnNames.LockoutEnd] = x.LockoutEnd?.ToString("yyyy-MM-dd HH:mm:ss"),
             [UserExportColumnNames.RoleNames] = SpreadsheetTextSanitizer.Sanitize(string.Join(";", roleNamesById.GetValueOrDefault(x.Id, new List<string>()))),
             [UserExportColumnNames.OrganizationUnits] = SpreadsheetTextSanitizer.Sanitize(string.Join(";", ouDisplayNamesByUserId.GetValueOrDefault(x.Id, new List<string>()))),

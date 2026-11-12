@@ -6,10 +6,8 @@ using Volo.Abp.MultiTenancy;
 namespace AbpAdmin.Identity;
 
 /// <summary>
-/// 用户导入/导出产生的 Excel 文件记录（重构报告问题 6：Identity 模块自有表，
-/// 不再借用审计模块的 AuditLogExcelFile——语义混淆 + 审计清理策略可能误删用户导出文件）。
-/// Id 即 BlobName，文件内容存 <see cref="UserExportBlobContainer"/>。
-/// 下载时校验 CreatorId == 当前用户，跨用户不可下载。
+/// 用户导出的 Excel 文件记录。Id 即 BlobName，内容在 <see cref="UserExportBlobContainer"/>。
+/// 下载校验 CreatorId，跨用户不可下载。
 /// </summary>
 public class UserExcelFile : CreationAuditedEntity<Guid>, IMultiTenant
 {
