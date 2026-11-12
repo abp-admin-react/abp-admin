@@ -1,7 +1,6 @@
 import { Alert, App, Form, Modal, Select, Spin, Switch } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import React, { useEffect, useState } from 'react';
-import TreePanel from '@/components/TreePanel';
 import {
   DataScopeType,
   DataScopeTypeLabels,
@@ -9,6 +8,7 @@ import {
   saveRoleDataScope,
 } from '@/abp/dataScope';
 import { getOrganizationUnits } from '@/abp/identityAdmin';
+import TreePanel from '@/components/TreePanel';
 import { isNotFound } from '@/requestErrorConfig';
 
 type OrganizationUnitDto = {
@@ -75,14 +75,32 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
     open && !!roleName && loadedRoleName === roleName && !loading && !saving;
 
   useEffect(() => {
+    // 关闭时丢弃树，下次打开 Custom 重新拉取——避免 forceRender 常驻实例用陈旧部门勾选。
+    // 同一次打开内 Custom 仍可复用已加载树；非 Custom 不拉全量部门。
+    // 必须带 cancelled：关闭后晚到的响应若仍 setOuTree，下次打开会因 length>0 跳过拉取，展示过期树。
     if (!open) {
+      setOuTree([]);
       return;
     }
-    // 加载组织单元树
+    if (!isCustom || ouTree.length > 0) {
+      return;
+    }
+    let cancelled = false;
     getOrganizationUnits()
-      .then((items) => setOuTree(buildOuTree(items || [])))
-      .catch(() => message.error('加载组织单元失败'));
-  }, [open, message]);
+      .then((items) => {
+        if (!cancelled) {
+          setOuTree(buildOuTree(items || []));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          message.error('加载组织单元失败');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, isCustom, ouTree.length, message]);
 
   useEffect(() => {
     form.resetFields();
@@ -210,9 +228,7 @@ const DataScopeModal: React.FC<DataScopeModalProps> = ({
                 treeData={ouTree}
                 checkedKeys={checkedOuIds}
                 onCheck={(keys) => setCheckedOuIds(keys.map(String))}
-                onCheckAll={(allKeys) =>
-                  setCheckedOuIds(allKeys.map(String))
-                }
+                onCheckAll={(allKeys) => setCheckedOuIds(allKeys.map(String))}
                 onClearAll={() => setCheckedOuIds([])}
                 toolbarExtra={
                   <span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>

@@ -54,6 +54,8 @@ describe('DataScopeModal', () => {
     expect(await screen.findByText('该角色尚未配置数据范围')).toBeTruthy();
     expect(screen.getByText('请选择数据范围类型')).toBeTruthy();
     expect(screen.queryByText('全部数据')).toBeNull();
+    // 非 Custom 不拉组织单元树
+    expect(mocks.getOrganizationUnits).not.toHaveBeenCalled();
     await waitFor(() => expect(saveButton()).toBeEnabled());
     fireEvent.click(saveButton());
 
@@ -73,6 +75,22 @@ describe('DataScopeModal', () => {
         customOrganizationUnitIds: [],
       }),
     );
+    expect(mocks.getOrganizationUnits).not.toHaveBeenCalled();
+  });
+
+  it('仅在选择自定义组织单元时加载部门树', async () => {
+    mocks.getRoleDataScopeByRoleName.mockRejectedValue(httpError(404));
+    mocks.getOrganizationUnits.mockResolvedValue([
+      { id: 'ou-1', displayName: '研发部', parentId: null },
+    ]);
+    render(modal('custom-role', vi.fn()));
+    await screen.findByText('该角色尚未配置数据范围');
+    expect(mocks.getOrganizationUnits).not.toHaveBeenCalled();
+
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+    fireEvent.click(await screen.findByText('自定义组织单元'));
+    await waitFor(() => expect(mocks.getOrganizationUnits).toHaveBeenCalledOnce());
+    expect(await screen.findByText('研发部')).toBeTruthy();
   });
 
   it('已配置时回填真实范围并按原值保存，不误报未配置', async () => {
