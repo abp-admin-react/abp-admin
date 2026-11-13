@@ -39,6 +39,7 @@ public class FrontendContractSnapshotTests
     private static readonly Type[] SeedTypes =
     {
         typeof(ServerMonitorDto),
+        typeof(RuntimeInfoDto),
         typeof(CacheMonitorInfoDto),
         // 缓存监控写值/改期（对标 abp-next-admin CachingManagement）的前端消费面：
         // 输入 DTO + 值读取 DTO（dataField 预填的可空性是镜像层易漂移点）

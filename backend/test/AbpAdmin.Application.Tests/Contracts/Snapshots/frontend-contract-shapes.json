@@ -376,6 +376,39 @@
       }
     }
   },
+  "AbpAdmin.Monitoring.RuntimeInfoDto": {
+    "kind": "dto",
+    "properties": {
+      "ApiVersion": {
+        "type": "string",
+        "nullable": false
+      },
+      "IanaTimeZoneId": {
+        "type": "string",
+        "nullable": true
+      },
+      "ServerTime": {
+        "type": "DateTimeOffset",
+        "nullable": false
+      },
+      "ServerUnixTimeMilliseconds": {
+        "type": "long",
+        "nullable": false
+      },
+      "TimeZoneDisplayName": {
+        "type": "string",
+        "nullable": false
+      },
+      "TimeZoneId": {
+        "type": "string",
+        "nullable": false
+      },
+      "UtcOffset": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Monitoring.ServerMonitorDto": {
     "kind": "dto",
     "properties": {
