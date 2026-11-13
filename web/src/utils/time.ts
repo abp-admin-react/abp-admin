@@ -16,6 +16,46 @@ dayjs.extend(timezone);
  * 页面不要自己 dayjs(iso) 当本地；统一走本文件。
  */
 
+/** 服务器 UTC 偏移（+08:00 / -05:30）→ 分钟。非法返回 null。不是浏览器时区。 */
+export function parseUtcOffsetMinutes(utcOffset: string): number | null {
+  const match = /^([+-])(\d{2}):(\d{2})$/.exec(utcOffset.trim());
+  if (!match) return null;
+  const hours = Number(match[2]);
+  const minutes = Number(match[3]);
+  if (hours > 14 || minutes > 59) return null;
+  const sign = match[1] === '-' ? -1 : 1;
+  return sign * (hours * 60 + minutes);
+}
+
+/**
+ * 按服务器 UTC 偏移格式化墙上时间。不用浏览器时区。
+ * 业务字段展示仍走 formatForDisplay。
+ */
+export function formatServerWallClock(
+  epochMs: number,
+  utcOffset: string,
+): string | null {
+  const minutes = parseUtcOffsetMinutes(utcOffset);
+  if (minutes == null || !Number.isFinite(epochMs)) return null;
+  const shifted = new Date(epochMs + minutes * 60_000);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())} ${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}`;
+}
+
+/** 浏览器所在电脑的墙上时间（IANA + UTC 偏移）。不是服务器时钟。 */
+export function formatBrowserWallClock(
+  epochMs: number,
+  timeZone = userTimeZone(),
+): string | null {
+  if (!Number.isFinite(epochMs)) return null;
+  const zone = timeZone.trim();
+  if (!zone) return null;
+  const local = dayjs(epochMs).tz(zone);
+  if (!local.isValid()) return null;
+  const offset = local.format('Z');
+  return `${local.format('YYYY-MM-DD HH:mm:ss')}（${zone}，UTC${offset}）`;
+}
+
 /** 浏览器本地 IANA 时区（Intl → dayjs.tz.guess）；禁止写死 Asia/Shanghai。 */
 export function userTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || dayjs.tz.guess();

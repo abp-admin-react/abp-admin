@@ -31,6 +31,7 @@ import {
   NotificationBell,
   OfflineBanner,
   RealTimeConnection,
+  RuntimeStatus,
   VersionDropdown,
 } from '@/components';
 import { queryClient } from '@/queryClient';
@@ -243,6 +244,8 @@ export const layout: RunTimeLayoutConfig = ({
       const tenant = initialState?.currentTenant;
       const loggedIn = !!initialState?.currentUser?.userid;
       return [
+        // 版本与时钟：Host 标签左侧。登录页 layout:false，这里不会渲染。
+        <RuntimeStatus key="runtime" />,
         tenant?.isAvailable ? (
           <Tag key="tenant" color="blue">
             {tenant.name}

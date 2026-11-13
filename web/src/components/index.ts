@@ -18,5 +18,6 @@ export { default as ImpersonationBanner } from './ImpersonationBanner';
 export { default as NotificationBell } from './NotificationBell';
 export { default as OfflineBanner } from './OfflineBanner';
 export { default as RealTimeConnection } from './RealTimeConnection';
+export { default as RuntimeStatus } from './RuntimeStatus';
 
 export { AvatarDropdown, LangDropdown, VersionDropdown };
