@@ -223,7 +223,7 @@ public class WithdrawManagerTests : CollectionTestBase
         // 广播失败态（M3 worker 的迁移；测试用受跟踪实体直接置态）
         await ForceStatusAsync(order.Id, WithdrawStatus.BroadcastFailed, "广播失败");
 
-        await Manager.RefundAfterApproveAsync(order.Id, Admin, "链上未付出，退款");
+        await Manager.RefundAfterApproveAsync(await GetOrderAsync(order.Id), Admin, "链上未付出，退款");
         (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Rejected);
 
         // 净额 + 手续费全部退回可用；账本 2241/6003 清零

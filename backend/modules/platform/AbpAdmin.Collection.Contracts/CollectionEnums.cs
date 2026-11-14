@@ -51,6 +51,7 @@ public static class BalanceActions
     public const string DepositCredit = "DepositCredit";
     public const string BusinessDebit = "BusinessDebit";
     public const string DebitReverse = "DebitReverse";
+    public const string ManualAdjust = "ManualAdjust";
 
     public const string WithdrawFreeze = "WithdrawFreeze";
     public const string WithdrawUnfreeze = "WithdrawUnfreeze";

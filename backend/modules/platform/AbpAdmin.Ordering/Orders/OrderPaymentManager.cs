@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Ordering.Data;
 using AbpAdmin.Ordering.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -39,14 +40,14 @@ public class StartPayResult
 }
 
 /// <summary>
-/// 订单支付状态机（计划第 3.2、6 节）。状态更新都是一条条件更新（WHERE Status = 'PendingPayment'）；
-/// 余额支付的扣款和这次更新在同一个工作单元里，一起提交或一起回滚——
-/// 回冲不是「更新失败了再调一次」；受影响行数为 0 时回滚这个工作单元（扣款不会留下），
-/// 然后另开工作单元读当前状态决定语义，不在这里调用 ReverseDebitAsync。
-/// 渠道调用（取消、创建）一律在扣款所在的工作单元打开之前完成。
+/// 订单支付状态机。余额扣款与待支付订单转为已支付共用一个事务；并发更新失败时一起回滚。
+/// 渠道调用在扣款事务之外执行。
 /// </summary>
 public class OrderPaymentManager : DomainService
 {
+    private const string CollectionMismatchNote = "Completed collection amount or currency mismatch.";
+    private const string DuplicateCollectionNote = "A second completed collection arrived after the order was paid.";
+
     private readonly IDbContextProvider<OrderingDbContext> _dbContextProvider;
     private readonly AbpAdmin.Collection.Contracts.ICollectionIntegrationService _integrationService;
     private readonly IClock _clock;
@@ -71,14 +72,14 @@ public class OrderPaymentManager : DomainService
 
     /// <summary>
     /// 换渠道或首次发起。前置：方法必须是渠道方式；报价仍有效。
-    /// 若已有 Pending 收款，先取消（渠道 HTTP 在扣款事务外，这里尚未打开任何事务）；
-    /// 返回已完成则按到账处理，不再创建新收款。
+    /// 改用不同报价前先关当前收款，原报价重试沿用同一收款尝试。
+    /// 收款与报价绑定后，渠道请求才会发出。
     /// </summary>
     public virtual async Task<StartPayResult> StartChannelPayAsync(OrdOrder order, OrdQuote quote)
     {
         AssertPayable(order, quote);
 
-        if (await CancelPendingCollectionAsync(order))
+        if (order.QuoteId != quote.Id && await CancelPendingCollectionAsync(order))
         {
             return new StartPayResult
             {
@@ -87,54 +88,76 @@ public class OrderPaymentManager : DomainService
             };
         }
 
-        var created = await _integrationService.CreateAsync(new AbpAdmin.Collection.Contracts.CreateCollectionInput
+        CollectionDto created;
+        try
         {
-            BusinessType = OrderingConsts.OrderBusinessType,
-            BusinessId = order.Id,
-            UserId = order.UserId,
-            Channel = quote.PayMethod.ToCollectionChannel()!.Value,
-            Currency = quote.PayCurrency,
-            Amount = AbpAdmin.Collection.Contracts.CollectionAmounts.Format(quote.PayAmount),
-            ExpiresAt = quote.ExpiresAt,
-        });
-
-        // PayAmount/PayCurrency/PayChannel/QuoteId/CollectionId 一起写入（每次发起支付时按当前报价）；
-        // 条件更新保证只在 PendingPayment 时生效。0 行 = 发起过程中订单被并发关闭/支付：
-        // 收款单留给过期作业取消，按当前状态如实回报，不谎报 ChannelCreated
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var rows = await dbContext.Orders
-            .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(o => o.PayAmount, quote.PayAmount)
-                .SetProperty(o => o.PayCurrency, quote.PayCurrency)
-                .SetProperty(o => o.PayChannel, quote.PayMethod)
-                .SetProperty(o => o.QuoteId, quote.Id)
-                .SetProperty(o => o.CollectionId, created.Id));
-
-        if (rows == 0)
+            created = await _integrationService.CreateAsync(new CreateCollectionInput
+            {
+                BusinessType = OrderingConsts.OrderBusinessType,
+                BusinessId = order.Id,
+                UserId = order.UserId,
+                Channel = quote.PayMethod.ToCollectionChannel()!.Value,
+                Currency = quote.PayCurrency,
+                Amount = CollectionAmounts.Format(quote.PayAmount),
+                ExpiresAt = quote.ExpiresAt,
+            }, prepared => BindPreparedCollectionAsync(order, quote, prepared));
+        }
+        catch (BusinessException ex) when (ex.Code == OrderingErrorCodes.InvalidOrderStatus)
         {
             var current = (await ReloadAsync(order.Id))!;
-            return new StartPayResult
+            if (current.Status != OrderStatus.PendingPayment)
             {
-                Outcome = current.Status switch
+                return new StartPayResult
                 {
-                    OrderStatus.Paid => StartPayOutcome.AlreadyCompleted,
-                    OrderStatus.Closed => StartPayOutcome.Closed,
-                    _ => StartPayOutcome.ChannelCreated, // 窗口极小；下一轮条件更新为准
-                },
-                Collection = created,
-                Order = current,
-            };
+                    Outcome = current.Status == OrderStatus.Closed ? StartPayOutcome.Closed : StartPayOutcome.AlreadyCompleted,
+                    Order = current,
+                };
+            }
+
+            throw;
+        }
+
+        if (created.Status == CollectionStatus.Completed)
+        {
+            await HandleCompletedCollectionAsync(order.Id, created);
         }
 
         var createdOrder = await ReloadAsync(order.Id)
             ?? throw new InvalidOperationException($"Order {order.Id} vanished right after channel creation.");
         return new StartPayResult
         {
-            Outcome = StartPayOutcome.ChannelCreated,
-            Collection = created,
+            Outcome = createdOrder.Status switch
+            {
+                OrderStatus.Paid or OrderStatus.Fulfilled => StartPayOutcome.AlreadyCompleted,
+                OrderStatus.Closed => StartPayOutcome.Closed,
+                _ when created.Status == CollectionStatus.Completed => StartPayOutcome.AlreadyCompleted,
+                _ => StartPayOutcome.ChannelCreated,
+            },
+            Collection = createdOrder.Status == OrderStatus.PendingPayment && created.Status == CollectionStatus.Pending
+                ? created
+                : null,
             Order = createdOrder,
         };
+    }
+
+    /// <summary>和本地收款单共用事务，外部渠道可回调前已关联订单与报价。</summary>
+    private async Task BindPreparedCollectionAsync(OrdOrder order, OrdQuote quote, CollectionDto prepared)
+    {
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var rows = await dbContext.Orders
+            .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment
+                && (o.CollectionId == order.CollectionId || o.CollectionId == prepared.Id))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.PayAmount, quote.PayAmount)
+                .SetProperty(o => o.PayCurrency, quote.PayCurrency)
+                .SetProperty(o => o.PayChannel, quote.PayMethod)
+                .SetProperty(o => o.QuoteId, quote.Id)
+                .SetProperty(o => o.CollectionId, prepared.Id));
+
+        if (rows == 0)
+        {
+            throw new BusinessException(OrderingErrorCodes.InvalidOrderStatus).WithData("OrderId", order.Id);
+        }
     }
 
     // ── 余额支付（计划第 6 节时序）────────────────────────────────────────────────────────
@@ -176,7 +199,8 @@ public class OrderPaymentManager : DomainService
 
             var dbContext = await _dbContextProvider.GetDbContextAsync();
             var rows = await dbContext.Orders
-                .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment)
+                .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment
+                    && o.CollectionId == order.CollectionId)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(o => o.Status, OrderStatus.Paid)
                     .SetProperty(o => o.PaidAt, now)
@@ -196,7 +220,6 @@ public class OrderPaymentManager : DomainService
             else
             {
                 await uow.CompleteAsync();
-                // 扣款成功且与标支付同一工作单元提交之后发布（计划第 3.2 节）
                 await PublishDebitedSafelyAsync(order.Id, order.UserId, debit.BalanceTxnId, quote);
             }
         }
@@ -204,9 +227,8 @@ public class OrderPaymentManager : DomainService
         if (!rolledBack)
         {
             var paid = (await ReloadAsync(order.Id))!;
-            // 与渠道路径同款善后：标支付提交后尽力取消其余等待中的收款（计划第 3.2 节；
-            ///余额单最容易留下悬空 Pending 收款——并发渠道发起败给余额支付时）
-            await AfterCommitAsync(() => CancelOtherPendingCollectionsAsync(order.Id, paid.CollectionId ?? Guid.Empty));
+            // 并发发起的其他收款可能仍处于待支付，提交后再向渠道发起关单。
+            await AfterCommitAsync(order.Id, () => CancelOtherPendingCollectionsAsync(order.Id, paid.CollectionId ?? Guid.Empty));
             return new StartPayResult { Outcome = StartPayOutcome.BalancePaid, Order = paid };
         }
 
@@ -226,6 +248,10 @@ public class OrderPaymentManager : DomainService
 
             case OrderStatus.Closed:
                 return new StartPayResult { Outcome = StartPayOutcome.Closed, Order = current };
+
+            case OrderStatus.PendingPayment when current.CollectionId != order.CollectionId:
+                throw new BusinessException(CollectionErrorCodes.PendingCollectionConflict)
+                    .WithData("BusinessId", order.Id);
 
             default:
                 // 仍是 PendingPayment 的窗口极小（条件更新只认 PendingPayment）；按已支付处理时留异常
@@ -248,15 +274,32 @@ public class OrderPaymentManager : DomainService
         OrderingPayChannel sourceChannel,
         decimal amount,
         AbpAdmin.Collection.Contracts.CollectionCurrency currency,
-        string? channelTradeNo)
+        string? channelTradeNo,
+        DateTime? completedAt = null)
     {
-        var order = await ReloadAsync(orderId);
+        using var uow = BeginPaymentHandling();
+        var order = await LockOrderAsync(orderId);
         if (order == null)
         {
             Logger.LogWarning("到账事件指向不存在的订单 {OrderId}，忽略", orderId);
             return;
         }
 
+        var paidAt = completedAt.GetValueOrDefault();
+        await ApplyCollectionCompletionAsync(order, collectionId, sourceChannel, amount, currency, channelTradeNo,
+            paidAt == default ? _clock.Now : paidAt);
+        await uow.CompleteAsync();
+    }
+
+    public virtual Task HandleCompletedCollectionAsync(Guid orderId, CollectionDto collection) =>
+        HandleCollectionCompletedAsync(orderId, collection.Id,
+            OrderingPayChannelExtensions.FromCollectionChannel(collection.Channel),
+            CollectionAmounts.Parse(collection.Amount), collection.Currency, collection.ChannelTradeNo, collection.CompletedAt);
+
+    private async Task ApplyCollectionCompletionAsync(
+        OrdOrder order, Guid collectionId, OrderingPayChannel sourceChannel, decimal amount,
+        CollectionCurrency currency, string? channelTradeNo, DateTime completedAt)
+    {
         var amountsMatch = order.PayAmount != null
             && order.PayCurrency == currency
             && order.PayAmount.Value == amount;
@@ -267,44 +310,38 @@ public class OrderPaymentManager : DomainService
                 if (!amountsMatch)
                 {
                     // 只追加异常明细，不关单；关单留到订单自己的 ExpiresAt
-                    await AppendAnomalyAsync(order.Id, amount, currency, collectionId, channelTradeNo,
-                        "Completed collection amount or currency mismatch.");
+                    await AppendCollectionAnomalyOnceAsync(order.Id, amount, currency, collectionId, channelTradeNo,
+                        CollectionMismatchNote);
                     return;
                 }
 
                 if (order.CollectionId == collectionId)
                 {
                     // 同一笔收款完成：标 Paid（条件更新），渠道单号随归因落库（用户对账凭证）
-                    await MarkPaidFromChannelAsync(order.Id, collectionId, sourceChannel, channelTradeNo);
+                    await MarkPaidFromChannelAsync(order.Id, collectionId, sourceChannel, channelTradeNo, completedAt);
                     return;
                 }
 
-                // 来源不同且订单仍是 PendingPayment、金额币种一致：这笔成为致付来源，
-                // 更新 CollectionId 与 PayChannel，写下 PaidAt，标 Paid（计划第 3.2 节）
-                var marked = await MarkPaidFromChannelAsync(order.Id, collectionId, sourceChannel, channelTradeNo);
+                var marked = await MarkPaidFromChannelAsync(order.Id, collectionId, sourceChannel, channelTradeNo, completedAt);
                 if (marked)
                 {
-                    // 提交之后再尽力取消其余 Pending 收款，失败由过期作业兜底，
-                    // 不在这个工作单元里调用渠道（OnCompleted 已在事务之外）
-                    await AfterCommitAsync(() => CancelOtherPendingCollectionsAsync(order.Id, collectionId));
+                    await AfterCommitAsync(order.Id, () => CancelOtherPendingCollectionsAsync(order.Id, collectionId));
                 }
 
                 return;
 
             case OrderStatus.Paid:
-                // 同一来源再投递，不改状态：仅当订单由渠道收款支付且致付归因正是这一笔。
-                // 余额支付的单（BalanceTxnId 非空）即使残留旧的 CollectionId（换渠道前的
-                ///渠道尝试），其后的任何渠道完成都是「来源不同且已支付」——按计划第 3.2 节
-                ///必须追加异常并告警，不能吞掉（否则渠道实际付款后无人记账）
+            case OrderStatus.Fulfilled:
+                // 同一笔渠道支付可重复投递，余额支付留下的旧渠道收款号不能用于去重。
                 if (order.BalanceTxnId == null && order.CollectionId == collectionId)
                 {
                     return;
                 }
 
                 // 另一笔收款在订单已支付后到达：追加一条异常明细，不覆盖已有明细，并告警
-                await AppendAnomalyAsync(order.Id, amount, currency, collectionId, channelTradeNo,
-                    "A second completed collection arrived after the order was paid.");
-                Logger.LogWarning("订单 {OrderId} 已支付后又收到收款 {CollectionId} 的完成", orderId, collectionId);
+                await AppendCollectionAnomalyOnceAsync(order.Id, amount, currency, collectionId, channelTradeNo,
+                    DuplicateCollectionNote);
+                Logger.LogWarning("订单 {OrderId} 已支付后又收到收款 {CollectionId} 的完成", order.Id, collectionId);
                 return;
 
             case OrderStatus.Closed:
@@ -312,20 +349,21 @@ public class OrderPaymentManager : DomainService
                 {
                     // 超时关闭且没有任何异常明细、金额币种一致：标回 Paid，并写上这笔的归因
                     //（渠道单号一并落库——复活也是渠道版标 Paid，对账凭证不能缺）
-                    await ReviveFromExpiredCloseAsync(order.Id, collectionId, sourceChannel, channelTradeNo);
+                    await ReviveFromExpiredCloseAsync(order.Id, collectionId, sourceChannel, channelTradeNo, completedAt);
                     return;
                 }
 
-                // CloseReason 为 UserCancel，或已有异常明细：不改状态，只告警
+                if (!amountsMatch && order.CloseReason == OrderCloseReason.Expired)
+                {
+                    await AppendCollectionAnomalyOnceAsync(order.Id, amount, currency, collectionId, channelTradeNo,
+                        CollectionMismatchNote);
+                }
+
                 Logger.LogWarning(
-                    "已关闭订单 {OrderId}（CloseReason={CloseReason}, Anomaly={Anomaly}）收到收款 {CollectionId} 的完成，只告警不改状态",
-                    orderId, order.CloseReason, order.PaymentAnomaly, collectionId);
+                    "已关闭订单 {OrderId} 收到收款 {CollectionId} 的完成，订单保持关闭（CloseReason={CloseReason}, AmountsMatch={AmountsMatch}）",
+                    order.Id, collectionId, order.CloseReason, amountsMatch);
                 return;
 
-            case OrderStatus.Fulfilled:
-                // 本期没有从 Fulfilled 出发的状态转移
-                Logger.LogWarning("已履约订单 {OrderId} 收到收款 {CollectionId} 的完成，忽略", orderId, collectionId);
-                return;
         }
     }
 
@@ -380,10 +418,7 @@ public class OrderPaymentManager : DomainService
         }
     }
 
-    /// <summary>
-    /// BalanceDebitedEto 到达时订单应已是 Paid。若仍是 PendingPayment，说明扣款没有和标支付
-    /// 放在同一个工作单元里：记异常并不改状态，交给补状态作业（计划第 3.2 节）。
-    /// </summary>
+    /// <summary>扣款事件到达时订单仍待支付，则记录异常，后续由补状态作业核对。</summary>
     public virtual async Task HandleBalanceDebitedAsync(
         Guid orderId, Guid balanceTxnId, decimal amount, AbpAdmin.Collection.Contracts.CollectionCurrency currency)
     {
@@ -398,13 +433,14 @@ public class OrderPaymentManager : DomainService
         {
             await AppendAnomalyAsync(order.Id, amount, currency, null, null,
                 "Balance debit committed but the order was not marked paid in the same unit of work.");
-            Logger.LogWarning("订单 {OrderId} 收到扣款完成事件但仍为待支付，交给补状态作业", orderId);
+            Logger.LogWarning("订单 {OrderId} 收到扣款流水 {BalanceTxnId} 的完成事件但仍为待支付，已记录异常",
+                orderId, balanceTxnId);
         }
     }
 
     // ── 关闭 / 履约 / 取消 ────────────────────────────────────────────────────────────────
 
-    /// <summary>用户在页面上取消：只有 PendingPayment 可以；先尽力取消等待中的收款，再关单。</summary>
+    /// <summary>用户取消待支付订单前，先确认关联收款已关闭。</summary>
     public virtual async Task CancelByUserAsync(OrdOrder order)
     {
         if (order.Status != OrderStatus.PendingPayment)
@@ -418,7 +454,8 @@ public class OrderPaymentManager : DomainService
 
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         await dbContext.Orders
-            .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment)
+            .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment
+                && o.CollectionId == order.CollectionId)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, OrderStatus.Closed)
                 .SetProperty(o => o.ClosedAt, _clock.Now)
@@ -430,16 +467,15 @@ public class OrderPaymentManager : DomainService
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         await dbContext.Orders
-            .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment)
+            .Where(o => o.Id == order.Id && o.Status == OrderStatus.PendingPayment
+                && o.CollectionId == order.CollectionId)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, OrderStatus.Closed)
                 .SetProperty(o => o.ClosedAt, _clock.Now)
                 .SetProperty(o => o.CloseReason, OrderCloseReason.Expired));
     }
 
-    /// <summary>
-    /// 管理端动作：把业务单从 Paid 标成 Fulfilled。标了之后不能回冲，退款只做人工记录（计划第 1 节）。
-    /// </summary>
+    /// <summary>把仍为 Paid 的业务单标为已履约。</summary>
     public virtual async Task MarkFulfilledAsync(OrdOrder order)
     {
         if (order.OrderType != OrderType.Business)
@@ -465,17 +501,20 @@ public class OrderPaymentManager : DomainService
 
     // ── 异常明细（只追加）────────────────────────────────────────────────────────────────
 
-    /// <summary>追加一条明细；<paramref name="markAnomaly"/> 控制是否点亮订单的 PaymentAnomaly
-    /// 异常标——到账类异常（金额不符/多笔到账）要点亮；人工退款走
-    /// <see cref="AppendManualRefundAsync"/>（markAnomaly=false）：退款是常规运营动作，
-    /// 不打异常标（否则干净支付的用户订单永远挂红标，复活守卫 !PaymentAnomaly 的语义也被污染）。</summary>
-    public virtual async Task AppendAnomalyAsync(
+    /// <summary>追加支付明细。<paramref name="markAnomaly"/> 只用于错额、多笔到账等异常，常规退款不标异常。</summary>
+    public virtual Task AppendAnomalyAsync(
         Guid orderId, decimal? amount, AbpAdmin.Collection.Contracts.CollectionCurrency? currency,
-        Guid? collectionId, string? channelTradeNo, string note, bool markAnomaly = true)
+        Guid? collectionId, string? channelTradeNo, string note, bool markAnomaly = true) =>
+        InsertPaymentDetailAsync(GuidGenerator.Create(), orderId, amount, currency, collectionId, channelTradeNo,
+            note, _clock.Now, markAnomaly);
+
+    private async Task InsertPaymentDetailAsync(
+        Guid detailId, Guid orderId, decimal? amount, CollectionCurrency? currency,
+        Guid? collectionId, string? channelTradeNo, string note, DateTime creationTime, bool markAnomaly)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
-        await dbContext.PaymentAnomalyLines.AddAsync(new OrdPaymentAnomalyLine(GuidGenerator.Create())
+        await dbContext.PaymentAnomalyLines.AddAsync(new OrdPaymentAnomalyLine(detailId)
         {
             OrderId = orderId,
             Amount = amount,
@@ -483,7 +522,7 @@ public class OrderPaymentManager : DomainService
             CollectionId = collectionId,
             ChannelTradeNo = channelTradeNo,
             Note = note,
-            CreationTime = _clock.Now,
+            CreationTime = creationTime,
         });
 
         if (markAnomaly)
@@ -496,13 +535,45 @@ public class OrderPaymentManager : DomainService
         await dbContext.SaveChangesAsync();
     }
 
+    private async Task AppendCollectionAnomalyOnceAsync(
+        Guid orderId, decimal amount, CollectionCurrency currency, Guid collectionId, string? channelTradeNo, string note)
+    {
+        // 所有渠道完成入口持有同一个订单行锁。作业补偿与事件重投共享按收款单的去重范围。
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        if (await dbContext.PaymentAnomalyLines.AnyAsync(line =>
+                line.OrderId == orderId && line.CollectionId == collectionId
+                && (line.Note == CollectionMismatchNote || line.Note == DuplicateCollectionNote)))
+        {
+            return;
+        }
+
+        await AppendAnomalyAsync(orderId, amount, currency, collectionId, channelTradeNo, note);
+    }
+
+    public virtual async Task HandleCollectionRefundSucceededAsync(CollectionRefundSucceededEto refund)
+    {
+        using var uow = BeginPaymentHandling();
+        var order = await LockOrderAsync(refund.BusinessId);
+        if (order == null)
+        {
+            Logger.LogWarning("退款 {RefundId} 指向不存在的订单 {OrderId}", refund.RefundId, refund.BusinessId);
+            return;
+        }
+
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        if (!await dbContext.PaymentAnomalyLines.AnyAsync(line => line.Id == refund.RefundId))
+        {
+            // 退款按原渠道实付币种记录。订单上的人工退款累计使用标价币种，不能混加。
+            await InsertPaymentDetailAsync(refund.RefundId, order.Id, CollectionAmounts.Parse(refund.Amount),
+                refund.Currency, refund.CollectionId, refund.ChannelRefundNo,
+                "Original-channel refund completed.", refund.SucceededAt, markAnomaly: false);
+        }
+
+        await uow.CompleteAsync();
+    }
+
     /// <summary>
-    /// 人工退款记录（管理端动作的落地）：追加一条退款明细（不打异常标）+ 累加 RefundedAmount。
-    /// 金额为 null 表示只记说明不记金额（此时不累加）。币种与两位小数由调用方
-    /// RecordManualRefundAsync 校验（必须等于订单标价币种），保证
-    /// RefundedAmount = Σ 退款明细金额且币种单一。用户侧订单详情可见——退款不再只是管理端口径。
-    /// 契约：明细插入与累加是两条语句，原子性依赖调用方的环境事务
-    /// （Auto API 的 POST 环境工作单元是事务性的；新调用方若非事务须自行包 UoW）。
+    /// 记录人工退款，空金额只保存说明。调用方校验金额和币种，并用事务一起提交退款明细和累计金额。
     /// </summary>
     public virtual async Task AppendManualRefundAsync(
         Guid orderId, decimal? amount, AbpAdmin.Collection.Contracts.CollectionCurrency? currency, string note)
@@ -538,23 +609,21 @@ public class OrderPaymentManager : DomainService
         if (cancel.Collection.Status == AbpAdmin.Collection.Contracts.CollectionStatus.Completed)
         {
             // 返回已完成：按金额币种走支付或异常，不再创建新收款、不扣款
-            await HandleCollectionCompletedAsync(
-                order.Id,
-                cancel.Collection.Id,
-                OrderingPayChannelExtensions.FromCollectionChannel(cancel.Collection.Channel),
-                AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(cancel.Collection.Amount),
-                cancel.Collection.Currency,
-                cancel.Collection.ChannelTradeNo);
+            await HandleCompletedCollectionAsync(order.Id, cancel.Collection);
             return true;
+        }
+
+        if (cancel.Collection.Status == CollectionStatus.Pending)
+        {
+            throw new BusinessException(CollectionErrorCodes.PendingCollectionConflict)
+                .WithData("BusinessId", order.Id)
+                .WithData("CollectionId", cancel.Collection.Id);
         }
 
         return false;
     }
 
-    /// <summary>
-    /// 扣款完成事件发布（计划第 3.2 节）：只在「扣款 + 标支付同事务已提交」之后调用；
-    /// 发布失败只告警——事件的消费端只是自检快路径，兜底在补状态作业。
-    /// </summary>
+    /// <summary>订单和扣款提交后发布给消费者核对。发布失败只记录告警。</summary>
     private async Task PublishDebitedSafelyAsync(Guid orderId, Guid userId, Guid balanceTxnId, OrdQuote quote)
     {
         try
@@ -572,11 +641,12 @@ public class OrderPaymentManager : DomainService
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "BalanceDebitedEto 发布失败（订单 {OrderId}），补状态作业会兜底", orderId);
+            Logger.LogWarning(ex, "订单 {OrderId} 的扣款与支付状态已提交，扣款事件发布失败", orderId);
         }
     }
 
-    private async Task AfterCommitAsync(Func<Task> action)    {
+    private async Task AfterCommitAsync(Guid orderId, Func<Task> action)
+    {
         var current = _unitOfWorkManager.Current;
         if (current == null)
         {
@@ -586,7 +656,7 @@ public class OrderPaymentManager : DomainService
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "标支付后的善后动作失败，交给过期作业兜底");
+                Logger.LogWarning(ex, "订单 {OrderId} 已支付，关闭其他待支付收款失败", orderId);
             }
 
             return;
@@ -600,21 +670,21 @@ public class OrderPaymentManager : DomainService
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "标支付后的善后动作失败（已提交），交给过期作业兜底");
+                Logger.LogWarning(ex, "订单 {OrderId} 已支付，关闭其他待支付收款失败", orderId);
             }
         });
     }
 
     /// <summary>条件更新标 Paid（WHERE Status = 'PendingPayment'）。返回是否生效。</summary>
     private async Task<bool> MarkPaidFromChannelAsync(
-        Guid orderId, Guid collectionId, OrderingPayChannel channel, string? channelTradeNo)
+        Guid orderId, Guid collectionId, OrderingPayChannel channel, string? channelTradeNo, DateTime completedAt)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var rows = await dbContext.Orders
             .Where(o => o.Id == orderId && o.Status == OrderStatus.PendingPayment)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, OrderStatus.Paid)
-                .SetProperty(o => o.PaidAt, _clock.Now)
+                .SetProperty(o => o.PaidAt, completedAt)
                 .SetProperty(o => o.CollectionId, collectionId)
                 .SetProperty(o => o.PayChannel, channel)
                 // 法币渠道无网络概念（PayNetwork 保持 null）；将来若加链上直付渠道，
@@ -677,7 +747,7 @@ public class OrderPaymentManager : DomainService
     ///（把 CloseReason/PaymentAnomaly 放进 WHERE，避免与并发的异常写入竞争，计划第 3.2 节）。
     /// </summary>
     private async Task ReviveFromExpiredCloseAsync(
-        Guid orderId, Guid collectionId, OrderingPayChannel channel, string? channelTradeNo)
+        Guid orderId, Guid collectionId, OrderingPayChannel channel, string? channelTradeNo, DateTime completedAt)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var rows = await dbContext.Orders
@@ -687,14 +757,14 @@ public class OrderPaymentManager : DomainService
                 && !o.PaymentAnomaly)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, OrderStatus.Paid)
-                .SetProperty(o => o.PaidAt, _clock.Now)
+                .SetProperty(o => o.PaidAt, completedAt)
                 .SetProperty(o => o.CollectionId, collectionId)
                 .SetProperty(o => o.PayChannel, channel)
                 .SetProperty(o => o.ChannelTradeNo, channelTradeNo));
 
         if (rows == 0)
         {
-            Logger.LogWarning("订单 {OrderId} 复活条件更新影响 0 行（状态已被并发改变），保留现状", orderId);
+            Logger.LogWarning("订单 {OrderId} 当前已不满足超时关闭后补记支付的条件，未更新状态", orderId);
         }
     }
 
@@ -728,6 +798,20 @@ public class OrderPaymentManager : DomainService
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         return await dbContext.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == orderId);
+    }
+
+    private IUnitOfWork BeginPaymentHandling() =>
+        _unitOfWorkManager.Begin(requiresNew: _unitOfWorkManager.Current?.Options.IsTransactional != true,
+            isTransactional: true);
+
+    private async Task<OrdOrder?> LockOrderAsync(Guid orderId)
+    {
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var orders = await dbContext.Orders
+            .FromSqlInterpolated($"SELECT * FROM \"OrdOrders\" WHERE \"Id\" = {orderId} FOR UPDATE")
+            .AsNoTracking()
+            .ToListAsync();
+        return orders.SingleOrDefault();
     }
 
 }

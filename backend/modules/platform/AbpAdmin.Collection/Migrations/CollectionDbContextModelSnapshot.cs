@@ -19,7 +19,7 @@ namespace AbpAdmin.Collection.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasAnnotation("_Abp_DatabaseProvider", EfCoreDatabaseProvider.PostgreSql)
-                .HasAnnotation("ProductVersion", "10.0.11")
+                .HasAnnotation("ProductVersion", "10.0.15")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -59,6 +59,81 @@ namespace AbpAdmin.Collection.Migrations
                             t.HasCheckConstraint("CK_ColBalances_FrozenNonNegative", "\"Frozen\" >= 0");
 
                             t.HasCheckConstraint("CK_ColBalances_NonNegative", "\"Balance\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColBalanceAdjustment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<Guid>("ApplicantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("BalanceAfter")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<Guid?>("BalanceTxnId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreationTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("LedgerVoucherId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReviewNote")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid?>("ReviewerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BalanceTxnId")
+                        .IsUnique();
+
+                    b.HasIndex("LedgerVoucherId")
+                        .IsUnique();
+
+                    b.HasIndex("RequestId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "CreationTime");
+
+                    b.HasIndex("UserId", "CreationTime");
+
+                    b.ToTable("ColBalanceAdjustments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ColBalanceAdjustments_Amount", "\"Amount\" <> 0");
+
+                            t.HasCheckConstraint("CK_ColBalanceAdjustments_Currency", "\"Currency\" IN (3, 4)");
                         });
                 });
 
@@ -199,9 +274,21 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<int>("Channel")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("ChannelCreateLeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ChannelCreateLeaseUntil")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("ChannelOrderCreated")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("ChannelPayload")
                         .HasMaxLength(2048)
                         .HasColumnType("character varying(2048)");
+
+                    b.Property<bool>("ChannelPaymentMismatch")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("ChannelResultUnknown")
                         .HasColumnType("boolean");
@@ -209,6 +296,9 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<string>("ChannelTradeNo")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("CloseRequested")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("CollectionNo")
                         .IsRequired()
@@ -225,6 +315,13 @@ namespace AbpAdmin.Collection.Migrations
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("MerchantAccountId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("NextChannelQueryAt")
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<int>("Status")
@@ -246,9 +343,95 @@ namespace AbpAdmin.Collection.Migrations
                         .IsUnique()
                         .HasFilter("\"Status\" = 0");
 
+                    b.HasIndex("NextChannelQueryAt", "CreationTime")
+                        .HasFilter("\"Status\" = 0 AND \"MerchantAccountId\" IS NOT NULL");
+
+                    b.HasIndex("Channel", "MerchantAccountId", "ChannelTradeNo")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 1 AND \"MerchantAccountId\" IS NOT NULL AND \"ChannelTradeNo\" IS NOT NULL");
+
                     b.HasIndex(new[] { "BusinessType", "BusinessId" }, "IX_ColCollections_BusinessType_BusinessId_Query");
 
                     b.ToTable("ColCollections", (string)null);
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColCollectionRefund", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<int>("Channel")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ChannelRefundNo")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("ChannelResultUnknown")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("CollectionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreationTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("LastCheckedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("MerchantAccountId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("MerchantRefundNo")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("NextSubmissionAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StatusNote")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("SucceededAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MerchantRefundNo")
+                        .IsUnique();
+
+                    b.HasIndex("CollectionId", "RequestId")
+                        .IsUnique();
+
+                    b.HasIndex("Channel", "MerchantAccountId", "ChannelRefundNo")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ColCollectionRefunds_Channel_Account_RefundNo")
+                        .HasFilter("\"ChannelRefundNo\" IS NOT NULL");
+
+                    b.HasIndex("Status", "LastCheckedAt", "Id");
+
+                    b.ToTable("ColCollectionRefunds", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ColCollectionRefunds_PositiveAmount", "\"Amount\" > 0");
+                        });
                 });
 
             modelBuilder.Entity("AbpAdmin.Collection.Entities.ColDepositAddress", b =>
@@ -327,6 +510,9 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<int>("LogIndex")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("ManuallyReleased")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid>("NetworkId")
                         .HasColumnType("uuid");
 
@@ -362,6 +548,9 @@ namespace AbpAdmin.Collection.Migrations
                     b.HasIndex("TxHash");
 
                     b.HasIndex("Status", "BlockNumber");
+
+                    b.HasIndex("SweepTaskId", "Status")
+                        .HasFilter("\"SweepTaskId\" IS NOT NULL");
 
                     b.HasIndex("TokenId", "CreationTime");
 
@@ -503,6 +692,13 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AnkrGroup")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("AnkrPlatformAuthKeyCipher")
+                        .HasColumnType("text");
+
                     b.Property<decimal>("AutoCreditMaxAmount")
                         .HasColumnType("numeric");
 
@@ -514,6 +710,9 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.Property<decimal>("DepositFeeRate")
                         .HasColumnType("numeric");
+
+                    b.Property<int?>("EstimatedArrivalMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("GasLowAlertedAt")
                         .HasColumnType("timestamp without time zone");
@@ -584,6 +783,10 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<DateTime?>("BroadcastAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("BroadcastVaultAddress")
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
+
                     b.Property<DateTime>("CreationTime")
                         .HasColumnType("timestamp without time zone");
 
@@ -591,15 +794,24 @@ namespace AbpAdmin.Collection.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
+                    b.Property<long?>("GasNonceUsed")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("GasTxHash")
                         .HasMaxLength(66)
                         .HasColumnType("character varying(66)");
+
+                    b.Property<DateTime?>("LastProcessedAt")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<Guid>("NetworkId")
                         .HasColumnType("uuid");
 
                     b.Property<long?>("NonceUsed")
                         .HasColumnType("bigint");
+
+                    b.PrimitiveCollection<string[]>("PreviousTxHashes")
+                        .HasColumnType("text[]");
 
                     b.Property<bool>("Retryable")
                         .HasColumnType("boolean");
@@ -634,6 +846,8 @@ namespace AbpAdmin.Collection.Migrations
                         .HasFilter("\"Status\" IN (1, 2)");
 
                     b.HasIndex("Status", "StatusChangedAt");
+
+                    b.HasIndex("TokenId", "Status", "LastProcessedAt");
 
                     b.ToTable("ColSweepTasks", (string)null);
                 });
@@ -760,6 +974,10 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<DateTime?>("BroadcastAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("BroadcastSenderAddress")
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
+
                     b.Property<DateTime?>("CompleteTime")
                         .HasColumnType("timestamp without time zone");
 
@@ -824,6 +1042,48 @@ namespace AbpAdmin.Collection.Migrations
                     b.HasIndex("UserId", "CreationTime");
 
                     b.ToTable("ColWithdrawOrders", (string)null);
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Payments.ColPaymentEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("DeliveredAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("NextAttemptAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NextAttemptAt", "CreatedAt")
+                        .HasFilter("\"DeliveredAt\" IS NULL");
+
+                    b.ToTable("ColPaymentEvents", (string)null);
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColCollectionRefund", b =>
+                {
+                    b.HasOne("AbpAdmin.Collection.Entities.ColCollection", null)
+                        .WithMany()
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

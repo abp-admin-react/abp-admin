@@ -1,20 +1,30 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Balances;
+using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Collection.Services;
 using AbpAdmin.Collection.Settings;
 using AbpAdmin.Collection.Withdrawals;
 using AbpAdmin.Collection.Ledger;
+using AbpAdmin.Ledger.Data;
+using AbpAdmin.Ledger.Integration.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Volo.Abp;
+using Volo.Abp.DistributedLocking;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.Security.Claims;
+using Volo.Abp.Security.Encryption;
 using Volo.Abp.Settings;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.Uow;
@@ -32,7 +42,8 @@ public class WithdrawBroadcastTests : CollectionTestBase
     private static readonly Guid User1 = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid Admin = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
-    private const string HotWallet = "0x2222222222222222222222222222222222222222";
+    private const string HotWallet = "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a";
+    private const string RotatedWallet = "0x5555555555555555555555555555555555555555";
     private const string HotWalletKey = "0x1111111111111111111111111111111111111111111111111111111111111111";
     private const string ToAddress = "0x3333333333333333333333333333333333333333";
 
@@ -58,14 +69,14 @@ public class WithdrawBroadcastTests : CollectionTestBase
     private static string UsdtContract(FakeChainGateway _) =>
         "0x55d398326f99059fF775485246999027B3197955"; // 种子里的 BSC USDT
 
-    private async Task ConfigureHotWalletAsync()
+    private async Task ConfigureHotWalletAsync(string address = HotWallet)
     {
         var uowManager = GetRequiredService<IUnitOfWorkManager>();
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: true);
         var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
         var network = await dbContext.Networks.OrderBy(n => n.CreationTime).FirstAsync();
-        network.WithdrawVaultAddress = HotWallet;
-        network.WithdrawVaultKeyCipher = Guard.ProtectKey(HotWalletKey);
+        network.WithdrawVaultAddress = address;
+        network.WithdrawVaultKeyCipher = await Guard.ProtectKeyAsync(HotWalletKey);
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();
     }
@@ -99,6 +110,14 @@ public class WithdrawBroadcastTests : CollectionTestBase
         var network = await GetNetworkAsync();
         var order = await FundSubmitApproveAsync(50m, autoApprove: true); // ≤100 阈值 → 自动审
 
+        gateway.BeforeSend = async () =>
+        {
+            var sending = await GetOrderAsync(order.Id);
+            sending.Status.ShouldBe(WithdrawStatus.Broadcasting);
+            sending.BroadcastSenderAddress.ShouldBe(HotWallet);
+            sending.NonceUsed.ShouldBe(gateway.TxCountSeed);
+        };
+
         // 第一轮：自动审 + 广播（回执未出，HasReceipt=false）
         await Broadcast.RunRoundAsync(network, gateway, 20, 5);
         var afterFirst = await GetOrderAsync(order.Id);
@@ -125,42 +144,202 @@ public class WithdrawBroadcastTests : CollectionTestBase
     }
 
     [Fact]
-    public async Task NoHash_Timeout_WithUnoccupiedNonce_AutoRequeues_Without_Manual()
+    public async Task Manual_Approval_Broadcast_And_Replayed_Receipt_Post_One_Payout()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        using var http = new HttpClient();
+        var factory = new WithdrawalTestGatewayFactory(http, GetRequiredService<IStringEncryptionService>(), gateway);
+        var admin = CreateAdmin(factory);
+        using var principal = UseAdminPrincipal();
+
+        const decimal gross = 256m;
+        const decimal fee = 1.024m;
+        const decimal net = 254.976m;
+        var order = await FundSubmitApproveAsync(gross, autoApprove: true);
+        order.Status.ShouldBe(WithdrawStatus.Pending);
+        (await BucketAsync(User1)).ShouldBe((744m, gross));
+        (await AccountBalanceAsync(FinanceAccountCodes.UserFrozen, User1)).ShouldBe(gross);
+        var initialStatus = await ReadAsync(admin.GetStatusAsync);
+        initialStatus.PendingCount.ShouldBe(1);
+        var pending = await ReadAsync(() => admin.GetWithdrawalsAsync(0, 10, status: "Pending"));
+        pending.Items.ShouldHaveSingleItem().Id.ShouldBe(order.Id);
+
+        await ReadAsync(async () =>
+        {
+            await admin.ApproveAsync(new WithdrawAuditInput { Id = order.Id, Remark = "人工核对通过" });
+            return true;
+        });
+        factory.RequestedNetworks.ShouldBe(new[] { network.Id });
+        var approved = await GetOrderAsync(order.Id);
+        approved.Status.ShouldBe(WithdrawStatus.Processing);
+        approved.AuditUserId.ShouldBe(Admin);
+        approved.AuditRemark.ShouldBe("人工核对通过");
+        approved.Amount.ShouldBe(gross);
+        approved.Fee.ShouldBe(fee);
+        approved.ActualAmount.ShouldBe(net);
+        (await BucketAsync(User1)).ShouldBe((744m, 0m));
+        (await AccountBalanceAsync(FinanceAccountCodes.UserFrozen, User1)).ShouldBe(0m);
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(net);
+        (await AccountBalanceAsync(FinanceAccountCodes.WithdrawFeeIncome)).ShouldBe(fee);
+        var approvedStatus = await ReadAsync(admin.GetStatusAsync);
+        approvedStatus.PendingCount.ShouldBe(0);
+        approvedStatus.ProcessingCount.ShouldBe(1);
+
+        await Broadcast.RunRoundAsync(network, gateway, 20, 5);
+        var sent = await GetOrderAsync(order.Id);
+        sent.Status.ShouldBe(WithdrawStatus.Broadcasting);
+        sent.TxHash.ShouldNotBeNullOrWhiteSpace();
+        gateway.Broadcasts.ShouldHaveSingleItem().To.ShouldBe(UsdtContract(gateway));
+        (await ReadAsync(admin.GetStatusAsync)).BroadcastingCount.ShouldBe(1);
+
+        gateway.HasReceipt = true;
+        gateway.ReceiptStatusOverride = 1;
+        await Broadcast.RunRoundAsync(network, gateway, 20, 5);
+        await Broadcast.CompleteFromReceiptAsync(order.Id, sent.TxHash!);
+        await Broadcast.RunRoundAsync(network, gateway, 20, 5);
+
+        var finalStatus = await ReadAsync(admin.GetStatusAsync);
+        finalStatus.PendingCount.ShouldBe(0);
+        finalStatus.ProcessingCount.ShouldBe(0);
+        finalStatus.BroadcastingCount.ShouldBe(0);
+        finalStatus.BroadcastFailedCount.ShouldBe(0);
+        var completed = await ReadAsync(() => admin.GetWithdrawalsAsync(0, 1, withdrawalId: order.Id));
+        var row = completed.Items.ShouldHaveSingleItem();
+        row.Status.ShouldBe(nameof(WithdrawStatus.Completed));
+        row.TxHash.ShouldBe(sent.TxHash);
+        row.CompleteTime.ShouldNotBeNull();
+        gateway.Broadcasts.Count.ShouldBe(1);
+
+        (await AccountBalanceAsync(FinanceAccountCodes.UserAvailable, User1)).ShouldBe(744m);
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(0m);
+        (await AccountBalanceAsync(FinanceAccountCodes.WithdrawFeeIncome)).ShouldBe(fee);
+        (await AccountBalanceAsync(FinanceAccountCodes.OnChainAsset)).ShouldBe(1000m - net);
+        await ReadAsync(async () =>
+        {
+            var ledger = await GetRequiredService<IDbContextProvider<LedgerDbContext>>().GetDbContextAsync();
+            var vouchers = await ledger.Vouchers.AsNoTracking()
+                .Where(item => item.BizType == FinanceBizTypes.Withdraw && item.BizRefId == order.Id.ToString())
+                .ToListAsync();
+            vouchers.Count.ShouldBe(4);
+            vouchers.ShouldAllBe(item => item.Currency == "USDT" && item.UserId == User1);
+            vouchers.Single(item => item.Phase == FinanceBizTypes.Phases.Freeze).Amount.ShouldBe(gross);
+            vouchers.Single(item => item.Phase == FinanceBizTypes.Phases.Approve).Amount.ShouldBe(net);
+            vouchers.Single(item => item.Phase == FinanceBizTypes.Phases.FeeTake).Amount.ShouldBe(fee);
+            var payout = vouchers.Single(item => item.Phase == FinanceBizTypes.Phases.Payout);
+            payout.Amount.ShouldBe(net);
+            payout.Summary.ShouldNotBeNull();
+            payout.Summary.ShouldContain(sent.TxHash!);
+            var entries = await ledger.Entries.AsNoTracking().Where(item => item.VoucherId == payout.Id).ToListAsync();
+            entries.Count.ShouldBe(2);
+            entries.Sum(item => item.Debit).ShouldBe(net);
+            entries.Sum(item => item.Credit).ShouldBe(net);
+            return true;
+        });
+    }
+
+    private Task<decimal> AccountBalanceAsync(string code, Guid? userId = null) =>
+        GetRequiredService<ILedgerIntegrationService>().GetBalanceAsync(
+            userId.HasValue
+                ? new AccountRef(code, FinOwnerType.User, userId.Value.ToString())
+                : new AccountRef(code, FinOwnerType.Platform, ""), "USDT");
+
+    private sealed class WithdrawalTestGatewayFactory(
+        HttpClient http, IStringEncryptionService encryptor, FakeChainGateway gateway)
+        : ChainGatewayFactory(http, encryptor, "", NullLoggerFactory.Instance)
+    {
+        public List<Guid> RequestedNetworks { get; } = new();
+
+        public override Task<IBscChainGateway> CreateAsync(CollectionDbContext db, ColNetwork network, int cap)
+        {
+            RequestedNetworks.Add(network.Id);
+            return Task.FromResult<IBscChainGateway>(gateway);
+        }
+    }
+
+    private CollectionWithdrawAdminAppService CreateAdmin(ChainGatewayFactory factory) =>
+        new(Manager, Poster, Guard, Broadcast, factory,
+            GetRequiredService<IDbContextProvider<CollectionDbContext>>(), GetRequiredService<ISettingProvider>(),
+            GetRequiredService<ISettingManager>(), GetRequiredService<IAbpDistributedLock>())
+        {
+            LazyServiceProvider = GetRequiredService<CollectionWithdrawAdminAppService>().LazyServiceProvider,
+        };
+
+    private IDisposable UseAdminPrincipal() =>
+        GetRequiredService<ICurrentPrincipalAccessor>().Change(new ClaimsPrincipal(
+            new ClaimsIdentity(new[] { new Claim(AbpClaimTypes.UserId, Admin.ToString()) }, "Testing")));
+
+    [Fact]
+    public async Task NoHash_Timeout_With_Lower_Pending_Nonce_Does_Not_Requeue()
     {
         var gateway = await ArrangeWalletAsync();
         var network = await GetNetworkAsync();
         var order = await FundSubmitApproveAsync();
 
-        // 无哈希超时 + 热钱包 pending nonce(5) ≤ NonceUsed(7)：交易从未进 mempool——可证未出款，自动回 Processing
+        // 单个节点未见该 nonce，仍无法证明原签名交易不会重新出现。
         await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, nonceUsed: 7);
         gateway.TxCountSeed = 5;
 
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
-        after.Status.ShouldBe(WithdrawStatus.Processing);
-        after.RetryCount.ShouldBe(1);
-        after.FailReason!.ShouldContain("可证未出款");
+        after.Status.ShouldBe(WithdrawStatus.Broadcasting);
+        after.RetryCount.ShouldBe(0);
+        after.NonceUsed.ShouldBe(7);
+        gateway.Broadcasts.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task NoHash_Timeout_UnoccupiedNonce_RetryExhausted_AutoRefunds()
+    public async Task NoHash_Timeout_With_Lower_Pending_Nonce_Even_At_Retry_Limit_Does_Not_Refund()
     {
         var gateway = await ArrangeWalletAsync();
         var network = await GetNetworkAsync();
         var order = await FundSubmitApproveAsync();
 
-        // 可证未出款 + 重试次数用尽 → 自动退款终态（净额+手续费回可用），无人介入
+        // 即使已用尽重试次数，缺少确定链上证据也不能退款。
         await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60,
             retryCount: 3, nonceUsed: 7);
         gateway.TxCountSeed = 5;
 
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
-        after.Status.ShouldBe(WithdrawStatus.Rejected);
-        after.FailReason!.ShouldContain("自动退款");
+        after.Status.ShouldBe(WithdrawStatus.Broadcasting);
+        after.NonceUsed.ShouldBe(7);
+        (await BucketAsync(order.UserId)).balance.ShouldBe(950m);
+    }
 
-        var balances = GetRequiredService<CollectionBalanceManager>();
-        (await BucketAsync(order.UserId)).balance.ShouldBe(1000m); // 提交冻结的 100 全额回可用
+    [Fact]
+    public async Task NoHash_And_Unavailable_Explorer_Moves_Overdue_Withdrawal_To_Manual_Review()
+    {
+        await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 95, nonceUsed: 7);
+        using var http = new System.Net.Http.HttpClient(new StubChainHeadHandler());
+        var gateway = new AnkrBscChainGateway(http, ["https://rpc.example.test"], [], 100, 0, 0,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AnkrBscChainGateway>.Instance);
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+
+        var after = await GetOrderAsync(order.Id);
+        after.Status.ShouldBe(WithdrawStatus.BroadcastFailed);
+        after.NonceUsed.ShouldBe(7);
+        after.TxHash.ShouldBeNull();
+        (await BucketAsync(order.UserId)).balance.ShouldBe(950m);
+    }
+
+    private sealed class StubChainHeadHandler : System.Net.Http.HttpMessageHandler
+    {
+        protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(
+            System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+        {
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            using var command = System.Text.Json.JsonDocument.Parse(body);
+            command.RootElement.GetProperty("method").GetString().ShouldBe("eth_blockNumber");
+            return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new System.Net.Http.StringContent("""{"result":"0xaf00"}"""),
+            };
+        }
     }
 
     [Fact]
@@ -179,6 +358,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
                 HotWallet, ToAddress, (order.ActualAmount * 1000000000000000000m).ToString("0"), 999),
         };
         gateway.TxNonces["0xabababababababababababababababababababababababababababababababab"] = 7; // 认领 nonce 复核（同 nonce 才可认领）
+        gateway.TxSenders["0xabababababababababababababababababababababababababababababababab"] = HotWallet;
 
         // 第一轮：认领哈希（Broadcasting 带哈希，回执未出）
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
@@ -264,19 +444,19 @@ public class WithdrawBroadcastTests : CollectionTestBase
     }
 
     [Fact]
-    public async Task Retry_DoubleSpend_Gate_Rejects_Recent_Payout_To_Same_Address()
+    public async Task Retry_Does_Not_Treat_A_Recent_Payout_To_Same_Address_As_Nonce_Evidence()
     {
         var gateway = await ArrangeWalletAsync();
         var network = await GetNetworkAsync();
         var order = await FundSubmitApproveAsync();
 
         // 无哈希 BroadcastFailed + 近 24h 内已有同地址 Completed 付款
-        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0);
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, nonceUsed: 7);
         await CompleteAnotherToSameAddressAsync();
 
         var ex = await Should.ThrowAsync<BusinessException>(
             () => Broadcast.RetryAsync(order.Id, network, gateway));
-        ex.Code.ShouldBe(CollectionErrorCodes.WithdrawRecentPayoutExists);
+        ex.Code.ShouldBe(CollectionErrorCodes.WithdrawPendingOutbound);
     }
 
     [Fact]
@@ -308,10 +488,109 @@ public class WithdrawBroadcastTests : CollectionTestBase
         var network = await GetNetworkAsync();
         var order = await FundSubmitApproveAsync();
 
-        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, retryCount: 3);
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, retryCount: 3, nonceUsed: 7);
         var ex = await Should.ThrowAsync<BusinessException>(
             () => Broadcast.RetryAsync(order.Id, network, gateway));
         ex.Code.ShouldBe(CollectionErrorCodes.WithdrawRetryLimitReached);
+    }
+
+    [Fact]
+    public async Task Retry_Completes_Successful_Receipt_At_Retry_Limit_Without_Rebroadcast()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, "0xfeed", minutesAgo: 0,
+            retryCount: WithdrawDefaults.MaxRetries, nonceUsed: 7);
+        gateway.HasReceipt = true;
+
+        await Broadcast.RetryAsync(order.Id, network, gateway);
+
+        var completed = await GetOrderAsync(order.Id);
+        completed.Status.ShouldBe(WithdrawStatus.Completed);
+        completed.RetryCount.ShouldBe(WithdrawDefaults.MaxRetries);
+        gateway.Broadcasts.ShouldBeEmpty();
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(0m);
+    }
+
+    [Fact]
+    public async Task Manual_Refund_Rejects_Receipt_From_Previous_Broadcast_Attempt()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, "0xfeed", minutesAgo: 0, nonceUsed: 7);
+        gateway.HasReceipt = true;
+        gateway.ReceiptStatusOverride = 0;
+        using var http = new HttpClient();
+        var admin = CreateAdmin(new WithdrawalTestGatewayFactory(http, GetRequiredService<IStringEncryptionService>(), gateway));
+        using var principal = UseAdminPrincipal();
+        gateway.BeforeReceiptRead = async hash =>
+        {
+            hash.ShouldBe("0xfeed");
+            await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, "0xbeef", minutesAgo: 0,
+                retryCount: 1, nonceUsed: 8);
+        };
+
+        var exception = await Should.ThrowAsync<BusinessException>(() => ReadAsync(async () =>
+        {
+            await admin.RefundAsync(new WithdrawAuditInput { Id = order.Id, Remark = "旧回执" });
+            return true;
+        }));
+
+        exception.Code.ShouldBe(CollectionErrorCodes.WithdrawInvalidStatus);
+        var current = await GetOrderAsync(order.Id);
+        current.Status.ShouldBe(WithdrawStatus.BroadcastFailed);
+        current.TxHash.ShouldBe("0xbeef");
+        (await BucketAsync(User1)).ShouldBe((950m, 0m));
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(order.ActualAmount);
+        (await AccountBalanceAsync(FinanceAccountCodes.WithdrawFeeIncome)).ShouldBe(order.Fee);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task Stale_Manual_Retry_Does_Not_Change_A_Newer_Attempt_With_Same_Hash_And_Nonce(int receiptStatus)
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, "0xfeed", minutesAgo: 0, nonceUsed: 7);
+        gateway.HasReceipt = true;
+        gateway.ReceiptStatusOverride = receiptStatus;
+        gateway.BeforeReceiptRead = _ => ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed,
+            "0xfeed", minutesAgo: 0, retryCount: 1, nonceUsed: 7);
+
+        var exception = await Should.ThrowAsync<BusinessException>(() => Broadcast.RetryAsync(order.Id, network, gateway));
+
+        exception.Code.ShouldBe(CollectionErrorCodes.WithdrawInvalidStatus);
+        var current = await GetOrderAsync(order.Id);
+        current.Status.ShouldBe(WithdrawStatus.BroadcastFailed);
+        current.TxHash.ShouldBe("0xfeed");
+        current.NonceUsed.ShouldBe(7);
+        current.RetryCount.ShouldBe(1);
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(order.ActualAmount);
+    }
+
+    [Fact]
+    public async Task Auto_Refund_Leaves_A_Newer_Broadcast_Attempt_Untouched()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var network = await GetNetworkAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, "0xfeed", minutesAgo: 60,
+            retryCount: WithdrawDefaults.MaxRetries - 1, nonceUsed: 7);
+        gateway.HasReceipt = true;
+        gateway.ReceiptStatusOverride = 0;
+        gateway.BeforeReceiptRead = _ => ForceStateAsync(order.Id, WithdrawStatus.Broadcasting,
+            "0xbeef", minutesAgo: 0, retryCount: WithdrawDefaults.MaxRetries, nonceUsed: 8);
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+
+        var current = await GetOrderAsync(order.Id);
+        current.Status.ShouldBe(WithdrawStatus.Broadcasting);
+        current.TxHash.ShouldBe("0xbeef");
+        (await BucketAsync(User1)).ShouldBe((950m, 0m));
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(order.ActualAmount);
     }
 
     [Fact]
@@ -339,16 +618,19 @@ public class WithdrawBroadcastTests : CollectionTestBase
     }
 
     [Fact]
-    public async Task Retry_NoHash_Provable_Unsent_Still_Requeues()
+    public async Task Retry_NoHash_Requires_A_Different_Confirmed_Transaction_At_The_Same_Sender_Nonce()
     {
-        // 对照半区：pending nonce 未越过 NonceUsed（原交易可证未进 mempool）⇒ 重试照常回队。
         var gateway = await ArrangeWalletAsync();
         var network = await GetNetworkAsync();
         var order = await FundSubmitApproveAsync();
 
         await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, nonceUsed: 7);
-        gateway.TxCountSeed = 7; // pending == NonceUsed ⇒ 本单从未进 mempool
+        gateway.TxCountSeed = 7;
+        var ambiguous = await Should.ThrowAsync<BusinessException>(() => Broadcast.RetryAsync(order.Id, network, gateway));
+        ambiguous.Code.ShouldBe(CollectionErrorCodes.WithdrawPendingOutbound);
+        (await GetOrderAsync(order.Id)).NonceUsed.ShouldBe(7);
 
+        await SeedLaterOrderWithHashAsync(nonce: 7, completed: true);
         await Broadcast.RetryAsync(order.Id, network, gateway);
         (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Processing);
     }
@@ -370,6 +652,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
             new(hash, 0, HotWallet, ToAddress, (order.ActualAmount * 1000000000000000000m).ToString("0"), 999),
         };
         gateway.TxNonces[hash] = 3; // 历史交易的 nonce=3 ≠ 本单 7
+        gateway.TxSenders[hash] = HotWallet;
 
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
@@ -411,7 +694,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         var after = await GetOrderAsync(order.Id);
         after.Status.ShouldBe(WithdrawStatus.Rejected);
-        after.FailReason!.ShouldContain("后继提现占用");
+        after.FailReason!.ShouldContain("nonce 7");
         (await BucketAsync(order.UserId)).balance.ShouldBe(1000m);
     }
 
@@ -439,6 +722,26 @@ public class WithdrawBroadcastTests : CollectionTestBase
     }
 
     [Fact]
+    public async Task Known_Receipt_Cannot_Complete_Two_Withdrawals()
+    {
+        var first = await FundSubmitApproveAsync();
+        var other = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, ToAddress, 50m);
+        await Manager.ApproveAsync(other.Id, Admin, null);
+        const string hash = "0xdeadbeef";
+        await ForceStateAsync(first.Id, WithdrawStatus.Broadcasting, hash, minutesAgo: 0, nonceUsed: 7);
+        await Broadcast.CompleteFromReceiptAsync(first.Id, hash, await GetOrderAsync(first.Id));
+        await ForceStateAsync(other.Id, WithdrawStatus.Broadcasting, hash, minutesAgo: 0, nonceUsed: 8);
+        var verified = await GetOrderAsync(other.Id);
+
+        var duplicate = await Should.ThrowAsync<BusinessException>(() =>
+            Broadcast.CompleteFromReceiptAsync(other.Id, hash, verified));
+        duplicate.Code.ShouldBe(CollectionErrorCodes.WithdrawReceiptMismatch);
+        (await GetOrderAsync(first.Id)).Status.ShouldBe(WithdrawStatus.Completed);
+        (await GetOrderAsync(other.Id)).Status.ShouldBe(WithdrawStatus.Broadcasting);
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(other.ActualAmount);
+    }
+
+    [Fact]
     public async Task Nonce_Evidence_Requires_Completed_Not_Mere_TxHash()
     {
         var gateway = await ArrangeWalletAsync();
@@ -455,6 +758,203 @@ public class WithdrawBroadcastTests : CollectionTestBase
         await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
         (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Broadcasting); // 不退款、不重播
         (await BucketAsync(order.UserId)).balance.ShouldBe(950m);
+    }
+
+    [Fact]
+    public async Task Rotating_Hot_Wallet_Adopts_Transfer_From_Original_Sender_At_Original_Nonce()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60, nonceUsed: 7);
+        await ConfigureHotWalletAsync(RotatedWallet);
+        var network = await GetNetworkAsync();
+        var oldHash = "0x" + new string('a', 64);
+        var newHash = "0x" + new string('b', 64);
+        var rawAmount = (order.ActualAmount * 1000000000000000000m).ToString("0");
+        gateway.Logs[UsdtContract(gateway)] =
+        [
+            new(newHash, 0, RotatedWallet, ToAddress, rawAmount, 998),
+            new(oldHash, 0, HotWallet, ToAddress, rawAmount, 999),
+        ];
+        gateway.TxNonces[oldHash] = 7;
+        gateway.TxNonces[newHash] = 7;
+        gateway.TxSenders[oldHash] = HotWallet;
+        gateway.TxSenders[newHash] = RotatedWallet;
+
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        (await GetOrderAsync(order.Id)).TxHash.ShouldBe(oldHash);
+        gateway.AddressTransferReads.ShouldBe([HotWallet]);
+
+        gateway.HasReceipt = true;
+        await Broadcast.RecoverStuckBroadcastingAsync(network, gateway);
+        var completed = await GetOrderAsync(order.Id);
+        completed.Status.ShouldBe(WithdrawStatus.Completed);
+        completed.BroadcastSenderAddress.ShouldBe(HotWallet);
+        (await BucketAsync(order.UserId)).balance.ShouldBe(950m);
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(0m);
+        gateway.Broadcasts.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData(RotatedWallet, "BSC")]
+    [InlineData(HotWallet, "AnotherNetwork")]
+    public async Task Completed_Payment_Requires_Original_Wallet_And_Network(string sender, string networkName)
+    {
+        var gateway = await ArrangeWalletAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, txHash: null, minutesAgo: 60,
+            retryCount: WithdrawDefaults.MaxRetries - 1, nonceUsed: 7);
+        await ConfigureHotWalletAsync(RotatedWallet);
+        await SeedLaterOrderWithHashAsync(nonce: 7, completed: true, sender: sender, networkName: networkName);
+
+        await Broadcast.RecoverStuckBroadcastingAsync(await GetNetworkAsync(), gateway);
+
+        var current = await GetOrderAsync(order.Id);
+        current.Status.ShouldBe(WithdrawStatus.Broadcasting);
+        current.NonceUsed.ShouldBe(7);
+        current.BroadcastSenderAddress.ShouldBe(HotWallet);
+        current.TxHash.ShouldBeNull();
+        (await BucketAsync(order.UserId)).balance.ShouldBe(950m);
+        gateway.Broadcasts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Retry_Requires_Original_Wallet_Nonce_Evidence_After_Rotation()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, nonceUsed: 7);
+        await ConfigureHotWalletAsync(RotatedWallet);
+        var network = await GetNetworkAsync();
+        await SeedLaterOrderWithHashAsync(nonce: 7, completed: true, sender: RotatedWallet);
+
+        var blocked = await Should.ThrowAsync<BusinessException>(() => Broadcast.RetryAsync(order.Id, network, gateway));
+        blocked.Code.ShouldBe(CollectionErrorCodes.WithdrawPendingOutbound);
+        (await GetOrderAsync(order.Id)).BroadcastSenderAddress.ShouldBe(HotWallet);
+
+        await SeedLaterOrderWithHashAsync(nonce: 7, completed: true, sender: HotWallet);
+        await Broadcast.RetryAsync(order.Id, network, gateway);
+        var requeued = await GetOrderAsync(order.Id);
+        requeued.Status.ShouldBe(WithdrawStatus.Processing);
+        requeued.BroadcastSenderAddress.ShouldBeNull();
+        requeued.NonceUsed.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Refund_Requires_Original_Wallet_Nonce_Evidence_After_Rotation()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, nonceUsed: 7);
+        await ConfigureHotWalletAsync(RotatedWallet);
+        await SeedLaterOrderWithHashAsync(nonce: 7, completed: true, sender: RotatedWallet);
+        using var http = new HttpClient();
+        var admin = CreateAdmin(new WithdrawalTestGatewayFactory(http, GetRequiredService<IStringEncryptionService>(), gateway));
+        using var principal = UseAdminPrincipal();
+        var input = new WithdrawAuditInput { Id = order.Id, Remark = "原热钱包出款核对" };
+
+        var blocked = await Should.ThrowAsync<BusinessException>(() => ReadAsync(async () =>
+        {
+            await admin.RefundAsync(input);
+            return true;
+        }));
+        blocked.Code.ShouldBe(CollectionErrorCodes.WithdrawPendingOutbound);
+        (await BucketAsync(order.UserId)).balance.ShouldBe(950m);
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(order.ActualAmount);
+
+        await SeedLaterOrderWithHashAsync(nonce: 7, completed: true, sender: HotWallet);
+        await ReadAsync(async () =>
+        {
+            await admin.RefundAsync(input);
+            return true;
+        });
+        (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Rejected);
+        (await BucketAsync(order.UserId)).balance.ShouldBe(1000m);
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(0m);
+        (await AccountBalanceAsync(FinanceAccountCodes.WithdrawFeeIncome)).ShouldBe(0m);
+    }
+
+    [Fact]
+    public async Task Legacy_Attempt_With_Stored_Hash_Still_Completes_Without_Sender()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.Broadcasting, "0xfeed", minutesAgo: 60,
+            nonceUsed: 7, sender: null);
+        await ConfigureHotWalletAsync(RotatedWallet);
+        gateway.HasReceipt = true;
+
+        await Broadcast.RecoverStuckBroadcastingAsync(await GetNetworkAsync(), gateway);
+
+        (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Completed);
+        gateway.AddressTransferReads.ShouldBeEmpty();
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(0m);
+    }
+
+    [Fact]
+    public async Task Legacy_Attempt_Without_Sender_And_Hash_Blocks_Refund_And_Retry()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0,
+            nonceUsed: 7, sender: null);
+        var network = await GetNetworkAsync();
+        using var http = new HttpClient();
+        var admin = CreateAdmin(new WithdrawalTestGatewayFactory(http, GetRequiredService<IStringEncryptionService>(), gateway));
+        using var principal = UseAdminPrincipal();
+
+        var retry = await Should.ThrowAsync<BusinessException>(() => Broadcast.RetryAsync(order.Id, network, gateway));
+        retry.Code.ShouldBe(CollectionErrorCodes.WithdrawBroadcastSenderUnknown);
+        var refund = await Should.ThrowAsync<BusinessException>(() => ReadAsync(async () =>
+        {
+            await admin.RefundAsync(new WithdrawAuditInput { Id = order.Id, Remark = "旧单无发送方" });
+            return true;
+        }));
+        refund.Code.ShouldBe(CollectionErrorCodes.WithdrawBroadcastSenderUnknown);
+
+        (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.BroadcastFailed);
+        (await BucketAsync(order.UserId)).balance.ShouldBe(950m);
+        gateway.AddressTransferReads.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Manual_Completion_Requires_Original_Transaction_Sender_In_Addition_To_Transfer_Log()
+    {
+        var gateway = await ArrangeWalletAsync();
+        var order = await FundSubmitApproveAsync();
+        await ForceStateAsync(order.Id, WithdrawStatus.BroadcastFailed, txHash: null, minutesAgo: 0, nonceUsed: 7);
+        await ConfigureHotWalletAsync(RotatedWallet);
+        var hash = "0x" + new string('c', 64);
+        gateway.HasReceipt = true;
+        gateway.Logs[UsdtContract(gateway)] =
+        [
+            new(hash, 0, HotWallet, ToAddress, (order.ActualAmount * 1000000000000000000m).ToString("0"), 495),
+        ];
+        gateway.TxNonces[hash] = 7;
+        gateway.TxSenders[hash] = RotatedWallet;
+        using var http = new HttpClient();
+        var admin = CreateAdmin(new WithdrawalTestGatewayFactory(http, GetRequiredService<IStringEncryptionService>(), gateway));
+        using var principal = UseAdminPrincipal();
+
+        var mismatch = await Should.ThrowAsync<BusinessException>(() => ReadAsync(async () =>
+        {
+            await admin.CompleteAsync(order.Id, hash);
+            return true;
+        }));
+        mismatch.Code.ShouldBe(CollectionErrorCodes.WithdrawReceiptMismatch);
+        var unchanged = await GetOrderAsync(order.Id);
+        unchanged.Status.ShouldBe(WithdrawStatus.BroadcastFailed);
+        unchanged.TxHash.ShouldBeNull();
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(order.ActualAmount);
+
+        gateway.TxSenders[hash] = HotWallet;
+        await ReadAsync(async () =>
+        {
+            await admin.CompleteAsync(order.Id, hash);
+            return true;
+        });
+        (await GetOrderAsync(order.Id)).Status.ShouldBe(WithdrawStatus.Completed);
+        (await AccountBalanceAsync(FinanceAccountCodes.AccountsPayable)).ShouldBe(0m);
     }
 
     [Fact]
@@ -490,7 +990,7 @@ public class WithdrawBroadcastTests : CollectionTestBase
     /// <summary>直接置态（绕过状态机；模拟 worker/链上路径的中间态）。nonce 模拟发送前落库的 NonceUsed。</summary>
     private async Task ForceStateAsync(
         Guid orderId, WithdrawStatus status, string? txHash, int minutesAgo,
-        int retryCount = 0, long? nonceUsed = null)
+        int retryCount = 0, long? nonceUsed = null, string? sender = HotWallet)
     {
         var uowManager = GetRequiredService<IUnitOfWorkManager>();
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: true);
@@ -500,13 +1000,15 @@ public class WithdrawBroadcastTests : CollectionTestBase
         o.TxHash = txHash;
         o.RetryCount = retryCount;
         o.NonceUsed = nonceUsed;
+        o.BroadcastSenderAddress = sender;
         o.StatusChangedAt = DateTime.UtcNow.AddMinutes(-minutesAgo - 1);
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();
     }
 
     /// <summary>造一笔同 nonce 后继单（证据要求 Completed：必经回执成功，广播中不算）。</summary>
-    private async Task SeedLaterOrderWithHashAsync(long nonce, bool completed)
+    private async Task SeedLaterOrderWithHashAsync(
+        long nonce, bool completed, string sender = HotWallet, string networkName = "BSC")
     {
         var uowManager = GetRequiredService<IUnitOfWorkManager>();
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: true);
@@ -515,12 +1017,13 @@ public class WithdrawBroadcastTests : CollectionTestBase
         {
             UserId = Guid.NewGuid(),
             Currency = CollectionCurrency.Usdt,
-            NetworkName = "BSC",
+            NetworkName = networkName,
             ToAddress = "0x4444444444444444444444444444444444444444",
             Amount = 10m, Fee = 0.04m, ActualAmount = 9.96m, FeeRate = 0.004m,
             Status = completed ? WithdrawStatus.Completed : WithdrawStatus.Broadcasting,
-            TxHash = "0x" + new string('e', 62) + "ff",
+            TxHash = "0x" + (sender == HotWallet ? new string('e', 62) : new string('d', 62)) + "ff",
             NonceUsed = nonce,
+            BroadcastSenderAddress = sender,
             StatusChangedAt = DateTime.UtcNow.AddMinutes(-5),
             CreationTime = DateTime.UtcNow,
         });

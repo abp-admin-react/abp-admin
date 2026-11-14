@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
@@ -15,6 +16,7 @@ using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
+using Volo.Abp.DistributedLocking;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Settings;
 using Volo.Abp.SettingManagement;
@@ -34,6 +36,7 @@ public class WithdrawAuditInput
 /// <summary>配置提现热钱包（私钥经 body 传递，不进 URL/访问日志）。</summary>
 public class SetWithdrawVaultInput
 {
+    public Guid? NetworkId { get; set; }
     public string Address { get; set; } = default!;
 
     public string PrivateKey { get; set; } = default!;
@@ -107,6 +110,7 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     private readonly AbpAdmin.Collection.Chain.ChainGatewayFactory _gatewayFactory;
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly ISettingProvider _settings;
+    private readonly IAbpDistributedLock _distributedLock;
     private readonly Volo.Abp.SettingManagement.ISettingManager _settingManager;
 
     public CollectionWithdrawAdminAppService(
@@ -117,7 +121,8 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         AbpAdmin.Collection.Chain.ChainGatewayFactory gatewayFactory,
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         ISettingProvider settings,
-        Volo.Abp.SettingManagement.ISettingManager settingManager)
+        Volo.Abp.SettingManagement.ISettingManager settingManager,
+        IAbpDistributedLock distributedLock)
     {
         _withdraws = withdraws;
         _ledger = ledger;
@@ -127,11 +132,12 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         _dbContextProvider = dbContextProvider;
         _settings = settings;
         _settingManager = settingManager;
+        _distributedLock = distributedLock;
     }
 
-    /// <summary>提现单列表（可按状态/用户过滤，倒序分页）。</summary>
+    /// <summary>提现单列表（可按订单、状态、用户过滤，倒序分页）。</summary>
     public virtual async Task<PagedResultDto<WithdrawOrderDto>> GetWithdrawalsAsync(
-        int skipCount, int maxResultCount, string? status = null, Guid? userId = null)
+        int skipCount, int maxResultCount, string? status = null, Guid? userId = null, Guid? withdrawalId = null)
     {
         AssertHost();
         if (maxResultCount <= 0 || maxResultCount > 200)
@@ -141,6 +147,11 @@ public class CollectionWithdrawAdminAppService : ApplicationService
 
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var query = dbContext.WithdrawOrders.AsNoTracking();
+        if (withdrawalId is { } id)
+        {
+            query = query.Where(o => o.Id == id);
+        }
+
         if (!string.IsNullOrEmpty(status)
             && Enum.TryParse<AbpAdmin.Collection.Entities.WithdrawStatus>(status, true, out var st))
         {
@@ -180,12 +191,14 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     /// cap 沿用扫链的 NodeLogResultCap 但允许缺省 10000：提现路径只调 eth_*（nonce/余额/签名/回执），
     /// 不消费 getLogs 截断启发式——「无实测上限拒绝工作」是扫链侧的规则，此处豁免且不伪造测量语义。
     /// </summary>
-    private async Task<(Entities.ColNetwork Network, Chain.IBscChainGateway Gateway)> CreateWithdrawGatewayAsync()
+    private async Task<(ColNetwork Network, IBscChainGateway Gateway)> CreateWithdrawGatewayAsync(string? networkName = null)
     {
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var network = await dbContext.Networks.AsNoTracking()
-            .OrderBy(n => n.CreationTime).FirstAsync()
+        var networks = WithdrawGuard.NetworkQuery(dbContext).AsNoTracking();
+        var network = (networkName == null
+                ? await networks.FirstOrDefaultAsync()
+                : await networks.FirstOrDefaultAsync(n => n.Name == networkName))
             ?? throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
         var gateway = await _gatewayFactory.CreateAsync(dbContext, network, network.NodeLogResultCap ?? 10000);
         await uow.CompleteAsync();
@@ -217,19 +230,23 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     /// <summary>
     /// 广播失败退款终态（BroadcastFailed → Rejected：净额+手续费退回用户可用；原因必填）。
     /// 链上双花闸（不再仅凭操作员判断）：带哈希的单必须回执明确失败（revert=可证未出款；
-    /// 成功 → 引导走人工完结，回执未定 → 拒绝）；无哈希的单必须 pending nonce 未越过
-    /// NonceUsed（越过 = 可能已上链）。验证不过一律拒绝——宁可多一步人工也不双付。
+    /// 成功 → 引导走人工完结，回执未定 → 拒绝）。无哈希时须有同发送地址、同 nonce 的其他已确认交易。
     /// </summary>
     public virtual async Task RefundAsync(WithdrawAuditInput input)
     {
         AssertHost();
         var order = await _withdraws.FindAsync(input.Id);
-        var (network, gateway) = await CreateWithdrawGatewayAsync();
+        if (order.Status != WithdrawStatus.BroadcastFailed)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidStatus);
+        }
+
+        var (_, gateway) = await CreateWithdrawGatewayAsync(order.NetworkName);
 
         if (!string.IsNullOrEmpty(order.TxHash))
         {
             var receipt = await gateway.GetTransactionReceiptAsync(order.TxHash);
-            if (receipt.Status == null)
+            if (receipt.Status is not (0 or 1))
             {
                 throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
                     .WithData("TxHash", order.TxHash);
@@ -241,19 +258,12 @@ public class CollectionWithdrawAdminAppService : ApplicationService
                     .WithData("Reason", "链上回执成功——该单已出款，请走人工完结而非退款");
             }
         }
-        else if (order.NonceUsed != null)
+        else if (!await _withdraws.HasOtherCompletedAttemptAsync(order))
         {
-            var wallet = await _guard.LoadAsync()
-                         ?? throw new BusinessException(CollectionErrorCodes.HotWalletNotConfigured);
-            var pending = await gateway.GetTransactionCountAsync(wallet.Address);
-            if (pending > order.NonceUsed.Value)
-            {
-                throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
-                    .WithData("Reason", $"pending nonce {pending} 已越过 NonceUsed {order.NonceUsed}，交易可能在途");
-            }
+            throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound);
         }
 
-        await _withdraws.RefundAfterApproveAsync(input.Id, CurrentUser.Id!.Value, input.Remark!);
+        await _withdraws.RefundAfterApproveAsync(order, CurrentUser.Id!.Value, input.Remark!);
     }
 
     /// <summary>提现配置快照（前端状态卡：开关/总闸/限额/费率 + 各状态单量）。</summary>
@@ -323,12 +333,23 @@ public class CollectionWithdrawAdminAppService : ApplicationService
                 .WithData("Reason", "private key does not match the address");
         }
 
+        await using var broadcastLock = await _distributedLock.TryAcquireAsync(
+            CollectionConsts.WithdrawBroadcastLockKey, timeout: TimeSpan.FromSeconds(5));
+        if (broadcastLock == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.TryAgain);
+        }
+
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var network = await dbContext.Networks.OrderBy(n => n.CreationTime).FirstAsync()
+        var network = await WithdrawGuard.NetworkQuery(dbContext).FirstOrDefaultAsync()
                       ?? throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
+        if (input.NetworkId.HasValue && input.NetworkId != network.Id)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawNetworkUnsupported);
+        }
         network.WithdrawVaultAddress = address.ToLowerInvariant();
-        network.WithdrawVaultKeyCipher = _guard.ProtectKey(privateKey);
+        network.WithdrawVaultKeyCipher = await _guard.ProtectKeyAsync(privateKey);
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();
     }
@@ -511,14 +532,12 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     public virtual async Task RetryAsync(Guid id)
     {
         AssertHost();
-        var (network, gateway) = await CreateWithdrawGatewayAsync();
+        var order = await _withdraws.FindAsync(id);
+        var (network, gateway) = await CreateWithdrawGatewayAsync(order.NetworkName);
         await _broadcast.RetryAsync(id, network, gateway);
     }
 
-    /// <summary>
-    /// 人工完结（BroadcastFailed 单补录链上哈希）：强制查回执且状态必须成功；
-    /// 金额匹配核对依赖人工（回执不含金额解析，v1 以哈希+成功状态+人工确认为准）。
-    /// </summary>
+    /// <summary>人工完结：已记录哈希直接查回执，补录哈希必须核对原广播和代币转账。</summary>
     public virtual async Task CompleteAsync(Guid id, string txHash)
     {
         AssertHost();
@@ -528,7 +547,19 @@ public class CollectionWithdrawAdminAppService : ApplicationService
             throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Reason", "tx hash malformed");
         }
 
-        var (_, gateway) = await CreateWithdrawGatewayAsync();
+        var order = await _withdraws.FindAsync(id);
+        if (order.Status == WithdrawStatus.Completed && order.TxHash == txHash)
+        {
+            return;
+        }
+
+        if (order.Status is not (WithdrawStatus.Broadcasting or WithdrawStatus.BroadcastFailed)
+            || (order.TxHash != null && order.TxHash != txHash))
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidStatus);
+        }
+
+        var (network, gateway) = await CreateWithdrawGatewayAsync(order.NetworkName);
         var receipt = await gateway.GetTransactionReceiptAsync(txHash);
         if (receipt.Status == null)
         {
@@ -541,28 +572,37 @@ public class CollectionWithdrawAdminAppService : ApplicationService
                 .WithData("Reason", "receipt status failed");
         }
 
-        var order = await _withdraws.FindAsync(id);
-        if (string.IsNullOrEmpty(order.TxHash))
+        if (order.TxHash != null)
         {
-            // 无哈希补录：本端点的主场景。先 CAS 落哈希（BroadcastFailed/无哈希），再走完结；
-            // 金额无法从回执自动核对（Transfer 事件解析不在此端点能力内），以哈希+成功回执+人工确认为准
-            using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
-            var dbContext = await _dbContextProvider.GetDbContextAsync();
-            var written = await dbContext.WithdrawOrders
-                .Where(o => o.Id == id
-                            && (o.Status == WithdrawStatus.Broadcasting || o.Status == WithdrawStatus.BroadcastFailed)
-                            && o.TxHash == null)
-                .ExecuteUpdateAsync(x => x.SetProperty(o => o.TxHash, txHash));
-            if (written == 0)
-            {
-                throw new BusinessException(CollectionErrorCodes.WithdrawInvalidStatus)
-                    .WithData("Reason", "单据状态不符（非广播中/广播失败，或已有别的哈希）");
-            }
-
-            await uow.CompleteAsync();
+            await _broadcast.CompleteFromReceiptAsync(id, txHash, order);
+            return;
         }
 
-        await _broadcast.CompleteFromReceiptAsync(id, txHash);
+        var sender = WithdrawManager.RequireBroadcastSender(order);
+        if (receipt.BlockNumber is not long block
+            || await gateway.GetTransactionNonceForSenderAsync(txHash, sender) != order.NonceUsed)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawReceiptMismatch);
+        }
+
+        var symbol = CollectionLedgerPoster.CurrencyCode(order.Currency);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var token = await dbContext.Tokens.AsNoTracking()
+            .FirstOrDefaultAsync(t => t.NetworkId == network.Id && t.Symbol == symbol)
+            ?? throw new BusinessException(CollectionErrorCodes.WithdrawReceiptMismatch);
+        var (logs, _) = await gateway.GetTransferLogsAsync(token.ContractAddress, block, block);
+        var matchingTransfer = logs.Any(log =>
+            log.BlockNumber == block
+            && string.Equals(log.TxHash, txHash, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(log.From, sender, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(log.To, order.ToAddress, StringComparison.OrdinalIgnoreCase)
+            && DepositScanManager.TryScaleRaw(log.RawAmount, token.Decimals, out _) == order.ActualAmount);
+        if (!matchingTransfer)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawReceiptMismatch);
+        }
+
+        await _broadcast.CompleteFromReceiptAsync(id, txHash, order, attachVerifiedHash: true);
     }
 
     /// <summary>

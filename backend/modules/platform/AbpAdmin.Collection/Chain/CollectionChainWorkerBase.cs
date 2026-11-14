@@ -4,7 +4,9 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
+using AbpAdmin.Collection.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -13,11 +15,8 @@ using Volo.Abp.DistributedLocking;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 扫链/归集/提现广播 worker 公共骨架（计划第 5.6 节）：开关与轮间隔每轮经短命 scope 热读设置
-///（SettingUi 改完下一轮生效，免重启）；开关关闭时空转退出（默认关）；
-/// 每轮取 Redis 分布式锁（等待 5 秒不是租期），轮内有墙钟预算——超时取消并告警
-///（Redis 锁自动续期，挂死进程不能永久占锁）；一种代币失败不挡住另一种。
-/// 开关热开后启动期已无法预知，Redis 支撑守卫改为轮内懒检查（见 <see cref="EnsureRedisBackedLockBackend"/>）。
+/// 链上后台任务每轮读取开关、间隔和预算。仅在开关开启且配置了 Redis 时尝试取轮锁，
+/// 5 秒取锁等待与轮次执行预算独立。预算到期后向轮次发送取消信号。
 /// </summary>
 public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.BackgroundService
 {
@@ -27,10 +26,10 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
 
-    /// <summary>兜底轮间隔（设置读不出/解析失败时睡眠用；计划间隔来自 <see cref="GetRoundPlanAsync"/>）。</summary>
+    /// <summary>轮次计划读取失败时的等待间隔。</summary>
     private readonly TimeSpan _defaultInterval;
 
-    /// <summary>每轮墙钟预算（宿主配置，不热改——挂死防护阀防误配）。</summary>
+    /// <summary>网页未配置单轮预算时使用的部署默认值。</summary>
     private readonly TimeSpan _roundBudget;
 
     private bool _lockBackendAlerted;
@@ -53,29 +52,37 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
 
     protected abstract string LockKey { get; }
 
-    /// <summary>每轮计划：开关 + 轮间隔（在短命 scope 里热读设置组装；间隔由 Create 钳制 ≥5s）。</summary>
+    protected virtual int? GetRoundBudgetSeconds(ChainRuntimeSettingsDto? runtime) => runtime?.ChainRoundBudgetSeconds;
+
     protected abstract Task<WorkerRoundPlan> GetRoundPlanAsync(IServiceProvider scopedServices);
 
-    /// <summary>一轮：scope 内解析依赖，逐代币执行 RunTokenAsync。</summary>
     protected abstract Task RunRoundAsync(IServiceProvider scopedServices, CancellationToken ct);
 
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var interval = _defaultInterval;
-        Logger.LogInformation("{Worker} 启动（默认轮间隔 {Interval}s，墙钟预算 {Budget}s；开关与间隔每轮热读设置）",
+        Logger.LogInformation("{Worker} 启动（默认轮间隔 {Interval}s，默认单轮预算 {Budget}s）",
             GetType().Name, _defaultInterval.TotalSeconds, _roundBudget.TotalSeconds);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             var runRound = false;
+            var roundBudget = _roundBudget;
             try
             {
                 using (var planScope = _scopeFactory.CreateScope())
                 {
                     var plan = await GetRoundPlanAsync(planScope.ServiceProvider);
                     interval = plan.Interval;
-                    // 开关默认关（计划第 5.6 节）：不取锁、不碰链、不打 RPC——纯睡眠等待运维开启
                     runRound = plan.Enabled && EnsureRedisBackedLockBackend();
+                    if (runRound)
+                    {
+                        var runtime = await planScope.ServiceProvider.GetRequiredService<ChainRuntimeSettings>().ReadAsync();
+                        if (GetRoundBudgetSeconds(runtime) is int seconds && ChainRuntimeSettings.IsValidBudget(seconds))
+                        {
+                            roundBudget = TimeSpan.FromSeconds(seconds);
+                        }
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -84,9 +91,9 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
             }
             catch (Exception ex)
             {
-                // 读不出计划（如设置库瞬断）按关处理：fail-closed，绝不在开关状态未知时碰链
                 Logger.LogError(ex, "{Worker} 读取轮计划失败，本轮跳过（按开关关闭处理）", GetType().Name);
                 interval = _defaultInterval;
+                runRound = false;
             }
 
             if (runRound)
@@ -103,23 +110,20 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
                     else
                     {
                         using var budget = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                        budget.CancelAfter(_roundBudget);
+                        budget.CancelAfter(roundBudget);
                         var stopwatch = Stopwatch.StartNew();
                         try
                         {
                             using var scope = _scopeFactory.CreateScope();
                             await RunRoundAsync(scope.ServiceProvider, budget.Token);
+                            Logger.LogDebug("{Worker} 一轮完成 {Elapsed}ms", GetType().Name, stopwatch.ElapsedMilliseconds);
                         }
                         catch (OperationCanceledException) when (budget.IsCancellationRequested
                                                                  && !stoppingToken.IsCancellationRequested)
                         {
-                            // 墙钟预算耗尽：锁在 using 释放（自动续期终止），告警提示
-                            Logger.LogError("[Collection] {Worker} 一轮超过墙钟预算 {Budget}s，已取消并释放锁",
-                                GetType().Name, _roundBudget.TotalSeconds);
+                            Logger.LogError("[Collection] {Worker} 一轮超过执行预算 {Budget}s，本轮已取消",
+                                GetType().Name, roundBudget.TotalSeconds);
                         }
-
-                        stopwatch.Stop();
-                        Logger.LogDebug("{Worker} 一轮完成 {Elapsed}ms", GetType().Name, stopwatch.ElapsedMilliseconds);
                     }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -128,7 +132,6 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
                 }
                 catch (Exception ex)
                 {
-                    // 一轮失败不挡下一轮（对齐「单币失败不挡另一种」的同族纪律）
                     Logger.LogError(ex, "{Worker} 一轮异常，等下一轮重试", GetType().Name);
                 }
             }
@@ -147,16 +150,14 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
     }
 
     /// <summary>
-    /// 懒 Redis 支撑守卫（原启动期守卫的热改等价物）：开关开着而分布式锁不是 Redis 支撑
-    /// （Redis:IsEnabled 显式 false，或 Redis:Configuration 空白）→ 拒绝执行本轮（fail-closed），
-    /// 多实例下进程内锁会永久占锁/丢轮。每轮重查（配置可热载）；告警只在「由好变坏」时发
-    /// 一次（恢复后清旗，再次失守会再告警——监控断续不失明）。
+    /// 仅允许有 Redis 配置的实例执行链上动作，避免各实例用互不相干的进程内锁同时运行。
+    /// 连续遇到配置缺失时只告警一次，恢复后重置。
     /// </summary>
     private bool EnsureRedisBackedLockBackend()
     {
         if (IsRedisBackedLockConfigured(_configuration))
         {
-            _lockBackendAlerted = false; // 恢复即重置：下一次失守会再次告警
+            _lockBackendAlerted = false;
             return true;
         }
 
@@ -164,14 +165,13 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
         {
             _lockBackendAlerted = true;
             Logger.LogError(
-                "{Prefix}{Worker} 开关已开但分布式锁不是 Redis 支撑（Redis:IsEnabled 显式 false 或 Redis:Configuration 空白），拒绝执行本轮。多实例下进程锁会永久占锁/丢轮；请启用 Redis 或关闭开关（计划第 5.6 节守卫）",
+                "{Prefix}{Worker} 已启用但 Redis 配置不可用（Redis:IsEnabled 为 false 或 Redis:Configuration 为空），本轮跳过。请启用并配置 Redis 或关闭该任务",
                 CollectionConsts.AlertPrefixLockBackend, GetType().Name);
         }
 
         return false;
     }
 
-    /// <summary>Redis 支撑判定（配置口径与旧启动守卫一致；internal 供注册契约测试直测）。</summary>
     internal static bool IsRedisBackedLockConfigured(Microsoft.Extensions.Configuration.IConfiguration configuration)
     {
         var redisEnabledValue = configuration["Redis:IsEnabled"];
@@ -181,8 +181,7 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
     }
 
     /// <summary>
-    /// 解析链网关（cap 未配置返回 null 并由调用方跳过——不设缺省上限不开扫链）。
-    /// RPC 来源双轨：扫链 key 池（ColChainApiKeys，管理页维护）优先，池空回退网络行 RpcCipher。
+    /// 需要明确的节点日志上限。RPC 优先使用启用的密钥池，池空时使用网络设置的 RPC 地址。
     /// </summary>
     protected static async Task<IBscChainGateway?> CreateGatewayAsync(ChainGatewayFactory factory,
         CollectionDbContext dbContext, Entities.ColNetwork network, Microsoft.Extensions.Logging.ILogger logger)
@@ -190,7 +189,7 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
         if (network.NodeLogResultCap is not int cap || cap <= 0)
         {
             logger.LogError(
-                "网络 {Network} 未配置 NodeLogResultCap（实测或文档上限），按计划拒绝打开扫链；请先完成测量并回填",
+                "网络 {Network} 未配置有效的节点日志上限，链上任务本轮跳过。请按实测或节点文档填写",
                 network.Name);
             return null;
         }
@@ -199,7 +198,7 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
             k => k.NetworkId == network.Id && k.Provider == Entities.ChainApiKeyProvider.RpcBsc && k.IsEnabled);
         if (!hasPool && string.IsNullOrEmpty(network.RpcCipher))
         {
-            logger.LogError("网络 {Network} 未配置扫链 key（key 池为空且 RpcCipher 为空），扫链无法进行", network.Name);
+            logger.LogError("网络 {Network} 没有启用的 RPC 密钥或备用 RPC 地址，链上任务本轮跳过", network.Name);
             return null;
         }
 
@@ -209,18 +208,15 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "网络 {Network} 组装链网关失败（key 解密失败或池为空）", network.Name);
+            logger.LogError(ex, "网络 {Network} 组装链网关失败，链上任务本轮跳过", network.Name);
             return null;
         }
     }
 }
 
 /// <summary>
-/// 网关工厂：组装扫链网关，RPC/Etherscan 双通道都支持「key 池优先、旧配置回退」——
-/// 池 = ColChainApiKeys（同服务商多把，管理页增删启停），网关内遇限流/认证错误自动换下一把；
-/// 池空回退网络行 RpcCipher（完整 URL 含 key）/ 宿主配置的 Etherscan 端点。
-/// 跨轮轮换：进程内递增偏移，每轮从不同 key 起步（Ankr/Etherscan 免费档限流按 key 计）。
-/// HttpClient 由宿主 IHttpClientFactory 提供。
+/// 组装 RPC 和 Etherscan 网关。每轮按进程内偏移轮换首选密钥，网关在配额或认证失败时切换。
+/// RPC 池空时用网络的备用地址。Etherscan 池空时，仅在启用回退设置后使用宿主端点。
 /// </summary>
 public class ChainGatewayFactory
 {
@@ -228,6 +224,7 @@ public class ChainGatewayFactory
     private readonly Volo.Abp.Security.Encryption.IStringEncryptionService _encryptor;
     private readonly string _etherscanEndpoint;
     private readonly Microsoft.Extensions.Logging.ILoggerFactory _loggerFactory;
+    private readonly IServiceScopeFactory? _scopeFactory;
     private int _rpcCursor;
     private int _etherscanCursor;
 
@@ -235,21 +232,34 @@ public class ChainGatewayFactory
         System.Net.Http.HttpClient http,
         Volo.Abp.Security.Encryption.IStringEncryptionService encryptor,
         string etherscanEndpoint,
-        Microsoft.Extensions.Logging.ILoggerFactory loggerFactory)
+        Microsoft.Extensions.Logging.ILoggerFactory loggerFactory,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _http = http;
         _encryptor = encryptor;
         _etherscanEndpoint = etherscanEndpoint;
         _loggerFactory = loggerFactory;
+        _scopeFactory = scopeFactory;
     }
 
     public string? MasterKey { get; set; }
+
+    public virtual async Task<string?> GetMasterKeyAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(MasterKey))
+        {
+            return MasterKey;
+        }
+
+        using var scope = _scopeFactory?.CreateScope();
+        return scope == null ? null : await scope.ServiceProvider.GetRequiredService<ChainKeyProvider>().GetAsync();
+    }
 
     /// <summary>组网关：取启用 key（按创建序），偏移起步轮换；首选 key 刷 LastUsedAt（运维可见度，失败不影响扫链）。</summary>
     public virtual async Task<IBscChainGateway> CreateAsync(CollectionDbContext dbContext,
         Entities.ColNetwork network, int cap)
     {
-        var masterKey = MasterKey
+        var masterKey = await GetMasterKeyAsync()
                         ?? throw new InvalidOperationException("Collection:MasterKey 未配置，无法解密扫链 key");
         var now = DateTime.UtcNow;
 
@@ -260,8 +270,6 @@ public class ChainGatewayFactory
             .OrderBy(k => k.CreationTime).ToListAsync();
         foreach (var k in rpcKeys)
         {
-            // 先解密再拼接：base + Decrypt() 会把 null 当空串拼出裸基座 URL，
-            // 坏 key 静默混进池、下方「全部解密失败」分支永不可达
             var key = Decrypt(k.KeyCipher, masterKey);
             if (key != null)
             {
@@ -271,15 +279,13 @@ public class ChainGatewayFactory
 
         if (rpcUrls.Count == 0)
         {
-            // key 池有条目但全部解密失败时，报错必须指向「解密失败」而不是「池为空」——
-            // 口令轮换/密文损坏是运维动作问题，与「还没录入 key」的排障方向完全不同
+            // 区分密钥池未配置与已配置但无法解密，后者需要重新录入密钥。
             if (rpcKeys.Count > 0)
             {
                 throw new InvalidOperationException(
                     $"网络 {network.Name} 无可用 RPC：key 池 {rpcKeys.Count} 条全部解密失败（疑似口令轮换/密文损坏），请重新录入 key");
             }
 
-            // 兼容旧配置：key 池为空时回退网络行 RpcCipher（完整 URL，行为与多 key 之前一致）
             if (string.IsNullOrEmpty(network.RpcCipher))
             {
                 throw new InvalidOperationException(
@@ -303,6 +309,10 @@ public class ChainGatewayFactory
         }
 
         var etherscanUrls = new List<string>();
+        using var settingsScope = _scopeFactory?.CreateScope();
+        var runtime = settingsScope == null ? null
+            : await settingsScope.ServiceProvider.GetRequiredService<ChainRuntimeSettings>().ReadAsync();
+        var useLegacyExplorerFallback = runtime?.UseLegacyExplorerFallback != false;
         var etherscanKeys = await dbContext.ChainApiKeys.AsNoTracking()
             .Where(k => k.NetworkId == network.Id
                         && k.Provider == Entities.ChainApiKeyProvider.EtherscanV2 && k.IsEnabled)
@@ -312,12 +322,15 @@ public class ChainGatewayFactory
             var etherscanBase = BuildEtherscanBase(_etherscanEndpoint);
             foreach (var k in etherscanKeys)
             {
-                etherscanUrls.Add(etherscanBase + Decrypt(k.KeyCipher, masterKey));
+                if (Decrypt(k.KeyCipher, masterKey) is { Length: > 0 } key)
+                {
+                    etherscanUrls.Add(etherscanBase + key);
+                }
             }
 
             await TouchLastUsedAsync(dbContext, etherscanKeys, _etherscanCursor, now);
         }
-        else
+        else if (useLegacyExplorerFallback)
         {
             // 回退宿主配置端点（secrets 里的完整 URL，可能自带 key）
             etherscanUrls.Add(_etherscanEndpoint);
@@ -362,16 +375,12 @@ public class ChainGatewayFactory
 
     private string? Decrypt(string? cipher, string masterKey)
     {
-        // 调用方 CreateGatewayAsync 已确保池或 RpcCipher 至少一个非空；null 时返回 null（仅日志排查用途）
         if (cipher == null) return null;
         return _encryptor.Decrypt(cipher.StartsWith('\u0001') ? cipher[1..] : cipher, masterKey);
     }
 }
 
-/// <summary>
-/// 每轮计划（热读设置组装）：开关 + 轮间隔。间隔统一经 <see cref="Create"/> 钳制 ≥5s——
-/// 防设置页误配 1s 间隔打爆 RPC/扫链 API（下限单源 ChainDefaults.MinIntervalSeconds）。
-/// </summary>
+/// <summary>轮次开关和等待间隔。<see cref="Create"/> 会限制最小间隔，避免高频请求节点。</summary>
 public sealed record WorkerRoundPlan(bool Enabled, TimeSpan Interval)
 {
     public static WorkerRoundPlan Create(bool enabled, TimeSpan interval)

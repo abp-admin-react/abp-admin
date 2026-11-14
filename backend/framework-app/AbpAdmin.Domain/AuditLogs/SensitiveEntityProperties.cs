@@ -25,8 +25,7 @@ public static class SensitiveEntityProperties
     {
         "PasswordHash", "Password", "SecurityStamp",
         "Payload", "ReferenceId", "ClientSecret",
-        // 链上（M5 计划第 5.6 节）：ColNetworks 上的助记词密文与 RPC 密文（含密钥的连接串）、
-        // ColChainApiKeys 上的扫链 key 密文。列名独特、按属性名全局黑名单生效；变更审计不留密文历史
-        "MnemonicCipher", "RpcCipher", "KeyCipher", "WithdrawVaultKeyCipher",
+        // 按属性名排除链网、提现钱包、节点密钥池和 Ankr 账户凭据的密文。
+        "MnemonicCipher", "RpcCipher", "KeyCipher", "WithdrawVaultKeyCipher", "AnkrPlatformAuthKeyCipher",
     };
 }

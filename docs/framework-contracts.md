@@ -24,7 +24,7 @@
 | `ModuleBoundaryContractTests`（Ordering.Tests） | 收款契约工程传递闭包无 EasyAbp/Nethereum/收款实现/EF 工程；订单工程直接引用只含契约+框架；两个模块 DbContext 的 `ConnectionStringName` 都是 `Default`（Default 才有共享事务，否则扣款+标支付静默分家） | 模块边界被悄悄击穿；共享事务静默消失 |
 | `ModuleBoundaryContractTests`（Ordering.Tests，提现 M2 扩充待办） | Collection → `AbpAdmin.Ledger.Integration.Contracts` 是新增合法引用（提现/充值过账 + ILedgerSeedProvider 播种，契约工程纯净无实现依赖）；提现专属边界锁（Collection 工程闭包不含 AbpAdmin.Ledger 实现）随 P1 对账作业一起补 | 过账接入变成对 Ledger 实现的整包引用 |
 | `SharedTransactionRollbackTests`（Ordering.Tests） | 同一工作单元写两边模块的行，失败一起回滚（收款/订单计划 M1 第一条测试） | 扣款与订单状态分家提交 |
-| `QuoteFeeMathTests` / `RefundGuardSourcePurityTests`（平台功能模块测试） | X_min 表驱动（分母≤0 拒绝、分子≤0 无下限、CNY/USD 比较基准）；`AbpAdmin.Application` 源码不出现收款/订单模块名（退款拦截只经 `IPaymentRefundGuard` 扩展点）；金额字段一律十进制字符串（`CollectionAmounts` 助手，业务代码不直接 decimal.Parse） | 费率下限算错货币基准；框架反向依赖业务模块；金额 JSON 数字精度丢失 |
+| `QuoteFeeMathTests`（平台功能模块测试） | X_min 表驱动（分母≤0 拒绝、分子≤0 无下限、CNY/USD 比较基准）；金额字段一律十进制字符串（`CollectionAmounts` 助手，业务代码不直接 decimal.Parse） | 费率下限算错货币基准；金额 JSON 数字精度丢失 |
 | `.github/workflows/ci.yml` | 以上全部 + 前端 `tsc`/vitest，push/PR 必跑 | fork 后保留此文件即继承全部保证 |
 
 ## 2. 部署身份与共享 Redis 基线
@@ -110,10 +110,8 @@
   框架侧语义变更时**必须同提交同步模块副本**，模块侧行为由
   `BizDataScopeDemoFilterTests`（读取/写入两侧 15 用例）钉住；框架原件的写入路径
   暂无直接用例，变更时以模块测试为准绳人工比对两侧。
-- **模块 Contracts DTO 不进 `FrontendContractSnapshotTests`**（层级隔离：Application.Tests
-  不反向引用业务模块工程，快照机制无法 seed 模块类型）：模块前端镜像（如
-  `web/src/abp/bizDataScopeDemo.ts`）的可空性契约暂由模块侧测试与评审保证；
-  快照机制上提为 TestBase 共享能力留待后续模块消费面扩大时再做。
+- `FrontendContractSnapshotTests` 显式登记前端消费的框架、收款和总账 DTO。业务模块示例
+  `web/src/abp/bizDataScopeDemo.ts` 的类型未登记，由模块测试与评审核对可空性。
 
 ## 6. 下游 fork 改造清单（源码模板专属）
 
@@ -121,11 +119,11 @@
 （appsettings `OpenIddict` 节）、菜单模板（`MenuTemplateDefinition.cs`）、Logo/标题、
 业务模块（`AbpAdmin.Biz.*`）；部署时设 `App:InstanceDiscriminator`（共享 Redis 场景）。
 
-**Payment 三件套（EasyAbp PaymentService/Prepayment/WeChatPay）已不可整体剔除**：
-收款模块（AbpAdmin.Collection）依赖其中的微信支付能力（Payment/PaymentItem 行、
-`CloseWeChatPayOrderJob`、退款拦截按 ItemType 前缀拒绝），且 `PaymentAdminAppService` 的
-退款入口要询问 `IPaymentRefundGuard`。无支付业务但保留收款/订单模块时，三件套随宿主加载；
-连收款/订单模块一并剔除时，退回到「无支付业务」形态（守卫无实现即放行）。
+后台支付记录（`/administration/payments`）从 `AbpAdmin.Collection` 查询，使用收款模块权限。渠道实现通过收款网关接入，订单通过收款契约调用。现有宿主库沿 EF Core 迁移链删除 EasyAbp PaymentService、Prepayment 和 WeChatPay 旧表及相关授权与设置。
+
+渠道回调先由所配置的商户验签器验证原始请求。验签回调、主动查单和关单时发现已付共用收款确认入口，核对商户单号、渠道、商户、币种、金额及交易号。关单结果不明时保留原支付尝试。收款确认或退款成功与待投递事件同事务写入，宿主后台作业重试投递和查询未决渠道结果。
+
+后台查单和退款使用独立的宿主权限。退款请求重试沿用同一 `RequestId`，按原收款币种和实付金额核算，处理中退款计入已占用额度。
 
 别动：§1 表中的保证测试与被它们钉住的实现；守卫（`AssertAbpKey`/`IsAllowedKey`/
 `BuildScanPattern`）、键名构造（`BuildDataProtectionKeyName`）、姿态判定——改这些先改

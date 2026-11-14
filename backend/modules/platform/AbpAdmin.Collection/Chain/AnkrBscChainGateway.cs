@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -7,47 +8,51 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Logging;
 
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// Ankr BSC JSON-RPC 网关（https://rpc.ankr.com/bsc/&#123;project-key&#125;）。
-/// getLogs 按 5.6 节口径判「没读完」：节点报错，或条数 ≥ 上限八成（上限由实测得来，进配置）。
-/// 签名广播用 Nethereum 的 LegacyTransaction（EIP-155），JSON-RPC 走本类自写——网关薄、假实现可替。
-/// 多 KEY：同一服务商可挂多把（管理页维护），遇 429/401/403/配额类错误自动切下一把重试；
-/// 其它错误（getLogs 超限、执行回退等）不切——那不是 key 的问题，切了纯浪费且破坏游标纪律。
+/// BSC JSON-RPC 网关，支持按地址使用 Etherscan 补查。节点日志接近上限时，调用方保留游标并缩小区间。
+/// 同一服务商仅在配额或认证失败时尝试下一把密钥。签名使用 EIP-155，并在广播前计算交易哈希。
 /// </summary>
 public class AnkrBscChainGateway : IBscChainGateway
 {
     /// <summary>keccak256("Transfer(address,address,uint256)")。</summary>
     public const string TransferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
-    /// <summary>截断判定的安全系数：返回条数 ≥ Cap×0.8 视为可能没读完（计划第 5.6 节）。</summary>
+    /// <summary>节点返回条数达到配置上限的八成时，按可能截断处理。</summary>
     public const double TruncateRatio = 0.8;
 
-    /// <summary>Ankr BSC RPC URL 模板（key 池的拼接基座；换服务商=改代码，参考项目同口径）。</summary>
+    /// <summary>Ankr 项目密钥使用的 BSC RPC 地址前缀。</summary>
     public const string AnkrBscRpcUrlBase = "https://rpc.ankr.com/bsc/";
+    public const string DefaultEtherscanV2Endpoint = "https://api.etherscan.io/v2/api";
 
     /// <summary>Etherscan V2 端点里 key 参数名（从配置端点截取基座，chainid 等参数跟配置走）。</summary>
     public const string EtherscanApiKeyParam = "apikey=";
 
     /// <summary>
-    /// 组装 Etherscan V2 请求 URL。两条来源的端点形态不同：
-    /// key 池路径 = 基座以 "?apikey=KEY" 结尾（BuildEtherscanBase 截出）；回退路径 = 宿主配置裸端点
-    /// （可能没有任何查询参数，也可能自带）。query 以 "&" 开头，因此必须先保证端点已带 "?"，
-    /// 并统一补 V2 多链端点必需的 chainid=56——回退路径不带 "?" 会拼出
-    /// "v2/api&contractaddress=…"，key 池路径缺 chainid 则被 V2 拒绝。
+    /// 组装 Etherscan V2 转账请求 URL。端点可来自密钥池或宿主配置，保留端点已指定的参数并补齐默认项。
+    /// 转账查询参数以 "&" 开头。
     /// </summary>
     internal static string BuildEtherscanUrl(string endpoint, string query)
     {
-        var hasQuery = endpoint.Contains('?');
-        if (endpoint.Contains("chainid=", System.StringComparison.OrdinalIgnoreCase))
+        var queryStart = endpoint.IndexOf('?');
+        var parameters = QueryHelpers.ParseQuery(queryStart >= 0 ? endpoint[queryStart..] : null);
+        if (!parameters.ContainsKey("chainid"))
         {
-            return hasQuery ? endpoint + query : endpoint + "?" + query[1..];
+            endpoint = QueryHelpers.AddQueryString(endpoint, "chainid", "56");
         }
-
-        return endpoint + (hasQuery ? "&" : "?") + "chainid=56" + query;
+        if (!parameters.ContainsKey("module"))
+        {
+            endpoint = QueryHelpers.AddQueryString(endpoint, "module", "account");
+        }
+        if (!parameters.ContainsKey("action"))
+        {
+            endpoint = QueryHelpers.AddQueryString(endpoint, "action", "tokentx");
+        }
+        return endpoint + query;
     }
 
     private readonly HttpClient _http;
@@ -58,14 +63,14 @@ public class AnkrBscChainGateway : IBscChainGateway
     private readonly int _rpcStart;
     private readonly int _etherscanStart;
 
-    /// <summary>端点数组各 ≥1；起始偏移由工厂按轮递增（同进程跨轮轮着用不同 key 起步）。</summary>
+    /// <summary>需要至少一个 RPC 端点。Etherscan 端点为空时停用按地址补查。</summary>
     public AnkrBscChainGateway(
         HttpClient http, string[] rpcEndpoints, string[] etherscanEndpoints, int nodeLogResultCap,
         int rpcStartOffset, int etherscanStartOffset, ILogger<AnkrBscChainGateway> logger)
     {
-        if (rpcEndpoints.Length == 0 || etherscanEndpoints.Length == 0)
+        if (rpcEndpoints.Length == 0)
         {
-            throw new ArgumentException("RPC/Etherscan 端点至少各一把");
+            throw new ArgumentException("至少配置一个 RPC 端点。");
         }
 
         _http = http;
@@ -73,7 +78,8 @@ public class AnkrBscChainGateway : IBscChainGateway
         _etherscanEndpoints = etherscanEndpoints;
         _nodeLogResultCap = nodeLogResultCap;
         _rpcStart = ((rpcStartOffset % rpcEndpoints.Length) + rpcEndpoints.Length) % rpcEndpoints.Length;
-        _etherscanStart = ((etherscanStartOffset % etherscanEndpoints.Length) + etherscanEndpoints.Length) % etherscanEndpoints.Length;
+        _etherscanStart = etherscanEndpoints.Length == 0 ? 0
+            : ((etherscanStartOffset % etherscanEndpoints.Length) + etherscanEndpoints.Length) % etherscanEndpoints.Length;
         _logger = logger;
     }
 
@@ -97,13 +103,11 @@ public class AnkrBscChainGateway : IBscChainGateway
         JsonElement result;
         try
         {
-            // GetLogs 恒有 result（错误走 error 分支抛 ChainRpcException）；null 视为协议异常由下方 catch 处理
             result = (await RpcAsync("eth_getLogs", new object[] { parameters }, ct))!.Value;
         }
         catch (Exception ex) when (ex is ChainRpcException || ex is InvalidOperationException)
         {
-            // 节点报错 / 响应体超限（宿主 5MB 报文透视上限）都按「没读完」处理：
-            // 缩小区间重试是调用方的游标纪律（计划第 5.6 节）
+            // 节点拒绝查询或缺少 result 时，返回未读完，让调用方缩小区间重试。
             _logger.LogWarning(ex, "getLogs 未读完（{From}..{To}）", fromBlock, toBlock);
             return (Array.Empty<TokenTransferLog>(), false);
         }
@@ -111,28 +115,25 @@ public class AnkrBscChainGateway : IBscChainGateway
         var logs = new List<TokenTransferLog>();
         foreach (var log in result.EnumerateArray())
         {
-            // 非白名单合约已被 address 过滤； topics[1]/[2] 是 from/to（pad 到 32 字节）
-            var txHash = log.GetProperty("transactionHash").GetString()!;
-            var logIndex = Convert.ToInt32(log.GetProperty("logIndex").GetString()!.Substring(2), 16);
-            var blockNumber = Convert.ToInt64(log.GetProperty("blockNumber").GetString()!.Substring(2), 16);
-            var topics = log.GetProperty("topics");
-            if (topics.GetArrayLength() < 3)
+            if (!MatchesContract(log, "address", contractAddress))
             {
                 continue;
             }
-
-            var from = ToAddress(topics[1].GetString()!);
-            var to = ToAddress(topics[2].GetString()!);
-            var raw = HexToDecimalString(log.GetProperty("data").GetString()!);
-            logs.Add(new TokenTransferLog(txHash.ToLowerInvariant(), logIndex, from, to, raw, blockNumber));
+            var txHash = log.GetProperty("transactionHash").GetString()!.ToLowerInvariant();
+            var blockNumber = Convert.ToInt64(log.GetProperty("blockNumber").GetString()![2..], 16);
+            if (ParseRpcTransfer(log, txHash, blockNumber) is { } transfer)
+            {
+                logs.Add(transfer);
+            }
         }
 
-        var complete = logs.Count < TruncateRatio * _nodeLogResultCap;
+        var resultCount = result.GetArrayLength();
+        var complete = resultCount < TruncateRatio * _nodeLogResultCap;
         if (!complete)
         {
             _logger.LogWarning(
                 "getLogs 返回 {Count} 条达到上限八成（cap={Cap}），区间 {From}..{To} 视为未读完",
-                logs.Count, _nodeLogResultCap, fromBlock, toBlock);
+                resultCount, _nodeLogResultCap, fromBlock, toBlock);
         }
 
         return (logs, complete);
@@ -142,8 +143,12 @@ public class AnkrBscChainGateway : IBscChainGateway
         string contractAddress, string address, long fromBlock, long toBlock,
         int page, int pageSize, CancellationToken ct = default)
     {
-        // Etherscan V2 多链端点（chainid=56）；tokentx 支持区块区间，做 1 块读不完时的按地址兜底。
-        // 多 key 轮换：免费档 5 req/s 最容易限流，命中配额/认证类错误就换下一把再试
+        if (_etherscanEndpoints.Length == 0)
+        {
+            throw new ChainRpcException("Etherscan 查询不可用，请配置启用的节点密钥。");
+        }
+
+        // 按地址和区块区间补查转账，仍需用日志索引与 RPC 扫描结果去重。
         var query = $"&contractaddress={contractAddress}&address={address}" +
                     $"&startblock={fromBlock}&endblock={toBlock}" +
                     $"&page={page}&offset={pageSize}&sort=asc";
@@ -176,54 +181,164 @@ public class AnkrBscChainGateway : IBscChainGateway
                 // 配额/认证类（"Max rate limit reached"/"Invalid API Key"…）→ 换 key 再试
                 if (IsQuotaOrAuthMessage(reason) && attempt < _etherscanEndpoints.Length - 1)
                 {
-                    _logger.LogWarning("Etherscan key#{Idx} 被拒（{Reason}），切下一把", idx, reason);
+                    _logger.LogWarning("Etherscan key#{Idx} 额度不足或认证失败，切下一把", idx);
                     continue;
                 }
 
                 // status=0 且 message=No transactions found 不是错误
-                if (items.ValueKind == JsonValueKind.Array)
+                if (items.ValueKind == JsonValueKind.Array && items.GetArrayLength() == 0
+                    && string.Equals(reason, "No transactions found", StringComparison.OrdinalIgnoreCase))
                 {
                     return new AddressTransferPage(Array.Empty<TokenTransferLog>(), false);
                 }
 
-                throw new ChainRpcException("etherscan-v2: " + reason);
+                throw new ChainRpcException("Etherscan 拒绝了转账记录查询。");
             }
 
-            return ParseEtherscanTransfers(items, pageSize);
+            return await ParseEtherscanTransfersAsync(items, contractAddress, address, fromBlock, toBlock, pageSize, ct);
         }
 
         // 循环必然 return/throw（末次尝试不再 continue）；到达这里说明逻辑有洞，显式失败
         throw new ChainRpcException("etherscan-v2: 轮换循环意外退出");
     }
 
-    private AddressTransferPage ParseEtherscanTransfers(JsonElement items, int pageSize)
+    private async Task<AddressTransferPage> ParseEtherscanTransfersAsync(
+        JsonElement items, string contractAddress, string address, long fromBlock, long toBlock,
+        int pageSize, CancellationToken ct)
     {
-        var logs = new List<TokenTransferLog>();
+        var logs = new Dictionary<(string TxHash, int LogIndex), TokenTransferLog>();
+        var receiptHashes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var t in items.EnumerateArray())
         {
-            if (!string.Equals(t.GetProperty("tokenSymbol").GetString(), "ERC20", StringComparison.OrdinalIgnoreCase)
-                && t.GetProperty("value").GetString() == null)
+            var txHash = t.GetProperty("hash").GetString()!.ToLowerInvariant();
+            // tokentx 可能不返回 logIndex。同一交易可发出多条 Transfer，transactionIndex 无法替代日志索引。
+            if (!MatchesContract(t, "contractAddress", contractAddress)
+                || !t.TryGetProperty("logIndex", out var index) || !TryReadLogIndex(index, out var logIndex))
             {
+                receiptHashes.Add(txHash);
                 continue;
             }
 
-            // LogIndex 优先（Etherscan tokentx 提供 logIndex）：进款单唯一键是 (TxHash, LogIndex)，
-            // transactionIndex 在「一笔交易多笔同代币 Transfer」时重复（拆分/批量合约给两个用户地址
-            // 打款），会把第二笔塌缩掉——链上到了钱、归集扫走了、却没有进款单，静默少记用户账
-            // 。旧端点无 logIndex 字段时回退 transactionIndex
-            var logIndex = t.TryGetProperty("logIndex", out var li) && li.GetString() is { } liRaw
-                ? int.Parse(liRaw)
-                : int.Parse(t.GetProperty("transactionIndex").GetString()!);
-            logs.Add(new TokenTransferLog(
-                t.GetProperty("hash").GetString()!.ToLowerInvariant(),
-                logIndex,
-                t.GetProperty("from").GetString()!,
-                t.GetProperty("to").GetString()!,
-                t.GetProperty("value").GetString()!,
-                long.Parse(t.GetProperty("blockNumber").GetString()!)));
+            logs[(txHash, logIndex)] = new TokenTransferLog(txHash, logIndex,
+                t.GetProperty("from").GetString()!, t.GetProperty("to").GetString()!,
+                t.GetProperty("value").GetString()!, long.Parse(t.GetProperty("blockNumber").GetString()!));
         }
 
-        return new AddressTransferPage(logs, logs.Count >= pageSize);
+        var unresolved = false;
+        foreach (var hash in receiptHashes)
+        {
+            var transfers = await ReadReceiptTransfersAsync(hash, contractAddress, address, fromBlock, toBlock, ct);
+            if (transfers.Count == 0)
+            {
+                unresolved = true;
+                continue;
+            }
+
+            foreach (var transfer in transfers)
+            {
+                logs[(transfer.TxHash, transfer.LogIndex)] = transfer;
+            }
+        }
+
+        return new AddressTransferPage(logs.Values.ToList(), items.GetArrayLength() >= pageSize, unresolved);
+    }
+
+    private async Task<IReadOnlyList<TokenTransferLog>> ReadReceiptTransfersAsync(
+        string hash, string contractAddress, string address, long fromBlock, long toBlock, CancellationToken ct)
+    {
+        var (logs, _) = await ReadReceiptTransfersCoreAsync(hash, contractAddress, fromBlock, toBlock, ct);
+        return logs.Where(transfer => string.Equals(transfer.From, address, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transfer.To, address, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    public Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> GetReceiptTransferLogsAsync(
+        string txHash, string contractAddress, long block, CancellationToken ct = default)
+        => ReadReceiptTransfersCoreAsync(txHash, contractAddress, block, block, ct);
+
+    /// <summary>同一条回执解析路径供归集证明和地址兜底使用，空成功回执与证据未读到分别返回。</summary>
+    private async Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> ReadReceiptTransfersCoreAsync(
+        string hash, string contractAddress, long fromBlock, long toBlock, CancellationToken ct)
+    {
+        try
+        {
+            var result = await RpcAsync("eth_getTransactionReceipt", new object[] { hash }, ct);
+            if (result is not { ValueKind: JsonValueKind.Object } receipt
+                || !string.Equals(receipt.GetProperty("transactionHash").GetString(), hash, StringComparison.OrdinalIgnoreCase)
+                || receipt.GetProperty("status").GetString() != "0x1")
+            {
+                return (Array.Empty<TokenTransferLog>(), false);
+            }
+
+            var block = Convert.ToInt64(receipt.GetProperty("blockNumber").GetString()![2..], 16);
+            if (block < fromBlock || block > toBlock)
+            {
+                return (Array.Empty<TokenTransferLog>(), false);
+            }
+
+            var transfers = new List<TokenTransferLog>();
+            foreach (var log in receipt.GetProperty("logs").EnumerateArray())
+            {
+                if (MatchesContract(log, "address", contractAddress)
+                    && ParseRpcTransfer(log, hash, block) is { } transfer)
+                {
+                    transfers.Add(transfer);
+                }
+            }
+
+            return (transfers, true);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or ChainRpcException or JsonException
+            or KeyNotFoundException or InvalidOperationException or FormatException or OverflowException or ArgumentOutOfRangeException)
+        {
+            _logger.LogWarning("交易 {TxHash} 的回执无法确认 Transfer 日志索引：{ErrorType}", hash, ex.GetType().Name);
+            return (Array.Empty<TokenTransferLog>(), false);
+        }
+    }
+
+    private static TokenTransferLog? ParseRpcTransfer(JsonElement log, string hash, long block)
+    {
+        if (log.TryGetProperty("removed", out var removed) && removed.ValueKind == JsonValueKind.True)
+        {
+            return null;
+        }
+
+        var topics = log.GetProperty("topics");
+        if (topics.GetArrayLength() < 3 || !string.Equals(topics[0].GetString(), TransferTopic, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!TryReadLogIndex(log.GetProperty("logIndex"), out var logIndex))
+        {
+            throw new FormatException("Transfer 日志缺少有效的 logIndex。");
+        }
+
+        var from = ToAddress(topics[1].GetString()!);
+        var to = ToAddress(topics[2].GetString()!);
+        var amount = HexToDecimalString(log.GetProperty("data").GetString()!);
+        return new TokenTransferLog(hash, logIndex, from, to, amount, block);
+    }
+
+    private static bool MatchesContract(JsonElement log, string field, string contractAddress) =>
+        log.TryGetProperty(field, out var address) && address.ValueKind == JsonValueKind.String
+            && string.Equals(address.GetString(), contractAddress, StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryReadLogIndex(JsonElement value, out int index)
+    {
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            return value.TryGetInt32(out index) && index >= 0;
+        }
+
+        index = -1;
+        if (value.ValueKind != JsonValueKind.String || value.GetString() is not { Length: > 0 } text)
+        {
+            return false;
+        }
+
+        return text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? int.TryParse(text.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out index) && index >= 0
+            : int.TryParse(text, System.Globalization.NumberStyles.None, null, out index);
     }
 
     public async Task<string> GetTokenBalanceRawAsync(string contractAddress, string address, CancellationToken ct = default)
@@ -248,22 +363,60 @@ public class AnkrBscChainGateway : IBscChainGateway
 
     public async Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default)
     {
-        var result = await RpcAsync("eth_getTransactionReceipt", new object[] { txHash }, ct);
-        if (result is null || result.Value.ValueKind == JsonValueKind.Null)
+        JsonElement? result;
+        try
+        {
+            result = await RpcAsync("eth_getTransactionReceipt", new object[] { txHash }, ct);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            throw new ChainRpcException("节点返回的交易回执 JSON 无效。");
+        }
+
+        if (result is { ValueKind: JsonValueKind.Null })
         {
             return new TransactionReceipt(txHash, null, null);
         }
 
-        return new TransactionReceipt(
-            txHash,
-            Convert.ToInt64(result.Value.GetProperty("blockNumber").GetString()!.Substring(2), 16),
-            Convert.ToInt32(result.Value.GetProperty("status").GetString()!.Substring(2), 16));
+        if (result is not { ValueKind: JsonValueKind.Object } value
+            || !MatchesContract(value, "transactionHash", txHash)
+            || !TryReadReceiptQuantity(value, "blockNumber", out var block)
+            || !TryReadReceiptQuantity(value, "status", out var status)
+            || status is not (0 or 1))
+        {
+            throw new ChainRpcException("节点返回的交易回执缺少有效的哈希、区块号或状态。");
+        }
+
+        return new TransactionReceipt(txHash, block, (int)status);
     }
 
-    public async Task<long?> GetTransactionNonceAsync(string txHash, CancellationToken ct = default)
+    private static bool TryReadReceiptQuantity(JsonElement receipt, string field, out long quantity)
+    {
+        quantity = -1;
+        return receipt.TryGetProperty(field, out var value)
+               && value.ValueKind == JsonValueKind.String
+               && value.GetString() is { Length: > 2 } hex
+               && hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+               && long.TryParse(hex.AsSpan(2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out quantity)
+               && quantity >= 0;
+    }
+
+    public Task<long?> GetTransactionNonceAsync(string txHash, CancellationToken ct = default)
+        => ReadTransactionNonceAsync(txHash, null, ct);
+
+    public Task<long?> GetTransactionNonceForSenderAsync(string txHash, string sender, CancellationToken ct = default)
+        => ReadTransactionNonceAsync(txHash, sender, ct);
+
+    private async Task<long?> ReadTransactionNonceAsync(string txHash, string? expectedSender, CancellationToken ct)
     {
         var result = await RpcAsync("eth_getTransactionByHash", new object[] { txHash }, ct);
         if (result is null || result.Value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (expectedSender != null && (!result.Value.TryGetProperty("from", out var from)
+                                       || !string.Equals(from.GetString(), expectedSender, StringComparison.OrdinalIgnoreCase)))
         {
             return null;
         }
@@ -276,10 +429,18 @@ public class AnkrBscChainGateway : IBscChainGateway
         string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
         CancellationToken ct = default)
     {
+        var transaction = await PrepareTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, ct);
+        await BroadcastTransactionAsync(transaction, ct);
+        return transaction.Hash;
+    }
+
+    public async Task<SignedChainTransaction> PrepareTransactionAsync(
+        string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
+        CancellationToken ct = default)
+    {
         var gasPriceHex = (await RpcAsync("eth_gasPrice", Array.Empty<object>(), ct))!.Value.GetString()!;
 
-        // gas 21000 只够裸转账；ERC20 transfer 链上 ~5 万，给 0x186A0。
-        // EIP-155：SignTransaction(byte[] key, BigInteger chainId, ...) 返回签名后 RLP hex
+        // 原生转账使用 21,000 gas，带调用数据的代币交易预留 100,000 gas。
         var signer = new Nethereum.Signer.LegacyTransactionSigner();
         var keyBytes = new Nethereum.Signer.EthECKey(privateKey).GetPrivateKeyAsBytes();
         var raw = signer.SignTransaction(
@@ -292,8 +453,19 @@ public class AnkrBscChainGateway : IBscChainGateway
             HexStringToBigInteger(string.IsNullOrEmpty(dataHex) ? "0x5208" : "0x186A0"),
             dataHex ?? "");
 
-        var hash = await RpcAsync("eth_sendRawTransaction", new object[] { raw.StartsWith("0x") ? raw : "0x" + raw }, ct);
-        return hash!.Value.GetString()!.ToLowerInvariant();
+        var rawHex = raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? raw[2..] : raw;
+        var hash = Nethereum.Util.Sha3Keccack.Current.CalculateHash(Convert.FromHexString(rawHex));
+        return new SignedChainTransaction("0x" + Convert.ToHexStringLower(hash), "0x" + rawHex);
+    }
+
+    public async Task BroadcastTransactionAsync(SignedChainTransaction transaction, CancellationToken ct = default)
+    {
+        var result = await RpcAsync("eth_sendRawTransaction", new object[] { transaction.RawHex }, ct);
+        if (result is not { ValueKind: JsonValueKind.String } hash
+            || !string.Equals(hash.GetString(), transaction.Hash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ChainRpcException("节点未确认已签名交易的哈希，发送结果需通过回执核对。");
+        }
     }
 
     public async Task<decimal> GetGasPriceGweiAsync(CancellationToken ct = default)
@@ -317,8 +489,7 @@ public class AnkrBscChainGateway : IBscChainGateway
             catch (Exception ex) when (IsKeyWorthRotating(ex) && attempt < _rpcEndpoints.Length - 1)
             {
                 // 只记录 key 序号不打 URL——URL 里含项目密钥
-                _logger.LogWarning("RPC key#{Idx} 调 {Method} 被拒（{Reason}），切下一把",
-                    idx, method, ex.Message);
+                _logger.LogWarning("RPC key#{Idx} 调 {Method} 时额度不足或认证失败，切下一把", idx, method);
             }
         }
 
@@ -327,8 +498,6 @@ public class AnkrBscChainGateway : IBscChainGateway
 
     private async Task<JsonElement?> RpcOnceAsync(string endpoint, string method, object[] parameters, CancellationToken ct)
     {
-        // JSON-RPC 2.0 参数字段名是 params（匿名类型不能叫 params，用字典）——
-        // 写成 parameters 时无参方法侥幸能通、带参方法全部报 "No more params"
         using var content = new StringContent(
             JsonSerializer.Serialize(new Dictionary<string, object>
             {
@@ -350,17 +519,16 @@ public class AnkrBscChainGateway : IBscChainGateway
         var root = doc.RootElement;
         if (root.TryGetProperty("error", out var error))
         {
-            var message = error.GetProperty("message").GetString();
-            if (IsQuotaOrAuthMessage(message))
-            {
-                throw new ChainRpcException(message!);
-            }
-
-            throw new ChainRpcException(method + ": " + message);
+            var isKeyError = error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String
+                && IsQuotaOrAuthMessage(message.GetString());
+            var code = error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("code", out var value) && value.ValueKind == JsonValueKind.Number
+                && value.TryGetInt32(out var number) ? number.ToString(System.Globalization.CultureInfo.InvariantCulture) : "未知";
+            throw new ChainRpcException($"{method}: 节点拒绝请求（错误码 {code}）。", isKeyError);
         }
 
-        // Clone 脱离已释放的 JsonDocument（using 退出后 pooled buffer 失效，会抛
-        // ObjectDisposedException）——克隆是独立拷贝
+        // 返回值需要独立于即将释放的 JsonDocument。
         return root.TryGetProperty("result", out var result) ? result.Clone() : null;
     }
 
@@ -378,7 +546,7 @@ public class AnkrBscChainGateway : IBscChainGateway
     internal static bool IsKeyWorthRotating(Exception ex)
     {
         return ex is HttpRequestException hre && IsKeyWorthRotating(hre.StatusCode)
-               || ex is ChainRpcException cre && IsQuotaOrAuthMessage(cre.Message);
+               || ex is ChainRpcException { IsKeyError: true };
     }
 
     /// <summary>JSON-RPC/浏览器层错误消息是否配额或认证类（英文消息，大小写不敏感）。</summary>
@@ -412,7 +580,7 @@ public class AnkrBscChainGateway : IBscChainGateway
             return System.Numerics.BigInteger.Zero;
         }
 
-        return System.Numerics.BigInteger.Parse(digits, System.Globalization.NumberStyles.HexNumber,
+        return System.Numerics.BigInteger.Parse("0" + digits, System.Globalization.NumberStyles.HexNumber,
             System.Globalization.CultureInfo.InvariantCulture);
     }
 
@@ -466,7 +634,14 @@ public class AnkrBscChainGateway : IBscChainGateway
 /// <summary>节点报错（getLogs 限流/超时等）——按游标纪律当「没读完」处理。</summary>
 public class ChainRpcException : Exception
 {
-    public ChainRpcException(string message) : base(message)
+    public ChainRpcException(string message) : this(message, isKeyError: false)
     {
     }
+
+    internal ChainRpcException(string message, bool isKeyError) : base(message)
+    {
+        IsKeyError = isKeyError;
+    }
+
+    internal bool IsKeyError { get; }
 }

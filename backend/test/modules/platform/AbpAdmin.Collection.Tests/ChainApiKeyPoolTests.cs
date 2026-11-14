@@ -3,6 +3,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Chain;
@@ -108,6 +109,89 @@ public class ChainApiKeyRotationTests : IDisposable
     }
 
     [Fact]
+    public async Task Rpc_Reported_Nonce_Requires_The_Requested_Transaction_Sender()
+    {
+        var sender = "0x" + new string('a', 40);
+        var other = "0x" + new string('b', 40);
+        var hash = "0x" + new string('c', 64);
+        var gateway = NewGateway(["r1"], ["e1"]);
+        _handler.Responder = _ => Json(HttpStatusCode.OK,
+            $$$"""{"jsonrpc":"2.0","id":1,"result":{"from":"{{{sender.ToUpperInvariant()}}}","nonce":"0x7"}}""");
+
+        (await gateway.GetTransactionNonceForSenderAsync(hash, sender)).ShouldBe(7);
+        (await gateway.GetTransactionNonceForSenderAsync(hash, other)).ShouldBeNull();
+
+        _handler.Responder = _ => Json(HttpStatusCode.OK,
+            """{"jsonrpc":"2.0","id":1,"result":{"nonce":"0x7"}}""");
+        (await gateway.GetTransactionNonceForSenderAsync(hash, sender)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Preparation_Computes_The_Signed_Hash_Before_Any_Broadcast()
+    {
+        // EIP-155 public example transaction. Its hash is the keccak256 of the signed RLP bytes.
+        const string expectedHash = "0x33469b22e9f636356c4160a87eb19df52b7412e8eac32a4a55ffe88ea8350788";
+        _handler.Responder = _ => Json(HttpStatusCode.OK, """{"result":"0x4a817c800"}""");
+        var gateway = NewGateway(["r1"], ["e1"]);
+
+        var signed = await gateway.PrepareTransactionAsync(
+            "0x" + string.Concat(Enumerable.Repeat("46", 32)),
+            "0x" + string.Concat(Enumerable.Repeat("35", 20)), "", "0xde0b6b3a7640000", chainId: 1, nonce: 9);
+        signed.Hash.ShouldBe(expectedHash);
+        _handler.Bodies.Count.ShouldBe(1);
+        using var prepare = JsonDocument.Parse(_handler.Bodies.Single());
+        prepare.RootElement.GetProperty("method").GetString().ShouldBe("eth_gasPrice");
+
+        _handler.Responder = _ => Json(HttpStatusCode.OK, JsonSerializer.Serialize(new { result = expectedHash }));
+        await gateway.BroadcastTransactionAsync(signed);
+        using var broadcast = JsonDocument.Parse(_handler.Bodies.Last());
+        broadcast.RootElement.GetProperty("method").GetString().ShouldBe("eth_sendRawTransaction");
+        broadcast.RootElement.GetProperty("params")[0].GetString().ShouldBe(signed.RawHex);
+
+        _handler.Responder = _ => Json(HttpStatusCode.OK, JsonSerializer.Serialize(new { result = "0x" + new string('0', 64) }));
+        await Should.ThrowAsync<ChainRpcException>(() => gateway.BroadcastTransactionAsync(signed));
+    }
+
+    [Fact]
+    public async Task Receipt_With_Different_Transaction_Hash_Is_Not_Valid_Evidence()
+    {
+        var hash = "0x" + new string('a', 64);
+        var other = "0x" + new string('b', 64);
+        _handler.Responder = _ => Json(HttpStatusCode.OK,
+            JsonSerializer.Serialize(new { result = new { transactionHash = other, blockNumber = "0x5", status = "0x0" } }));
+        var gateway = NewGateway(["r1"], ["e1"]);
+
+        await Should.ThrowAsync<ChainRpcException>(() => gateway.GetTransactionReceiptAsync(hash));
+    }
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("[]")]
+    [InlineData("{\"id\":1}")]
+    [InlineData("{\"result\":{\"transactionHash\":\"0xabc\",\"blockNumber\":null,\"status\":\"0x1\"}}")]
+    [InlineData("{\"result\":{\"transactionHash\":\"0xabc\",\"blockNumber\":\"0x5\",\"status\":\"0x2\"}}")]
+    [InlineData("{\"result\":{\"transactionHash\":\"0xabc\",\"blockNumber\":\"ab5\",\"status\":\"0x1\"}}")]
+    public async Task Malformed_Receipt_Is_Not_Reported_As_Absent(string body)
+    {
+        _handler.Responder = _ => Json(HttpStatusCode.OK, body);
+        var gateway = NewGateway(["r1"], ["e1"]);
+
+        await Should.ThrowAsync<ChainRpcException>(() => gateway.GetTransactionReceiptAsync("0xabc"));
+    }
+
+    [Fact]
+    public async Task Null_And_Confirmed_Receipts_Are_Distinguished()
+    {
+        var gateway = NewGateway(["r1"], ["e1"]);
+        _handler.Responder = _ => Json(HttpStatusCode.OK, """{"result":null}""");
+        (await gateway.GetTransactionReceiptAsync("0xabc")).ShouldBe(new TransactionReceipt("0xabc", null, null));
+
+        _handler.Responder = _ => Json(HttpStatusCode.OK,
+            """{"result":{"transactionHash":"0xABC","blockNumber":"0x5","status":"0x1"}}""");
+        (await gateway.GetTransactionReceiptAsync("0xabc")).ShouldBe(new TransactionReceipt("0xabc", 5, 1));
+    }
+
+    [Fact]
     public async Task Etherscan_Rotates_On_Quota_Message_In_Result_Field()
     {
         _handler.Responder = (req) =>
@@ -153,6 +237,7 @@ public class ChainApiKeyRotationTests : IDisposable
     private sealed class StubHandler : HttpMessageHandler
     {
         public System.Collections.Generic.List<string> Requests { get; } = new();
+        public System.Collections.Generic.List<string> Bodies { get; } = new();
 
         public Func<string, HttpResponseMessage> Responder { get; set; } =
             (req) => new HttpResponseMessage(HttpStatusCode.OK)
@@ -165,6 +250,10 @@ public class ChainApiKeyRotationTests : IDisposable
         {
             var url = request.RequestUri!.ToString();
             Requests.Add(url);
+            if (request.Content != null)
+            {
+                Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
+            }
             return Responder(url);
         }
     }
@@ -291,13 +380,14 @@ public class ChainApiKeyPoolTests : CollectionTestBase
     public async Task Admin_Add_Validates_Shape_Rejects_Duplicate_Masks_Key()
     {
         var service = GetRequiredService<CollectionNetworkAdminAppService>();
+        var networkId = (await service.GetNetworksAsync()).First().Id;
 
         // 形状：Ankr 必须 64 位十六进制
         await Should.ThrowAsync<BusinessException>(async () =>
-            await service.AddApiKeyAsync("RpcBsc", "short-key", null));
+            await service.AddApiKeyFromBodyAsync(new AddNetworkApiKeyInput { NetworkId = networkId, Provider = "RpcBsc", Key = "short-key" }));
 
         var key = NextAnkrKey();
-        var added = await service.AddApiKeyAsync("RpcBsc", key, "ankr-main");
+        var added = await service.AddApiKeyFromBodyAsync(new AddNetworkApiKeyInput { NetworkId = networkId, Provider = "RpcBsc", Key = key, Label = "ankr-main" });
         added.Provider.ShouldBe("RpcBsc");
         added.IsEnabled.ShouldBeTrue();
         added.MaskedKey.ShouldBe("****" + key[^4..]);        // 掩码 = **** + 尾 4 位
@@ -305,13 +395,13 @@ public class ChainApiKeyPoolTests : CollectionTestBase
 
         // 同服务商判重（SHA-256），跨服务商不判
         await Should.ThrowAsync<BusinessException>(async () =>
-            await service.AddApiKeyAsync("RpcBsc", key, "dup"));
-        var crossProvider = await service.AddApiKeyAsync("EtherscanV2", key[..34], "es-as-eth");
+            await service.AddApiKeyFromBodyAsync(new AddNetworkApiKeyInput { NetworkId = networkId, Provider = "RpcBsc", Key = key, Label = "dup" }));
+        var crossProvider = await service.AddApiKeyFromBodyAsync(new AddNetworkApiKeyInput { NetworkId = networkId, Provider = "EtherscanV2", Key = key[..34], Label = "es-as-eth" });
         crossProvider.Provider.ShouldBe("EtherscanV2");
 
         // Etherscan 形状：34 位字母数字
         await Should.ThrowAsync<BusinessException>(async () =>
-            await service.AddApiKeyAsync("EtherscanV2", "ab", null));
+            await service.AddApiKeyFromBodyAsync(new AddNetworkApiKeyInput { NetworkId = networkId, Provider = "EtherscanV2", Key = "ab" }));
 
         var listed = await service.GetApiKeysAsync();
         listed.RpcKeys.ShouldContain(k => k.Id == added.Id);
@@ -322,7 +412,8 @@ public class ChainApiKeyPoolTests : CollectionTestBase
     public async Task Admin_Toggle_And_Remove_Take_Effect()
     {
         var service = GetRequiredService<CollectionNetworkAdminAppService>();
-        var added = await service.AddApiKeyAsync("RpcBsc", NextAnkrKey(), "to-toggle");
+        var networkId = (await service.GetNetworksAsync()).First().Id;
+        var added = await service.AddApiKeyFromBodyAsync(new AddNetworkApiKeyInput { NetworkId = networkId, Provider = "RpcBsc", Key = NextAnkrKey(), Label = "to-toggle" });
 
         await service.SetApiKeyEnabledAsync(added.Id, false);
         var afterToggle = await service.GetApiKeysAsync();

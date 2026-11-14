@@ -166,6 +166,13 @@ public class AnonymousEndpointSweepTests
                  || e.DisplayName.StartsWith("AbpAdmin.TokenGateway.Http.WalletController.", StringComparison.Ordinal)),
 
         new(
+            "Collection channel notifications authenticate the original request with the configured provider verifier. "
+            + "Unconfigured providers have no acceptance path.",
+            e => e.Template == "api/collection/channel-notifications/{channel}/{merchantAccountId}"
+                 && e.DisplayName.StartsWith(
+                     "AbpAdmin.Collection.Http.CollectionChannelNotificationController.NotifyAsync ", StringComparison.Ordinal)),
+
+        new(
             "Post-login account status (GetCurrentAccountStatusAsync): [AllowAnonymous] bypasses class-level "
             + "Users.Update so any signed-in user can call it; method checks CurrentUser.IsAuthenticated and "
             + "throws if anonymous. DTO is only ShouldChangePassword+Reason — no PII/secrets.",

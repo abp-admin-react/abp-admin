@@ -19,10 +19,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Balances;
 
 /// <summary>
-/// 稳定币余额记账（计划第 3.1、5.5 节）。扣款刻意不新开工作单元：加入调用方的环境事务
-///（订单的「扣款 + 标支付同事务」前提），锁住余额行直到外层提交；回冲自带 requiresNew
-/// 事务，因为调用方（补状态作业、管理端）没有可加入的事务语义。
-/// 金额一律 decimal，边界字符串转换在集成服务完成。
+/// 稳定币余额记账。扣款加入订单事务时，流水、余额和支付状态一起提交；扣款回冲使用独立事务。
 /// </summary>
 public class CollectionBalanceManager : DomainService
 {
@@ -49,8 +46,6 @@ public class CollectionBalanceManager : DomainService
         _unitOfWorkManager = unitOfWorkManager;
     }
 
-    // ── 扣款（计划第 3.1 节的 DebitBalance 设计 / 第 5.5 节扣款 SQL，本地实现为 DebitAsync）────
-
     /// <summary>
     /// 扣 USDT / USDC。余额足够才减（行锁留到外层事务提交，命令超时读配置）；
     /// 同一业务单已有未回冲扣款时：金额币种相同返回原流水，否则冲突。
@@ -59,10 +54,7 @@ public class CollectionBalanceManager : DomainService
     public virtual async Task<Guid> DebitAsync(
         string businessType, Guid businessId, Guid userId, CollectionCurrency currency, decimal amount)
     {
-        // 生产调用方（订单 PayWithBalanceAsync）持有事务性环境 UoW：加入它，不新开。
-        // 环境事务必须真的是事务：非事务环境下两条语句各自自动提交，余额不足的失败路径会留下
-        // 已提交的孤儿扣款行——补状态作业会把它当成已付款证据把订单标 Paid。
-        // 没有环境事务时（直连场景/测试）自开事务性 UoW，保持「要么都在要么都不在」。
+        // 余额不足时，事务必须撤销扣款流水，否则订单核对会把孤立的流水当成已付款证据。
         AssertAmbientTransactionIfAny();
         if (_unitOfWorkManager.Current != null)
         {
@@ -132,7 +124,7 @@ public class CollectionBalanceManager : DomainService
 
         if (balances.Count == 0)
         {
-            // 余额不足（含无余额行）：当前余额写进日志便于客服分辨（计划第 5.5 节）
+            // 余额不存在时按零记录。
             var current = await dbContext.Balances.AsNoTracking()
                 .Where(b => b.UserId == userId && b.Currency == currency)
                 .FirstOrDefaultAsync();
@@ -150,8 +142,6 @@ public class CollectionBalanceManager : DomainService
 
         return txnId;
     }
-
-    // ── 回冲（计划第 3.1 节 ReverseDebitAsync）────────────────────────────────────────────
 
     /// <summary>
     /// 回冲该业务单未回冲的扣款。并发两次只加回一次余额（条件更新带 WHERE ReversedAt IS NULL，
@@ -206,7 +196,6 @@ public class CollectionBalanceManager : DomainService
         await uow.CompleteAsync();
     }
 
-    // ── 未回冲扣款查询（计划第 3.1 节 GetDebitAsync：补状态作业判断「已扣未标支付」）──────
 
     public virtual Task<ColBalanceTxn?> FindUnreversedDebitAsync(string businessType, Guid businessId)
     {
@@ -223,12 +212,9 @@ public class CollectionBalanceManager : DomainService
         });
     }
 
-    // ── 已入账充值清单（计划第 3.1 节 ListCreditedTxnsAsync：正向序号 + 7 天重扫）─────────
-
     /// <summary>
-    /// 按单调序号列出已入账充值流水（Seq 升序、最多 maxCount），并重扫最近 7 天里
-    /// 序号落在游标之前（曾被跳过）的充值行。两段按 Seq 天然不相交。
-    /// Cursor = 本批最大序号；空批等于传入游标——被跳过的行只靠 7 天重扫补。
+    /// 新增流水和最近 7 天的旧流水各取至多 maxCount 条，按序号合并。
+    /// 旧流水用于补偿消费失败，返回的游标不回退。
     /// </summary>
     public virtual Task<ListCreditedTxnsResult> ListCreditedAsync(long afterSeq, int maxCount)
     {
@@ -267,13 +253,10 @@ public class CollectionBalanceManager : DomainService
                 Amount = CollectionAmounts.Format(t.Amount),
                 CreditedAt = t.CreationTime,
             }).ToList(),
-            // 单调：重扫-only 批的最大序号可能小于传入游标，不得回退（与契约对齐）
             Cursor = merged.Count > 0 ? Math.Max(afterSeq, merged.Max(t => t.Seq)) : afterSeq,
         };
         });
     }
-
-    // ── 充值入账（计划第 5.5 节；M5 归集确认后调用，测试与运维补账也走这里）──────────────
 
     /// <summary>
     /// 记一笔充值入账：IdempotencyKey 是进款单 id（重复提交只入账一次），
@@ -282,9 +265,7 @@ public class CollectionBalanceManager : DomainService
     public virtual async Task<Guid> CreditAsync(
         Guid userId, CollectionCurrency currency, decimal amount, string idempotencyKey)
     {
-        // 与扣款同一纪律（M5 的归集确认在事务里调它；测试与补账直连也安全）：
-        // 非事务环境拒绝——插流水与加余额分两次自动提交，失败路径会让进款单幂等键
-        // 永久吞掉一笔充值（重试只返回已存在，余额却从没加上）
+        // 流水和余额必须一起提交，否则重试会把只写入流水的充值误判为已入账。
         AssertAmbientTransactionIfAny();
         if (_unitOfWorkManager.Current != null)
         {
@@ -618,6 +599,80 @@ public class CollectionBalanceManager : DomainService
             .WithData("Amount", CollectionAmounts.Format(amount));
     }
 
+    /// <summary>人工调账原语。调用方在同一事务中完成审批状态与总账过账。</summary>
+    public virtual async Task<Guid> ApplyAdjustmentAsync(
+        Guid adjustmentId, Guid userId, CollectionCurrency currency, decimal amount)
+    {
+        if (_unitOfWorkManager.Current?.Options.IsTransactional != true)
+        {
+            throw new InvalidOperationException("Balance adjustment requires a transactional unit of work.");
+        }
+
+        AssertStableCurrency(currency);
+        if (amount == 0m || decimal.Round(amount, CollectionAmounts.Scale) != amount
+            || amount > AbpAdmin.Ledger.Integration.Contracts.FinanceBizEvent.MaxAmount
+            || amount < -AbpAdmin.Ledger.Integration.Contracts.FinanceBizEvent.MaxAmount)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount);
+        }
+
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var key = "adjustment:" + adjustmentId.ToString("D");
+        var txnId = GuidGenerator.Create();
+        var now = _clock.Now;
+        var inserted = await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "ColBalanceTxns" ("Id", "UserId", "Currency", "Action", "Amount", "BalanceAfter", "IdempotencyKey", "BusinessType", "BusinessId", "RefTxnId", "ReversedAt", "CreationTime")
+            VALUES ({txnId}, {userId}, {(int)currency}, {BalanceActions.ManualAdjust}, {amount}, {0m}, {key}, {AbpAdmin.Ledger.Integration.Contracts.FinanceBizTypes.WalletAdjustment}, {adjustmentId}, NULL, NULL, {now})
+            ON CONFLICT ("IdempotencyKey") DO NOTHING
+            """);
+        if (inserted == 0)
+        {
+            var existing = await dbContext.BalanceTxns.AsNoTracking()
+                .SingleAsync(row => row.IdempotencyKey == key);
+            if (existing.UserId != userId || existing.Currency != currency || existing.Amount != amount
+                || existing.Action != BalanceActions.ManualAdjust)
+            {
+                throw new BusinessException(CollectionBalanceAdjustmentErrorCodes.RequestConflict);
+            }
+
+            return existing.Id;
+        }
+
+        decimal balanceAfter;
+        if (amount > 0m)
+        {
+            balanceAfter = await AddToBalanceAsync(dbContext, userId, currency, amount, now);
+        }
+        else
+        {
+            var previousTimeout = dbContext.Database.GetCommandTimeout();
+            await SetDebitCommandTimeoutAsync(dbContext);
+            try
+            {
+                var balances = await dbContext.Database.SqlQuery<decimal>($"""
+                    WITH updated AS (
+                        UPDATE "ColBalances" SET "Balance" = "Balance" + {amount}, "UpdatedAt" = {now}
+                        WHERE "UserId" = {userId} AND "Currency" = {(int)currency} AND "Balance" >= {-amount}
+                        RETURNING "Balance" AS "Value")
+                    SELECT "Value" FROM updated
+                    """).ToListAsync();
+                if (balances.Count == 0)
+                {
+                    throw new BusinessException(CollectionErrorCodes.InsufficientBalance);
+                }
+
+                balanceAfter = balances[0];
+            }
+            finally
+            {
+                dbContext.Database.SetCommandTimeout(previousTimeout);
+            }
+        }
+
+        await SetBalanceAfterAsync(dbContext, txnId, balanceAfter);
+        return txnId;
+    }
+
     // ── 内部 ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -637,7 +692,7 @@ public class CollectionBalanceManager : DomainService
         return balances.Count > 0 ? balances[0] : amount;
     }
 
-    /// <summary>流水行的 BalanceAfter 回填（扣/回冲/充值/提现各状态流转共用的第三条语句，7 个调用点）。</summary>
+    /// <summary>把本次记账后的可用余额写回流水。</summary>
     private static Task<int> SetBalanceAfterAsync(
         Microsoft.EntityFrameworkCore.DbContext dbContext, Guid txnId, decimal balanceAfter)
     {
@@ -645,11 +700,7 @@ public class CollectionBalanceManager : DomainService
             $"UPDATE \"ColBalanceTxns\" SET \"BalanceAfter\" = {balanceAfter} WHERE \"Id\" = {txnId}");
     }
 
-    /// <summary>
-    /// 环境工作单元若存在则必须是事务性的（fail-closed）：扣款/充值的多条语句要么整组提交、
-    /// 要么整组回滚；非事务环境下加入等于各自自动提交，失败路径留下孤儿账。编程错误直接抛，
-    /// 不降级——唯一合法调用方（订单 PayWithBalanceAsync）始终持事务性 requiresNew。
-    /// </summary>
+    /// <summary>拒绝加入非事务工作单元，防止流水与余额各自提交。</summary>
     private void AssertAmbientTransactionIfAny()
     {
         var current = _unitOfWorkManager.Current;

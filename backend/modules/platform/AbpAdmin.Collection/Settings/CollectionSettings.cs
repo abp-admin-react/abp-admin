@@ -10,8 +10,16 @@ public static class CollectionSettings
 {
     public const string Prefix = "Collection";
 
-    /// <summary>本模块设置页一级 Tab 名（SettingUi Group1 元数据值）。</summary>
+    /// <summary>交易通用设置分组（SettingUi Group1 元数据值）。</summary>
     public const string SettingUiGroup = Prefix;
+
+    public static class SettingUiGroups
+    {
+        public const string WechatPay = "WechatPay";
+        public const string Alipay = "Alipay";
+        public const string Stripe = "Stripe";
+        public const string Web3 = "Web3";
+    }
 
     /// <summary>单笔收款上限：渠道 × 币种各一个，值为十进制字符串金额。</summary>
     public static class MaxAmount
@@ -28,6 +36,12 @@ public static class CollectionSettings
     /// </summary>
     public static class Chain
     {
+        /// <summary>宿主网页保存的运行配置。由链网管理接口校验并整体写入。</summary>
+        public const string Runtime = Prefix + ".Chain.Runtime";
+
+        /// <summary>从后台初次初始化的凭据加密密钥，由 ABP 运行部署密钥加密。</summary>
+        public const string MasterKey = Prefix + ".Chain.MasterKey";
+
         /// <summary>扫链开关（默认 false：worker 纯睡眠不取锁不碰链）。</summary>
         public const string ScanEnabled = Prefix + ".Chain.ScanEnabled";
 
@@ -58,6 +72,9 @@ public static class CollectionSettings
         /// <summary>归集每轮取出上限（十进制金额；空/0 = 不限；同址同币合并后超出上限的进款单留给下一轮）。</summary>
         public const string SweepRoundLimit = Prefix + ".Chain.SweepRoundLimit";
 
+        /// <summary>归集每轮每阶段最多处理的任务数，超过安全上限时钳制。</summary>
+        public const string SweepTaskBatchSize = Prefix + ".Chain.SweepTaskBatchSize";
+
         /// <summary>打油单笔 BNB 上限（超过按仅人工失败，防配置错误烧币）。</summary>
         public const string FuelBnbLimit = Prefix + ".Chain.FuelBnbLimit";
 
@@ -81,8 +98,8 @@ public static class CollectionSettings
     }
 
     /// <summary>
-    /// 留在宿主配置（appsettings/secrets）的基础设施参数（冒号键）：密钥/端点/告警收件人
-    /// 不进设置页；墙钟预算是挂死防护阀（防误配 1s 预算让轮次永远做不完），也不热改。
+    /// 部署配置。运行预算和告警收件人作为迁移前的默认值，网页保存后使用网页值。
+    /// 主密钥保管在部署端。Etherscan 的部署备用地址可在网页关闭，节点密钥通过密钥池管理。
     /// </summary>
     public static class Host
     {
@@ -194,7 +211,10 @@ public static class WithdrawDefaults
 public static class ChainDefaults
 {
     public const int ScanIntervalSeconds = 20;
+    public const int MaxScanIntervalSeconds = 4_294_967; // Task.Delay accepts at most 4_294_967_294 milliseconds.
     public const int SweepIntervalSeconds = 60;
+    public const int SweepTaskBatchSize = 20;
+    public const int MaxSweepTaskBatchSize = 100;
     public const int HotWalletWatchIntervalSeconds = 300;
     public const int Confirmations = 15;
     public const int BlockRange = 50;

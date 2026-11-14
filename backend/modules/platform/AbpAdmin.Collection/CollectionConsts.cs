@@ -31,6 +31,12 @@ public static class CollectionConsts
     /// 本别名保留既有引用点不破坏；改名=数据迁移，须同步 DB 种子。</summary>
     public const string BscNetworkName = Contracts.CollectionNetworkConsts.BscNetworkName;
 
+    public const long BscMainnetChainId = 56;
+
+    public const int DefaultEstimatedArrivalMinutes = 60;
+
+    public const int MaxEstimatedArrivalMinutes = 1440;
+
     public const string ScannerLockKey = "Collection:Scanner";
 
     public const string SweepLockKey = "Collection:Sweep";

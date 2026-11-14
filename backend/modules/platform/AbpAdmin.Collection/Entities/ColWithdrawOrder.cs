@@ -54,6 +54,9 @@ public class ColWithdrawOrder : BasicAggregateRoot<Guid>
     /// <summary>提现交易 nonce（热钱包 pending nonce；重播双花门与替换重签用）。</summary>
     public long? NonceUsed { get; set; }
 
+    /// <summary>本次广播尝试的发送地址，和 nonce 一起在签名前落库；旧记录缺失时不推断发送方。</summary>
+    public string? BroadcastSenderAddress { get; set; }
+
     /// <summary>广播时刻（Broadcasting 超时恢复的计时起点）。</summary>
     public DateTime? BroadcastAt { get; set; }
 

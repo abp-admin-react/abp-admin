@@ -23,6 +23,15 @@ public class CollectionLedgerPoster : DomainService
         _ledger = ledger;
     }
 
+    public virtual Task<Guid> PostBalanceAdjustmentAsync(Guid adjustmentId, Guid userId,
+        Contracts.CollectionCurrency currency, decimal signedAmount, string reason, Guid reviewerId)
+    {
+        return _ledger.PostAsync(new FinanceBizEvent(
+            FinanceBizTypes.WalletAdjustment, adjustmentId.ToString("D"), signedAmount > 0m ? "increase" : "decrease",
+            CurrencyCode(currency), Math.Abs(signedAmount), UserId: userId,
+            Summary: reason, OperatorId: reviewerId));
+    }
+
     /// <summary>
     /// 账本币种码（大写）：CollectionCurrency.ToString() 给枚举名 "Usdt"，
     /// 账本子账户与查询两侧都必须走这里，大小写错位会让写入与查询互不可见。

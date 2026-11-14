@@ -91,6 +91,7 @@ public class CollectionTestModule : AbpModule
         // 测试先配置行为/复位再调被测服务
         context.Services.AddSingleton<Channels.ICollectionChannelGateway>(Fakes.FakeChannelGateway.Wechat);
         context.Services.AddSingleton<Channels.ICollectionChannelGateway>(Fakes.FakeChannelGateway.Alipay);
+        context.Services.AddSingleton<Channels.ICollectionRefundChannelGateway>(Fakes.FakeRefundChannelGateway.Instance);
         context.Services.AddSingleton<Fakes.FakeChainPushNotifier>(Fakes.FakeChainPushNotifier.Instance);
         context.Services.AddSingleton<Contracts.IChainPushNotifier>(Fakes.FakeChainPushNotifier.Instance);
     }

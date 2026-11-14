@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Chain;
+using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Settings;
@@ -18,9 +19,8 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Withdrawals;
 
 /// <summary>
-/// 提现广播 worker（M3 薄壳）：轮次逻辑在 <see cref="WithdrawBroadcastManager"/>（可注入假网关直测）。
-/// 开关 Collection.Withdraw.Enabled（设置页热改，默认 false——纯睡眠不取锁不碰链；与提交总闸同键同源）；
-/// 广播节奏（间隔/批量）同样热读。Redis 轮锁 + 墙钟预算与扫链/归集 worker 同纪律（CollectionChainWorkerBase）。
+/// 提现后台任务与提交共用提现总开关。执行轮读取最新的广播间隔和批量配置，
+/// 再交由 <see cref="WithdrawBroadcastManager"/> 核对回执、审核和广播。
 /// </summary>
 public class WithdrawBroadcastWorker : CollectionChainWorkerBase
 {
@@ -38,6 +38,8 @@ public class WithdrawBroadcastWorker : CollectionChainWorkerBase
     }
 
     protected override string LockKey => CollectionConsts.WithdrawBroadcastLockKey;
+
+    protected override int? GetRoundBudgetSeconds(ChainRuntimeSettingsDto? runtime) => runtime?.WithdrawRoundBudgetSeconds;
 
     /// <summary>测试桥：宿主注册测试断言轮锁键（internal + InternalsVisibleTo）。</summary>
     internal string LockKeyExposeForTest() => LockKey;
@@ -61,15 +63,13 @@ public class WithdrawBroadcastWorker : CollectionChainWorkerBase
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await dbContextProvider.GetDbContextAsync();
-        var network = await dbContext.Networks.AsNoTracking()
-            .OrderBy(n => n.CreationTime).FirstOrDefaultAsync(ct);
+        var network = await WithdrawGuard.NetworkQuery(dbContext).AsNoTracking().FirstOrDefaultAsync(ct);
         if (network == null)
         {
             return;
         }
 
-        // 广播只需要 eth_* 调用（nonce/余额/签名/回执），不扫日志——但沿用扫链的网关组装纪律
-        //（key 池优先、RpcCipher 回退、cap 未测量拒绝工作），运维只需维护一套 RPC 配置
+        // 提现与扫链共用网关，无哈希恢复会通过按地址补查寻找原交易。
         var gateway = await CreateGatewayAsync(factory, dbContext, network, Logger);
         await uow.CompleteAsync();
         if (gateway == null)

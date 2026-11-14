@@ -10,6 +10,22 @@ public static class CollectionPermissions
         public const string Default = GroupName + ".Collections";
     }
 
+    public static class Payments
+    {
+        public const string View = GroupName + ".Payments.View";
+        public const string Reconcile = GroupName + ".Payments.Reconcile";
+        public const string Refund = GroupName + ".Payments.Refund";
+    }
+
+    public static class BalanceAdjustments
+    {
+        public const string View = GroupName + ".BalanceAdjustments.View";
+        public const string Create = GroupName + ".BalanceAdjustments.Create";
+        public const string Approve = GroupName + ".BalanceAdjustments.Approve";
+        public const string Reject = GroupName + ".BalanceAdjustments.Reject";
+        public const string ApproveOwn = GroupName + ".BalanceAdjustments.ApproveOwn";
+    }
+
     /// <summary>链网运维（RPC/助记词/测量上限/金库地址/最低充值额）——高危动作独立权限。</summary>
     public static class Network
     {

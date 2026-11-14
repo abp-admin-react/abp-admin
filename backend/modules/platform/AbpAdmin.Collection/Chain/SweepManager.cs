@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Settings;
 using AbpAdmin.Collection.Balances;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
@@ -22,18 +23,14 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 归集一轮（计划第 5.6 节）：可再试失败冷却拉回 → Queued 激活（同址同币合并、每轮取出上限、
-/// 地址级抢占——同址已有 Fueling/Sweeping 时另一币不能再占，部分唯一索引兜底）→ 打油/广播 →
-/// 确认数达标同事务标 Swept + 按进款单逐笔入账（IdempotencyKey = 进款单 id）+ 提交后发
-/// BalanceCreditedEto。确认数不够保持 Sweeping 和原哈希不重签；宽限后无回执才重签（同 nonce 替换）。
-/// 写入纪律：列表全部 AsNoTracking，状态写入走带状态守卫的 ExecuteUpdate——跟踪实体与
-/// 原子更新混用会让轮末 SaveChanges 用陈旧值覆盖回列（冷却拉回的任务停在 Queued、TxHash
-/// 丢失）。例外两处：确认入账块（独立事务 UoW 内跟踪实体直改，CompleteAsync 收口隐式保存）
-/// 与轮末的 network 告警冷却戳（本工作单元 SaveChanges）。
-/// 金库地址取自 ColToken；金库私钥系统不保存；用户地址私钥按助记词现推、不落日志。
+/// 每轮先核对在途交易，再分别处理冷却重试、排队、打油和待广播任务。各阶段优先处理等待最久的任务。
+/// 归集代币前先落库签名哈希和 nonce，避免节点收到交易但响应丢失后用新 nonce 重发。
+/// 任务状态按原尝试条件更新。确认与转账核对通过后，任务完结、余额和凭证在同一事务提交。
 /// </summary>
 public class SweepManager : DomainService
 {
+    private static readonly TimeSpan StageBudget = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan ReceiptQueryBudget = TimeSpan.FromSeconds(3);
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly CollectionBalanceManager _balanceManager;
     private readonly CollectionLedgerPoster _ledgerPoster;
@@ -63,19 +60,21 @@ public class SweepManager : DomainService
     private string? MasterKey => _masterKey;
     private string? _masterKey;
 
-    /// <summary>主密钥由 worker 装配注入（Collection:MasterKey；null = 归集不可用，轮次空转并告警）。</summary>
+    /// <summary>用于解密归集密钥的主密钥，由 worker 组装。为空时无法执行签名。</summary>
     public SweepManager WithMasterKey(string? masterKey)
     {
         _masterKey = masterKey;
         return this;
     }
 
+    /// <summary>每种状态独立取批，回执先于新单。批次大小也约束同轮新激活和首播。</summary>
     public virtual async Task RunTokenRoundAsync(
         ColNetwork network, ColToken token, IBscChainGateway gateway,
         int confirmations, decimal? sweepRoundLimit, decimal fuelBnbLimit,
         TimeSpan retryCooldown, TimeSpan rebroadcastGrace, TimeSpan stuckThreshold,
         decimal gasBnbAlertThreshold,
-        CancellationToken ct)
+        CancellationToken ct,
+        int batchSize = ChainDefaults.SweepTaskBatchSize)
     {
         if (string.IsNullOrEmpty(token.VaultAddress))
         {
@@ -87,106 +86,142 @@ public class SweepManager : DomainService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var now = _clock.Now;
 
-        // 分离实体防丢：心跳与告警冷却列必须落在本工作单元的受追踪行上
+        // 调用方传入的网络来自另一个工作单元，重读后才能保存心跳和告警时间。
         network = await dbContext.Networks.SingleAsync(n => n.Id == network.Id, ct);
         network.SweepHeartbeatAt = now;
 
-        // ① 可再试失败：冷却（StatusChangedAt）后拉回 Queued
-        await dbContext.SweepTasks
-            .Where(t => t.TokenId == token.Id && t.Status == SweepTaskStatus.Failed && t.Retryable
-                        && now - t.StatusChangedAt >= retryCooldown)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(t => t.Status, SweepTaskStatus.Queued)
+        batchSize = Math.Clamp(batchSize, 1, ChainDefaults.MaxSweepTaskBatchSize);
+        var tasks = dbContext.SweepTasks.AsNoTracking().Where(t => t.TokenId == token.Id);
+        long? roundHead = null;
+        async Task<long> GetHeadAsync(CancellationToken tokenCt) =>
+            roundHead ??= await gateway.GetLatestBlockNumberAsync(tokenCt);
+
+        var sweeping = tasks.Where(t => t.Status == SweepTaskStatus.Sweeping);
+        Task DriveSweepAsync(ColSweepTask task, CancellationToken taskCt) =>
+            DriveSweepingAsync(network, token, gateway, dbContext, task, GetHeadAsync, confirmations, rebroadcastGrace, taskCt);
+
+        await RunStageAsync(dbContext, sweeping.Where(t => t.TxHash != null), batchSize, "回执", DriveSweepAsync, ct);
+
+        var retryIds = tasks.Where(t => t.Status == SweepTaskStatus.Failed && t.Retryable
+                && t.StatusChangedAt <= now - retryCooldown)
+            .OrderBy(t => t.StatusChangedAt).ThenBy(t => t.Id).Take(batchSize).Select(t => t.Id);
+        await dbContext.SweepTasks.Where(t => retryIds.Contains(t.Id) && t.Status == SweepTaskStatus.Failed && t.Retryable)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, SweepTaskStatus.Queued)
                 .SetProperty(t => t.Retryable, false)
                 .SetProperty(t => t.FailReason, (string?)null)
                 .SetProperty(t => t.StatusChangedAt, now), ct);
 
-        // ② 激活 Queued（同址同币合并 + 上限 + 地址级抢占）
-        var queued = await dbContext.SweepTasks.AsNoTracking()
-            .Where(t => t.TokenId == token.Id && t.Status == SweepTaskStatus.Queued)
-            .OrderBy(t => t.CreationTime)
-            .ToListAsync(ct);
-        foreach (var task in queued)
+        var queued = tasks.Where(t => t.Status == SweepTaskStatus.Queued && !dbContext.SweepTasks.Any(active =>
+            active.AddressId == t.AddressId && (active.Status == SweepTaskStatus.Fueling || active.Status == SweepTaskStatus.Sweeping)));
+        await RunStageAsync(dbContext, queued, batchSize, "排队", (task, taskCt) => TryActivateAsync(task, sweepRoundLimit, taskCt), ct);
+        var resumedSweeps = new List<Guid>();
+        await RunStageAsync(dbContext, tasks.Where(t => t.Status == SweepTaskStatus.Fueling), batchSize, "打油",
+            (task, taskCt) => DriveFuelingAsync(network, gateway, dbContext, task, GetHeadAsync, confirmations,
+                fuelBnbLimit, gasBnbAlertThreshold, resumedSweeps, taskCt), ct);
+        await RunStageAsync(dbContext, sweeping.Where(t => t.TxHash == null || resumedSweeps.Contains(t.Id)),
+            batchSize, "待广播", DriveSweepAsync, ct);
+
+        if (ChainAlertService.ShouldAlert(network.SweepStuckAlertedAt, TimeSpan.FromMinutes(60), now))
         {
-            ct.ThrowIfCancellationRequested();
-            try
+            var stuck = await sweeping.Where(t => t.StatusChangedAt < now - stuckThreshold)
+                .OrderBy(t => t.StatusChangedAt).ThenBy(t => t.Id).FirstOrDefaultAsync(ct);
+            if (stuck != null)
             {
-                await TryActivateAsync(dbContext, task, sweepRoundLimit, ct);
+                await _alerts.RaiseAsync(CollectionConsts.AlertPrefixSweepStuck, "归集卡住",
+                    $"代币 {token.Symbol} 任务 {stuck.Id}（地址 {stuck.Address}）在 Sweeping 停留超过 {stuckThreshold.TotalMinutes:0} 分钟（TxHash={stuck.TxHash ?? "未广播"}）。");
+                network.SweepStuckAlertedAt = now;
             }
-            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pg && pg.SqlState == "23505")
-            {
-                // 地址级互斥的部分唯一索引兜底：并发 worker 先占了同地址（另一币）→ 本轮放弃该任务，
-                // 不让单任务冲突掀翻整轮（与「同址两币不同时广播」同一规则的并发形态）
-                Logger.LogWarning("任务 {TaskId} 激活撞地址级互斥索引（并发抢占），本轮跳过", task.Id);
-            }
-        }
-
-        // ③ Fueling：地址有 gas → Sweeping；没有 → 打油（超上限仅人工；Gas 地址见底告警）
-        var fueling = await dbContext.SweepTasks.AsNoTracking()
-            .Where(t => t.TokenId == token.Id && t.Status == SweepTaskStatus.Fueling)
-            .ToListAsync(ct);
-        foreach (var task in fueling)
-        {
-            ct.ThrowIfCancellationRequested();
-            await DriveFuelingAsync(network, token, gateway, dbContext, task, fuelBnbLimit, gasBnbAlertThreshold, ct);
-        }
-
-        // ④ Sweeping：广播 → 回执 → 确认数 → Swept + 入账
-        var sweeping = await dbContext.SweepTasks.AsNoTracking()
-            .Where(t => t.TokenId == token.Id && t.Status == SweepTaskStatus.Sweeping)
-            .ToListAsync(ct);
-        foreach (var task in sweeping)
-        {
-            ct.ThrowIfCancellationRequested();
-            await DriveSweepingAsync(network, token, gateway, dbContext, task, confirmations, rebroadcastGrace, ct);
-        }
-
-        // ⑤ 归集卡住告警（Sweeping 停留超过阈值；固定前缀）
-        var stuck = sweeping.FirstOrDefault(t => now - t.StatusChangedAt > stuckThreshold);
-        if (stuck != null && ChainAlertService.ShouldAlert(network.SweepStuckAlertedAt, TimeSpan.FromMinutes(60), now))
-        {
-            await _alerts.RaiseAsync(CollectionConsts.AlertPrefixSweepStuck, "归集卡住",
-                $"代币 {token.Symbol} 任务 {stuck.Id}（地址 {stuck.Address}）在 Sweeping 停留超过 {stuckThreshold.TotalMinutes:0} 分钟（TxHash={stuck.TxHash ?? "未广播"}）。");
-            network.SweepStuckAlertedAt = now;
         }
 
         await dbContext.SaveChangesAsync(ct);
         await uow.CompleteAsync();
     }
 
-    /// <summary>激活：链接进款单（合并 + 上限）→ 按 gas 决定 Fueling / Sweeping；地址被占则本轮放弃。</summary>
-    private async Task TryActivateAsync(
-        CollectionDbContext dbContext, ColSweepTask task, decimal? roundLimit, CancellationToken ct)
+    /// <summary>先记录本次处理时间再处理。失败或耗时的任务轮到队尾，其余阶段保留自己的时间预算。</summary>
+    private async Task RunStageAsync(CollectionDbContext db, IQueryable<ColSweepTask> query, int batchSize,
+        string stage, Func<ColSweepTask, CancellationToken, Task> processAsync, CancellationToken ct)
     {
-        // 地址级抢占：同地址已有另一币的 Fueling/Sweeping → 本轮不动（部分唯一索引兜底并发）
-        var addressBusy = await dbContext.SweepTasks
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(StageBudget);
+        var stageCt = budget.Token;
+        try
+        {
+            var batch = await query.OrderBy(t => t.LastProcessedAt ?? t.CreationTime)
+                .ThenBy(t => t.CreationTime).ThenBy(t => t.Id).Take(batchSize).ToListAsync(stageCt);
+            foreach (var task in batch)
+            {
+                var processedAt = _clock.Now;
+                var rows = await db.SweepTasks.Where(t => t.Id == task.Id && t.Status == task.Status
+                        && t.LastProcessedAt == task.LastProcessedAt)
+                    .ExecuteUpdateAsync(s => s.SetProperty(t => t.LastProcessedAt, processedAt), stageCt);
+                if (rows == 0) continue;
+                try
+                {
+                    await processAsync(task, stageCt);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && !ct.IsCancellationRequested)
+                {
+                    Logger.LogWarning(ex, "归集任务 {TaskId} 在{Stage}阶段处理异常，本轮跳过此任务", task.Id, stage);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stageCt.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            Logger.LogWarning("归集{Stage}阶段达到阶段时间上限，剩余任务留待下轮", stage);
+        }
+    }
+
+    /// <summary>确定归集批次并转入 Fueling。已有同地址在途任务时等待下轮。</summary>
+    private async Task TryActivateAsync(ColSweepTask candidate, decimal? roundLimit, CancellationToken ct)
+    {
+        using var activateUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var txDb = await _dbContextProvider.GetDbContextAsync();
+        await DepositSweepQueue.LockAddressAsync(txDb, candidate.AddressId, ct);
+        var task = await txDb.SweepTasks.AsNoTracking()
+            .SingleOrDefaultAsync(t => t.Id == candidate.Id && t.Status == SweepTaskStatus.Queued, ct);
+        if (task == null)
+        {
+            return;
+        }
+
+        var addressBusy = await txDb.SweepTasks
             .AnyAsync(t => t.AddressId == task.AddressId
-                           && t.TokenId != task.TokenId
                            && (t.Status == SweepTaskStatus.Fueling || t.Status == SweepTaskStatus.Sweeping), ct);
         if (addressBusy)
         {
             return;
         }
 
-        // Confirmed = 首次激活；Sweeping = 可再试失败拉回后重驱（单已链接，状态停在广播中）
-        // 可链接单：首次 Confirmed + 重试时停在 Sweeping 的已链接单
-        var linked = await dbContext.DepositOrders.AsNoTracking()
+        var hasBroadcast = task.NonceUsed != null || task.TxHash != null || task.BroadcastAt != null;
+        var linked = await txDb.DepositOrders.AsNoTracking()
             .Where(o => o.SweepTaskId == task.Id
-                        && (o.Status == DepositOrderStatus.Confirmed || o.Status == DepositOrderStatus.Sweeping))
-            .OrderBy(o => o.CreationTime)
+                        && (o.Status == DepositOrderStatus.Sweeping
+                            || (!hasBroadcast && o.Status == DepositOrderStatus.Confirmed)))
+            .OrderBy(o => o.CreationTime).ThenBy(o => o.Id)
             .ToListAsync(ct);
         if (linked.Count == 0)
         {
+            await FailAsync(txDb, task.Id, SweepTaskStatus.Queued, retryable: false,
+                reason: "归集排队任务无可处理的关联进款，请核对单据", _clock.Now);
+            await activateUow.CompleteAsync(ct);
             return;
         }
 
-        // 每轮取出上限：装到装不下为止（至少一笔，避免死锁在极小限额上）
+        // 对重试任务保留已激活的进款集合，已确认失败并清掉广播证据也不改变批次。
+        var hasActivatedOrders = linked.Any(o => o.Status == DepositOrderStatus.Sweeping);
+        var keepBatch = hasBroadcast || hasActivatedOrders;
+        if (hasActivatedOrders)
+        {
+            linked.RemoveAll(o => o.Status != DepositOrderStatus.Sweeping);
+        }
+
+        // 新批次至少选一笔，避免单笔金额超过上限后永远排队。
         decimal sum = 0m;
         var pickedIds = new List<Guid>();
         for (var i = 0; i < linked.Count; i++)
         {
             var value = linked[i].Amount ?? 0m;
-            if (i > 0 && roundLimit.HasValue && sum + value > roundLimit.Value)
+            if (!keepBatch && i > 0 && roundLimit.HasValue && sum + value > roundLimit.Value)
             {
                 break;
             }
@@ -195,22 +230,17 @@ public class SweepManager : DomainService
             sum += value;
         }
 
+        if (keepBatch && sum != task.Amount)
+        {
+            await FailAsync(txDb, task.Id, SweepTaskStatus.Queued, retryable: false,
+                reason: "原归集批次金额与关联进款不一致，请核对单据", _clock.Now);
+            await activateUow.CompleteAsync(ct);
+            return;
+        }
+
         var now = _clock.Now;
 
-        // 先条件占位任务（WHERE Status='Queued'）；落空 = 已被并发激活。
-        // 重签宽限以 BroadcastAt 计，激活重置 StatusChangedAt 不影响它。
-        // 地址级互斥索引（AddressId 上 Status IN (1,2)）会把「同地址已有 Fueling/Sweeping
-        // 僵尸任务」的激活打成 23505——是「地址被占」的正常语义而非故障：捕获后本轮跳过该
-        // 任务（卡死告警段会盯住僵尸）——不捕获会炸掉整轮归集（Sweeping 僵尸占位 +
-        // 进款单堆积时激活每轮必撞、归集全线停摆）
-        // claim/翻状态/解链三条语句合并进一个内层事务——三条独立自动提交的中断窗口
-        // （CollectionChainWorkerBase 的轮预算取消是真中断源）会留下「任务已 Fueling
-        // 且 Amount 已按选中子集聚合、尾巴单仍链接+Confirmed」的部分激活态；下一轮自愈无条件
-        // 升级全部链接 Confirmed 单并在确认时全额入账，而链上只广播了选中子集金额 ⇒ 超限入账。
-        // 原子化后要么三句全落、要么任务留 Queued 下轮重来。三条语句在绑定内层事务的
-        // DbContext 上执行（外层轮 UoW 有意非事务，见 RunTokenRoundAsync 注释）。
-        using var activateUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
-        var txDb = await _dbContextProvider.GetDbContextAsync();
+        // 占用任务、标记入选单据和解绑其余单据必须一起提交，确保入账集合与待广播金额一致。
         int claimed;
         try
         {
@@ -223,11 +253,8 @@ public class SweepManager : DomainService
         }
         catch (Npgsql.PostgresException ex) when (ex.SqlState == "23505")
         {
-            // ExecuteUpdateAsync 把约束冲突的 PostgresException 直接抛出（不包 DbUpdateException）；
-            // 内层事务随 dispose 回滚
-            Logger.LogWarning(
-                "任务 {TaskId} 激活被地址互斥拦下（同地址存在 Fueling/Sweeping 任务），本轮跳过；僵尸由卡死告警段处置",
-                task.Id);
+            // 地址的在途状态受唯一索引保护；冲突时当前激活事务回滚。
+            Logger.LogWarning("归集任务 {TaskId} 激活时地址已有在途任务，本轮跳过", task.Id);
             return;
         }
         if (claimed == 0)
@@ -235,16 +262,17 @@ public class SweepManager : DomainService
             return;
         }
 
-        // 选中单标记 Sweeping（只认 Confirmed/Sweeping，原子条件防串）
-        await txDb.DepositOrders
-            .Where(o => pickedIds.Contains(o.Id)
+        var updated = await txDb.DepositOrders
+            .Where(o => o.SweepTaskId == task.Id && pickedIds.Contains(o.Id)
                         && (o.Status == DepositOrderStatus.Confirmed || o.Status == DepositOrderStatus.Sweeping))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, DepositOrderStatus.Sweeping), ct);
+        if (updated != pickedIds.Count)
+        {
+            return;
+        }
 
-        // 超上限的尾巴单解链（SweepTaskId=null）：广播自愈只翻「本任务已链接的 Confirmed 单」，
-        // 不解链它们会被自愈误升级为 Sweeping 并在确认时入账——但链上只转了选中子集的金额
-        //（否则 RoundLimit 被自愈击穿）。解链后由扫链轮确认推进重新链接到下一个任务
+        // 未入选单据继续保持 Confirmed，由扫链轮加入后续任务。
         await txDb.DepositOrders
             .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Confirmed
                         && !pickedIds.Contains(o.Id))
@@ -253,13 +281,16 @@ public class SweepManager : DomainService
         await activateUow.CompleteAsync(ct);
     }
 
+    /// <summary>跟踪打油回执，发送前保存 nonce，使同一任务的重发只能替换原交易。</summary>
     private async Task DriveFuelingAsync(
-        ColNetwork network, ColToken token, IBscChainGateway gateway, CollectionDbContext dbContext,
-        ColSweepTask task, decimal fuelBnbLimit, decimal gasBnbAlertThreshold, CancellationToken ct)
+        ColNetwork network, IBscChainGateway gateway, CollectionDbContext dbContext,
+        ColSweepTask task, Func<CancellationToken, Task<long>> getHeadAsync, int confirmations,
+        decimal fuelBnbLimit, decimal gasBnbAlertThreshold, List<Guid> resumedSweeps, CancellationToken ct)
     {
         var now = _clock.Now;
 
         // 已有打油在途：等回执，不重复广播（否则每轮 60s 连环打油烧 BNB）
+        var gasNonce = task.GasNonceUsed;
         if (task.GasTxHash != null)
         {
             var gasReceipt = await gateway.GetTransactionReceiptAsync(task.GasTxHash, ct);
@@ -270,10 +301,15 @@ public class SweepManager : DomainService
 
             if (gasReceipt.Status == 0)
             {
-                // 打油交易失败：清掉在途标记，本轮重新评估
-                await dbContext.SweepTasks
-                    .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling)
-                    .ExecuteUpdateAsync(s => s.SetProperty(t => t.GasTxHash, (string?)null), ct);
+                if (gasReceipt.BlockNumber is long block
+                    && await getHeadAsync(ct) - block >= confirmations)
+                {
+                    await dbContext.SweepTasks.Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling
+                            && t.GasTxHash == task.GasTxHash && t.GasNonceUsed == gasNonce)
+                        .ExecuteUpdateAsync(s => s.SetProperty(t => t.GasTxHash, (string?)null)
+                            .SetProperty(t => t.GasNonceUsed, (long?)null), ct);
+                }
+                return;
             }
         }
 
@@ -282,7 +318,13 @@ public class SweepManager : DomainService
         var sweepGasCostBnb = gasPrice * 100_000m / 1_000_000_000m; // ERC20 transfer gas 上界
         if (addressBnb >= sweepGasCostBnb)
         {
-            await TransitionAsync(dbContext, task, SweepTaskStatus.Fueling, SweepTaskStatus.Sweeping, now);
+            var rows = await dbContext.SweepTasks.Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, SweepTaskStatus.Sweeping)
+                    .SetProperty(t => t.StatusChangedAt, now), ct);
+            if (rows > 0 && task.TxHash != null)
+            {
+                resumedSweeps.Add(task.Id);
+            }
             return;
         }
 
@@ -324,32 +366,70 @@ public class SweepManager : DomainService
 
         var gasKey = HdKeyService.DerivePrivateKey(mnemonic.Words, HdKeyService.GasAddressIndex);
         var valueWei = "0x" + ToRawHex(fuelAmount, 18);
+        if (task.GasTxHash != null)
+        {
+            return;
+        }
+
+        if (gasNonce == null)
+        {
+            // 同一个网络的打油账户由所有代币共用。存在未知发送结果时，先核对那一笔。
+            var unresolved = await dbContext.SweepTasks.AnyAsync(t => t.NetworkId == task.NetworkId
+                && t.Id != task.Id && t.Status == SweepTaskStatus.Fueling
+                && t.GasNonceUsed != null && t.GasTxHash == null, ct);
+            if (unresolved)
+            {
+                return;
+            }
+
+            gasNonce = await gateway.GetTransactionCountAsync(gasAddress, ct);
+            using var gasUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+            var gasDb = await _dbContextProvider.GetDbContextAsync();
+            var claimed = await gasDb.SweepTasks.Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling
+                    && t.GasTxHash == null && t.GasNonceUsed == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.GasNonceUsed, gasNonce), ct);
+            await gasUow.CompleteAsync(ct);
+            if (claimed == 0)
+            {
+                return;
+            }
+        }
+
         var gasTx = await gateway.SendTransactionAsync(
-            gasKey, task.Address, dataHex: "", valueWei, network.ChainId, nonce: await gateway.GetTransactionCountAsync(gasAddress, ct), ct);
+            gasKey, task.Address, dataHex: "", valueWei, network.ChainId, nonce: gasNonce.Value, ct);
         await dbContext.SweepTasks
-            .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling)
+            .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling
+                && t.GasNonceUsed == gasNonce && t.GasTxHash == null)
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.GasTxHash, gasTx), ct);
-        // 保持 Fueling：下一轮看到地址有 gas 自然推进 Sweeping
-        Logger.LogInformation("任务 {TaskId} 已打油 {Fuel} BNB（{Hash}）", task.Id, fuelAmount, gasTx);
+        Logger.LogInformation("归集任务 {TaskId} 已提交 {Fuel} BNB 打油交易 {Hash}，等待回执", task.Id, fuelAmount, gasTx);
     }
 
+    /// <summary>未知候选仅阻止重签。任一通过确认与转账核对的候选可完成原任务。</summary>
     private async Task DriveSweepingAsync(
         ColNetwork network, ColToken token, IBscChainGateway gateway, CollectionDbContext dbContext,
-        ColSweepTask task, int confirmations, TimeSpan rebroadcastGrace, CancellationToken ct)
+        ColSweepTask task, Func<CancellationToken, Task<long>> getHeadAsync, int confirmations,
+        TimeSpan rebroadcastGrace, CancellationToken ct)
     {
         var now = _clock.Now;
-        var head = await gateway.GetLatestBlockNumberAsync(ct);
-
-        // 未广播：先自愈再签名广播（用户地址私钥现推）。激活已把 claim/翻状态/解链合并进
-        // 内层事务，新数据不会再留下「已选中但仍是 Confirmed」的中间态——这里的自愈升级
-        // 只防御存量库的历史部分激活行与人工补链。
-        // 超上限尾巴单已在激活时解链，不会被这里误升级
-        if (task.TxHash == null)
+        var head = task.TxHash == null ? 0 : await getHeadAsync(ct);
+        var (receipt, uncertain, transferMismatch) = await FindSweepReceiptAsync(
+            gateway, task, token, head, confirmations, ct);
+        if (receipt == null)
         {
-            // 自愈升级加金额上限——只升到 task.Amount（= 链上将广播的金额）装得下
-            // 为止。激活原子化后新数据不会再出现「尾巴单仍链接」的中间态，但存量库的历史部分
-            // 激活行/人工补链仍可能让链接 Confirmed 合计超过广播金额；无条件升级会在确认时
-            // 全额入账（金库缺口）。超额者留在 Confirmed 由对账/人工路径处置。
+            if (transferMismatch && !uncertain)
+            {
+                await FailSweepAttemptAsync(dbContext, task, "归集回执未包含与本单匹配的代币转账，拒绝入账", now, ct);
+                return;
+            }
+
+            // 无 nonce 的历史哈希只能继续查回执。上次发送结果不明时保留完整等待窗口。
+            if (uncertain || (task.TxHash != null && task.NonceUsed == null)
+                || (task.BroadcastAt.HasValue && now - task.BroadcastAt.Value <= rebroadcastGrace))
+            {
+                return;
+            }
+
+            // 补齐旧批次的状态时以任务金额为上限，防止仍关联的多余单据变成待入账。
             var sweepingGross = await dbContext.DepositOrders.AsNoTracking()
                 .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Sweeping)
                 .SumAsync(o => (decimal?)o.Amount ?? 0m, ct);
@@ -382,11 +462,11 @@ public class SweepManager : DomainService
             var linkable = await dbContext.DepositOrders.AsNoTracking()
                 .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Sweeping)
                 .ToListAsync(ct);
-            if (linkable.Count == 0)
+            if (linkable.Count == 0 || linkable.Sum(o => o.Amount ?? 0m) != task.Amount)
             {
-                // 链接单全部丢失（人工清理过？）：不广播真金，任务置失败仅人工
+                // 没有关联进款可结算，停在失败状态等待核对。
                 await FailAsync(dbContext, task.Id, SweepTaskStatus.Sweeping, retryable: false,
-                    reason: "任务下没有任何 Sweeping 链接进款单，拒绝盲目归集", now);
+                    reason: "关联进款毛额与归集任务不一致，拒绝广播", now);
                 return;
             }
 
@@ -398,10 +478,11 @@ public class SweepManager : DomainService
 
             using var mnemonic = HdKeyService.Unprotect(network.MnemonicCipher!, MasterKey, _encryptor);
             var userKey = HdKeyService.DerivePrivateKey(mnemonic.Words, task.AddressIndex);
+            var vaultAddress = task.BroadcastVaultAddress ?? token.VaultAddress!;
             string dataHex;
             try
             {
-                dataHex = BuildErc20TransferData(token.VaultAddress!, task.Amount, token.Decimals);
+                dataHex = BuildErc20TransferData(vaultAddress, task.Amount, token.Decimals);
             }
             catch (OverflowException)
             {
@@ -411,88 +492,111 @@ public class SweepManager : DomainService
                 return;
             }
             var nonce = task.NonceUsed ?? await gateway.GetTransactionCountAsync(task.Address, ct);
-            var txHash = await gateway.SendTransactionAsync(
-                userKey, token.VaultAddress!, dataHex, "0x0", network.ChainId, nonce, ct);
+            var transaction = await gateway.PrepareTransactionAsync(
+                userKey, token.ContractAddress, dataHex, "0x0", network.ChainId, nonce, ct);
+            // 签名可能与上次相同。只保留不同的候选哈希，覆盖节点已收单但发送响应丢失的情况。
+            var previousHashes = SweepHashes(task)
+                .Where(hash => !string.Equals(hash, transaction.Hash, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var claimedAt = _clock.Now;
+            int claimed;
+            using (var broadcastUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
+            {
+                var broadcastDb = await _dbContextProvider.GetDbContextAsync();
+                claimed = await MatchSweepAttempt(broadcastDb, task)
+                    .ExecuteUpdateAsync(s => s.SetProperty(t => t.TxHash, transaction.Hash)
+                        .SetProperty(t => t.PreviousTxHashes, previousHashes.Length == 0 ? null : previousHashes)
+                        .SetProperty(t => t.BroadcastAt, claimedAt)
+                        .SetProperty(t => t.BroadcastVaultAddress, vaultAddress)
+                        .SetProperty(t => t.NonceUsed, nonce), ct);
+                await broadcastUow.CompleteAsync(ct);
+            }
+            if (claimed == 0)
+            {
+                return;
+            }
 
-            await dbContext.SweepTasks
-                .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Sweeping)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(t => t.TxHash, txHash)
-                    .SetProperty(t => t.BroadcastAt, now)
-                    .SetProperty(t => t.NonceUsed, nonce), ct); // StatusChangedAt 不动：重签宽限以 BroadcastAt 起算（见下行查回执），卡住告警仍按 StatusChangedAt（自激活起算）
+            await gateway.BroadcastTransactionAsync(transaction, ct);
             Logger.LogInformation("任务 {TaskId} 归集已广播 {Amount} {Symbol}（{Hash}）",
-                task.Id, task.Amount, token.Symbol, txHash);
+                task.Id, task.Amount, token.Symbol, transaction.Hash);
             return;
         }
 
-        // 已广播：查回执
-        var receipt = await gateway.GetTransactionReceiptAsync(task.TxHash, ct);
-        if (receipt.Status == null)
+        // 回执可能来自首次签名或后续替换，结算采用确认通过的哈希。
+        if (receipt.Status is not (0 or 1))
         {
-            // 无回执：宽限（从 BroadcastAt 起算）之内保持原哈希不重签；超时才允许同 nonce 替换
-            if (now - (task.BroadcastAt ?? now) > rebroadcastGrace)
-            {
-                Logger.LogWarning("任务 {TaskId} 广播超宽限无回执，按同 nonce {Nonce} 重签替换", task.Id, task.NonceUsed);
-                await dbContext.SweepTasks
-                    .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Sweeping)
-                    .ExecuteUpdateAsync(s => s
-                        .SetProperty(t => t.TxHash, (string?)null)
-                        .SetProperty(t => t.BroadcastAt, (DateTime?)null), ct); // NonceUsed 保留：替换必须复用
-            }
+            return;
+        }
 
+        if (receipt.BlockNumber is not long receiptBlock)
+        {
             return;
         }
 
         if (receipt.Status == 0)
         {
-            // 链上 revert：归集转出失败多为代币暂停/黑名单——固定前缀告警 + 仅人工
+            // 只有已达到确认深度的失败回执才允许人工重试使用新 nonce。
+            if (head - receiptBlock < confirmations)
+            {
+                return;
+            }
             await _alerts.RaiseAsync(CollectionConsts.AlertPrefixTokenPaused, "代币暂停或转账被拒",
-                $"代币 {token.Symbol} 归集交易 {task.TxHash} 链上失败（revert），请人工核查合约状态。");
-            await FailAsync(dbContext, task.Id, SweepTaskStatus.Sweeping, retryable: false, reason: "归集交易链上 revert", now);
+                $"代币 {token.Symbol} 归集交易 {receipt.TxHash} 链上失败（revert），请人工核查合约状态。");
+            await MatchSweepAttempt(dbContext, task).ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.Status, SweepTaskStatus.Failed)
+                .SetProperty(t => t.Retryable, false)
+                .SetProperty(t => t.FailReason, "归集交易链上 revert，已确认未转账")
+                .SetProperty(t => t.StatusChangedAt, now)
+                .SetProperty(t => t.TxHash, (string?)null)
+                .SetProperty(t => t.PreviousTxHashes, (string[]?)null)
+                .SetProperty(t => t.NonceUsed, (long?)null)
+                .SetProperty(t => t.BroadcastAt, (DateTime?)null)
+                .SetProperty(t => t.BroadcastVaultAddress, (string?)null)
+                .SetProperty(t => t.TxBlockNumber, (long?)null), ct);
             return;
         }
 
         // 回执在块里：确认数不够 → 保持 Sweeping 和原哈希，下轮再看（不增加替换档、不重签）
-        await dbContext.SweepTasks
-            .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Sweeping)
-            .ExecuteUpdateAsync(s => s.SetProperty(t => t.TxBlockNumber, receipt.BlockNumber), ct);
-        if (head - receipt.BlockNumber!.Value < confirmations)
+        await MatchSweepAttempt(dbContext, task)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.TxBlockNumber, receiptBlock), ct);
+        if (head - receiptBlock < confirmations)
         {
             return;
         }
 
-        // 资金时刻的对账门：入账前先核对链接单毛额合计 == task.Amount（= 链上
-        // 广播金额）。不等 ⇒ 说明链接集合与广播子集漂移（历史部分激活/人工补链），此时逐笔
-        // 入账就是把没上链的钱记给用户（金库缺口）。fail-closed：任务置失败仅人工，单保持
-        // Sweeping 不入账，交卡单告警 + 对账处置。
-        var pendingCredit = await dbContext.DepositOrders.AsNoTracking()
-            .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Sweeping)
-            .Select(o => new { o.Id, Amount = (decimal?)o.Amount ?? 0m })
-            .ToListAsync(ct);
-        var pendingGross = pendingCredit.Sum(x => x.Amount);
-        if (pendingGross != task.Amount)
-        {
-            await _alerts.RaiseAsync(null, "归集卡住",
-                $"任务 {task.Id} 链上确认但链接单毛额合计 {pendingGross} ≠ 广播金额 {task.Amount}，拒绝自动入账");
-            await FailAsync(dbContext, task.Id, SweepTaskStatus.Sweeping, retryable: false,
-                reason: $"链接单毛额合计 {pendingGross} 与广播金额 {task.Amount} 不一致，拒绝入账待人工核对", now);
-            return;
-        }
-
-        // 确认达标：同一事务里标 Swept + 按进款单逐笔入账（CreditAsync 加入本工作单元）
+        // 确认总转账与关联单据毛额一致后，任务、余额、凭证和单据状态才一同提交。
         using (var creditUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
         {
             var creditDbContext = await _dbContextProvider.GetDbContextAsync();
             var linked = await creditDbContext.DepositOrders
                 .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Sweeping)
                 .ToListAsync(ct);
+            var linkedGross = linked.Sum(order => order.Amount ?? 0m);
+            if (linked.Count == 0 || linkedGross != task.Amount)
+            {
+                await FailSweepAttemptAsync(creditDbContext, task,
+                    $"链接单毛额合计 {linkedGross} 与广播金额 {task.Amount} 不一致，拒绝入账待人工核对", now, ct);
+                await creditUow.CompleteAsync(ct);
+                await _alerts.RaiseAsync(null, "归集卡住",
+                    $"任务 {task.Id} 链上确认但链接单毛额合计 {linkedGross} ≠ 广播金额 {task.Amount}，拒绝自动入账");
+                return;
+            }
+
+            var rows = await MatchSweepAttempt(creditDbContext, task)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.Status, SweepTaskStatus.Swept)
+                    .SetProperty(t => t.TxHash, receipt.TxHash)
+                    .SetProperty(t => t.PreviousTxHashes, (string[]?)null)
+                    .SetProperty(t => t.TxBlockNumber, receiptBlock)
+                    .SetProperty(t => t.StatusChangedAt, now), ct);
+            if (rows == 0)
+            {
+                return;
+            }
+
             foreach (var order in linked)
             {
-                // 入账净额（线上口径：充值入账的是建单快照净额；历史单无快照回退毛额）。
-                // BalanceCreditedEto 在 CreditAsync 内携带同一净额，只发一次。
-                // 两本一致收敛到净额：余额行直接入净额（BalanceCreditedEto 同净额，只发一次）；
-                // 账本按线上口径过毛额（借 1001 / 贷 2201）再扣手续费（借 2201 / 贷 6003），
-                // 2201 净额 = 毛额 − fee = 余额行。若两侧都用净额+fee 再扣会把用户扣两遍。
+                // 用户余额记净额。账本分别记毛额和手续费，用户负债的净变动与余额一致。
                 var gross = order.Amount ?? 0m;
                 var credit = CollectionLedgerPoster.ResolveCreditAmount(
                     order.Amount, order.ActualAmount, order.Fee);
@@ -505,45 +609,101 @@ public class SweepManager : DomainService
                 order.Status = DepositOrderStatus.Swept;
             }
 
-            if (linked.Count == 0)
-            {
-                // 链上已转出但没有任何链接进款单：绝不能标 Swept（资金已动、用户未入账）。
-                // 保持 Sweeping 让「归集卡住」告警接手，人工核对链接关系
-                Logger.LogError(CollectionConsts.AlertPrefixSweepStuck + "任务 {TaskId} 链上确认但链接进款单为 0，保持 Sweeping 等人工", task.Id);
-                await creditUow.CompleteAsync();
-                return;
-            }
-
-            var rows = await creditDbContext.SweepTasks
-                .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Sweeping)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(t => t.Status, SweepTaskStatus.Swept)
-                    .SetProperty(t => t.StatusChangedAt, now), ct);
-            if (rows == 0)
-            {
-                throw new InvalidOperationException("归集任务确认状态被并发改变：" + task.Id);
-            }
-
-            // 防御性释放：正常流尾巴单已在激活时解链；这里兜底清理残留的 Confirmed 链接单
+            // 解绑旧批次里残留的 Confirmed 单据，供下轮重新挂队。
             await creditDbContext.DepositOrders
                 .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Confirmed)
                 .ExecuteUpdateAsync(s => s.SetProperty(o => o.SweepTaskId, (Guid?)null), ct);
 
             await creditUow.CompleteAsync();
-            Logger.LogInformation("任务 {TaskId} 归集确认并入账 {Amount} {Symbol}（{Count} 笔进款）",
+            Logger.LogInformation("归集任务 {TaskId} 确认毛额 {GrossAmount} {Symbol}，已结算 {Count} 笔进款",
                 task.Id, task.Amount, token.Symbol, linked.Count);
         }
     }
 
-    private static Task TransitionAsync(CollectionDbContext dbContext, ColSweepTask task,
-        SweepTaskStatus from, SweepTaskStatus next, DateTime now)
+    /// <summary>坏回执只影响对应哈希，旧候选继续核对。缺少可靠查单结果时保持原 nonce 和候选。</summary>
+    private async Task<(TransactionReceipt? Receipt, bool Uncertain, bool TransferMismatch)> FindSweepReceiptAsync(
+        IBscChainGateway gateway, ColSweepTask task, ColToken token, long head, int confirmations, CancellationToken ct)
     {
-        return dbContext.SweepTasks
-            .Where(t => t.Id == task.Id && t.Status == from)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(t => t.Status, next)
-                .SetProperty(t => t.StatusChangedAt, now));
+        TransactionReceipt? unconfirmed = null;
+        var uncertain = false;
+        var transferMismatch = false;
+        foreach (var hash in SweepHashes(task))
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(ReceiptQueryBudget);
+            try
+            {
+                var receipt = await gateway.GetTransactionReceiptAsync(hash, budget.Token);
+                if (!string.Equals(hash, receipt.TxHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    uncertain = true;
+                    continue;
+                }
+                if (receipt.Status == null && receipt.BlockNumber == null) continue;
+                if (receipt.Status is not (0 or 1) || receipt.BlockNumber is not (>= 0 and var block) || block > head)
+                {
+                    uncertain = true;
+                    continue;
+                }
+                if (head - block < confirmations)
+                {
+                    unconfirmed ??= receipt;
+                    continue;
+                }
+                if (receipt.Status == 0) return (receipt, uncertain, transferMismatch);
+
+                var (logs, complete) = await gateway.GetReceiptTransferLogsAsync(hash, token.ContractAddress, block, budget.Token);
+                if (!complete)
+                {
+                    uncertain = true;
+                    continue;
+                }
+                if (logs.Any(log => log.BlockNumber == block
+                    && string.Equals(log.TxHash, hash, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(log.From, task.Address, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(log.To, task.BroadcastVaultAddress ?? token.VaultAddress, StringComparison.OrdinalIgnoreCase)
+                    && DepositScanManager.TryScaleRaw(log.RawAmount, token.Decimals, out _) == task.Amount))
+                {
+                    return (receipt, uncertain, transferMismatch);
+                }
+                transferMismatch = true;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested &&
+                (ex is ChainRpcException or System.Net.Http.HttpRequestException or OperationCanceledException))
+            {
+                uncertain = true;
+                Logger.LogWarning("任务 {TaskId} 的候选交易 {Hash} 回执查询失败（{Type}），继续核对其他候选",
+                    task.Id, hash, ex.GetType().Name);
+            }
+        }
+
+        return (unconfirmed, uncertain, transferMismatch);
     }
+
+    private static IEnumerable<string> SweepHashes(ColSweepTask task)
+    {
+        if (task.TxHash != null)
+        {
+            yield return task.TxHash;
+        }
+
+        foreach (var hash in task.PreviousTxHashes ?? [])
+        {
+            yield return hash;
+        }
+    }
+
+    private static IQueryable<ColSweepTask> MatchSweepAttempt(CollectionDbContext db, ColSweepTask task) =>
+        db.SweepTasks.Where(row => row.Id == task.Id && row.Status == SweepTaskStatus.Sweeping
+            && row.TxHash == task.TxHash && row.NonceUsed == task.NonceUsed && row.BroadcastAt == task.BroadcastAt);
+
+    private static Task FailSweepAttemptAsync(CollectionDbContext db, ColSweepTask task, string reason,
+        DateTime now, CancellationToken ct) =>
+        MatchSweepAttempt(db, task).ExecuteUpdateAsync(s => s
+            .SetProperty(row => row.Status, SweepTaskStatus.Failed)
+            .SetProperty(row => row.Retryable, false)
+            .SetProperty(row => row.FailReason, reason)
+            .SetProperty(row => row.StatusChangedAt, now), ct);
 
     private static Task FailAsync(CollectionDbContext dbContext, Guid taskId, SweepTaskStatus from,
         bool retryable, string reason, DateTime now)

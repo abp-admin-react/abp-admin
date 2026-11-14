@@ -1,5 +1,6 @@
 using AbpAdmin.Collection.Ledger;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,14 +22,9 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Withdrawals;
 
 /// <summary>
-/// 提现广播轮次逻辑（M3）：卡单恢复 → 小额自动审 → 广播队列。
-/// 与 SweepManager 同款纪律：AsNoTracking 读 + 守卫式 ExecuteUpdate 写、一动作一事务。
-/// 广播失败语义（全自动 nonce 仲裁，无人工）：
-///  · 超时且有哈希 → 查回执：成功完结 / 失败重试（超限自动退款 Rejected）
-///  · 超时且无哈希 → nonce 仲裁：pending nonce ≤ NonceUsed = 可证未出款 → 自动重播 /
-///    超限自动退款；已越过 NonceUsed = 可能已上链 → BroadcastFailed 等人工核查
-///  · 签名/发送抛异常 → 保持 Broadcasting（无哈希），下一轮仲裁自动处置
-/// nonce 每次广播取热钱包 pending nonce（不缓存复用），杜绝替换重签双花。
+/// 每轮先查在途交易，再处理小额自动审核和待广播订单。发送前保存原发送地址和 nonce。
+/// 有哈希的订单每轮查回执，无哈希的订单超时后按原发送方与 nonce 核对。
+/// 只有失败回执或另一笔已完结提现占用同一发送方的 nonce，才自动重试或退款。
 /// </summary>
 public class WithdrawBroadcastManager : DomainService
 {
@@ -43,7 +39,7 @@ public class WithdrawBroadcastManager : DomainService
     private readonly WithdrawGuard _guard;
     private readonly IClock _clock;
     private readonly Volo.Abp.Security.Encryption.IStringEncryptionService _encryptor;
-    private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
+    private readonly ChainKeyProvider _chainKeyProvider;
     private readonly ChainAlertService _alerts;
 
     public WithdrawBroadcastManager(
@@ -55,7 +51,7 @@ public class WithdrawBroadcastManager : DomainService
         WithdrawGuard guard,
         IClock clock,
         Volo.Abp.Security.Encryption.IStringEncryptionService encryptor,
-        Microsoft.Extensions.Configuration.IConfiguration configuration,
+        ChainKeyProvider chainKeyProvider,
         ChainAlertService alerts)
     {
         _dbContextProvider = dbContextProvider;
@@ -66,7 +62,7 @@ public class WithdrawBroadcastManager : DomainService
         _guard = guard;
         _clock = clock;
         _encryptor = encryptor;
-        _configuration = configuration;
+        _chainKeyProvider = chainKeyProvider;
         _alerts = alerts;
     }
 
@@ -75,12 +71,8 @@ public class WithdrawBroadcastManager : DomainService
         ColNetwork network, IBscChainGateway gateway,
         int autoApproveBatch, int broadcastBatch, CancellationToken ct = default)
     {
-        // 直调场景（测试/管理端）没有环境 UoW：自开非事务 UoW 供 DbContext 解析；
-        // worker 调用自带 UoW 则加入。原子块（完结/审批）内部自开 requiresNew 事务。
         await WithDbScopeAsync(async () =>
         {
-            // 段间隔离（对齐 AutoApprove/Broadcast 的单间纪律）：恢复段一个 RPC 异常
-            // 不能拖死整轮的自动审与广播——否则一条脏单永久卡死整条提现流水线
             try
             {
                 await RecoverStuckBroadcastingAsync(network, gateway, ct);
@@ -140,19 +132,11 @@ public class WithdrawBroadcastManager : DomainService
         var cutoff = _clock.Now.AddMinutes(-timeoutMinutes);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
-        // 轮次级缓存：热钱包 / pending nonce / 币种→代币，整段只查一次（避免逐单重复 RPC/SELECT）
-        var wallet = await _guard.LoadAsync(ct);
-        long? pendingNonce = null;
-        if (wallet != null)
-        {
-            pendingNonce = await gateway.GetTransactionCountAsync(wallet.Address, ct);
-        }
-
-        var tokenCache = new System.Collections.Generic.Dictionary<CollectionCurrency, ColToken>();
+        var tokenCache = new Dictionary<CollectionCurrency, ColToken>();
 
         // ① 有哈希的 Broadcasting：每轮查回执（正常完结路径就在这，不等超时）
         var withHash = await dbContext.WithdrawOrders.AsNoTracking()
-            .Where(o => o.Status == WithdrawStatus.Broadcasting && o.TxHash != null)
+            .Where(o => o.Status == WithdrawStatus.Broadcasting && o.TxHash != null && o.NetworkName == network.Name)
             .OrderBy(o => o.StatusChangedAt)
             .Take(20)
             .ToListAsync(ct);
@@ -162,18 +146,11 @@ public class WithdrawBroadcastManager : DomainService
             try
             {
                 var receipt = await gateway.GetTransactionReceiptAsync(order.TxHash!, ct);
-                if (receipt.Status == null)
+                if (receipt.Status is not (0 or 1))
                 {
-                    // 长期无回执（zombie）：超 3×超时窗后按 nonce 判定——pending 已回落（被节点丢弃）
-                    // 可证未上链，清哈希回 Processing 重播；仍在途则继续等（链上终会出回执）
-                    if (wallet != null && pendingNonce.HasValue && order.NonceUsed.HasValue
-                        && _clock.Now - order.StatusChangedAt > TimeSpan.FromMinutes(timeoutMinutes * 3))
+                    if (_clock.Now - order.StatusChangedAt > TimeSpan.FromMinutes(timeoutMinutes * 3))
                     {
-                        if (pendingNonce.Value <= order.NonceUsed.Value)
-                        {
-                            Logger.LogWarning("提现单 {OrderId} 带哈希长期无回执且 nonce 已回落（交易被丢弃），可证未上链，回 Processing 重播", order.Id);
-                            await RequeueToProcessingAsync(order, WithdrawStatus.Broadcasting, "带哈希超时且链上 nonce 未占用（交易被丢弃），自动重播", ct);
-                        }
+                        await MarkFailedAsync(order, WithdrawStatus.Broadcasting, "已记录交易哈希但长期未获取回执，需核实链上结果");
                     }
 
                     continue;
@@ -181,7 +158,7 @@ public class WithdrawBroadcastManager : DomainService
 
                 if (receipt.Status == 1)
                 {
-                    await CompleteFromReceiptAsync(order.Id, order.TxHash!);
+                    await CompleteFromReceiptAsync(order.Id, order.TxHash!, order);
                 }
                 else if (order.RetryCount + 1 >= maxRetries)
                 {
@@ -200,36 +177,40 @@ public class WithdrawBroadcastManager : DomainService
             }
         }
 
-        // ② 无哈希且超时的 Broadcasting：nonce 自动仲裁（无人工）。
-        if (wallet == null)
-        {
-            var unconfigured = await dbContext.WithdrawOrders.AsNoTracking()
-                .CountAsync(o => o.Status == WithdrawStatus.Broadcasting && o.TxHash == null && o.StatusChangedAt < cutoff, ct);
-            if (unconfigured > 0)
-            {
-                Logger.LogError("{Prefix}{Count} 笔无哈希超时单因热钱包未配置无法仲裁，等待配置恢复",
-                    CollectionConsts.AlertPrefixWithdrawHotWallet, unconfigured);
-            }
-
-            return;
-        }
-
+        // ② 无哈希且超时的 Broadcasting：正向证据才能自动重试或退款。
         var stuckNoHash = await dbContext.WithdrawOrders.AsNoTracking()
-            .Where(o => o.Status == WithdrawStatus.Broadcasting && o.TxHash == null && o.StatusChangedAt < cutoff)
+            .Where(o => o.Status == WithdrawStatus.Broadcasting && o.TxHash == null && o.StatusChangedAt < cutoff
+                        && o.NetworkName == network.Name)
             .OrderBy(o => o.StatusChangedAt)
             .Take(20)
             .ToListAsync(ct);
 
+        var manualReviewAfter = TimeSpan.FromMinutes(timeoutMinutes * 3L);
         foreach (var order in stuckNoHash)
         {
             try
             {
-                if (order.NonceUsed == null)
+                if (!WithdrawManager.HasBroadcastSender(order))
                 {
-                    // 理论不可达（nonce 发送前落库）：防御分支——历史脏数据转失败并告警，不重播
-                    Logger.LogError("{Prefix}提现单 {OrderId} 无哈希且无 NonceUsed（脏数据），转 BroadcastFailed",
-                        CollectionConsts.AlertPrefixWithdrawHotWallet, order.Id);
-                    await MarkFailedAsync(order.Id, WithdrawStatus.Broadcasting, "无哈希且无 NonceUsed（数据异常）");
+                    await MarkFailedAsync(order, WithdrawStatus.Broadcasting, "无哈希且缺少原发送地址或 nonce，需人工核实链上交易");
+                    continue;
+                }
+
+                var sender = order.BroadcastSenderAddress!;
+
+                if (await _withdraws.HasOtherCompletedAttemptAsync(order, ct))
+                {
+                    if (order.RetryCount + 1 >= maxRetries)
+                    {
+                        await AutoRefundAsync(order, WithdrawStatus.Broadcasting,
+                            $"原发送方的 nonce {order.NonceUsed} 已被另一笔提现占用，重试次数用尽，自动退款");
+                    }
+                    else
+                    {
+                        await RequeueToProcessingAsync(order, WithdrawStatus.Broadcasting,
+                            $"原发送方的 nonce {order.NonceUsed} 已被另一笔提现占用，自动重播（第 {order.RetryCount + 1} 次）", ct);
+                    }
+
                     continue;
                 }
 
@@ -238,56 +219,20 @@ public class WithdrawBroadcastManager : DomainService
                     tokenCache[order.Currency] = token = await FindTokenAsync(dbContext, network, order.Currency, ct);
                 }
 
-                if (pendingNonce is null || pendingNonce.Value <= order.NonceUsed.Value)
+                var adopted = await TryAdoptTxHashAsync(order, token, sender, gateway, ct);
+                if (adopted == AdoptResult.NoMatch && _clock.Now - order.StatusChangedAt > manualReviewAfter)
                 {
-                    // pending ≤ NonceUsed：本单交易从未进 mempool（或已被丢弃）＝可证未出款
-                    if (order.RetryCount + 1 >= maxRetries)
-                    {
-                        await AutoRefundAsync(order, WithdrawStatus.Broadcasting,
-                            $"广播超时且链上可证未出款（pending nonce {pendingNonce} ≤ NonceUsed {order.NonceUsed}），重试次数用尽，自动退款");
-                    }
-                    else
-                    {
-                        await RequeueToProcessingAsync(order, WithdrawStatus.Broadcasting,
-                            $"广播超时未上链（nonce 未被占用，可证未出款），自动重播（第 {order.RetryCount + 1} 次）", ct);
-                    }
+                    await MarkFailedAsync(order, WithdrawStatus.Broadcasting,
+                        "长期未找到原发送方的交易，无法确认是否出款，需人工核实链上交易");
                 }
-                else
+            }
+            catch (Exception ex) when (ex is ChainRpcException or System.Net.Http.HttpRequestException)
+            {
+                Logger.LogError(ex, "无哈希仲裁单笔异常，跳过本单: OrderId={OrderId}", order.Id);
+                if (_clock.Now - order.StatusChangedAt > manualReviewAfter)
                 {
-                    // pending > NonceUsed：nonce 已被某笔占用。两种可能：本单交易在途/已挖（去认领），
-                    // 或本单发送从未抵达节点、nonce 被后继单占了（本单必未上链）。用「同 nonce 的其他单」
-                    // 区分：同账户同 nonce 只能有一笔上链——别的单已带着该 nonce 落哈希/完结 ⇒ 本单必未出款。
-                    // 证据必须收紧到「后继单已 Completed」：Completed 必经回执成功 ⇒ 后继交易确实上链
-                    // 占用了该 nonce ⇒ 同账户同 nonce 本单必未上链（数学证明）。若只看 TxHash != null，
-                    // 后继已广播未挖、本单同 nonce 已挖的窗口会把已出款的单判成未出款而退款——双付。
-                    var nonceTakenByOther = await dbContext.WithdrawOrders.AsNoTracking().AnyAsync(
-                        o => o.Id != order.Id && o.NonceUsed == order.NonceUsed
-                             && o.Status == WithdrawStatus.Completed, ct);
-                    if (nonceTakenByOther)
-                    {
-                        if (order.RetryCount + 1 >= maxRetries)
-                        {
-                            await AutoRefundAsync(order, WithdrawStatus.Broadcasting,
-                                $"nonce {order.NonceUsed} 已被后继提现占用（本单交易必未上链，可证未出款），重试次数用尽，自动退款");
-                        }
-                        else
-                        {
-                            await RequeueToProcessingAsync(order, WithdrawStatus.Broadcasting,
-                                $"nonce {order.NonceUsed} 已被后继提现占用（可证未出款），自动重播（第 {order.RetryCount + 1} 次）", ct);
-                        }
-
-                        continue;
-                    }
-
-                    var adopted = await TryAdoptTxHashAsync(order, token, wallet, gateway, ct);
-                    if (adopted == AdoptResult.NoMatch
-                        && _clock.Now - order.StatusChangedAt > TimeSpan.FromMinutes(timeoutMinutes * 3))
-                    {
-                        // 长期认领不到且无同 nonce 证据：链上索引滞后与真实出款无法区分——
-                        // 转失败 + 高危告警，让管理端补录/退款可达（绝不自动退款：出款与否不可证）
-                        await MarkFailedAsync(order.Id, WithdrawStatus.Broadcasting,
-                            "无哈希超时且 nonce 已被占用，但窗口内认领不到交易（索引滞后或链上异常），需人工核实后补录或退款");
-                    }
+                    await MarkFailedAsync(order, WithdrawStatus.Broadcasting,
+                        "长期无法查询原发送方的交易，需人工核实是否出款");
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -297,7 +242,6 @@ public class WithdrawBroadcastManager : DomainService
         }
     }
 
-    /// <summary>认领结果。</summary>
     protected internal enum AdoptResult
     {
         Adopted,
@@ -305,30 +249,24 @@ public class WithdrawBroadcastManager : DomainService
     }
 
     /// <summary>
-    /// 哈希认领：按热钱包出站转账（from=热钱包、to=收款地址、金额=净额）在近窗口内找回
-    /// 本单交易哈希并落库，交给正常回执确认路径完结。
-    /// 匹配必须通过 nonce 复核（eth_getTransactionByHash）：Transfer 日志不带 nonce，而
-    /// 同地址同金额的重复提现是常态——只按 (from,to,amount) 认领会把旧交易/别的单的交易
-    /// 认到本单头上（未付款标 Completed）。同账户同 nonce 链上唯一，nonce 是认领的唯一键；
-    /// 哈希已被其他单持有的不认领（nonce 复核下天然唯一，仍冗余检查）。
-    /// CAS 只在仍无哈希且 nonce 未变时生效。扫描页设上限（热钱包出站流水无界，防爆轮）。
+    /// 按原发送方、收款地址和净额寻找转账，再用原发送方的 nonce 核对交易。
+    /// 转账日志没有 nonce，同地址同金额也可能属于不同单据。哈希未被别单使用且原尝试未变才保存。
     /// </summary>
     private async Task<AdoptResult> TryAdoptTxHashAsync(
-        ColWithdrawOrder order, ColToken token, WithdrawHotWallet wallet,
+        ColWithdrawOrder order, ColToken token, string sender,
         IBscChainGateway gateway, CancellationToken ct)
     {
         var head = await gateway.GetLatestBlockNumberAsync(ct);
-        var fromBlock = Math.Max(0, head - 43_200); // ≈9h@0.75s/块；超时阈值配得比窗口大时认领不到→走人工核实分支
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var fromBlock = Math.Max(0, head - 43_200); // 超出查找窗口的订单保留人工核对路径。
         var page = 1;
         const int maxPages = 10;
         while (!ct.IsCancellationRequested)
         {
             var result = await gateway.GetTransfersForAddressAsync(
-                token.ContractAddress, wallet.Address, fromBlock, head, page, 100, ct);
+                token.ContractAddress, sender, fromBlock, head, page, 100, ct);
             foreach (var log in result.Logs)
             {
-                if (!string.Equals(log.From, wallet.Address, StringComparison.OrdinalIgnoreCase)
+                if (!string.Equals(log.From, sender, StringComparison.OrdinalIgnoreCase)
                     || !string.Equals(log.To, order.ToAddress, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -340,39 +278,27 @@ public class WithdrawBroadcastManager : DomainService
                     continue;
                 }
 
-                // nonce 复核：这笔链上交易占用的必须是本单落库的 NonceUsed（认领唯一键）
-                var logNonce = await gateway.GetTransactionNonceAsync(log.TxHash, ct);
+                var logNonce = await gateway.GetTransactionNonceForSenderAsync(log.TxHash, sender, ct);
                 if (logNonce == null || logNonce.Value != order.NonceUsed!.Value)
                 {
                     Logger.LogDebug("认领候选 {TxHash} nonce {Candidate} ≠ 本单 {Nonce}，跳过", log.TxHash, logNonce, order.NonceUsed);
                     continue;
                 }
 
-                // 冗余防线：该哈希不得已被其他单持有
-                var hashClaimed = await dbContext.WithdrawOrders.AsNoTracking()
-                    .AnyAsync(o => o.Id != order.Id && o.TxHash == log.TxHash, ct);
-                if (hashClaimed)
+                var txHash = log.TxHash.ToLowerInvariant();
+                if (!await TryWriteBroadcastHashAsync(order, txHash, ct))
                 {
                     continue;
                 }
 
-                var rows = await dbContext.WithdrawOrders
-                    .Where(o => o.Id == order.Id && o.Status == WithdrawStatus.Broadcasting
-                                && o.TxHash == null && o.NonceUsed == order.NonceUsed)
-                    .ExecuteUpdateAsync(s => s.SetProperty(o => o.TxHash, log.TxHash), ct);
-                if (rows > 0)
-                {
-                    Logger.LogInformation("提现单 {OrderId} 哈希认领成功（nonce {Nonce} → {TxHash}），交回执路径完结",
-                        order.Id, order.NonceUsed, log.TxHash);
-                    return AdoptResult.Adopted;
-                }
-
-                return AdoptResult.NoMatch; // CAS 未中：已被并发处置
+                Logger.LogInformation("提现单 {OrderId} 哈希认领成功（nonce {Nonce} → {TxHash}），交回执路径完结",
+                    order.Id, order.NonceUsed, txHash);
+                return AdoptResult.Adopted;
             }
 
             if (!result.Incomplete)
             {
-                Logger.LogWarning("提现单 {OrderId} 无哈希超时：pending nonce 已越过 NonceUsed（交易在途/已挖）但窗口内未扫到匹配转账，下一轮再仲裁",
+                Logger.LogWarning("提现单 {OrderId} 无哈希超时，查询窗口内未找到原发送方的匹配转账",
                     order.Id);
                 return AdoptResult.NoMatch;
             }
@@ -389,46 +315,50 @@ public class WithdrawBroadcastManager : DomainService
         return AdoptResult.NoMatch;
     }
 
-    /// <summary>
-    /// 统一的「清哈希/nonce 回 Processing 重播」CAS 迁移（收拢三处拷贝）：
-    /// 守卫含 from 状态 + 原哈希 + 原 nonce（无哈希单即 null 守卫），RetryCount+1。
-    /// </summary>
-    private async Task RequeueToProcessingAsync(ColWithdrawOrder order, WithdrawStatus from, string reason, CancellationToken ct)
+    /// <summary>核对原尝试后清除其广播信息，将订单重新排队并递增重试次数。</summary>
+    private async Task<bool> RequeueToProcessingAsync(ColWithdrawOrder order, WithdrawStatus from, string reason, CancellationToken ct)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var rows = await dbContext.WithdrawOrders
-            .Where(o => o.Id == order.Id && o.Status == from
-                        && o.TxHash == order.TxHash && o.NonceUsed == order.NonceUsed)
+        var rows = await WithdrawManager.MatchBroadcastAttempt(dbContext.WithdrawOrders.Where(o => o.Status == from), order)
             .ExecuteUpdateAsync(x => x
                 .SetProperty(o => o.Status, WithdrawStatus.Processing)
                 .SetProperty(o => o.StatusChangedAt, _clock.Now)
                 .SetProperty(o => o.TxHash, (string?)null)
                 .SetProperty(o => o.NonceUsed, (long?)null)
+                .SetProperty(o => o.BroadcastSenderAddress, (string?)null)
                 .SetProperty(o => o.RetryCount, order.RetryCount + 1)
                 .SetProperty(o => o.FailReason, reason), ct);
         if (rows > 0)
         {
             Logger.LogWarning("提现单 {OrderId} 回 Processing 重试（第 {Retry} 次）：{Reason}", order.Id, order.RetryCount + 1, reason);
         }
+
+        return rows > 0;
     }
 
     /// <summary>
-    /// 自动退款终态：链上可证未出款（revert / nonce 未占用）→ BroadcastFailed → Rejected，
+    /// 自动退款终态：回执失败或 nonce 被另一笔已完结交易占用 → BroadcastFailed → Rejected，
     /// 净额+手续费自动退回用户可用，告警留痕（可见但不阻塞——不需要人解除状态）。
     /// </summary>
     private async Task AutoRefundAsync(ColWithdrawOrder order, WithdrawStatus from, string reason)
     {
-        await MarkFailedAsync(order.Id, from, reason);
+        if (!await MarkFailedAsync(order, from, reason))
+        {
+            return;
+        }
         try
         {
-            await _withdraws.RefundAfterApproveAsync(order.Id, auditUserId: null, remark: reason);
+            await _withdraws.RefundAfterApproveAsync(order, auditUserId: null, remark: reason);
             await _alerts.RaiseAsync(null, "提现自动退款",
                 $"提现单 {order.Id}：{reason}。净额+手续费已自动退回用户可用余额（系统处置，无需人工）。");
         }
+        catch (BusinessException ex) when (ex.Code == CollectionErrorCodes.WithdrawInvalidStatus)
+        {
+            Logger.LogInformation("提现单 {OrderId} 已由其他操作更新，跳过本次自动退款", order.Id);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // MarkFailed 与退款是两个事务：退款失败时单据已在 BroadcastFailed（管理端 refund 可达），
-            // 高危告警立即上报——不能只留一条静默日志让冻结的资金无人知晓
+            // 失败状态已经提交，退款仍可由管理端处理。
             Logger.LogError(ex, "{Prefix}提现单 {OrderId} 自动退款失败（单据已转 BroadcastFailed），需人工退款",
                 CollectionConsts.AlertPrefixWithdrawHotWallet, order.Id);
             await _alerts.RaiseAsync(null, "提现自动退款失败",
@@ -436,19 +366,45 @@ public class WithdrawBroadcastManager : DomainService
         }
     }
 
-    /// <summary>回执成功 → 完结（CAS + CompleteTime + 账本 payout；幂等：Broadcasting/Completed 双态容许重放）。</summary>
-    public virtual async Task CompleteFromReceiptAsync(Guid orderId, string txHash)
+    /// <summary>交易核对通过后同事务完结订单和出款账本，重复提交相同完结哈希直接返回。</summary>
+    public virtual async Task CompleteFromReceiptAsync(
+        Guid orderId, string txHash, ColWithdrawOrder? verifiedAttempt = null, bool attachVerifiedHash = false)
     {
+        if (attachVerifiedHash && (verifiedAttempt?.Id != orderId || verifiedAttempt.TxHash != null))
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidStatus).WithData("WithdrawOrderId", orderId);
+        }
+
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var now = _clock.Now;
+        if (verifiedAttempt != null && !await CanClaimHashAsync(dbContext, verifiedAttempt, txHash))
+        {
+            // 已成功完结的本单须保持幂等，即使老数据中已有重复哈希。
+            var alreadyCompleted = await dbContext.WithdrawOrders.AsNoTracking().AnyAsync(order =>
+                order.Id == orderId && order.Status == WithdrawStatus.Completed && order.TxHash == txHash);
+            if (!alreadyCompleted)
+            {
+                throw new BusinessException(CollectionErrorCodes.WithdrawReceiptMismatch)
+                    .WithData("Reason", "该交易哈希已归属另一笔提现");
+            }
 
-        var rows = await dbContext.WithdrawOrders
-            .Where(o => o.Id == orderId
-                        && (o.Status == WithdrawStatus.Broadcasting || o.Status == WithdrawStatus.BroadcastFailed)
-                        && o.TxHash == txHash)
+            await uow.CompleteAsync();
+            return;
+        }
+
+        var expectedHash = attachVerifiedHash ? null : txHash;
+        var eligible = dbContext.WithdrawOrders.Where(o => o.Id == orderId && o.TxHash == expectedHash
+            && (o.Status == WithdrawStatus.Broadcasting || o.Status == WithdrawStatus.BroadcastFailed));
+        if (verifiedAttempt != null)
+        {
+            eligible = WithdrawManager.MatchBroadcastAttempt(eligible, verifiedAttempt);
+        }
+
+        var rows = await eligible
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, WithdrawStatus.Completed)
+                .SetProperty(o => o.TxHash, txHash)
                 .SetProperty(o => o.StatusChangedAt, now)
                 .SetProperty(o => o.CompleteTime, now)
                 .SetProperty(o => o.FailReason, (string?)null));
@@ -473,6 +429,32 @@ public class WithdrawBroadcastManager : DomainService
         Logger.LogInformation("提现单 {OrderId} 打款完成（{TxHash}）", orderId, txHash);
     }
 
+    private async Task<bool> TryWriteBroadcastHashAsync(ColWithdrawOrder attempt, string txHash, CancellationToken ct)
+    {
+        using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        if (!await CanClaimHashAsync(dbContext, attempt, txHash, ct))
+        {
+            return false;
+        }
+
+        var broadcasting = dbContext.WithdrawOrders.Where(order => order.Status == WithdrawStatus.Broadcasting);
+        var rows = await WithdrawManager.MatchBroadcastAttempt(broadcasting, attempt)
+            .ExecuteUpdateAsync(update => update.SetProperty(order => order.TxHash, txHash), ct);
+        await uow.CompleteAsync(ct);
+        return rows > 0;
+    }
+
+    private static async Task<bool> CanClaimHashAsync(
+        CollectionDbContext dbContext, ColWithdrawOrder attempt, string txHash, CancellationToken ct = default)
+    {
+        var identity = $"{attempt.NetworkName}:{txHash}";
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtext('Collection:WithdrawalHash'), hashtext({identity}))", ct);
+        return !await dbContext.WithdrawOrders.AsNoTracking().AnyAsync(order => order.Id != attempt.Id
+            && order.NetworkName == attempt.NetworkName && order.TxHash == txHash, ct);
+    }
+
     // ── ② 小额自动审 ─────────────────────────────────────────────────────────────────────
 
     public virtual Task AutoApproveSmallOrdersAsync(
@@ -488,7 +470,7 @@ public class WithdrawBroadcastManager : DomainService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
         var pending = await dbContext.WithdrawOrders.AsNoTracking()
-            .Where(o => o.Status == WithdrawStatus.Pending && o.Amount <= threshold)
+            .Where(o => o.Status == WithdrawStatus.Pending && o.Amount <= threshold && o.NetworkName == network.Name)
             .OrderBy(o => o.CreationTime)
             .Take(batchSize)
             .ToListAsync(ct);
@@ -502,9 +484,7 @@ public class WithdrawBroadcastManager : DomainService
             return; // 总闸：整批等下一轮
         }
 
-        // 轮次级缓存：热钱包/代币/偿付检查只做一次（避免逐单重复 2 RPC + 2 SELECT）。
-        // 审批不搬链上资金（打款在广播段，那里保留逐单检查），偿付语义按整批净额对照——
-        // 整批过不了就整批不动，比逐单放行更保守。
+        // 审核前按币种检查本批次的净额合计，实际广播时再次逐单检查。
         var wallet = await _guard.LoadAsync(ct);
         if (wallet == null)
         {
@@ -554,7 +534,7 @@ public class WithdrawBroadcastManager : DomainService
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var queue = await dbContext.WithdrawOrders.AsNoTracking()
-            .Where(o => o.Status == WithdrawStatus.Processing)
+            .Where(o => o.Status == WithdrawStatus.Processing && o.NetworkName == network.Name)
             .OrderBy(o => o.CreationTime)
             .Take(batchSize)
             .ToListAsync(ct);
@@ -568,7 +548,7 @@ public class WithdrawBroadcastManager : DomainService
             return; // 总闸：整批等下一轮
         }
 
-        // 轮次级缓存：热钱包与代币热路径只读一次；逐单偿付检查保留（打款前最后一道，前单上链会变动余额）
+        // 复用本轮钱包和代币配置。前一笔交易可能影响余额，广播前仍逐单检查。
         var wallet = await _guard.LoadAsync(ct)
                      ?? throw new BusinessException(CollectionErrorCodes.HotWalletNotConfigured);
         var tokenCache = new System.Collections.Generic.Dictionary<CollectionCurrency, ColToken>();
@@ -593,8 +573,8 @@ public class WithdrawBroadcastManager : DomainService
             }
             catch (Exception ex)
             {
-                // 发送结果未知：保持 Broadcasting 无哈希——卡单恢复会转人工，绝不在此重试
-                Logger.LogError(ex, "提现单 {OrderId} 广播异常（发送结果未知），等卡单恢复人工核查", order.Id);
+                // 发送前可能已提交广播尝试，后续由恢复流程按已保存的状态核对。
+                Logger.LogError(ex, "提现单 {OrderId} 广播处理异常，后续按单据状态继续处理", order.Id);
             }
         }
     }
@@ -604,41 +584,12 @@ public class WithdrawBroadcastManager : DomainService
         System.Collections.Generic.Dictionary<CollectionCurrency, ColToken> tokenCache,
         ColWithdrawOrder order, CancellationToken ct)
     {
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
         var token = tokenCache[order.Currency];
+        var sender = wallet.Address.ToLowerInvariant();
 
         // 广播前偿付/熔断/BNB 检查（签名临界区内还有最后一道总闸检查）
         await _guard.EnsureCanPayAsync(wallet, gateway, token, order.ActualAmount, ct);
 
-        // 取件 CAS：Processing → Broadcasting + 发送前落库 NonceUsed/BroadcastAt。
-        // nonce 必须先于发送持久化：发送结果未知（超时/崩溃）时，「热钱包 pending nonce 是否
-        // 已越过 NonceUsed」是唯一可证明「钱没出去/已出去」的判据——先记 nonce 才有无人工的自动仲裁。
-        var now = _clock.Now;
-        long nonce;
-        await SignGate.WaitAsync(ct);
-        try
-        {
-            nonce = await gateway.GetTransactionCountAsync(wallet.Address, ct);
-        }
-        finally
-        {
-            SignGate.Release();
-        }
-
-        var rows = await dbContext.WithdrawOrders
-            .Where(o => o.Id == order.Id && o.Status == WithdrawStatus.Processing)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(o => o.Status, WithdrawStatus.Broadcasting)
-                .SetProperty(o => o.StatusChangedAt, now)
-                .SetProperty(o => o.NonceUsed, nonce)
-                .SetProperty(o => o.BroadcastAt, now)
-                .SetProperty(o => o.FailReason, (string?)null), ct);
-        if (rows == 0)
-        {
-            return;
-        }
-
-        // 签名临界区：串行化 + 发送前最后一道总闸（关 TOCTOU，exchange 同款）
         await SignGate.WaitAsync(ct);
         try
         {
@@ -647,29 +598,37 @@ public class WithdrawBroadcastManager : DomainService
                 throw new BusinessException(CollectionErrorCodes.WithdrawHalted);
             }
 
-            var masterKey = _configuration[CollectionSettings.Host.MasterKey];
-            if (string.IsNullOrEmpty(masterKey))
-            {
-                throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
-            }
+            var masterKey = await _chainKeyProvider.GetAsync()
+                            ?? throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
 
             var privateKey = wallet.DecryptKey(masterKey, _encryptor);
-            var dataHex = SweepManager.BuildErc20TransferData(order.ToAddress, order.ActualAmount, token.Decimals);
-            var txHash = await gateway.SendTransactionAsync(
-                privateKey, token.ContractAddress, dataHex, "0x0", network.ChainId, nonce, ct);
+            var derived = new Nethereum.Signer.EthECKey(privateKey).GetPublicAddress();
+            if (!string.Equals(derived, sender, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new BusinessException(CollectionErrorCodes.HotWalletNotConfigured)
+                    .WithData("Reason", "提现钱包地址与签名密钥不匹配");
+            }
 
-            await dbContext.WithdrawOrders
-                .Where(o => o.Id == order.Id && o.Status == WithdrawStatus.Broadcasting && o.TxHash == null)
-                .ExecuteUpdateAsync(s => s.SetProperty(o => o.TxHash, txHash), ct);
+            var nonce = await gateway.GetTransactionCountAsync(sender, ct);
+            if (!await ClaimBroadcastAttemptAsync(order, sender, nonce, ct))
+            {
+                return;
+            }
+
+            var dataHex = SweepManager.BuildErc20TransferData(order.ToAddress, order.ActualAmount, token.Decimals);
+            var txHash = (await gateway.SendTransactionAsync(
+                privateKey, token.ContractAddress, dataHex, "0x0", network.ChainId, nonce, ct)).ToLowerInvariant();
+            order.NonceUsed = nonce;
+            order.BroadcastSenderAddress = sender;
+            if (!await TryWriteBroadcastHashAsync(order, txHash, ct))
+            {
+                Logger.LogWarning("{Prefix}提现单 {OrderId} 已发送，但未能关联交易哈希 {TxHash}，等待核实",
+                    CollectionConsts.AlertPrefixWithdrawHotWallet, order.Id, txHash);
+                return;
+            }
+
             Logger.LogInformation("提现单 {OrderId} 已广播 {Actual} {Currency} → {To}（{TxHash}）",
                 order.Id, order.ActualAmount, order.Currency, order.ToAddress, txHash);
-        }
-        catch (Exception ex)
-        {
-            // 发送结果未知：保持 Broadcasting 无哈希——nonce 已落库，卡单恢复的 nonce 仲裁
-            // 下一轮自动判定（pending ≤ NonceUsed = 可证未出款 → 自动重播/退款），无需人工
-            Logger.LogError(ex, "提现单 {OrderId} 广播异常（发送结果未知，NonceUsed={Nonce}），等 nonce 仲裁自动处置", order.Id, nonce);
-            throw;
         }
         finally
         {
@@ -677,11 +636,30 @@ public class WithdrawBroadcastManager : DomainService
         }
     }
 
+    private async Task<bool> ClaimBroadcastAttemptAsync(ColWithdrawOrder order, string sender, long nonce, CancellationToken ct)
+    {
+        // 发送结果可能未知，必须先提交发送地址和 nonce，才能在恢复时识别原尝试。
+        using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var now = _clock.Now;
+        var queued = dbContext.WithdrawOrders.Where(o => o.Status == WithdrawStatus.Processing);
+        var rows = await WithdrawManager.MatchBroadcastAttempt(queued, order)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.Status, WithdrawStatus.Broadcasting)
+                .SetProperty(o => o.StatusChangedAt, now)
+                .SetProperty(o => o.NonceUsed, nonce)
+                .SetProperty(o => o.BroadcastSenderAddress, sender)
+                .SetProperty(o => o.BroadcastAt, now)
+                .SetProperty(o => o.FailReason, (string?)null), ct);
+        await uow.CompleteAsync(ct);
+        return rows > 0;
+    }
+
     // ── 管理端补救路径（BroadcastFailed 单）─────────────────────────────────────────────
 
     /// <summary>
-    /// 重试（仅 BroadcastFailed 且 RetryCount 未超限）：有哈希先验回执——成功直接完结、
-    /// 失败清哈希回 Processing；无哈希先过 nonce 仲裁门、再过双花门（近期已向该地址付款则拒绝）。
+    /// 处置 BroadcastFailed：成功回执直接完结；只有重新排队受重试次数限制。
+    /// 无哈希时仅接受同一发送方的 nonce 已被另一笔完结提现占用的证据。
     /// </summary>
     public virtual async Task RetryAsync(Guid orderId, ColNetwork network, IBscChainGateway gateway, CancellationToken ct = default)
     {
@@ -702,6 +680,28 @@ public class WithdrawBroadcastManager : DomainService
                 .WithData("From", order.Status.ToString()).WithData("To", "Processing");
         }
 
+        if (order.NetworkName != network.Name)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawNetworkUnsupported);
+        }
+
+        var txHash = order.TxHash;
+        if (!string.IsNullOrEmpty(txHash))
+        {
+            var receipt = await gateway.GetTransactionReceiptAsync(txHash, ct);
+            if (receipt.Status is not (0 or 1))
+            {
+                throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
+                    .WithData("TxHash", txHash);
+            }
+
+            if (receipt.Status == 1)
+            {
+                await CompleteFromReceiptAsync(order.Id, txHash, order);
+                return;
+            }
+        }
+
         var maxRetries = await _settings.GetIntAsync(CollectionSettings.Withdraw.MaxRetries, WithdrawDefaults.MaxRetries);
         if (order.RetryCount >= maxRetries)
         {
@@ -709,54 +709,29 @@ public class WithdrawBroadcastManager : DomainService
                 .WithData("RetryCount", order.RetryCount).WithData("Max", maxRetries);
         }
 
-        if (!string.IsNullOrEmpty(order.TxHash))
+        if (!string.IsNullOrEmpty(txHash))
         {
-            var receipt = await gateway.GetTransactionReceiptAsync(order.TxHash, ct);
-            if (receipt.Status == null)
-            {
-                throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
-                    .WithData("TxHash", order.TxHash);
-            }
-
-            if (receipt.Status == 1)
-            {
-                await CompleteFromReceiptAsync(order.Id, order.TxHash!);
-                return;
-            }
-
             // 回执失败：清哈希回 Processing（新 nonce 重试）
-            await RequeueToProcessingAsync(order, WithdrawStatus.BroadcastFailed, "管理端重试（回执失败）", ct);
+            await RequeueManualRetryAsync(order, "管理端重试（回执失败）", ct);
             return;
         }
 
-        // 无哈希：nonce 仲裁——与 RefundAsync 对同一「BroadcastFailed 无哈希」状态
-        // 的裁决口径对齐：账面记录的 NonceUsed 仍在途（pending nonce 已越过它）说明原交易
-        // 可能已进 mempool/已挖，此时回队重播会以新 nonce 二次转账 ActualAmount = 双付。
-        // 必须在 RequeueToProcessingAsync 清掉 NonceUsed 证据之前裁决。
-        if (order.NonceUsed != null)
+        if (!await _withdraws.HasOtherCompletedAttemptAsync(order, ct))
         {
-            var wallet = await _guard.LoadAsync(ct)
-                         ?? throw new BusinessException(CollectionErrorCodes.HotWalletNotConfigured);
-            var pending = await gateway.GetTransactionCountAsync(wallet.Address, ct);
-            if (pending > order.NonceUsed.Value)
-            {
-                throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
-                    .WithData("Reason", $"pending nonce {pending} 已越过 NonceUsed {order.NonceUsed}，交易可能在途，先人工核实链上");
-            }
+            throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
+                .WithData("Reason", "缺少原发送方的链上未出款证据，请先核实交易");
         }
 
-        // 双花门——近期（24h）已向该地址付过款即拒绝，人工先核实链上
-        var since = _clock.Now.AddDays(-1);
-        var recentPayout = await dbContext.WithdrawOrders.AsNoTracking().AnyAsync(
-            o => o.ToAddress == order.ToAddress && o.Id != order.Id
-                 && o.CompleteTime != null && o.CompleteTime >= since, ct);
-        if (recentPayout)
-        {
-            throw new BusinessException(CollectionErrorCodes.WithdrawRecentPayoutExists)
-                .WithData("ToAddress", order.ToAddress);
-        }
+        await RequeueManualRetryAsync(order, "管理端重试（原 nonce 已被另一笔提现占用）", ct);
+    }
 
-        await RequeueToProcessingAsync(order, WithdrawStatus.BroadcastFailed, "管理端重试（双花门通过）", ct);
+    private async Task RequeueManualRetryAsync(ColWithdrawOrder order, string reason, CancellationToken ct)
+    {
+        if (!await RequeueToProcessingAsync(order, WithdrawStatus.BroadcastFailed, reason, ct))
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidStatus)
+                .WithData("WithdrawOrderId", order.Id);
+        }
     }
 
     // ── 内部 ─────────────────────────────────────────────────────────────────────────────
@@ -769,11 +744,10 @@ public class WithdrawBroadcastManager : DomainService
                ?? throw new Volo.Abp.AbpException($"网络 {network.Name} 缺少代币 {symbol}（种子未建或被禁用）");
     }
 
-    private async Task MarkFailedAsync(Guid orderId, WithdrawStatus from, string reason)
+    private async Task<bool> MarkFailedAsync(ColWithdrawOrder order, WithdrawStatus from, string reason)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var rows = await dbContext.WithdrawOrders
-            .Where(o => o.Id == orderId && o.Status == from)
+        var rows = await WithdrawManager.MatchBroadcastAttempt(dbContext.WithdrawOrders.Where(o => o.Status == from), order)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, WithdrawStatus.BroadcastFailed)
                 .SetProperty(o => o.StatusChangedAt, _clock.Now)
@@ -781,8 +755,10 @@ public class WithdrawBroadcastManager : DomainService
         if (rows > 0)
         {
             Logger.LogError("{Prefix}提现单 {OrderId} → BroadcastFailed：{Reason}",
-                CollectionConsts.AlertPrefixWithdrawHotWallet, orderId, reason);
+                CollectionConsts.AlertPrefixWithdrawHotWallet, order.Id, reason);
         }
+
+        return rows > 0;
     }
 
     private async Task<bool> IsHaltedAsync()

@@ -10,10 +10,15 @@ using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Jobs;
+using AbpAdmin.Collection.Services;
+using AbpAdmin.Collection.Settings;
+using AbpAdmin.Ledger.Data;
+using AbpAdmin.Ledger.Integration.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
+using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Uow;
 using Xunit;
@@ -295,6 +300,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         {
             HasReceipt = true,
             ReceiptConfirmationsMet = true,
+            SimulatedSweepSender = watched,
         };
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
@@ -309,7 +315,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
             await dbContext.SweepTasks.AddAsync(new ColSweepTask(taskId)
             {
                 NetworkId = network.Id, TokenId = usdt.Id, UserId = tailUser, AddressId = addressId,
-                Address = "0x" + Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N")[..8],
+                Address = watched,
                 AddressIndex = 2, Amount = 50m,
                 Status = SweepTaskStatus.Queued, StatusChangedAt = DateTime.Now, CreationTime = DateTime.Now,
             });
@@ -330,9 +336,43 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var db = await DbAsync();
         var a = await ReadOrderAsync(orderIdA);
         var b = await ReadOrderAsync(orderIdB);
-        // 上限截取：只有 A（20）被广播+入账，B（30）留待下一轮（不被误入账）
+        // 上限截取：只有 A（20）被广播+入账，B（30）不会提前入账。
         a.Status.ShouldBe(DepositOrderStatus.Swept);
+        b.Status.ShouldBe(DepositOrderStatus.Confirmed);
+        b.SweepTaskId.ShouldBeNull();
         (await db.Balances.Where(x => x.UserId == tailUser).SumAsync(x => x.Balance)).ShouldBe(20m);
+    }
+
+    [Fact]
+    public async Task Manually_Released_Tail_Is_Enqueued_Again_Above_Automatic_Limit()
+    {
+        var (network, usdt, _) = await SeedChainAsync(scanRan: true);
+        await SetNetworkDepositPolicyAsync(network.Id, 0m, 25m);
+        usdt.VaultAddress = "0x" + new string('a', 40);
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var first = await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId, status: DepositOrderStatus.Confirmed);
+        var tail = await SeedOrderAsync(network.Id, usdt, watched, 100m, addressId, status: DepositOrderStatus.Confirmed);
+        var gateway = new FakeChainGateway(head: 500);
+        var scanner = NewScanManager();
+        await scanner.RunTokenRoundAsync(network, usdt, gateway, 12, 50, 1440,
+            TimeSpan.FromMinutes(1440), 0.9m, CancellationToken.None);
+        await GetRequiredService<CollectionNetworkAdminAppService>().ApproveLargeDepositAsync(tail);
+        var originalTask = (await ReadOrderAsync(first)).SweepTaskId;
+        (await ReadOrderAsync(tail)).SweepTaskId.ShouldBe(originalTask);
+
+        await NewSweepManager().RunTokenRoundAsync(network, usdt, gateway, 12, 25m, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        var detached = await ReadOrderAsync(tail);
+        detached.SweepTaskId.ShouldBeNull();
+        detached.ManuallyReleased.ShouldBeTrue();
+
+        await scanner.RunTokenRoundAsync(network, usdt, gateway, 12, 50, 1440,
+            TimeSpan.FromMinutes(1440), 0.9m, CancellationToken.None);
+        var linked = await ReadOrderAsync(tail);
+        linked.SweepTaskId.ShouldNotBeNull();
+        linked.SweepTaskId.ShouldNotBe(originalTask);
+        (await DbAsync()).SweepTasks.Count(t => t.AddressId == addressId).ShouldBe(2);
     }
 
     [Fact]
@@ -346,6 +386,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         {
             HasReceipt = true,
             ReceiptConfirmationsMet = true,
+            SimulatedSweepSender = watched,
         };
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
@@ -358,7 +399,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
             await dbContext.SweepTasks.AddAsync(new ColSweepTask(taskId)
             {
                 NetworkId = network.Id, TokenId = usdt.Id, UserId = healUser, AddressId = addressId,
-                Address = "0x" + Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N")[..8],
+                Address = watched,
                 AddressIndex = 2, Amount = 20m,
                 Status = SweepTaskStatus.Fueling, StatusChangedAt = DateTime.Now, CreationTime = DateTime.Now,
             });
@@ -413,7 +454,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         task.Status.ShouldBe(SweepTaskStatus.Failed);
         task.Retryable.ShouldBeFalse();
         task.FailReason.ShouldNotBeNull();
-        task.FailReason.ShouldContain("拒绝盲目归集");
+        task.FailReason.ShouldContain("拒绝广播");
         gateway.BroadcastCount.ShouldBe(0); // 拒绝盲目归集：不广播真金
     }
 
@@ -495,10 +536,16 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var manager = NewSweepManager();
         await manager.RunTokenRoundAsync(network, usdt, gateway, 12, null, 0.005m,
             TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        (await ReadOrderTaskAsync(usdt.Id)).Status.ShouldBe(SweepTaskStatus.Sweeping);
+        gateway.ReceiptConfirmationsMet = true;
+        await manager.RunTokenRoundAsync(network, usdt, gateway, 12, null, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
 
         var task = (await DbAsync()).SweepTasks.Single(t => t.TokenId == usdt.Id);
         task.Status.ShouldBe(SweepTaskStatus.Failed);
         task.Retryable.ShouldBeFalse(); // 仅人工
+        task.TxHash.ShouldBeNull();
+        task.NonceUsed.ShouldBeNull();
         var order = await ReadOrderAsync(orderId);
         order.Status.ShouldBe(DepositOrderStatus.Sweeping); // 单不动，等人工
         (await DbAsync()).Balances.Count(b => b.UserId == rvUser).ShouldBe(0); // 不入账
@@ -516,7 +563,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var orderId = await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId);
         await ActivateAsync(network, usdt, gateway, orderId); // 广播 fake-1（nonce 0）
 
-        // 宽限已过 + 无回执：清哈希保 nonce；重签轮同 nonce 换新哈希
+        // 宽限已过且无回执：重签复用已保存的 nonce。
         using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
         {
             var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
@@ -539,6 +586,463 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         gateway.Broadcasts.Count.ShouldBe(2);
         gateway.Broadcasts[0].Nonce.ShouldBe(gateway.Broadcasts[1].Nonce); // 同 nonce 替换，绝不开新 nonce
         retried.NonceUsed.ShouldBe(gateway.Broadcasts[1].Nonce);
+    }
+
+    [Theory]
+    [InlineData(ReplacementReceipt.Shallow)]
+    [InlineData(ReplacementReceipt.Malformed)]
+    [InlineData(ReplacementReceipt.TimedOut)]
+    [InlineData(ReplacementReceipt.IncompleteTransferProof)]
+    public async Task Original_Hash_Can_Win_After_A_Replacement_And_Vault_Change(ReplacementReceipt replacementReceipt)
+    {
+        var user = NewUser();
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        var vault = "0x" + new string('a', 40);
+        token.VaultAddress = vault;
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId, userId: user);
+        var gateway = new FakeChainGateway(head: 500) { SimulatedSweepSender = watched };
+        await ActivateAsync(network, token, gateway, orderId);
+        var original = await ReadOrderTaskAsync(token.Id);
+        original.BroadcastVaultAddress.ShouldBe(vault);
+        var originalHash = original.TxHash;
+        originalHash.ShouldNotBeNull();
+
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
+        {
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await db.SweepTasks.Where(t => t.Id == original.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.BroadcastAt, TestClock.Now.AddMinutes(-40)));
+            await uow.CompleteAsync();
+        }
+
+        token.VaultAddress = "0x" + new string('b', 40);
+        var manager = NewSweepManager();
+        async Task RoundAsync()
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await manager.RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+                TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, deadline.Token);
+        }
+        await RoundAsync();
+        var replacement = await ReadOrderTaskAsync(token.Id);
+        replacement.TxHash.ShouldNotBeNull();
+        replacement.TxHash.ShouldNotBe(originalHash);
+        replacement.PreviousTxHashes.ShouldNotBeNull();
+        replacement.PreviousTxHashes.ShouldContain(originalHash);
+        gateway.Broadcasts.Count.ShouldBe(2);
+        gateway.Broadcasts.Select(call => call.Nonce).ShouldBe(new[] { original.NonceUsed!.Value, original.NonceUsed.Value });
+
+        gateway.HasReceipt = true;
+        gateway.ReceiptHashes = [originalHash, replacement.TxHash];
+        if (replacementReceipt == ReplacementReceipt.IncompleteTransferProof)
+        {
+            gateway.IncompleteReceiptLogHashes.Add(replacement.TxHash);
+        }
+        else
+        {
+            gateway.ShallowReceiptHashes = [replacement.TxHash];
+        }
+        gateway.ReceiptConfirmationsMet = true;
+        var receiptReads = new List<string>();
+        var candidateCanceled = false;
+        gateway.BeforeCancellableReceiptRead = async (hash, ct) =>
+        {
+            receiptReads.Add(hash);
+            if (hash != replacement.TxHash)
+            {
+                return;
+            }
+            if (replacementReceipt == ReplacementReceipt.Malformed)
+            {
+                throw new ChainRpcException("simulated malformed receipt");
+            }
+            if (replacementReceipt == ReplacementReceipt.TimedOut)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                }
+                finally
+                {
+                    candidateCanceled = ct.IsCancellationRequested;
+                }
+            }
+        };
+        await RoundAsync();
+        await RoundAsync();
+        candidateCanceled.ShouldBe(replacementReceipt == ReplacementReceipt.TimedOut);
+        receiptReads.ShouldBe([replacement.TxHash, originalHash]);
+        if (replacementReceipt == ReplacementReceipt.IncompleteTransferProof)
+        {
+            gateway.ReceiptLogReads.ShouldBe([replacement.TxHash, originalHash]);
+        }
+        var settled = await ReadOrderTaskAsync(token.Id);
+        settled.TxHash.ShouldBe(originalHash);
+        (settled.PreviousTxHashes ?? []).ShouldBeEmpty();
+        settled.Status.ShouldBe(SweepTaskStatus.Swept);
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Swept);
+        gateway.BroadcastCount.ShouldBe(2);
+        await AssertSweepCreditAsync(user, orderId, expected: true);
+    }
+
+    public enum ReplacementReceipt
+    {
+        Shallow,
+        Malformed,
+        TimedOut,
+        IncompleteTransferProof,
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Untrusted_Sweep_Receipt_Remains_Pending_Past_Grace_Without_Rebroadcast(bool malformedResponse)
+    {
+        var user = NewUser();
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0x" + new string('a', 40);
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId, userId: user);
+        var gateway = new FakeChainGateway(head: 500);
+        await ActivateAsync(network, token, gateway, orderId);
+        var sent = gateway.Broadcasts.Single();
+        var broadcastAt = DateTime.UtcNow.AddMinutes(-40);
+
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true))
+        {
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await db.SweepTasks.Where(t => t.TokenId == token.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.BroadcastAt, broadcastAt));
+            await uow.CompleteAsync();
+        }
+
+        gateway.HasReceipt = true;
+        gateway.ReceiptConfirmationsMet = true;
+        gateway.ReceiptStatusOverride = 2;
+        var receiptReads = new List<string>();
+        gateway.BeforeReceiptRead = hash =>
+        {
+            receiptReads.Add(hash);
+            return malformedResponse
+                ? Task.FromException(new ChainRpcException("simulated malformed receipt"))
+                : Task.CompletedTask;
+        };
+        var manager = NewSweepManager();
+        for (var round = 0; round < 2; round++)
+        {
+            await manager.RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+                TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        }
+
+        receiptReads.ShouldBe([sent.Hash, sent.Hash]);
+        gateway.Broadcasts.Single().Hash.ShouldBe(sent.Hash);
+        var pending = await ReadOrderTaskAsync(token.Id);
+        pending.Status.ShouldBe(SweepTaskStatus.Sweeping);
+        pending.TxHash.ShouldBe(sent.Hash);
+        pending.NonceUsed.ShouldBe(sent.Nonce);
+        pending.BroadcastAt.ShouldNotBeNull().ShouldBe(broadcastAt, TimeSpan.FromMilliseconds(1));
+        pending.TxBlockNumber.ShouldBeNull();
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Sweeping);
+        await AssertSweepCreditAsync(user, orderId, expected: false);
+    }
+
+    [Fact]
+    public async Task Confirmed_Sweep_Settles_Before_Working_Through_A_Large_Queue()
+    {
+        const int backlogSize = 256;
+        var user = NewUser();
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0x" + new string('a', 40);
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId, userId: user);
+        var gateway = new FakeChainGateway(head: 500) { SimulatedSweepSender = watched };
+        await ActivateAsync(network, token, gateway, orderId);
+        var originalHash = gateway.Broadcasts.Single().Hash;
+        gateway.HasReceipt = true;
+        gateway.ReceiptHashes = [originalHash];
+        gateway.ReceiptConfirmationsMet = true;
+
+        await SeedSweepBacklogAsync(token, backlogSize, DateTime.UtcNow);
+
+        int? queuedAtReceipt = null;
+        gateway.BeforeReceiptRead = async hash =>
+        {
+            if (hash == originalHash)
+            {
+                queuedAtReceipt = await CountQueuedAsync();
+            }
+        };
+
+        await NewSweepManager().RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+
+        queuedAtReceipt.ShouldBe(backlogSize);
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Swept);
+        (await CountQueuedAsync()).ShouldBe(backlogSize - ChainDefaults.SweepTaskBatchSize);
+        await AssertSweepCreditAsync(user, orderId, expected: true);
+
+        async Task<int> CountQueuedAsync()
+        {
+            using var read = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            var count = await db.SweepTasks.CountAsync(t => t.TokenId == token.Id && t.Status == SweepTaskStatus.Queued);
+            await read.CompleteAsync();
+            return count;
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_Receipt_Batch_Rotates_Past_Unresolved_Older_Attempts()
+    {
+        const int receiptBatchSize = ChainDefaults.SweepTaskBatchSize;
+        var user = NewUser();
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0x" + new string('a', 40);
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId, userId: user);
+        var gateway = new FakeChainGateway(head: 500) { SimulatedSweepSender = watched };
+        await ActivateAsync(network, token, gateway, orderId);
+        var targetHash = gateway.Broadcasts.Single().Hash;
+        gateway.HasReceipt = true;
+        gateway.ReceiptHashes = [targetHash];
+        gateway.ReceiptConfirmationsMet = true;
+        await SeedSweepBacklogAsync(token, receiptBatchSize, DateTime.UtcNow.AddHours(-1), withBroadcast: true);
+
+        var queried = new List<string>();
+        gateway.BeforeReceiptRead = hash =>
+        {
+            queried.Add(hash);
+            return hash == targetHash ? Task.CompletedTask : Task.FromException(new ChainRpcException("simulated malformed receipt"));
+        };
+
+        await RoundAsync();
+        queried.Count.ShouldBe(receiptBatchSize);
+        queried.Distinct().Count().ShouldBe(receiptBatchSize);
+        queried.ShouldNotContain(targetHash);
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Sweeping);
+
+        queried.Clear();
+        await RoundAsync();
+        queried.First().ShouldBe(targetHash);
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Swept);
+        gateway.Broadcasts.Single().Hash.ShouldBe(targetHash);
+        await AssertSweepCreditAsync(user, orderId, expected: true);
+
+        Task RoundAsync() => NewSweepManager().RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Gas_Send_With_Unknown_Result_Reuses_Saved_Nonce()
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0x" + new string('a', 40);
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId);
+        var gateway = new FakeChainGateway(head: 500) { TxCountSeed = 61 };
+        gateway.BnbBalances[watched] = 0m;
+        gateway.AfterBroadcast = (_, _, _) => throw new ChainRpcException("gas response lost");
+        await ActivateAsync(network, token, gateway, orderId);
+        (await ReadOrderTaskAsync(token.Id)).GasNonceUsed.ShouldBe(61);
+        gateway.AfterBroadcast = null;
+        gateway.TxCountSeed = 90;
+        await NewSweepManager().RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        gateway.Broadcasts.Select(call => call.Nonce).ShouldBe(new long[] { 61, 61 });
+        (await ReadOrderTaskAsync(token.Id)).GasTxHash.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Sweep_Lost_Send_Response_Settles_Original_Hash_Once_After_Restart()
+    {
+        var user = NewUser();
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0x" + new string('a', 40);
+        var watched = WatchAddress;
+        var gateway = new FakeChainGateway(head: 500) { TxCountSeed = 41, SimulatedSweepSender = watched };
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId, userId: user);
+        (string To, string Data, long Nonce, ColSweepTask Task)? broadcast = null;
+        gateway.AfterBroadcast = async (to, data, nonce) =>
+        {
+            using var read = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            var saved = await db.SweepTasks.AsNoTracking().SingleAsync(t => t.TokenId == token.Id);
+            await read.CompleteAsync();
+            broadcast = (to, data, nonce, saved);
+            throw new ChainRpcException("the node accepted the broadcast but the response was lost");
+        };
+
+        await ActivateAsync(network, token, gateway, orderId);
+        broadcast.HasValue.ShouldBeTrue();
+        var observed = broadcast.GetValueOrDefault();
+        observed.To.ShouldBe(token.ContractAddress);
+        observed.Data.ShouldStartWith("0xa9059cbb" + new string('0', 24) + new string('a', 40));
+        observed.Nonce.ShouldBe(41);
+        observed.Task.NonceUsed.ShouldBe(41);
+        observed.Task.BroadcastAt.ShouldNotBeNull();
+        gateway.Broadcasts.Count.ShouldBe(1);
+        var originalHash = gateway.Broadcasts.Single().Hash;
+        observed.Task.TxHash.ShouldBe(originalHash);
+        (await ReadOrderTaskAsync(token.Id)).TxHash.ShouldBe(originalHash);
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Sweeping);
+        var beforeSettlement = await DbAsync();
+        (await beforeSettlement.Balances.CountAsync(row => row.UserId == user)).ShouldBe(0);
+
+        gateway.AfterBroadcast = null;
+        gateway.HasReceipt = true;
+        gateway.ReceiptConfirmationsMet = true;
+        gateway.ReceiptHashes = [originalHash];
+        using var restartScope = ServiceProvider.CreateScope();
+        var restarted = restartScope.ServiceProvider.GetRequiredService<SweepManager>().WithMasterKey("test-master-key");
+        for (var round = 0; round < 2; round++)
+        {
+            await restarted.RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+                TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        }
+
+        gateway.BroadcastCount.ShouldBe(1);
+        var settled = await ReadOrderTaskAsync(token.Id);
+        settled.TxHash.ShouldBe(originalHash);
+        (settled.PreviousTxHashes ?? []).ShouldBeEmpty();
+        settled.Status.ShouldBe(SweepTaskStatus.Swept);
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Swept);
+
+        using var check = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+        var collection = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+        var ledger = await GetRequiredService<IDbContextProvider<LedgerDbContext>>().GetDbContextAsync();
+        var depositKey = BalanceIdempotencyKeys.ForDepositOrder(orderId);
+        (await collection.Balances.SingleAsync(row => row.UserId == user)).Balance.ShouldBe(20m);
+        (await collection.BalanceTxns.CountAsync(row => row.UserId == user && row.IdempotencyKey == depositKey)).ShouldBe(1);
+        (await ledger.Vouchers.CountAsync(row => row.BizRefId == depositKey && row.BizType == FinanceBizTypes.Deposit
+            && row.Phase == FinanceBizTypes.Phases.Pay)).ShouldBe(1);
+        await check.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task Sweep_Interrupted_Before_Node_Acceptance_Reuses_Saved_Nonce_And_Credits_Once()
+    {
+        var user = NewUser();
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0x" + new string('a', 40);
+        var watched = WatchAddress;
+        var gateway = new FakeChainGateway(head: 500) { TxCountSeed = 41, SimulatedSweepSender = watched };
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId, userId: user);
+        var depositKey = BalanceIdempotencyKeys.ForDepositOrder(orderId);
+        gateway.BeforeSend = () => throw new OperationCanceledException("worker stopped before the RPC accepted the transaction");
+
+        await Should.ThrowAsync<OperationCanceledException>(() => ActivateAsync(network, token, gateway, orderId));
+
+        var interrupted = await ReadOrderTaskAsync(token.Id);
+        interrupted.Status.ShouldBe(SweepTaskStatus.Sweeping);
+        interrupted.TxHash.ShouldNotBeNull();
+        interrupted.NonceUsed.ShouldBe(41);
+        interrupted.BroadcastAt.ShouldNotBeNull();
+        gateway.Broadcasts.ShouldBeEmpty();
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Sweeping);
+        await AssertCreditAsync(expected: false);
+
+        gateway.BeforeSend = null;
+        gateway.TxCountSeed = 90;
+        using var restartScope = ServiceProvider.CreateScope();
+        var restarted = restartScope.ServiceProvider.GetRequiredService<SweepManager>().WithMasterKey("test-master-key");
+        Task RunRestartedRoundAsync() => restarted.RunTokenRoundAsync(network, token, gateway,
+            12, null, 0.005m, TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120),
+            0.02m, CancellationToken.None);
+        await RunRestartedRoundAsync(); // 池中无回执，宽限内不发第二次。
+        gateway.Broadcasts.ShouldBeEmpty();
+
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true))
+        {
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await db.SweepTasks.Where(row => row.Id == interrupted.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(row => row.BroadcastAt, TestClock.Now.AddMinutes(-40)));
+            await uow.CompleteAsync();
+        }
+
+        await RunRestartedRoundAsync();
+        gateway.Broadcasts.Count.ShouldBe(1);
+        var sent = gateway.Broadcasts.Single();
+        sent.Nonce.ShouldBe(41);
+        var retry = await ReadOrderTaskAsync(token.Id);
+        retry.TxHash.ShouldBe(sent.Hash);
+        retry.TxHash.ShouldNotBe(interrupted.TxHash);
+        retry.PreviousTxHashes.ShouldNotBeNull();
+        retry.PreviousTxHashes.ShouldContain(interrupted.TxHash);
+        await AssertCreditAsync(expected: false);
+
+        gateway.HasReceipt = true;
+        gateway.ReceiptConfirmationsMet = true;
+        gateway.ReceiptHashes = [sent.Hash];
+        await RunRestartedRoundAsync();
+        await RunRestartedRoundAsync();
+
+        gateway.Broadcasts.Count.ShouldBe(1);
+        var completed = await ReadOrderTaskAsync(token.Id);
+        completed.Status.ShouldBe(SweepTaskStatus.Swept);
+        completed.TxHash.ShouldBe(sent.Hash);
+        (completed.PreviousTxHashes ?? []).ShouldBeEmpty();
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Swept);
+        await AssertCreditAsync(expected: true);
+
+        async Task AssertCreditAsync(bool expected)
+        {
+            using var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+            var collection = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            var ledger = await GetRequiredService<IDbContextProvider<LedgerDbContext>>().GetDbContextAsync();
+            var balances = await collection.Balances.Where(row => row.UserId == user).ToListAsync();
+            if (expected)
+            {
+                balances.Single().Balance.ShouldBe(20m);
+            }
+            else
+            {
+                balances.ShouldBeEmpty();
+            }
+            var count = expected ? 1 : 0;
+            (await collection.BalanceTxns.CountAsync(row => row.UserId == user && row.IdempotencyKey == depositKey)).ShouldBe(count);
+            (await ledger.Vouchers.CountAsync(row => row.BizRefId == depositKey && row.BizType == FinanceBizTypes.Deposit
+                && row.Phase == FinanceBizTypes.Phases.Pay)).ShouldBe(count);
+            await uow.CompleteAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Sweep_Rejects_Credit_Without_Confirmed_Transfer_Proof(int receiptStatus)
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0xvault";
+        var gateway = new FakeChainGateway(head: 500)
+        {
+            HasReceipt = true, ReceiptConfirmationsMet = true, ReceiptStatusOverride = receiptStatus,
+        };
+        var user = NewUser();
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId);
+        await ActivateAsync(network, token, gateway, orderId);
+
+        var manager = NewSweepManager();
+        await manager.RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+
+        var task = (await DbAsync()).SweepTasks.Single(t => t.TokenId == token.Id);
+        task.Status.ShouldBe(receiptStatus == 1 ? SweepTaskStatus.Failed : SweepTaskStatus.Sweeping);
+        if (receiptStatus == 1)
+        {
+            task.FailReason!.ShouldContain("未包含与本单匹配的代币转账");
+        }
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Sweeping);
+        (await DbAsync()).Balances.Count(b => b.UserId == user).ShouldBe(0);
     }
 
     [Fact]
@@ -602,22 +1106,14 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         }
 
         var manager = NewSweepManager();
-        // 重试轮：Queued→Fueling→Sweeping→宽限已过→清哈希（Nonce 保留，等重签）
+        // 重试轮：超宽限后同 nonce 替换，收到新哈希才覆盖旧哈希。
         await manager.RunTokenRoundAsync(network, usdt, gateway, 12, null, 0.005m,
             TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
 
         var afterRetry = await ReadOrderTaskAsync(usdt.Id);
         afterRetry.Status.ShouldBe(SweepTaskStatus.Sweeping);
-        afterRetry.TxHash.ShouldBeNull("宽限已过应清哈希等重签");
-
-        // 重签轮：同 nonce 换新哈希（假网关每次递增）
-        await manager.RunTokenRoundAsync(network, usdt, gateway, 12, null, 0.005m,
-            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
-
-        var retried = await ReadOrderTaskAsync(usdt.Id);
-        retried.Status.ShouldBe(SweepTaskStatus.Sweeping);
-        retried.TxHash.ShouldNotBeNull();
-        retried.TxHash.ShouldNotBe("0xfake-1");
+        afterRetry.TxHash.ShouldNotBeNull();
+        afterRetry.TxHash.ShouldNotBe("0xfake-1");
         gateway.BroadcastCount.ShouldBe(2);
     }
 
@@ -630,6 +1126,64 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         return result;
     }
 
+    private async Task AssertSweepCreditAsync(Guid userId, Guid orderId, bool expected)
+    {
+        using var read = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+        var collection = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+        var ledger = await GetRequiredService<IDbContextProvider<LedgerDbContext>>().GetDbContextAsync();
+        var depositKey = BalanceIdempotencyKeys.ForDepositOrder(orderId);
+        var balance = await collection.Balances.SingleOrDefaultAsync(row => row.UserId == userId);
+        if (expected)
+        {
+            balance.ShouldNotBeNull().Balance.ShouldBe(20m);
+        }
+        else
+        {
+            balance.ShouldBeNull();
+        }
+        var count = expected ? 1 : 0;
+        (await collection.BalanceTxns.CountAsync(row => row.UserId == userId && row.IdempotencyKey == depositKey)).ShouldBe(count);
+        (await ledger.Vouchers.CountAsync(row => row.BizRefId == depositKey && row.BizType == FinanceBizTypes.Deposit
+            && row.Phase == FinanceBizTypes.Phases.Pay)).ShouldBe(count);
+        await read.CompleteAsync();
+    }
+
+    private async Task SeedSweepBacklogAsync(ColToken token, int count, DateTime createdAt, bool withBroadcast = false)
+    {
+        using var seed = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true, isTransactional: true);
+        var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+        for (var index = 0; index < count; index++)
+        {
+            var address = new ColDepositAddress(TestGuid.Next())
+            {
+                UserId = NewUser(), NetworkId = token.NetworkId, Address = WatchAddress,
+                AddressIndex = 1000 + index, CreationTime = createdAt,
+            };
+            var task = new ColSweepTask(TestGuid.Next())
+            {
+                NetworkId = token.NetworkId, TokenId = token.Id, UserId = address.UserId, AddressId = address.Id,
+                Address = address.Address, AddressIndex = address.AddressIndex, Amount = 20m,
+                Status = withBroadcast ? SweepTaskStatus.Sweeping : SweepTaskStatus.Queued,
+                TxHash = withBroadcast ? $"0x{index:x64}" : null,
+                BroadcastAt = withBroadcast ? createdAt : null,
+                NonceUsed = withBroadcast ? 41L : null,
+                BroadcastVaultAddress = withBroadcast ? token.VaultAddress : null,
+                CreationTime = createdAt, StatusChangedAt = createdAt,
+            };
+            db.DepositAddresses.Add(address);
+            db.SweepTasks.Add(task);
+            db.DepositOrders.Add(new ColDepositOrder(TestGuid.Next())
+            {
+                NetworkId = token.NetworkId, TokenId = token.Id, UserId = address.UserId, AddressId = address.Id,
+                ToAddress = address.Address, FromAddress = "0xfrom", TxHash = $"0x{1000 + index:x64}",
+                RawAmount = "20000000000000000000", Amount = 20m, BlockNumber = 120,
+                Status = withBroadcast ? DepositOrderStatus.Sweeping : DepositOrderStatus.Confirmed,
+                SweepTaskId = task.Id, CreationTime = createdAt,
+            });
+        }
+        await seed.CompleteAsync();
+    }
+
     [Fact]
     public async Task Sweep_Confirmation_Credits_Balance_And_Creates_TopUp_Order_Exactly_Once()
     {
@@ -639,6 +1193,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         usdt.VaultAddress = "0xvault";
         var gateway = new FakeChainGateway(head: 500);
         gateway.HasReceipt = true;
+        gateway.SimulatedSweepSender = watched;
         gateway.ReceiptConfirmationsMet = true;
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
@@ -690,6 +1245,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         await SetNetworkDepositPolicyAsync(network.Id, feeRate: 0.001m, autoMax: 5000m); // 千一充值手续费
         var gateway = new FakeChainGateway(head: 500);
         gateway.HasReceipt = true;
+        gateway.SimulatedSweepSender = watched;
         gateway.ReceiptConfirmationsMet = true;
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
@@ -743,6 +1299,9 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
         var orderId = await SeedOrderAsync(network.Id, usdt, watched, 25m, addressId, userId: scUser, blockNumber: 480);
+        var admin = GetRequiredService<Services.CollectionNetworkAdminAppService>();
+        var pendingError = await Should.ThrowAsync<BusinessException>(() => admin.ApproveLargeDepositAsync(orderId));
+        pendingError.Code.ShouldBe(CollectionErrorCodes.DepositNotReleasable);
 
         var scan = GetRequiredService<DepositScanManager>();
         await scan.RunTokenRoundAsync(network, usdt, gateway, 12, 50, 1440,
@@ -758,11 +1317,122 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var statusBefore = await adminSvc.GetStatusAsync(network.Id);
         statusBefore.HeldDepositCount.ShouldBeGreaterThanOrEqualTo(1);
 
-        // 管理端放行（只入队）→ 挂上任务；重复放行被状态门拒绝
-        var admin = GetRequiredService<Services.CollectionNetworkAdminAppService>();
+        // 放行仅入队；第二次请求应确认原链接仍然有效。
         await admin.ApproveLargeDepositAsync(orderId);
-        (await dbContext.DepositOrders.AsNoTracking().SingleAsync(o => o.Id == orderId)).SweepTaskId.ShouldNotBeNull();
-        await Should.ThrowAsync<Volo.Abp.BusinessException>(() => admin.ApproveLargeDepositAsync(orderId));
+        var taskId = (await ReadOrderAsync(orderId)).SweepTaskId;
+        taskId.ShouldNotBeNull();
+        await admin.ApproveLargeDepositAsync(orderId);
+        (await ReadOrderAsync(orderId)).SweepTaskId.ShouldBe(taskId);
+    }
+
+    [Fact]
+    public async Task Concurrent_Large_Deposit_Releases_Produce_One_Queued_Task()
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 6000m, addressId, DepositOrderStatus.Confirmed);
+
+        Task Approve(IServiceProvider services) => services.GetRequiredService<Services.CollectionNetworkAdminAppService>()
+            .ApproveLargeDepositAsync(orderId);
+
+        await RunWithAddressLockAsync(addressId, beforeRelease: null, Approve, Approve, Approve);
+
+        var db = await DbAsync();
+        var task = await db.SweepTasks.AsNoTracking().SingleAsync(row => row.AddressId == addressId);
+        task.Status.ShouldBe(SweepTaskStatus.Queued);
+        (await ReadOrderAsync(orderId)).SweepTaskId.ShouldBe(task.Id);
+    }
+
+    [Fact]
+    public async Task Scanner_And_Manual_Release_Share_One_Queued_Task()
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 25m, addressId, DepositOrderStatus.Confirmed);
+        var secondId = await SeedOrderAsync(network.Id, token, watched, 30m, addressId);
+        var gateway = new FakeChainGateway(head: 500);
+
+        await RunWithAddressLockAsync(addressId, beforeRelease: null,
+            services => services.GetRequiredService<Services.CollectionNetworkAdminAppService>().ApproveLargeDepositAsync(orderId),
+            services => services.GetRequiredService<DepositScanManager>().RunTokenRoundAsync(network, token, gateway,
+                12, 50, 1440, TimeSpan.FromMinutes(1440), 0.9m, CancellationToken.None));
+
+        var db = await DbAsync();
+        var task = await db.SweepTasks.AsNoTracking().SingleAsync(row => row.AddressId == addressId);
+        task.Status.ShouldBe(SweepTaskStatus.Queued);
+        var orders = await ReadOrdersAsync(token.Id);
+        orders.Select(row => row.Id).ShouldBe([orderId, secondId], ignoreOrder: true);
+        orders.ShouldAllBe(row => row.Status == DepositOrderStatus.Confirmed && row.SweepTaskId == task.Id);
+    }
+
+    [Fact]
+    public async Task Sweep_Activation_Reloads_Orders_Linked_Before_Lock_Release()
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0xvault";
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var firstId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId, DepositOrderStatus.Confirmed);
+        var secondId = await SeedOrderAsync(network.Id, token, watched, 25m, addressId, DepositOrderStatus.Confirmed);
+        var admin = GetRequiredService<Services.CollectionNetworkAdminAppService>();
+        await admin.ApproveLargeDepositAsync(firstId);
+        var taskId = (await ReadOrderAsync(firstId)).SweepTaskId!.Value;
+        var gateway = new FakeChainGateway(head: 500);
+
+        Task RunSweep(IServiceProvider services) => services.GetRequiredService<SweepManager>().WithMasterKey("test-master-key")
+            .RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+                TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+
+        await RunWithAddressLockAsync(addressId,
+            db => db.DepositOrders.Where(row => row.Id == secondId)
+                .ExecuteUpdateAsync(set => set.SetProperty(row => row.SweepTaskId, taskId)),
+            RunSweep);
+
+        // 放行请求可能在归集已经激活后才重试；此时仍确认原来的任务。
+        await admin.ApproveLargeDepositAsync(secondId);
+        var db = await DbAsync();
+        var task = await db.SweepTasks.AsNoTracking().SingleAsync(row => row.AddressId == addressId);
+        task.Id.ShouldBe(taskId);
+        task.Amount.ShouldBe(45m);
+        task.Status.ShouldBe(SweepTaskStatus.Sweeping);
+        gateway.BroadcastCount.ShouldBe(1);
+        var orders = await ReadOrdersAsync(token.Id);
+        orders.Select(row => row.Id).ShouldBe([firstId, secondId], ignoreOrder: true);
+        orders.ShouldAllBe(row => row.Status == DepositOrderStatus.Sweeping && row.SweepTaskId == taskId);
+    }
+
+    [Fact]
+    public async Task New_Deposit_Does_Not_Join_A_Retried_Already_Broadcast_Task()
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        var watched = WatchAddress;
+        var db = await DbAsync();
+        var addressId = await SeedWatchedAddressAsync(db, network.Id, watched);
+        var firstId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId, DepositOrderStatus.Sweeping);
+        var secondId = await SeedOrderAsync(network.Id, token, watched, 25m, addressId, DepositOrderStatus.Confirmed);
+        var retried = new ColSweepTask(Guid.NewGuid())
+        {
+            NetworkId = network.Id, TokenId = token.Id, UserId = User1, AddressId = addressId, Address = watched,
+            Amount = 20m, Status = SweepTaskStatus.Queued, TxHash = "0xalready-broadcast", NonceUsed = 41,
+            BroadcastAt = TestClock.Now, StatusChangedAt = TestClock.Now, CreationTime = TestClock.Now,
+        };
+        db.SweepTasks.Add(retried);
+        await db.SaveChangesAsync();
+        await db.DepositOrders.Where(row => row.Id == firstId)
+            .ExecuteUpdateAsync(set => set.SetProperty(row => row.SweepTaskId, retried.Id));
+
+        var admin = GetRequiredService<Services.CollectionNetworkAdminAppService>();
+        await admin.ApproveLargeDepositAsync(secondId);
+        var tasks = await db.SweepTasks.AsNoTracking().Where(row => row.AddressId == addressId).ToListAsync();
+        tasks.Count.ShouldBe(2);
+        var newTask = tasks.Single(row => row.Id != retried.Id);
+        newTask.Status.ShouldBe(SweepTaskStatus.Queued);
+        newTask.TxHash.ShouldBeNull();
+        tasks.Single(row => row.Id == retried.Id).TxHash.ShouldBe(retried.TxHash);
+        (await ReadOrderAsync(firstId)).SweepTaskId.ShouldBe(retried.Id);
+        (await ReadOrderAsync(secondId)).SweepTaskId.ShouldBe(newTask.Id);
     }
 
     [Fact]
@@ -812,6 +1482,52 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
     // ── 共用 ─────────────────────────────────────────────────────────────────────────────
 
     private readonly List<IUnitOfWork> _openUows = new();
+
+    private async Task RunWithAddressLockAsync(Guid addressId, Func<CollectionDbContext, Task>? beforeRelease,
+        params Func<IServiceProvider, Task>[] contenders)
+    {
+        var running = new List<Task>();
+        try
+        {
+            using var barrier = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true, isTransactional: true);
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            var identity = addressId.ToString("D");
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtext('Collection:DepositSweepQueue'), hashtext({identity}))");
+
+            foreach (var contender in contenders)
+            {
+                running.Add(RunInNewScopeAsync(contender));
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                while (await db.Database.SqlQuery<int>($"""
+                    SELECT count(*)::int AS "Value" FROM pg_locks
+                    WHERE locktype = 'advisory' AND NOT granted AND objsubid = 2
+                      AND classid::bigint = (hashtext('Collection:DepositSweepQueue')::bigint & 4294967295)
+                      AND objid::bigint = (hashtext({identity})::bigint & 4294967295)
+                    """).SingleAsync(deadline.Token) < running.Count)
+                {
+                    await Task.Delay(25, deadline.Token);
+                }
+            }
+
+            if (beforeRelease is not null)
+            {
+                await beforeRelease(db);
+            }
+
+            await barrier.CompleteAsync();
+        }
+        finally
+        {
+            await Task.WhenAll(running).WaitAsync(TimeSpan.FromSeconds(15));
+        }
+    }
+
+    private async Task RunInNewScopeAsync(Func<IServiceProvider, Task> action)
+    {
+        using var scope = ServiceProvider.CreateScope();
+        await action(scope.ServiceProvider);
+    }
 
     /// <summary>取活动上下文：无环境事务时开一个并挂到测试生命周期（用例结束统一提交释放）。</summary>
     private async Task<CollectionDbContext> DbAsync()
@@ -928,7 +1644,12 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
 /// </summary>
 public class FakeChainGateway : IBscChainGateway
 {
+    private readonly Dictionary<string, (string To, string DataHex, long Nonce)> _prepared = new();
+    private int _nextTransactionNumber;
+
     public Dictionary<string, List<TokenTransferLog>> Logs { get; } = new();
+    public Func<string, string, long, Task>? AfterBroadcast { get; set; }
+    public string? SimulatedSweepSender { get; set; }
 
     public long Head { get; set; }
 
@@ -937,16 +1658,24 @@ public class FakeChainGateway : IBscChainGateway
     public string? ThrowOnContract { get; set; }
 
     public bool HasReceipt { get; set; }
+    public HashSet<string>? ReceiptHashes { get; set; }
+    public HashSet<string>? ShallowReceiptHashes { get; set; }
+    public HashSet<string> IncompleteReceiptLogHashes { get; } = new();
+    public List<string> ReceiptLogReads { get; } = new();
 
     public bool ReceiptConfirmationsMet { get; set; }
 
     /// <summary>回执状态覆盖（null=无回执；0=revert；1=成功）。</summary>
     public int? ReceiptStatusOverride { get; set; }
+    public Func<string, Task>? BeforeReceiptRead { get; set; }
+    public Func<string, CancellationToken, Task>? BeforeCancellableReceiptRead { get; set; }
+    public Func<Task>? BeforeSend { get; set; }
+    public List<string> AddressTransferReads { get; } = new();
 
     /// <summary>按地址的 BNB 余额（缺省 1 = 有 gas）。</summary>
     public Dictionary<string, decimal> BnbBalances { get; } = new();
 
-    public List<(string To, string DataHex, long Nonce)> Broadcasts { get; } = new();
+    public List<(string To, string DataHex, long Nonce, string Hash)> Broadcasts { get; } = new();
 
     public int BroadcastCount { get; private set; }
 
@@ -968,6 +1697,24 @@ public class FakeChainGateway : IBscChainGateway
         var logs = Logs.TryGetValue(contractAddress, out var list)
             ? list.Where(l => l.BlockNumber >= fromBlock && l.BlockNumber <= toBlock).ToList()
             : new List<TokenTransferLog>();
+        if (SimulatedSweepSender is { } sender && HasReceipt && (ReceiptStatusOverride ?? 1) == 1)
+        {
+            foreach (var broadcast in Broadcasts)
+            {
+                var receiptBlock = ReceiptBlock(broadcast.Hash);
+                if (broadcast.To != contractAddress || broadcast.DataHex.Length != 138
+                    || (ReceiptHashes != null && !ReceiptHashes.Contains(broadcast.Hash))
+                    || receiptBlock < fromBlock || receiptBlock > toBlock)
+                {
+                    continue;
+                }
+
+                var encodedAddress = broadcast.DataHex.Substring(10, 64).TrimStart('0');
+                var address = encodedAddress == "vault" ? "0xvault" : "0x" + encodedAddress.PadLeft(40, '0');
+                var amount = System.Numerics.BigInteger.Parse("0" + broadcast.DataHex.Substring(74), System.Globalization.NumberStyles.HexNumber);
+                logs.Add(new TokenTransferLog(broadcast.Hash, 0, sender, address, amount.ToString(), receiptBlock));
+            }
+        }
         var complete = TruncateThreshold == int.MaxValue || logs.Count < TruncateThreshold;
         return Task.FromResult<(IReadOnlyList<TokenTransferLog>, bool)>((logs, complete));
     }
@@ -976,6 +1723,7 @@ public class FakeChainGateway : IBscChainGateway
         string contractAddress, string address, long fromBlock, long toBlock, int page, int pageSize,
         CancellationToken ct = default)
     {
+        AddressTransferReads.Add(address);
         if (contractAddress == ThrowOnContract)
         {
             throw new ChainRpcException("simulated channel failure");
@@ -997,7 +1745,7 @@ public class FakeChainGateway : IBscChainGateway
             var slice = window.Skip(start).Take(pageSize + 1).ToList();
             return Task.FromResult(new AddressTransferPage(slice, start + slice.Count < window.Count));
         }
-        var hasMore = TruncateThreshold != int.MaxValue && window.Count >= TruncateThreshold;
+        var hasMore = window.Count > 0 && TruncateThreshold != int.MaxValue && window.Count >= TruncateThreshold;
         if (!hasMore)
         {
             var slice = window.Skip((page - 1) * pageSize).Take(pageSize).ToList();
@@ -1024,25 +1772,83 @@ public class FakeChainGateway : IBscChainGateway
     public Task<long> GetTransactionCountAsync(string address, CancellationToken ct = default)
         => Task.FromResult(TxCountSeed);
 
-    public Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default)
-        => Task.FromResult(HasReceipt
-            ? new TransactionReceipt(txHash, ReceiptConfirmationsMet ? 400L : 495L, ReceiptStatusOverride ?? 1)
-            : new TransactionReceipt(txHash, null, null));
+    public async Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default)
+    {
+        if (BeforeReceiptRead != null)
+        {
+            await BeforeReceiptRead(txHash);
+        }
 
-    public Task<string> SendTransactionAsync(
+        if (BeforeCancellableReceiptRead != null)
+        {
+            await BeforeCancellableReceiptRead(txHash, ct);
+        }
+
+        return HasReceipt && (ReceiptHashes == null || ReceiptHashes.Contains(txHash))
+            ? new TransactionReceipt(txHash, ReceiptBlock(txHash), ReceiptStatusOverride ?? 1)
+            : new TransactionReceipt(txHash, null, null);
+    }
+
+    private long ReceiptBlock(string txHash) =>
+        ReceiptConfirmationsMet && ShallowReceiptHashes?.Contains(txHash) != true ? 400L : 495L;
+
+    public Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> GetReceiptTransferLogsAsync(
+        string txHash, string contractAddress, long block, CancellationToken ct = default)
+    {
+        ReceiptLogReads.Add(txHash);
+        if (IncompleteReceiptLogHashes.Contains(txHash))
+        {
+            return Task.FromResult<(IReadOnlyList<TokenTransferLog>, bool)>(([], false));
+        }
+
+        return GetTransferLogsAsync(contractAddress, block, block, ct);
+    }
+
+    public Task<SignedChainTransaction> PrepareTransactionAsync(
         string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
         CancellationToken ct = default)
     {
+        var hash = "0xfake-" + ++_nextTransactionNumber;
+        _prepared.Add(hash, (to, dataHex, nonce));
+        return Task.FromResult(new SignedChainTransaction(hash, RawHex: hash));
+    }
+
+    public async Task BroadcastTransactionAsync(SignedChainTransaction transaction, CancellationToken ct = default)
+    {
+        if (BeforeSend is not null)
+        {
+            await BeforeSend();
+        }
+
+        var (to, dataHex, nonce) = _prepared[transaction.Hash];
         BroadcastCount++;
-        Broadcasts.Add((to, dataHex, nonce));
-        return Task.FromResult("0xfake-" + BroadcastCount);
+        Broadcasts.Add((to, dataHex, nonce, transaction.Hash));
+        if (AfterBroadcast != null)
+        {
+            await AfterBroadcast(to, dataHex, nonce);
+        }
+    }
+
+    public async Task<string> SendTransactionAsync(
+        string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
+        CancellationToken ct = default)
+    {
+        var signed = await PrepareTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, ct);
+        await BroadcastTransactionAsync(signed, ct);
+        return signed.Hash;
     }
 
     public Task<decimal> GetGasPriceGweiAsync(CancellationToken ct = default) => Task.FromResult(1m);
 
     /// <summary>按哈希的交易 nonce（提现认领校验用；缺省 null = 节点不认识该交易）。</summary>
     public System.Collections.Generic.Dictionary<string, long> TxNonces { get; } = new();
+    public Dictionary<string, string> TxSenders { get; } = new();
 
     public Task<long?> GetTransactionNonceAsync(string txHash, CancellationToken ct = default)
         => Task.FromResult(TxNonces.TryGetValue(txHash, out var n) ? n : (long?)null);
+
+    public Task<long?> GetTransactionNonceForSenderAsync(string txHash, string sender, CancellationToken ct = default)
+        => TxSenders.TryGetValue(txHash, out var actual) && string.Equals(actual, sender, StringComparison.OrdinalIgnoreCase)
+            ? GetTransactionNonceAsync(txHash, ct)
+            : Task.FromResult<long?>(null);
 }

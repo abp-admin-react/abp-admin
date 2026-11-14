@@ -297,10 +297,11 @@ public class AbpAdminHttpApiHostModule : AbpModule
             })
             .ValidateOnStart();
 
-        // 链上 worker（M5 计划第 59 行）：扫链/归集/热钱包监控/提现广播 BackgroundService 只在宿主注册
-        //（DbMigrator 不调）；开关/间隔/阈值已迁设置页（worker 每轮热读）；Redis 支撑守卫在
-        // worker 基类轮内懒检查（fail-closed 拒轮 + [Alert:LockBackend]），不在启动期判定
+        // 链上任务只在宿主运行，每轮读取设置并检查 Redis 配置，再竞争分布式锁。
+        // RPC 地址可能含密钥，使用受限传输并禁止 HttpClient 记录请求地址。
         context.Services.AddHttpClient("collection-chain")
+            .RemoveAllLoggers()
+            .ConfigurePrimaryHttpMessageHandler(ChainHttpTransport.CreateHandler)
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(60));
         context.Services.AddSingleton<ChainGatewayFactory>(sp =>
         {
@@ -308,13 +309,12 @@ public class AbpAdminHttpApiHostModule : AbpModule
             return new ChainGatewayFactory(
                 sp.GetRequiredService<System.Net.Http.IHttpClientFactory>().CreateClient("collection-chain"),
                 sp.GetRequiredService<Volo.Abp.Security.Encryption.IStringEncryptionService>(),
-                options.EtherscanV2Endpoint ?? "https://api.etherscan.io/v2/api",
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>())
-            {
-                MasterKey = options.MasterKey,
-            };
+                options.EtherscanV2Endpoint ?? AnkrBscChainGateway.DefaultEtherscanV2Endpoint,
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
+                sp.GetRequiredService<IServiceScopeFactory>());
         });
         context.Services.AddCollectionChainWorkers(configuration);
+        context.Services.AddHostedService<AbpAdmin.Collection.Payments.CollectionPaymentReconciliationWorker>();
 
         // 默认安全（问题3 修复）：PII 日志改白名单语义——仅开发环境或显式开启 App:EnablePiiLogging 时输出
         // （排查 JWT 错误用）。原 App:DisablePII 默认 false → 取反后生产默认全开，双重反直觉。

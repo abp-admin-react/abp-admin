@@ -11,6 +11,10 @@ namespace AbpAdmin.Collection.Settings;
 /// </summary>
 public static class ChainSettingReader
 {
+    public static async Task<int> GetScanIntervalSecondsAsync(this ISettingProvider settings) =>
+        System.Math.Clamp(await settings.GetIntAsync(CollectionSettings.Chain.ScanIntervalSeconds, ChainDefaults.ScanIntervalSeconds),
+            ChainDefaults.MinIntervalSeconds, ChainDefaults.MaxScanIntervalSeconds);
+
     /// <summary>正整数（v &gt; 0）；空/垃圾/非正回退默认。</summary>
     public static async Task<int> GetIntAsync(this ISettingProvider settings, string key, int fallback)
     {

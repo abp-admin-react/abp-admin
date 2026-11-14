@@ -54,18 +54,27 @@ public class DepositAddressManager : DomainService
         return this;
     }
 
-    /// <summary>解析一期唯一的 BSC 网络行；种子未跑时抛「充值未开放」。</summary>
-    public async Task<Guid> ResolveBscNetworkIdAsync()
+    /// <summary>解析 BSC 网络和充值展示时间；种子未跑时抛「充值未开放」。</summary>
+    internal async Task<(Guid Id, int? EstimatedArrivalMinutes)> ResolveBscDepositNetworkAsync()
     {
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var network = await dbContext.Networks
             .Where(n => n.Name == CollectionConsts.BscNetworkName)
-            .Select(n => (Guid?)n.Id)
+            .Select(n => new { n.Id, n.ChainId, n.EstimatedArrivalMinutes })
             .FirstOrDefaultAsync();
         await uow.CompleteAsync();
-        return network ?? throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
+        if (network == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
+        }
+
+        return (network.Id, network.ChainId == CollectionConsts.BscMainnetChainId
+            ? network.EstimatedArrivalMinutes ?? CollectionConsts.DefaultEstimatedArrivalMinutes
+            : null);
     }
+
+    public async Task<Guid> ResolveBscNetworkIdAsync() => (await ResolveBscDepositNetworkAsync()).Id;
 
     /// <summary>
     /// 取或派生当前用户的充值地址。返回（地址, 充值是否开放, 未开放时的说明）。

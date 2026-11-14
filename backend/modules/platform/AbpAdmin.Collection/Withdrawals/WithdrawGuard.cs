@@ -31,9 +31,8 @@ public record WithdrawHotWallet(ColNetwork Network, string Address, string KeyCi
 }
 
 /// <summary>
-/// 提现护栏（M3）：热钱包偿付检查 + 熔断地板 + BNB 门槛。
-/// 检查点三处——管理端/自动审批前、广播前、签名临界区内发送前（关 TOCTOU）。
-/// 低于 USDT 地板 = 熔断：阻断所有审批（不只是本单）并告警，运维补币后自动恢复。
+/// 审核和广播前检查对应代币的余额、最低储备和 BNB 门槛。
+/// 钱包签名时由广播流程复查提现总开关。
 /// </summary>
 public class WithdrawGuard : DomainService
 {
@@ -41,7 +40,7 @@ public class WithdrawGuard : DomainService
     private readonly ISettingProvider _settings;
     private readonly ChainAlertService _alerts;
     private readonly IStringEncryptionService _encryptor;
-    private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
+    private readonly ChainKeyProvider _chainKeyProvider;
     private readonly IClock _clock;
 
     public WithdrawGuard(
@@ -49,14 +48,14 @@ public class WithdrawGuard : DomainService
         ISettingProvider settings,
         ChainAlertService alerts,
         IStringEncryptionService encryptor,
-        Microsoft.Extensions.Configuration.IConfiguration configuration,
+        ChainKeyProvider chainKeyProvider,
         IClock clock)
     {
         _dbContextProvider = dbContextProvider;
         _settings = settings;
         _alerts = alerts;
         _encryptor = encryptor;
-        _configuration = configuration;
+        _chainKeyProvider = chainKeyProvider;
         _clock = clock;
     }
 
@@ -64,8 +63,7 @@ public class WithdrawGuard : DomainService
     public virtual async Task<WithdrawHotWallet?> LoadAsync(CancellationToken ct = default)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var network = await dbContext.Networks.AsNoTracking()
-            .OrderBy(n => n.CreationTime).FirstOrDefaultAsync(ct);
+        var network = await NetworkQuery(dbContext).AsNoTracking().FirstOrDefaultAsync(ct);
         if (network == null || string.IsNullOrEmpty(network.WithdrawVaultAddress)
             || string.IsNullOrEmpty(network.WithdrawVaultKeyCipher))
         {
@@ -75,15 +73,19 @@ public class WithdrawGuard : DomainService
         return new WithdrawHotWallet(network, network.WithdrawVaultAddress!, network.WithdrawVaultKeyCipher!);
     }
 
+    /// <summary>现有提现流程使用最早创建的网络，配置页、审批和广播共用此选择顺序。</summary>
+    internal static IOrderedQueryable<ColNetwork> NetworkQuery(CollectionDbContext dbContext) =>
+        dbContext.Networks.OrderBy(network => network.CreationTime).ThenBy(network => network.Id);
+
     /// <summary>
     /// 审批/广播前的偿付检查：热钱包代币余额 ≥ 本次净额、≥ 熔断地板、BNB ≥ 门槛。
-    /// 任一不满足抛对应错误码（调用方拒绝该单）；熔断额外告警并阻断所有后续审批。
+    /// 检查不通过时抛对应错误码，最低储备或 BNB 不足时同时发告警。
     /// </summary>
     public virtual async Task EnsureCanPayAsync(
         WithdrawHotWallet wallet, IBscChainGateway gateway, ColToken token,
         decimal actualAmount, CancellationToken ct = default)
     {
-        // 熔断地板按 USDT 计（热钱包主币种；USDC 共用同一地板口径）
+        // 沿用 HotWalletUsdtFloor 配置名，实际对本次提现代币应用同一阈值。
         var raw = await gateway.GetTokenBalanceRawAsync(token.ContractAddress, wallet.Address, ct);
         var balance = DepositScanManager.TryScaleRaw(raw, token.Decimals, out var overflow);
         if (overflow || balance == null)
@@ -97,7 +99,7 @@ public class WithdrawGuard : DomainService
         {
             await _alerts.RaiseAsync(null, "提现热钱包熔断",
                 $"热钱包 {wallet.Address} {token.Symbol} 余额 {balance:0.######} 低于熔断地板 {floor:0.######}，" +
-                "所有提现审批已阻断，请补币或人工处理。");
+                "涉及该币种的提现操作受限，请补币后重试。");
             throw new BusinessException(CollectionErrorCodes.WithdrawBreakerOpen)
                 .WithData("Balance", CollectionAmounts.Format(balance.Value))
                 .WithData("Floor", CollectionAmounts.Format(floor));
@@ -115,7 +117,7 @@ public class WithdrawGuard : DomainService
         if (bnb < minBnb)
         {
             await _alerts.RaiseAsync(null, "提现热钱包 BNB 不足",
-                $"热钱包 {wallet.Address} BNB {bnb:0.######} 低于门槛 {minBnb:0.######}（付不了 gas），提现审批已阻断。");
+                $"热钱包 {wallet.Address} BNB {bnb:0.######} 低于门槛 {minBnb:0.######}，本次提现检查未通过。");
             throw new BusinessException(CollectionErrorCodes.HotWalletGasShort)
                 .WithData("Bnb", bnb.ToString("0.######"))
                 .WithData("Min", minBnb.ToString("0.######"));
@@ -144,8 +146,7 @@ public class WithdrawGuard : DomainService
             UsdtFloor = CollectionAmounts.Format(floor),
             MinBnb = CollectionAmounts.Format(minBnb),
             Bnb = CollectionAmounts.Format(await gateway.GetBnbBalanceAsync(wallet.Address, ct)),
-            // 熔断口径与 EnsureCanPayAsync 统一：任一启用币种余额低于地板即熔断（只看 USDT 一行会漏判，
-            // USDT 被禁用时状态卡静默显示健康——与审批侧实际判定分裂）；无任何启用币种也视为熔断
+            // 没有启用币种，或任一启用币种低于最低储备时，状态卡显示熔断。
             BreakerOpen = tokens.Count == 0,
         };
         foreach (var token in tokens)
@@ -164,9 +165,9 @@ public class WithdrawGuard : DomainService
     }
 
     /// <summary>加密热钱包私钥入密文（管理端 Set 用；与 HdKeyService 同一版本前缀协议）。</summary>
-    public virtual string ProtectKey(string privateKey)
+    public virtual async Task<string> ProtectKeyAsync(string privateKey)
     {
-        var masterKey = _configuration[CollectionSettings.Host.MasterKey]
+        var masterKey = await _chainKeyProvider.GetAsync()
                         ?? throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
         return HdKeyService.Protect(privateKey.Trim(), masterKey, _encryptor); // Protect 即通用敏感明文加密（原 ProtectPlain 与其逐字重复，已删）
     }

@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Ordering.Orders;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.EventBus.Distributed;
@@ -7,11 +8,10 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Ordering.Handlers;
 
 /// <summary>
-/// 渠道完成事件（计划第 3.2 节）：订单模块把事件当作快路径，
-/// 「提交之后、处理之前进程退出」的窗口由补状态作业（OrderStatusSyncJobHandler）兜底。
+/// 渠道完成事件：投递可能重试，订单处理与补状态作业共用同一幂等入口。
 /// </summary>
 public class CollectionCompletedEventHandler
-    : IDistributedEventHandler<AbpAdmin.Collection.Contracts.CollectionCompletedEto>, ITransientDependency
+    : IDistributedEventHandler<CollectionCompletedEto>, ITransientDependency
 {
     private readonly OrderPaymentManager _orderPaymentManager;
 
@@ -21,7 +21,7 @@ public class CollectionCompletedEventHandler
     }
 
     [UnitOfWork]
-    public virtual async Task HandleEventAsync(AbpAdmin.Collection.Contracts.CollectionCompletedEto eto)
+    public virtual async Task HandleEventAsync(CollectionCompletedEto eto)
     {
         if (eto.BusinessType != OrderingConsts.OrderBusinessType)
         {
@@ -32,10 +32,22 @@ public class CollectionCompletedEventHandler
             eto.BusinessId,
             eto.CollectionId,
             OrderingPayChannelExtensions.FromCollectionChannel(eto.Channel),
-            AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(eto.Amount),
+            CollectionAmounts.Parse(eto.Amount),
             eto.Currency,
-            eto.ChannelTradeNo);
+            eto.ChannelTradeNo,
+            eto.CompletedAt);
     }
+}
+
+/// <summary>渠道退款成功后，把实退金额和币种投影到原业务单的支付明细。</summary>
+public class CollectionRefundSucceededEventHandler(OrderPaymentManager orderPaymentManager)
+    : IDistributedEventHandler<CollectionRefundSucceededEto>, ITransientDependency
+{
+    [UnitOfWork]
+    public virtual Task HandleEventAsync(CollectionRefundSucceededEto eto) =>
+        eto.BusinessType == OrderingConsts.OrderBusinessType
+            ? orderPaymentManager.HandleCollectionRefundSucceededAsync(eto)
+            : Task.CompletedTask;
 }
 
 /// <summary>充值到账：插入已支付的充值订单（BalanceTxnId 唯一）。</summary>
@@ -58,7 +70,7 @@ public class BalanceCreditedEventHandler
     }
 }
 
-/// <summary>扣款完成事件：订单应已是 Paid；仍是 PendingPayment 只记异常（计划第 3.2 节）。</summary>
+/// <summary>订单应与扣款一起提交为 Paid；仍待支付时告警，交由定时核对处理。</summary>
 public class BalanceDebitedEventHandler
     : IDistributedEventHandler<AbpAdmin.Collection.Contracts.BalanceDebitedEto>, ITransientDependency
 {

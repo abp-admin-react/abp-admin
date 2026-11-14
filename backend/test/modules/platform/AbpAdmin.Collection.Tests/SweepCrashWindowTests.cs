@@ -149,6 +149,10 @@ public class SweepCrashWindowTests : CollectionTestBase
         // 修复后：拒绝入账、任务置失败仅人工、单保持 Sweeping。
         var (network, token, addressId, watched) = await SeedAsync();
         var gateway = new FakeChainGateway(head: 500) { HasReceipt = true, ReceiptConfirmationsMet = true };
+        gateway.Logs[token.ContractAddress] = new()
+        {
+            new TokenTransferLog("0xpoisoned", 0, watched, token.VaultAddress!, "10000000000000000000", 400),
+        };
 
         using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
         {
@@ -175,6 +179,7 @@ public class SweepCrashWindowTests : CollectionTestBase
             var task = await dbContext.SweepTasks.AsNoTracking().SingleAsync(t => t.TokenId == token.Id);
             task.Status.ShouldBe(SweepTaskStatus.Failed);
             task.Retryable.ShouldBeFalse("金额漂移必须人工核对，不得自动重试");
+            task.FailReason!.ShouldContain("链接单毛额合计");
 
             var orders = await dbContext.DepositOrders.AsNoTracking()
                 .Where(o => o.SweepTaskId == task.Id)

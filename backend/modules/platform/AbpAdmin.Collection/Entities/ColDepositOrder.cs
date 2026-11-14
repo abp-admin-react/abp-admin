@@ -63,7 +63,10 @@ public class ColDepositOrder : BasicAggregateRoot<Guid>
 
     public DepositOrderStatus Status { get; set; }
 
-    /// <summary>并入的归集任务（Confirmed→Sweeping 时回填）。</summary>
+    /// <summary>人工放行允许后续批次重新挂队，原归集任务被截尾时仍有效。</summary>
+    public bool ManuallyReleased { get; set; }
+
+    /// <summary>当前归集任务。批次限额截尾时可解除关联。</summary>
     public Guid? SweepTaskId { get; set; }
 
     public DateTime CreationTime { get; set; }

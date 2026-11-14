@@ -34,6 +34,10 @@ public class ColNetwork : BasicAggregateRoot<Guid>
     /// <summary>RPC 连接串密文（URL 含项目密钥）。null = 未设置。</summary>
     public string? RpcCipher { get; set; }
 
+    public string? AnkrPlatformAuthKeyCipher { get; set; }
+
+    public string? AnkrGroup { get; set; }
+
     // ── 提现热钱包（M3）：独立于归集助记词的打款钱包，绝不与 MnemonicCipher 同源 ——
 
     /// <summary>提现热钱包地址（0x + 40 位十六进制）。null = 未配置（审批/广播拒绝）。</summary>
@@ -43,6 +47,14 @@ public class ColNetwork : BasicAggregateRoot<Guid>
 
     /// <summary>充值手续费率（0-1，按毛额计，建单时向零截断 8 位快照）。0 = 不收费。</summary>
     public decimal DepositFeeRate { get; set; }
+
+    /// <summary>充值页面展示的预计到账时间，单位分钟。空值使用网络的展示默认值。</summary>
+    public int? EstimatedArrivalMinutes { get; set; }
+
+    internal bool IsBscMainnet => Name == CollectionConsts.BscNetworkName && ChainId == CollectionConsts.BscMainnetChainId;
+
+    internal int? GetEstimatedArrivalMinutes() =>
+        IsBscMainnet ? EstimatedArrivalMinutes ?? CollectionConsts.DefaultEstimatedArrivalMinutes : null;
 
     /// <summary>
     /// 进款毛额超过此值的单不自动进归集，停在 Confirmed 等管理端放行（放行只入队，入账仍走归集确认）。

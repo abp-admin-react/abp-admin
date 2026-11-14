@@ -50,6 +50,8 @@ public class WithdrawOrderDto
 
     public string? TxHash { get; set; }
 
+    public string? BroadcastSenderAddress { get; set; }
+
     public int RetryCount { get; set; }
 
     public string? FailReason { get; set; }
@@ -77,6 +79,7 @@ public class WithdrawOrderDto
             ActualAmount = CollectionAmounts.Format(o.ActualAmount),
             Status = o.Status.ToString(),
             TxHash = o.TxHash,
+            BroadcastSenderAddress = o.BroadcastSenderAddress,
             RetryCount = o.RetryCount,
             FailReason = o.FailReason,
             AuditRemark = o.AuditRemark,

@@ -21,8 +21,14 @@ public record TransactionReceipt(
     /// <summary>null = 无回执；1 = 成功；0 = 失败（revert）。</summary>
     int? Status);
 
+/// <summary>本地签名后的交易。哈希可在发送之前持久化，RawHex 仅用于提交同一份签名数据。</summary>
+public sealed record SignedChainTransaction(string Hash, string RawHex);
+
 /// <summary>按地址分批查询的一次结果（块区间无法整读时的兜底通道）。</summary>
-public record AddressTransferPage(IReadOnlyList<TokenTransferLog> Logs, bool Incomplete);
+public record AddressTransferPage(
+    IReadOnlyList<TokenTransferLog> Logs,
+    bool Incomplete,
+    bool HasUnresolvedLogs = false);
 
 /// <summary>
 /// BSC 链网关（计划第 5.6 节）：只读操作（getLogs/回执/余额/nonce）与签名广播（EIP-155）。
@@ -40,7 +46,7 @@ public interface IBscChainGateway
     Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> GetTransferLogsAsync(
         string contractAddress, long fromBlock, long toBlock, CancellationToken ct = default);
 
-    /// <summary>按地址分批兜底（缩到 1 块仍读不完时）；分页拉取，Incomplete=true 表示还有下一页。</summary>
+    /// <summary>按地址分批兜底。Incomplete 表示还有下一页；HasUnresolvedLogs 表示本页有日志未能确认。</summary>
     Task<AddressTransferPage> GetTransfersForAddressAsync(
         string contractAddress, string address, long fromBlock, long toBlock,
         int page, int pageSize, CancellationToken ct = default);
@@ -56,11 +62,28 @@ public interface IBscChainGateway
     /// <summary>回执；无回执返回 BlockNumber/Status 为 null 的记录。</summary>
     Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default);
 
+    /// <summary>获取指定回执的代币转账。Complete=false 表示节点尚未提供可核对的证据。</summary>
+    Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> GetReceiptTransferLogsAsync(
+        string txHash, string contractAddress, long block, CancellationToken ct = default)
+        => GetTransferLogsAsync(contractAddress, block, block, ct);
+
     /// <summary>
     /// 交易的 nonce（eth_getTransactionByHash）；交易不存在或节点不给 nonce 返回 null。
     /// 哈希认领用它核对「这笔链上交易确实占用的是本单落库的 NonceUsed」——Transfer 日志不带 nonce。
     /// </summary>
     Task<long?> GetTransactionNonceAsync(string txHash, CancellationToken ct = default);
+
+    /// <summary>仅当链上交易确由指定发送地址发出时返回 nonce。</summary>
+    Task<long?> GetTransactionNonceForSenderAsync(string txHash, string sender, CancellationToken ct = default)
+        => Task.FromResult<long?>(null);
+
+    /// <summary>签名 EIP-155 交易并计算完整签名数据的哈希，不发送交易。</summary>
+    Task<SignedChainTransaction> PrepareTransactionAsync(
+        string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
+        CancellationToken ct = default);
+
+    /// <summary>发送已签名的交易。调用方可在调用前保存该交易的哈希。</summary>
+    Task BroadcastTransactionAsync(SignedChainTransaction transaction, CancellationToken ct = default);
 
     /// <summary>
     /// 签名并广播一笔 EIP-155 legacy 交易（nonce 显式传入：重签替换必须复用原 nonce，

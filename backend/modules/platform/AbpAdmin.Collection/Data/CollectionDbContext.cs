@@ -1,4 +1,5 @@
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Collection.Payments;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp.Data;
 using Volo.Abp.EntityFrameworkCore;
@@ -21,6 +22,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
     public DbSet<ColBalance> Balances { get; set; } = default!;
 
     public DbSet<ColBalanceTxn> BalanceTxns { get; set; } = default!;
+
+    public DbSet<ColBalanceAdjustment> BalanceAdjustments { get; set; } = default!;
 
     public DbSet<ColNetwork> Networks { get; set; } = default!;
 
@@ -51,6 +54,10 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
     {
         base.OnModelCreating(builder);
 
+        builder.ApplyConfiguration(new CollectionRefundConfiguration());
+        builder.ApplyConfiguration(new CollectionBalanceAdjustmentConfiguration());
+        builder.ApplyConfiguration(new CollectionPaymentEventConfiguration());
+
         builder.Entity<ColCollection>(b =>
         {
             b.ToTable(CollectionConsts.DbTablePrefix + "Collections");
@@ -78,6 +85,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             // 显式命名让 EF 把它与同列组的部分唯一索引当成两个索引实体（不命名会被合并吞掉）
             b.HasIndex(x => new { x.BusinessType, x.BusinessId }, "IX_ColCollections_BusinessType_BusinessId_Query");
         });
+        builder.ConfigureCollectionPaymentIdentity();
 
         builder.Entity<ColBalance>(b =>
         {
@@ -137,6 +145,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.Property(x => x.Name).IsRequired().HasMaxLength(32);
             b.Property(x => x.MnemonicCipher);
             b.Property(x => x.RpcCipher);
+            b.Property(x => x.AnkrGroup).HasMaxLength(128);
 
             b.HasIndex(x => x.Name).IsUnique();
         });
@@ -189,6 +198,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.Status, x.BlockNumber });
             b.HasIndex(x => new { x.TokenId, x.Status });
             b.HasIndex(x => x.TxHash);
+            b.HasIndex(x => new { x.SweepTaskId, x.Status })
+                .HasFilter("\"SweepTaskId\" IS NOT NULL");
 
             // 跳过比例窗口聚合（TokenId + 时间）与用户进款分页（UserId + 时间）——
             // 表单调增长，无索引则每轮/每请求全扫
@@ -204,6 +215,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.Property(x => x.Address).IsRequired().HasMaxLength(42);
             b.Property(x => x.Amount).HasPrecision(28, 18);
             b.Property(x => x.TxHash).HasMaxLength(66);
+            b.Property(x => x.BroadcastVaultAddress).HasMaxLength(42);
             b.Property(x => x.GasTxHash).HasMaxLength(66);
             b.Property(x => x.FailReason).HasMaxLength(CollectionConsts.MaxNoteLength);
 
@@ -216,6 +228,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
                 .IsUnique()
                 .HasFilter("\"Status\" IN (1, 2)");
             b.HasIndex(x => new { x.Status, x.StatusChangedAt });
+            b.HasIndex(x => new { x.TokenId, x.Status, x.LastProcessedAt });
         });
 
         builder.Entity<ColVaultCheck>(b =>
@@ -258,6 +271,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.Property(x => x.ActualAmount).HasPrecision(28, 18);
             b.Property(x => x.FeeRate).HasPrecision(18, 8);
             b.Property(x => x.TxHash).HasMaxLength(66);
+            b.Property(x => x.BroadcastSenderAddress).HasMaxLength(42);
             b.Property(x => x.FailReason).HasMaxLength(CollectionConsts.MaxNoteLength);
             b.Property(x => x.AuditRemark).HasMaxLength(CollectionConsts.MaxNoteLength);
 

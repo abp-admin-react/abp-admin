@@ -1,6 +1,7 @@
 using AbpAdmin.Collection.Ledger;
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Balances;
 using AbpAdmin.Collection.Contracts;
@@ -19,11 +20,8 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Withdrawals;
 
 /// <summary>
-/// 提现编排（提现 M2）：提交/撤单/审核/拒绝/失败退款。纪律——
-/// 每个动作一个事务性 UoW（加入环境事务或自开），余额原语（CollectionBalanceManager）、
-/// 状态迁移（CAS 条件 UPDATE）与账本过账（CollectionLedgerPoster）三者同事务提交或回滚。
-/// 当日额度在冻结锁内计数（并发提交串行化在余额行锁上，exchange 同款次序）。
-/// 广播/卡单恢复/重试在 M3 的 WithdrawBroadcastWorker。
+/// 处理提现提交、撤单、审核和失败退款。订单状态、用户余额与凭证在同一事务提交。
+/// 提交时先锁定用户余额，再检查跨币种的当日笔数。广播恢复由后台任务处理。
 /// </summary>
 public class WithdrawManager : DomainService
 {
@@ -126,10 +124,7 @@ public class WithdrawManager : DomainService
         var orderId = GuidGenerator.Create();
         var now = _clock.Now;
 
-        // ①′ 先按固定币种序（USDT→USDC）把该用户两行余额都锁住，再冻结、再计数：
-        // 笔数按用户跨币种合并，锁序不统一时 USDT 单（锁序 USDT→USDC）与 USDC 单（USDC→USDT）
-        // 交叉加锁 → PG 死锁检测杀一侧。对齐线上「先锁资金账户再数笔数」且锁序恒定。
-        // 无副作用的条件 UPDATE 拿行锁；行不存在时 0 行更新（退化为单币种行为）。
+        // 按固定币种顺序锁定已有的余额行，串行计算跨币种笔数并避免交叉加锁死锁。
         foreach (var lockCurrency in new[] { CollectionCurrency.Usdt, CollectionCurrency.Usdc })
         {
             await dbContext.Balances
@@ -252,7 +247,7 @@ public class WithdrawManager : DomainService
 
     // ── 广播失败退款（BroadcastFailed → Rejected 终态；净额+手续费退回可用）──────────────
 
-    public virtual async Task RefundAfterApproveAsync(Guid orderId, Guid? auditUserId, string remark)
+    public virtual async Task RefundAfterApproveAsync(ColWithdrawOrder verifiedAttempt, Guid? auditUserId, string remark)
     {
         if (string.IsNullOrWhiteSpace(remark))
         {
@@ -260,10 +255,10 @@ public class WithdrawManager : DomainService
         }
 
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
-        var order = await FindAsync(orderId);
+        var order = await FindAsync(verifiedAttempt.Id);
         var now = _clock.Now;
         await CasTransitionAsync(order.Id, WithdrawStatus.BroadcastFailed, WithdrawStatus.Rejected,
-            auditUserId, remark, now, remark);
+            auditUserId, remark, now, remark, verifiedAttempt);
         await _balances.RefundAsync(order.UserId, order.Currency, order.Amount, order.Id);
         await _ledger.PostRefundAsync(order);
         await _ledger.PostFeeRefundAsync(order);
@@ -324,12 +319,17 @@ public class WithdrawManager : DomainService
     /// <summary>状态迁移 CAS：0 行 = 已被并发迁移，抛 WithdrawInvalidStatus。审计/原因字段按终值直写。</summary>
     private async Task CasTransitionAsync(
         Guid orderId, WithdrawStatus from, WithdrawStatus to,
-        Guid? auditUserId, string? auditRemark, DateTime? auditTime, string? failReason)
+        Guid? auditUserId, string? auditRemark, DateTime? auditTime, string? failReason,
+        ColWithdrawOrder? verifiedAttempt = null)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var now = _clock.Now;
-        var rows = await dbContext.WithdrawOrders
-            .Where(o => o.Id == orderId && o.Status == from)
+        var query = dbContext.WithdrawOrders.Where(o => o.Id == orderId && o.Status == from);
+        if (verifiedAttempt != null)
+        {
+            query = MatchBroadcastAttempt(query, verifiedAttempt);
+        }
+        var rows = await query
             .ExecuteUpdateAsync(s => s
                 .SetProperty(o => o.Status, to)
                 .SetProperty(o => o.StatusChangedAt, now)
@@ -344,6 +344,44 @@ public class WithdrawManager : DomainService
                 .WithData("From", from.ToString())
                 .WithData("To", to.ToString());
         }
+    }
+
+    /// <summary>按网络、发送方、nonce、哈希和重试次数匹配核对过的广播尝试，状态由调用方限定。</summary>
+    internal static IQueryable<ColWithdrawOrder> MatchBroadcastAttempt(
+        IQueryable<ColWithdrawOrder> orders, ColWithdrawOrder attempt)
+    {
+        return orders.Where(order => order.Id == attempt.Id && order.NetworkName == attempt.NetworkName
+                                     && order.TxHash == attempt.TxHash
+                                     && order.NonceUsed == attempt.NonceUsed
+                                     && order.BroadcastSenderAddress == attempt.BroadcastSenderAddress
+                                     && order.RetryCount == attempt.RetryCount);
+    }
+
+    /// <summary>缺少原发送方或 nonce 时，当前热钱包的链上状态无法证明此单未付款。</summary>
+    internal static string RequireBroadcastSender(ColWithdrawOrder order)
+    {
+        if (!HasBroadcastSender(order))
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawBroadcastSenderUnknown)
+                .WithData("Reason", "缺少原广播发送地址或 nonce，请先核实链上交易");
+        }
+
+        return order.BroadcastSenderAddress!;
+    }
+
+    internal static bool HasBroadcastSender(ColWithdrawOrder order) =>
+        order.NonceUsed is >= 0 && order.BroadcastSenderAddress is { } sender
+        && System.Text.RegularExpressions.Regex.IsMatch(sender, "^0x[0-9a-f]{40}$");
+
+    /// <summary>另一个已完结的同网络、同发送方交易占用了本次 nonce，本次尝试不可能再使用它付款。</summary>
+    internal async Task<bool> HasOtherCompletedAttemptAsync(ColWithdrawOrder order, CancellationToken ct = default)
+    {
+        var sender = RequireBroadcastSender(order);
+        var db = await _dbContextProvider.GetDbContextAsync();
+        return await db.WithdrawOrders.AsNoTracking().AnyAsync(other => other.Id != order.Id
+            && other.NetworkName == order.NetworkName && other.BroadcastSenderAddress == sender
+            && other.NonceUsed == order.NonceUsed && other.Status == WithdrawStatus.Completed
+            && other.TxHash != null && other.TxHash != "", ct);
     }
 
     private static string ValidateAddress(string toAddress)

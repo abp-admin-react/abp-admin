@@ -89,6 +89,44 @@ public class OrderStateMachineTests : OrderingStubTestBase
     }
 
     [Fact]
+    public async Task Completion_Before_Channel_Create_Returns_Uses_Prepared_Quote()
+    {
+        var manager = GetRequiredService<OrderPaymentManager>();
+        var order = await UowAsync(() => CreateBusinessOrderAsync());
+        var quote = await UowAsync(() => GetRequiredService<Quotes.QuoteManager>()
+            .GetOrCreateActiveQuoteAsync(order, OrderingPayChannel.WechatNative));
+        Stub.OnChannelCreate = async collection =>
+        {
+            using var callbackScope = ServiceProvider.CreateScope();
+            using var callbackUow = callbackScope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>()
+                .Begin(requiresNew: true, isTransactional: true);
+            var callback = callbackScope.ServiceProvider.GetRequiredService<Handlers.CollectionCompletedEventHandler>();
+            await callback.HandleEventAsync(new CollectionCompletedEto
+            {
+                CollectionId = collection.Id,
+                BusinessId = order.Id,
+                BusinessType = OrderingConsts.OrderBusinessType,
+                UserId = order.UserId,
+                Channel = collection.Channel,
+                Currency = collection.Currency,
+                Amount = collection.Amount,
+                ChannelTradeNo = "wx-early",
+                CompletedAt = DateTime.UtcNow,
+            });
+            await callbackUow.CompleteAsync();
+        };
+
+        var result = await UowAsync(() => manager.StartChannelPayAsync(order, quote));
+
+        result.Outcome.ShouldBe(StartPayOutcome.AlreadyCompleted);
+        result.Collection.ShouldBeNull();
+        result.Order.Status.ShouldBe(OrderStatus.Paid);
+        result.Order.QuoteId.ShouldBe(quote.Id);
+        result.Order.ChannelTradeNo.ShouldBe("wx-early");
+        (await UowAsync(() => AnomalyLinesAsync(order.Id))).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Same_Source_ReDelivery_Does_Not_Change_State()
     {
         var order = await MarkPaidViaWechatAsync();
@@ -141,6 +179,50 @@ public class OrderStateMachineTests : OrderingStubTestBase
         var lines = await UowAsync(() => AnomalyLinesAsync(order.Id));
         lines.Count.ShouldBe(2); // 只追加，不覆盖：第二条完整保留
         (await UowAsync(() => ReloadAsync(order.Id))).Status.ShouldBe(OrderStatus.Paid);
+    }
+
+    [Fact]
+    public async Task Concurrent_Redeliveries_Of_Second_Collection_Append_One_Detail()
+    {
+        var order = await MarkPaidViaWechatAsync();
+        var collectionId = Guid.NewGuid();
+        var manager = GetRequiredService<OrderPaymentManager>();
+
+        Task DeliverAsync() => UowAsync(() => manager.HandleCollectionCompletedAsync(
+            order.Id, collectionId, OrderingPayChannel.AlipayPrecreate, 20m, CollectionCurrency.Cny, "ali-duplicate"));
+        await Task.WhenAll(DeliverAsync(), DeliverAsync());
+
+        var details = await UowAsync(() => AnomalyLinesAsync(order.Id));
+        details.Single().CollectionId.ShouldBe(collectionId);
+    }
+
+    [Fact]
+    public async Task Refund_Event_Redelivery_Records_Real_Currency_Without_Changing_Manual_Total()
+    {
+        var order = await MarkPaidViaWechatAsync();
+        var refund = new CollectionRefundSucceededEto
+        {
+            RefundId = Guid.NewGuid(),
+            CollectionId = order.CollectionId!.Value,
+            BusinessId = order.Id,
+            BusinessType = OrderingConsts.OrderBusinessType,
+            Channel = CollectionChannel.WechatNative,
+            Currency = CollectionCurrency.Cny,
+            Amount = "3.45",
+            ChannelRefundNo = "wx-refund",
+            SucceededAt = DateTime.UtcNow,
+        };
+        var handler = GetRequiredService<Handlers.CollectionRefundSucceededEventHandler>();
+        await Task.WhenAll(UowAsync(() => handler.HandleEventAsync(refund)), UowAsync(() => handler.HandleEventAsync(refund)));
+
+        var detail = (await UowAsync(() => AnomalyLinesAsync(order.Id))).Single();
+        detail.Id.ShouldBe(refund.RefundId);
+        detail.Amount.ShouldBe(3.45m);
+        detail.Currency.ShouldBe(CollectionCurrency.Cny);
+        detail.ChannelTradeNo.ShouldBe("wx-refund");
+        var current = await UowAsync(() => ReloadAsync(order.Id));
+        current.RefundedAmount.ShouldBeNull();
+        current.PaymentAnomaly.ShouldBeFalse();
     }
 
     [Fact]
@@ -245,6 +327,26 @@ public class OrderStateMachineTests : OrderingStubTestBase
         current.Status.ShouldBe(OrderStatus.PendingPayment); // 取消旧收款不关闭订单
         current.PayChannel.ShouldBe(OrderingPayChannel.AlipayPrecreate);
         current.CollectionId.ShouldBe(result.Collection!.Id);
+    }
+
+    [Fact]
+    public async Task Unknown_Close_Blocks_Channel_Swap_And_Balance_Debit()
+    {
+        var order = await PrepareWechatPaidCandidateAsync();
+        Stub.CancelOutcomes[order.CollectionId!.Value] = CollectionStatus.Pending;
+        var manager = GetRequiredService<OrderPaymentManager>();
+        var quoteManager = GetRequiredService<Quotes.QuoteManager>();
+        var alipay = await UowAsync(() => quoteManager.GetOrCreateActiveQuoteAsync(order, OrderingPayChannel.AlipayPrecreate));
+        var balance = await UowAsync(() => quoteManager.GetOrCreateActiveQuoteAsync(order, OrderingPayChannel.BalanceUsdt));
+
+        (await Should.ThrowAsync<Volo.Abp.BusinessException>(() => UowAsync(() => manager.StartChannelPayAsync(order, alipay))))
+            .Code.ShouldBe(CollectionErrorCodes.PendingCollectionConflict);
+        (await Should.ThrowAsync<Volo.Abp.BusinessException>(() => UowAsync(() => manager.PayWithBalanceAsync(order, balance))))
+            .Code.ShouldBe(CollectionErrorCodes.PendingCollectionConflict);
+
+        Stub.CreateCallCount.ShouldBe(1);
+        Stub.DebitCallCount.ShouldBe(0);
+        (await UowAsync(() => ReloadAsync(order.Id))).CollectionId.ShouldBe(order.CollectionId);
     }
 
     [Fact]

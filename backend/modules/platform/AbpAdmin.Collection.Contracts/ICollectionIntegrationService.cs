@@ -6,27 +6,23 @@ using Volo.Abp;
 namespace AbpAdmin.Collection.Contracts;
 
 /// <summary>
-/// 收款集成服务（计划第 3.1 节）。订单模块只依赖本契约程序集，收款实现模块提供实现；
-/// 同进程调用仍是本地 DI。金额一律十进制字符串，经 <see cref="CollectionAmounts"/> 解析。
-/// 用户和管理端看余额、流水，走收款模块自己的应用服务，不放进这里。
+/// 供订单等模块在进程内调用的收款契约。金额使用十进制字符串，经 <see cref="CollectionAmounts"/> 转换。
 /// </summary>
 [IntegrationService]
 public interface ICollectionIntegrationService
 {
     /// <summary>
     /// 创建一笔外部收款。同一业务单只允许一笔 Pending：已有 Pending 且渠道、金额、币种都相同
-    /// 则返回原单（渠道字段为空时用同一收款号重试渠道调用）；渠道不同则冲突（调用方先取消）；
-    /// 金额或币种不同则冲突。Stripe 剩余时间不足 30 分钟时直接拒绝不插行。
-    /// 本地插入与渠道回写都用 requiresNew 事务并在渠道调用前提交；渠道 HTTP 在事务之外。
-    /// 渠道明确失败改为 ChannelFailed（释放 Pending 唯一索引）；超时或结果未知保持 Pending 并标未知。
+    /// 则返回原单。渠道字段为空且未在提交或关单时，可用原收款号重试渠道调用。
+    /// 渠道、金额或币种不同则冲突。Stripe 剩余时间不足 30 分钟时拒绝。
+    /// onPrepared 在收款单准备事务内运行，可绑定业务快照。事务提交之后再调用渠道。
+    /// 渠道明确失败改为 ChannelFailed；超时或结果未知保持 Pending，使用原单号补查。
     /// </summary>
-    Task<CollectionDto> CreateAsync(CreateCollectionInput input);
+    Task<CollectionDto> CreateAsync(CreateCollectionInput input, Func<CollectionDto, Task>? onPrepared = null);
 
     /// <summary>
-    /// 取消仍在等待的收款。本地先改 Closed 并提交（requiresNew），渠道关单在事务外；
-    /// 渠道返回「订单不存在」、超时或网络失败：本地仍为 Closed 并告警（「订单不存在」视为关单成功）。
-    /// 收款单不是 Pending 时不请求渠道关单，返回当前状态，不抛异常——调用方收到已完成时，
-    /// 按金额币种走支付或异常，不再创建新收款。
+    /// 取消仍在等待的收款。关单确证后转 Closed，渠道已支付则核对实付事实。
+    /// 关单结果未知时返回 Pending，调用方不能开启新的支付尝试。
     /// </summary>
     Task<CancelCollectionResult> CancelAsync(Guid collectionId);
 
@@ -52,8 +48,8 @@ public interface ICollectionIntegrationService
     Task<DebitDto?> GetDebitAsync(string businessType, Guid businessId);
 
     /// <summary>
-    /// 按单调序号列出已入账的充值流水，并重扫最近 7 天（计划第 3.1 节的补漏规则）。
-    /// 单行失败跳过并告警，游标推进到本批最大序号（含跳过的行）。
+    /// 分别读取游标后的新增充值和最近 7 天且序号不超过游标的充值，每段至多 maxCount 条。
+    /// 游标只前进。消费失败的流水由调用方在重扫窗口内重试。
     /// </summary>
     Task<ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount);
 

@@ -1,9 +1,11 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Channels;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Fakes;
+using AbpAdmin.Collection.Payments;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -175,7 +177,7 @@ public class CollectionIntegrationServiceTests : CollectionTestBase
     {
         var created = await Service.CreateAsync(Input(amount: "72.45"));
         Fake.CloseResults[created.CollectionNo] = new ChannelCloseResult(
-            ChannelCloseOutcome.AlreadyPaid, TradeNo: "fake-paid", PaidAmount: 72.45m);
+            ChannelCloseOutcome.AlreadyPaid, Payment(created));
 
         var result = await Service.CancelAsync(created.Id);
 
@@ -183,6 +185,216 @@ public class CollectionIntegrationServiceTests : CollectionTestBase
         result.Collection.Status.ShouldBe(CollectionStatus.Completed);
         result.Collection.CompletedAt.ShouldNotBeNull();
         result.Collection.ChannelTradeNo.ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task Callback_Query_And_Close_Converge_On_One_Completion()
+    {
+        var created = await Service.CreateAsync(Input(amount: "72.45"));
+        var payment = Payment(created);
+        var closeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseClose = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Fake.OnClose = async _ =>
+        {
+            closeStarted.TrySetResult();
+            await releaseClose.Task;
+            return new ChannelCloseResult(ChannelCloseOutcome.AlreadyPaid, payment);
+        };
+        Fake.QueryResults[created.CollectionNo] = new ChannelQueryResult(ChannelQueryOutcome.Paid, payment);
+
+        var cancel = RunInScopeAsync(provider => Integration(provider).CancelAsync(created.Id));
+        try
+        {
+            await closeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var query = RunInScopeAsync(provider => Integration(provider).QueryChannelAsync(created.Id));
+            var callbacks = Enumerable.Range(0, 3).Select(_ => RunInScopeAsync(provider =>
+                provider.GetRequiredService<CollectionPaymentConfirmationService>().ConfirmAsync(payment))).ToArray();
+            releaseClose.SetResult();
+
+            var results = await Task.WhenAll(callbacks);
+            results.Count(x => x.Outcome == CollectionPaymentConfirmationOutcome.Accepted).ShouldBeLessThanOrEqualTo(1);
+            results.All(x => x.Outcome is CollectionPaymentConfirmationOutcome.Accepted
+                or CollectionPaymentConfirmationOutcome.Duplicate).ShouldBeTrue();
+            (await query).Status.ShouldBe(CollectionStatus.Completed);
+            (await cancel).Collection.Status.ShouldBe(CollectionStatus.Completed);
+            (await Service.GetAsync(created.Id))!.ChannelTradeNo.ShouldBe(payment.TradeNo);
+            var duplicate = await GetRequiredService<CollectionPaymentConfirmationService>().ConfirmAsync(payment);
+            duplicate.Outcome.ShouldBe(CollectionPaymentConfirmationOutcome.Duplicate);
+            var completions = await ReadAsync(async () =>
+            {
+                var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+                return await db.Set<ColPaymentEvent>().CountAsync(item => item.Id == created.Id
+                    && item.Kind == CollectionPaymentEventKind.Completed);
+            });
+            completions.ShouldBe(1);
+        }
+        finally
+        {
+            releaseClose.TrySetResult();
+            await cancel;
+        }
+    }
+
+    [Fact]
+    public async Task A_Provider_Trade_Cannot_Complete_Two_Collections()
+    {
+        var first = await Service.CreateAsync(Input(amount: "72.45"));
+        var second = await Service.CreateAsync(Input(amount: "72.45"));
+        var results = await Task.WhenAll(new[] { first, second }.Select(row => RunInScopeAsync(provider =>
+            provider.GetRequiredService<CollectionPaymentConfirmationService>().ConfirmAsync(Payment(row)))));
+
+        results.Count(result => result.Outcome == CollectionPaymentConfirmationOutcome.Accepted).ShouldBe(1);
+        results.Count(result => result.Outcome == CollectionPaymentConfirmationOutcome.Conflict).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Payment_Requires_The_Original_Merchant_Currency_And_Amount()
+    {
+        var created = await Service.CreateAsync(Input(amount: "72.45"));
+        var payment = Payment(created);
+        var service = GetRequiredService<CollectionPaymentConfirmationService>();
+        foreach (var mismatch in new[]
+        {
+            payment with { MerchantAccountId = "wrong-merchant" },
+            payment with { Channel = CollectionChannel.AlipayPrecreate },
+            payment with { Amount = 72.46m },
+            payment with { Currency = CollectionCurrency.Usd },
+        })
+        {
+            (await service.ConfirmAsync(mismatch)).Outcome.ShouldBe(CollectionPaymentConfirmationOutcome.Conflict);
+        }
+
+        (await Service.GetAsync(created.Id))!.Status.ShouldBe(CollectionStatus.Pending);
+        (await service.ConfirmAsync(payment)).Outcome.ShouldBe(CollectionPaymentConfirmationOutcome.Accepted);
+    }
+
+    [Fact]
+    public async Task Unknown_Close_Holds_The_Original_Attempt_Until_Query_Confirms_It_Closed()
+    {
+        var input = Input(amount: "72.45");
+        var created = await Service.CreateAsync(input);
+        Fake.CloseResults[created.CollectionNo] = new ChannelCloseResult(ChannelCloseOutcome.Unknown);
+
+        var unresolved = await Service.CancelAsync(created.Id);
+        unresolved.Collection.Status.ShouldBe(CollectionStatus.Pending);
+        unresolved.Collection.ChannelResultUnknown.ShouldBeTrue();
+        await Should.ThrowAsync<BusinessException>(() => Service.CreateAsync(input));
+        await Should.ThrowAsync<BusinessException>(() => Service.CreateAsync(
+            Input("72.45", CollectionChannel.AlipayPrecreate, businessId: input.BusinessId)));
+
+        Fake.QueryResults[created.CollectionNo] = new ChannelQueryResult(ChannelQueryOutcome.OrderNotFound);
+        (await Service.QueryChannelAsync(created.Id)).Status.ShouldBe(CollectionStatus.Pending);
+
+        Fake.QueryResults[created.CollectionNo] = new ChannelQueryResult(ChannelQueryOutcome.Closed);
+        (await Service.QueryChannelAsync(created.Id)).Status.ShouldBe(CollectionStatus.Closed);
+        var replacement = await Service.CreateAsync(
+            Input("72.45", CollectionChannel.AlipayPrecreate, businessId: input.BusinessId));
+        replacement.Id.ShouldNotBe(created.Id);
+    }
+
+    [Fact]
+    public async Task Concurrent_Create_And_Close_Cannot_Expose_A_New_Payment_Payload()
+    {
+        var input = Input("72.45");
+        var started = new TaskCompletionSource<ChannelCreateRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Fake.OnCreate = async request =>
+        {
+            started.TrySetResult(request);
+            await resume.Task;
+            return new ChannelCreateResult(Succeeded: true, Payload: "should-not-be-exposed");
+        };
+
+        var first = RunInScopeAsync(provider => Integration(provider).CreateAsync(input));
+        try
+        {
+            var request = await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var duplicate = await Service.CreateAsync(input);
+            duplicate.Id.ShouldBe(request.CollectionId);
+            duplicate.ChannelPayload.ShouldBeNull();
+            Fake.CreateCallCount.ShouldBe(1);
+
+            var close = await Service.CancelAsync(request.CollectionId);
+            close.Collection.Status.ShouldBe(CollectionStatus.Pending);
+            close.Collection.ChannelResultUnknown.ShouldBeTrue();
+            Fake.CloseCallCount.ShouldBe(0);
+            Fake.QueryResults[request.CollectionNo] = new ChannelQueryResult(ChannelQueryOutcome.Closed);
+            (await Service.QueryChannelAsync(request.CollectionId)).Status.ShouldBe(CollectionStatus.Pending);
+
+            resume.SetResult();
+            (await first).ChannelPayload.ShouldBeNull();
+            (await Service.QueryChannelAsync(request.CollectionId)).Status.ShouldBe(CollectionStatus.Closed);
+        }
+        finally
+        {
+            resume.TrySetResult();
+            await first;
+        }
+    }
+
+    [Fact]
+    public async Task Paid_Mismatch_Remains_Visible_And_Blocks_Replacement_Until_Resolved()
+    {
+        var input = Input("72.45");
+        var created = await Service.CreateAsync(input);
+        var payment = Payment(created);
+        var confirmation = GetRequiredService<CollectionPaymentConfirmationService>();
+        (await confirmation.ConfirmAsync(payment with { Amount = 71m })).Outcome
+            .ShouldBe(CollectionPaymentConfirmationOutcome.Conflict);
+        Fake.QueryResults[created.CollectionNo] = new ChannelQueryResult(ChannelQueryOutcome.Closed);
+        var unresolved = await Service.QueryChannelAsync(created.Id);
+        unresolved.Status.ShouldBe(CollectionStatus.Pending);
+        unresolved.ChannelResultUnknown.ShouldBeTrue();
+        unresolved.StatusNote!.ShouldContain("does not match");
+        await Should.ThrowAsync<BusinessException>(() => Service.CreateAsync(input));
+
+        (await confirmation.ConfirmAsync(payment)).Outcome.ShouldBe(CollectionPaymentConfirmationOutcome.Accepted);
+        (await confirmation.ConfirmAsync(payment with { TradeNo = "other-paid-trade" })).Outcome
+            .ShouldBe(CollectionPaymentConfirmationOutcome.Conflict);
+        var completed = (await Service.GetAsync(created.Id))!;
+        completed.Status.ShouldBe(CollectionStatus.Completed);
+        completed.ChannelTradeNo.ShouldBe(payment.TradeNo);
+        completed.StatusNote!.ShouldContain("other-paid-trade");
+    }
+
+    [Fact]
+    public async Task Callback_Can_Complete_Before_Create_Channel_Response()
+    {
+        var prepared = false;
+        Fake.OnCreate = async request =>
+        {
+            prepared.ShouldBeTrue();
+            await RunInScopeAsync(async provider =>
+            {
+                var row = await Integration(provider).GetAsync(request.CollectionId);
+                row.ShouldNotBeNull();
+                var service = provider.GetRequiredService<CollectionPaymentConfirmationService>();
+                (await service.ConfirmAsync(Payment(row))).Outcome.ShouldBe(CollectionPaymentConfirmationOutcome.Accepted);
+                return true;
+            });
+
+            return new ChannelCreateResult(Succeeded: false, Unknown: true);
+        };
+
+        var created = await Service.CreateAsync(Input("72.45"), _ =>
+        {
+            prepared = true;
+            return Task.CompletedTask;
+        });
+        created.Status.ShouldBe(CollectionStatus.Completed);
+        created.ChannelResultUnknown.ShouldBeFalse();
+    }
+
+    private CollectionPaymentObservation Payment(CollectionDto row) =>
+        new(row.Channel, Fake.MerchantAccountId, row.CollectionNo, "fake-paid", 72.45m, row.Currency);
+
+    private static CollectionIntegrationService Integration(IServiceProvider provider) =>
+        (CollectionIntegrationService)provider.GetRequiredService<ICollectionIntegrationService>();
+
+    private async Task<T> RunInScopeAsync<T>(Func<IServiceProvider, Task<T>> run)
+    {
+        using var scope = ServiceProvider.CreateScope();
+        return await run(scope.ServiceProvider);
     }
 
     [Fact]

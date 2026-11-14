@@ -23,6 +23,10 @@ public class CollectionLedgerSeedProvider : ILedgerSeedProvider, ITransientDepen
 
     public IEnumerable<LedgerRuleSeed> Rules { get; } = new LedgerRuleSeed[]
     {
+        new(FinanceBizTypes.WalletAdjustment, "increase", "用户余额调增",
+            "[{\"debit\":\"3101\",\"credit\":\"2201\",\"note\":\"用户余额调增\"}]"),
+        new(FinanceBizTypes.WalletAdjustment, "decrease", "用户余额调减",
+            "[{\"debit\":\"2201\",\"credit\":\"3101\",\"note\":\"用户余额调减\"}]"),
         // 充值入账（归集确认同事务过账）：链上资产增、欠用户增
         new(FinanceBizTypes.Deposit, FinanceBizTypes.Phases.Pay, "充值入账",
             "[{\"debit\":\"1001\",\"credit\":\"2201\",\"note\":\"充值入账\"}]"),

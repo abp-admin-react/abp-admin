@@ -17,18 +17,13 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Ordering.Jobs;
 
 /// <summary>
-/// 订单补状态作业（计划第 3.3 节）：只调用集成服务和自己的表。Host 专用定时作业
-///（IScheduledJobHandler + [ExposeServices]，实例字段不跨调用保存状态）。
-/// 扫描范围：仍为 PendingPayment 的订单；Paid（含 CollectionId 归因）且无异常标志位、PaidAt
-/// 在最近 7 天内的订单；Closed、无异常标志位、ExpiresAt 在最近 7 天内的订单。更早的关闭单用
-/// 管理端列表的预置过滤查看，不每轮全表扫描，也不另建清单表。
-/// M2 起补两步（计划第 3.3 节）：「已扣未标支付」（GetDebitAsync 核对金额币种后补支付/复活/
-/// 回冲）与「充值流水补插」（ListCreditedTxnsAsync 序号游标 + 7 天重扫，跳过计数告警）。
+/// 宿主定时核对待支付和近期已支付、已关闭的订单，补偿已确认的收款、未回冲的扣款和遗漏的充值订单。
+/// 收款与余额通过集成服务读取，订单状态交给订单支付管理器更新。
 /// </summary>
 [ExposeServices(typeof(IScheduledJobHandler))]
 public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDependency
 {
-    /// <summary>补状态回看窗口：Paid/Closed 单只看最近 7 天（计划第 3.3 节）。</summary>
+    /// <summary>已支付和已关闭订单的 7 天回看窗口。</summary>
     public static readonly TimeSpan LookBackWindow = TimeSpan.FromDays(7);
 
     private const int BatchSize = 200;
@@ -79,7 +74,6 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
 
                 if (order.PayAmount == null)
                 {
-                    // 尚未发起支付：补状态作业不做金额比较（计划第 3.1 节）
                     continue;
                 }
 
@@ -89,31 +83,10 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                     continue;
                 }
 
-                var match = FindMatching(completed, order);
-                if (match != null)
-                {
-                    await _orderPaymentManager.HandleCollectionCompletedAsync(
-                        order.Id, match.Id,
-                        OrderingPayChannelExtensions.FromCollectionChannel(match.Channel),
-                        AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(match.Amount),
-                        match.Currency, match.ChannelTradeNo);
-                }
-                else if (!order.PaymentAnomaly)
-                {
-                    // 有一笔 Completed 但金额或币种不一致：只追加一次异常明细（PaymentAnomaly
-                    ///标志位在首次追加时置位，本轮询不重复写行），不关单，关单留到订单自己的
-                    ///ExpiresAt（无去重时 5 分钟一轮会刷出上百重复行）
-                    var mismatch = completed[0];
-                    await _orderPaymentManager.AppendAnomalyAsync(
-                        order.Id,
-                        AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(mismatch.Amount),
-                        mismatch.Currency, mismatch.Id, mismatch.ChannelTradeNo,
-                        "Reconciliation found a completed collection with mismatched amount or currency.");
-                }
+                await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, FindMatching(completed, order) ?? completed[0]);
             }
             catch (Exception ex)
             {
-                // 单个订单失败不挡住整轮（对齐集成服务的单行跳过纪律）
                 _logger.LogWarning(ex, "补状态处理订单 {OrderId} 失败，下一轮重试", order.Id);
             }
         }
@@ -135,21 +108,12 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                     continue;
                 }
 
-                // 订单已是 Paid，业务单下另有一笔 Completed 且不是致付来源：无论金额是否一致，
-                // 都追加异常明细并告警（计划第 3.3 节）。余额支付的单（BalanceTxnId 非空）残留的
-                // CollectionId 是换渠道前的旧归因，任何完成的收款都算第二笔；
-                // 渠道支付的单只有收款号不等于致付归因才算
+                // 余额支付已完成时，旧渠道留下的 CollectionId 不能证明这笔渠道收款就是付款来源。
                 var second = completed.FirstOrDefault(c =>
                     order.BalanceTxnId != null || c.Id != order.CollectionId);
                 if (second != null)
                 {
-                    await _orderPaymentManager.AppendAnomalyAsync(
-                        order.Id,
-                        AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(second.Amount),
-                        second.Currency, second.Id, second.ChannelTradeNo,
-                        "Reconciliation found another completed collection after the order was paid.");
-                    _logger.LogWarning("订单 {OrderId}（已支付）发现第二笔完成收款 {CollectionId}",
-                        order.Id, second.Id);
+                    await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, second);
                 }
             }
             catch (Exception ex)
@@ -179,26 +143,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                     continue;
                 }
 
-                var match = FindMatching(completed, order);
-                if (match != null)
-                {
-                    // CloseReason 决定复活或只告警：Expired 可标回 Paid；UserCancel 只告警
-                    await _orderPaymentManager.HandleCollectionCompletedAsync(
-                        order.Id, match.Id,
-                        OrderingPayChannelExtensions.FromCollectionChannel(match.Channel),
-                        AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(match.Amount),
-                        match.Currency, match.ChannelTradeNo);
-                }
-                else
-                {
-                    // 金额或币种不一致的 Completed：追加异常明细，不复活
-                    var mismatch = completed[0];
-                    await _orderPaymentManager.AppendAnomalyAsync(
-                        order.Id,
-                        AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(mismatch.Amount),
-                        mismatch.Currency, mismatch.Id, mismatch.ChannelTradeNo,
-                        "Reconciliation found a mismatched completed collection on a closed order.");
-                }
+                await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, FindMatching(completed, order) ?? completed[0]);
             }
             catch (Exception ex)
             {
@@ -206,10 +151,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
             }
         }
 
-        // ── M2：已扣未标支付（计划第 3.3 节）────────────────────────────────────────────
         await ReconcileUnmarkedDebitsAsync(now);
-
-        // ── M2：充值流水补插（计划第 3.3 节：序号游标 + 7 天重扫 + 跳过计数）────────────
         await BackfillCreditedTxnsAsync(context);
     }
 
@@ -217,7 +159,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
     /// 「已扣未标支付」：扣款和标支付本应同事务原子提交，这一步是为跨模块旁路留下的兜底——
     /// PendingPayment 且有金额币种一致的未回冲扣款 → 补标 Paid（写 BalanceTxnId、PaidAt）；
     /// Closed(Expired)、无异常标志位、金额一致 → 标回 Paid 并写归因；
-    /// Closed(UserCancel) 且扣款未回冲 → 回冲扣款并追加异常明细（不复活，计划第 3.3 节）。
+    /// Closed(UserCancel) 且扣款未回冲 → 回冲扣款并追加异常明细。
     /// </summary>
     private async Task ReconcileUnmarkedDebitsAsync(DateTime now)
     {
@@ -295,8 +237,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                         continue;
                     }
 
-                    // 过期关闭 + 扣款金额币种对不上：不能复活也不能静默跳过——扣着的钱必须有去处，
-                    // 追加异常明细进人工队列（否则既不告警也不留痕，出了 7 天窗口就永久失联）
+                    // 金额或币种不符时保留异常记录，供订单移出自动核对窗口后继续处理。
                     await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
                         null, debit.BalanceTxnId.ToString(),
                         "Expired order has an unreversed debit with mismatched amount or currency; needs manual resolution.");
@@ -308,7 +249,6 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
 
                 if (order.CloseReason == OrderCloseReason.UserCancel)
                 {
-                    // 用户取消后的扣款：回冲 + 追加异常明细（不复活，计划第 3.3 节）
                     await _integrationService.ReverseDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
                     await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
                         null, debit.BalanceTxnId.ToString(),
@@ -327,7 +267,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
     /// <summary>
     /// 充值流水补插：序号游标正向拉一批，没有对应充值订单的按 BalanceTxnId 补插（停在 Paid）。
     /// 单行失败跳过并告警，游标推进到本批最大序号（含跳过的行，被跳过的行只靠 7 天重扫补）；
-    /// 同一 BalanceTxnId 连续跳过超过阈值告警并重新计数；游标 7 天没前进告警（计划第 3.1 节）。
+    /// 同一流水达到失败次数阈值时告警并重新计数。
     /// </summary>
     private async Task BackfillCreditedTxnsAsync(ScheduledJobContext context)
     {
@@ -374,13 +314,12 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
             }
             catch (Exception ex)
             {
-                // 单行失败跳过并告警；连续跳过计数 +1，超过阈值再告警并重新计数
                 var count = (skipped.TryGetValue(txn.BalanceTxnId, out var c) ? c : 0) + 1;
-                _logger.LogWarning(ex, "充值流水补插失败，跳过（BalanceTxnId={TxnId}，连续第 {Count} 轮）",
+                _logger.LogWarning(ex, "充值流水补插失败并跳过（BalanceTxnId={TxnId}，累计未成功 {Count} 次）",
                     txn.BalanceTxnId, count);
                 if (count >= threshold)
                 {
-                    _logger.LogWarning("充值流水 {TxnId} 连续跳过超过 {Threshold} 轮，请人工检查", txn.BalanceTxnId, threshold);
+                    _logger.LogWarning("充值流水 {TxnId} 补插失败次数达到 {Threshold}，请人工检查", txn.BalanceTxnId, threshold);
                     skipped[txn.BalanceTxnId] = 0;
                 }
                 else
@@ -390,7 +329,6 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
             }
         }
 
-        // 游标前进检测：超过 7 天没前进告警（计划第 3.1 节；序号与时间双轨防漏的另一半）
         if (result.Cursor > state.CreditCursor)
         {
             state.CreditCursor = result.Cursor;
@@ -398,7 +336,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
         }
         else if (state.CursorLastAdvancedAt != null && now - state.CursorLastAdvancedAt > LookBackWindow)
         {
-            _logger.LogWarning("充值序号游标超过 7 天没有前进（cursor={Cursor}）——入账停滞或丢行，请检查", state.CreditCursor);
+            _logger.LogWarning("充值补插游标超过 7 天未前进，检查是否有未处理的充值流水（Cursor={Cursor}）", state.CreditCursor);
             state.CursorLastAdvancedAt = now; // 告警节流：再等一个窗口
         }
 
@@ -452,9 +390,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
     }
 
     /// <summary>
-    /// 已过订单自己的 ExpiresAt 且仍是 PendingPayment：先 CancelAsync；
-    /// 返回已完成且金额币种一致则标 Paid 并写归因；不一致则追加异常明细并 Closed(Expired)；
-    /// 已取消/已关闭则把订单改为 Closed(Expired)（计划第 3.3 节）。
+    /// 过期订单先关渠道单。明确已支付时按到账规则处理，结果仍待确认时保留待支付状态供下轮核对。
     /// </summary>
     private async Task HandleExpiredAsync(OrdOrder order)
     {
@@ -467,24 +403,18 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                     && cancel.Collection.Currency == order.PayCurrency
                     && AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(cancel.Collection.Amount) == order.PayAmount.Value;
 
-                if (amountsMatch)
+                await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, cancel.Collection);
+                if (!amountsMatch)
                 {
-                    await _orderPaymentManager.HandleCollectionCompletedAsync(
-                        order.Id, cancel.Collection.Id,
-                        OrderingPayChannelExtensions.FromCollectionChannel(cancel.Collection.Channel),
-                        AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(cancel.Collection.Amount),
-                        cancel.Collection.Currency, cancel.Collection.ChannelTradeNo);
-                }
-                else
-                {
-                    await _orderPaymentManager.AppendAnomalyAsync(
-                        order.Id,
-                        AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(cancel.Collection.Amount),
-                        cancel.Collection.Currency, cancel.Collection.Id, cancel.Collection.ChannelTradeNo,
-                        "Expired order found a completed collection with mismatched amount or currency.");
                     await _orderPaymentManager.CloseExpiredAsync(order);
                 }
 
+                return;
+            }
+
+            if (cancel.Collection.Status == AbpAdmin.Collection.Contracts.CollectionStatus.Pending)
+            {
+                // 等待渠道查单或关单给出明确结果。下一轮继续处理原收款。
                 return;
             }
         }

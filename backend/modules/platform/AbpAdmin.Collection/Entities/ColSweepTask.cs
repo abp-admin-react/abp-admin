@@ -46,9 +46,14 @@ public class ColSweepTask : BasicAggregateRoot<Guid>
 
     public string? FailReason { get; set; }
 
-    /// <summary>代币归集交易哈希（小写）。确认数不够保持 Sweeping 和原哈希，不重签；
-    /// 宽限后节点仍不认才允许重签，同地址出现替换哈希时跟随新哈希。</summary>
+    /// <summary>当前已签名交易的哈希，发送前保存。入账时改为实际确认的交易哈希。</summary>
     public string? TxHash { get; set; }
+
+    /// <summary>同一 nonce 下替换过的哈希。任一候选均可能先上链，在确认前都需要核对。</summary>
+    public string[]? PreviousTxHashes { get; set; }
+
+    /// <summary>金库收款地址快照，与 nonce 一起在发送前提交，重签与确认均使用此地址。</summary>
+    public string? BroadcastVaultAddress { get; set; }
 
     /// <summary>归集交易的 nonce（重签复用同一 nonce 替换）。</summary>
     public long? NonceUsed { get; set; }
@@ -59,14 +64,20 @@ public class ColSweepTask : BasicAggregateRoot<Guid>
     /// <summary>打油的 BNB 交易哈希（排障用）。</summary>
     public string? GasTxHash { get; set; }
 
+    /// <summary>在发送打油交易前保存 nonce，响应丢失时使用原 nonce。</summary>
+    public long? GasNonceUsed { get; set; }
+
     /// <summary>
-    /// 当前在途归集交易的广播时刻（重签宽限的计时起点；清哈希重签时更新）。
+    /// 当前签名尝试的提交时刻，在调用广播前保存。用于计算重签宽限期。
     /// 不与 StatusChangedAt 复用——冷却与宽限是两个时钟，复用会让激活/冷却重置宽限。
     /// </summary>
     public DateTime? BroadcastAt { get; set; }
 
     /// <summary>状态变化时间：冷却判据，不用 LastModificationTime。</summary>
     public DateTime StatusChangedAt { get; set; }
+
+    /// <summary>最近一次被作业选中处理的时间，用于各状态内轮转，独立于业务状态变更时间。</summary>
+    public DateTime? LastProcessedAt { get; set; }
 
     public DateTime CreationTime { get; set; }
 }

@@ -31,6 +31,9 @@ public class ColCollection : Volo.Abp.Domain.Entities.BasicAggregateRoot<Guid>
 
     public CollectionChannel Channel { get; set; }
 
+    /// <summary>渠道调用前固定。旧收款单没有已验证的商户标识。</summary>
+    public string? MerchantAccountId { get; set; }
+
     public CollectionCurrency Currency { get; set; }
 
     /// <summary>精度与币种匹配（numeric(28,18)；法币在写入前由订单模块舍入到 0.01）。</summary>
@@ -43,6 +46,18 @@ public class ColCollection : Volo.Abp.Domain.Entities.BasicAggregateRoot<Guid>
 
     /// <summary>渠道结果未知（超时/网络失败，保持 Pending 由补单作业按商户订单号查询）。</summary>
     public bool ChannelResultUnknown { get; set; }
+
+    public bool ChannelOrderCreated { get; set; }
+
+    public bool CloseRequested { get; set; }
+
+    public Guid? ChannelCreateLeaseId { get; set; }
+
+    public DateTime? ChannelCreateLeaseUntil { get; set; }
+
+    public bool ChannelPaymentMismatch { get; set; }
+
+    public DateTime? NextChannelQueryAt { get; set; }
 
     public DateTime? ExpiresAt { get; set; }
 

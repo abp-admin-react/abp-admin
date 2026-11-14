@@ -17,8 +17,7 @@ using Volo.Abp.Settings;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 扫链 worker：逐代币跑 DepositScanManager（一币一游标，一币失败不挡另一币）。轮末推 SignalR 进度。
-/// 开关/间隔/扫链参数每轮热读设置（Collection.Chain.*，SettingUi 免重启）。
+/// 按代币推进充值游标。每轮读取当前扫链设置，单个代币失败时继续扫描其他代币。
 /// </summary>
 public class DepositScanWorker : CollectionChainWorkerBase
 {
@@ -42,8 +41,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
         var settings = scopedServices.GetRequiredService<ISettingProvider>();
         return WorkerRoundPlan.Create(
             await settings.IsTrueAsync(CollectionSettings.Chain.ScanEnabled),
-            TimeSpan.FromSeconds(await settings.GetIntAsync(
-                CollectionSettings.Chain.ScanIntervalSeconds, ChainDefaults.ScanIntervalSeconds)));
+            TimeSpan.FromSeconds(await settings.GetScanIntervalSecondsAsync()));
     }
 
     protected override async Task RunRoundAsync(IServiceProvider scopedServices, CancellationToken ct)
@@ -57,7 +55,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var db = await dbContext.GetDbContextAsync();
-        var network = await db.Networks.OrderBy(n => n.CreationTime).FirstOrDefaultAsync(ct);
+        var network = await db.Networks.OrderBy(n => n.CreationTime).ThenBy(n => n.Id).FirstOrDefaultAsync(ct);
         if (network == null) return;
 
         var gateway = await CreateGatewayAsync(factory, db, network, Logger);
@@ -97,8 +95,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
             }
         }
 
-        // 轮末推 SignalR 进度（全部代币通道；tokens 是本轮开始时快照，当轮扫描在自己的
-        // 工作单元重读更新的是另一实例，本推送不含当轮增量）
+        // 推送轮初的游标快照，包含禁用代币。轮内更新在各代币的独立工作单元中提交。
         if (pusher != null)
         {
             try
@@ -126,8 +123,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
 }
 
 /// <summary>
-/// 归集 worker：逐代币跑 SweepManager。轮末推 SignalR 任务变更快照。
-/// 开关/间隔/归集参数每轮热读设置（Collection.Chain.*，SettingUi 免重启）。
+/// 按代币执行归集轮次，并在轮末推送活跃任务快照。每轮读取当前归集设置。
 /// </summary>
 public class SweepWorker : CollectionChainWorkerBase
 {
@@ -159,14 +155,14 @@ public class SweepWorker : CollectionChainWorkerBase
     {
         var dbContext = scopedServices.GetRequiredService<IDbContextProvider<CollectionDbContext>>();
         var factory = scopedServices.GetRequiredService<ChainGatewayFactory>();
-        var sweepManager = scopedServices.GetRequiredService<SweepManager>().WithMasterKey(factory.MasterKey);
+        var sweepManager = scopedServices.GetRequiredService<SweepManager>().WithMasterKey(await factory.GetMasterKeyAsync());
         var pusher = scopedServices.GetService<Contracts.IChainPushNotifier>();
         var uowManager = scopedServices.GetRequiredService<Volo.Abp.Uow.IUnitOfWorkManager>();
         var settings = scopedServices.GetRequiredService<ISettingProvider>();
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var db = await dbContext.GetDbContextAsync();
-        var network = await db.Networks.OrderBy(n => n.CreationTime).FirstOrDefaultAsync(ct);
+        var network = await db.Networks.OrderBy(n => n.CreationTime).ThenBy(n => n.Id).FirstOrDefaultAsync(ct);
         if (network == null) return;
 
         var tokens = await db.Tokens
@@ -181,6 +177,7 @@ public class SweepWorker : CollectionChainWorkerBase
         var confirmations = await settings.GetIntAsync(
             CollectionSettings.Chain.Confirmations, ChainDefaults.Confirmations);
         var roundLimit = await settings.GetOptionalPositiveDecimalAsync(CollectionSettings.Chain.SweepRoundLimit);
+        var batchSize = await settings.GetIntAsync(CollectionSettings.Chain.SweepTaskBatchSize, ChainDefaults.SweepTaskBatchSize);
         var fuelBnbLimit = await settings.GetDecimalAsync(
             CollectionSettings.Chain.FuelBnbLimit, ChainDefaults.FuelBnbLimit);
         var retryCooldown = TimeSpan.FromMinutes(await settings.GetIntAsync(
@@ -204,7 +201,7 @@ public class SweepWorker : CollectionChainWorkerBase
                     rebroadcastGrace,
                     sweepStuck,
                     gasAlertThreshold,
-                    ct);
+                    ct, batchSize);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

@@ -11,6 +11,7 @@ public static class FinanceBizTypes
     public const string Payment = "payment";
     public const string Wallet = "wallet";
     public const string ManualAdjust = "manual-adjust";
+    public const string WalletAdjustment = "wallet-adjust";
 
     /// <summary>链上充值入账（归集确认后入账，借 1001 / 贷 2201）。</summary>
     public const string Deposit = "deposit";

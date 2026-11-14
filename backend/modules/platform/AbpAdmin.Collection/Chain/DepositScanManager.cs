@@ -16,14 +16,14 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 扫链一轮（计划第 5.6 节游标纪律，一币一游标）：
-/// ① 首次打开 = 链头 - 确认数，不从创世块扫；② 游标只在区间确认读完（未触上限、无节点报错）后前进；
-/// ③ 缩到 1 块仍读不完 → 按地址分批兜底并告警。（「连续多轮低位后区间放回」未实现——当前区间固定为配置值。）
-/// 低于 MinDeposit / 放不进 numeric(28,18) 的转入记终态进款单，游标照常前进，不归集不加余额；
-/// 首次打开游标落位到链头-确认数（历史转入按计划口径不补扫）；落后超阈值告警（冷却看网络行）。
+/// 每个代币维护自己的游标，初始位置为链头减确认数。完整读取区间后才推进，
+/// 单个区块仍读不全时按地址补查。低于最低金额或超出存储精度的进款记录为终态，不参与归集入账。
 /// </summary>
 public class DepositScanManager : DomainService
 {
+    private const int AddressFallbackPageSize = 200;
+    private const int AddressFallbackMaxPages = 10;
+
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly ChainAlertService _alerts;
     private readonly IClock _clock;
@@ -31,8 +31,7 @@ public class DepositScanManager : DomainService
     private readonly Volo.Abp.Guids.IGuidGenerator _guidGenerator;
     private readonly Contracts.IChainPushNotifier? _pushNotifier;
 
-    // 进程内告警冷却（static：管理器是 transient，每轮新实例——实例字典冷却永不跨轮生效。
-    // 多实例各有一份，重复告警有限度可接受）
+    // 管理器按轮创建，告警冷却存储在进程内，供各轮共用。
     private static readonly Dictionary<Guid, DateTime> SkipRatioAlertedAt = new();
     private static readonly Dictionary<Guid, DateTime> FallbackAlertedAt = new();
 
@@ -63,16 +62,14 @@ public class DepositScanManager : DomainService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var now = _clock.Now;
 
-        // network/token 由 worker 在自己的工作单元加载——跨工作单元是分离实体，直接改会被静默丢弃
-        //（否则游标/心跳不会落库）。管理器在本工作单元重读，参数仅当身份/配置用。
+        // 在当前工作单元重读网络和代币，确保游标和心跳可以保存。
         network = await dbContext.Networks.SingleAsync(n => n.Id == network.Id, ct);
         token = await dbContext.Tokens.SingleAsync(t => t.Id == token.Id, ct);
 
         var head = await gateway.GetLatestBlockNumberAsync(ct);
         network.LatestChainHead = head;
 
-        // 看管中的地址集（内存比对是常数时间；主成本是该合约区间内的全部 Transfer，见计划）。
-        // AddressIndex 随行传递：归集任务创建时必须带上，否则签名用 index-0 错误密钥
+        // 后续归集用地址的派生索引签名，匹配日志时保留该索引。
         var watched = await dbContext.DepositAddresses.AsNoTracking()
             .Where(a => a.NetworkId == network.Id)
             .Select(a => new { a.Id, a.Address, a.UserId, a.AddressIndex })
@@ -92,9 +89,7 @@ public class DepositScanManager : DomainService
         }
         else if (token.LastScannedBlock == null)
         {
-            // 首轮窗口为空（游标=链头-确认数，按定义无可扫区间）：游标无条件落位到 target
-            //（落位不依赖看管地址数——cursor 与 target 每轮都由当前链头重算、恒等）。
-            // 落位即「扫链已跑过一轮」，历史转入按计划口径不补扫。
+            // 首轮只保存起始游标，即使尚无充值地址也不回扫历史区块。
             token.LastScannedBlock = target;
         }
 
@@ -130,20 +125,20 @@ public class DepositScanManager : DomainService
         var range = to - from + 1;
         IReadOnlyList<TokenTransferLog> logs;
         bool complete;
-        var end = to;
+        long end;
 
         while (true)
         {
-            (logs, complete) = await gateway.GetTransferLogsAsync(token.ContractAddress, from, from + range - 1, ct);
-            if (complete)
+            end = from + range - 1;
+            (logs, complete) = await gateway.GetTransferLogsAsync(token.ContractAddress, from, end, ct);
+            if (complete && logs.All(log => IsInRange(log, from, end)))
             {
-                end = from + range - 1;
                 break;
             }
 
             if (range > 1)
             {
-                // 没读完：不前进，缩小区间（计划第 5.6 节）
+                // 未读完的区间不能推进游标。
                 range = Math.Max(1, range / 2);
                 continue;
             }
@@ -157,18 +152,19 @@ public class DepositScanManager : DomainService
                     $"代币 {token.Symbol} 块 {from} 多次读取未完整，已按地址分批查询。");
                 FallbackAlertedAt[token.Id] = _clock.Now;
             }
-            logs = await FallbackByAddressAsync(gateway, token, byAddress.Keys.ToList(), from, from, ct);
-            complete = true;
-            end = from;
+            (logs, complete) = await FallbackByAddressAsync(gateway, token, byAddress.Keys, from, end, ct);
             break;
         }
 
         // 匹配看管中的地址并建进款单（ON CONFLICT DO NOTHING：重启不重复建单）
-        var matched = logs.Where(l => byAddress.ContainsKey(l.To.ToLowerInvariant())).ToList();
-        foreach (var log in matched)
+        var matched = 0;
+        foreach (var log in logs)
         {
-            var (addressId, userId, addressIndex) = byAddress[log.To.ToLowerInvariant()];
-            await UpsertDepositOrderAsync(dbContext, network, token, addressId, userId, log, ct);
+            if (byAddress.TryGetValue(log.To.ToLowerInvariant(), out var address))
+            {
+                await UpsertDepositOrderAsync(dbContext, network, token, address.Id, address.UserId, log, ct);
+                matched++;
+            }
         }
 
         // 游标前进：确认读完才推进
@@ -184,33 +180,55 @@ public class DepositScanManager : DomainService
 
         Logger.LogDebug(
             "扫链 {Symbol} {From}..{End}：日志 {Logs} 条，匹配进款 {Matched}，游标{Advanced}",
-            token.Symbol, from, end, logs.Count, matched.Count, advanced ? "已推进" : "未推进");
+            token.Symbol, from, end, logs.Count, matched, advanced ? "已推进" : "未推进");
     }
 
-    /// <summary>按地址分批兜底（Etherscan V2 tokentx），聚合去重（去重仍靠进款单唯一键兜底）。</summary>
-    private async Task<IReadOnlyList<TokenTransferLog>> FallbackByAddressAsync(
-        IBscChainGateway gateway, ColToken token, List<string> addresses, long from, long to, CancellationToken ct)
+    /// <summary>按地址分批兜底。有效日志可以先落库，任一地址未读全则保留游标重试。</summary>
+    private async Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> FallbackByAddressAsync(
+        IBscChainGateway gateway, ColToken token, IEnumerable<string> addresses, long from, long to, CancellationToken ct)
     {
         var merged = new Dictionary<(string Tx, int Log), TokenTransferLog>();
+        var complete = true;
         foreach (var address in addresses)
         {
-            var page = 1;
-            AddressTransferPage result;
-            do
+            for (var page = 1; page <= AddressFallbackMaxPages; page++)
             {
-                result = await gateway.GetTransfersForAddressAsync(
-                    token.ContractAddress, address, from, to, page, pageSize: 200, ct);
+                var result = await gateway.GetTransfersForAddressAsync(
+                    token.ContractAddress, address, from, to, page, AddressFallbackPageSize, ct);
+                complete &= !result.HasUnresolvedLogs;
                 foreach (var log in result.Logs)
                 {
-                    merged[(log.TxHash, log.LogIndex)] = log;
+                    if (!IsInRange(log, from, to))
+                    {
+                        complete = false;
+                        continue;
+                    }
+
+                    if (string.Equals(log.To, address, StringComparison.OrdinalIgnoreCase))
+                    {
+                        merged[(log.TxHash.ToLowerInvariant(), log.LogIndex)] = log;
+                    }
                 }
 
-                page++;
-            } while (result.Incomplete && page <= 10);
+                if (!result.Incomplete)
+                {
+                    break;
+                }
+
+                if (page == AddressFallbackMaxPages)
+                {
+                    complete = false;
+                    Logger.LogWarning("代币 {Symbol} 块 {Block} 的地址查询达到 {Pages} 页仍有后续，保留游标重试",
+                        token.Symbol, from, AddressFallbackMaxPages);
+                }
+            }
         }
 
-        return merged.Values.ToList();
+        return (merged.Values.ToList(), complete);
     }
+
+    private static bool IsInRange(TokenTransferLog log, long from, long to) =>
+        log.BlockNumber >= from && log.BlockNumber <= to;
 
     private async Task UpsertDepositOrderAsync(
         CollectionDbContext dbContext, Entities.ColNetwork network, ColToken token,
@@ -255,118 +273,66 @@ public class DepositScanManager : DomainService
             finalFeeRate = feeRate;
         }
 
-        await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+        var txHash = log.TxHash.ToLowerInvariant();
+        var inserted = await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "ColDepositOrders" ("Id", "NetworkId", "TokenId", "UserId", "AddressId", "ToAddress", "FromAddress", "TxHash", "LogIndex", "RawAmount", "Amount", "Fee", "ActualAmount", "FeeRateSnapshot", "BlockNumber", "BlockTime", "Status", "SweepTaskId", "CreationTime")
-            VALUES ({_guidGenerator.Create()}, {network.Id}, {token.Id}, {userId}, {addressId}, {log.To}, {log.From}, {log.TxHash}, {log.LogIndex}, {log.RawAmount}, {finalAmount}, {finalFee}, {finalActual}, {finalFeeRate}, {log.BlockNumber}, {now}, {(int)status}, NULL, {now})
+            VALUES ({_guidGenerator.Create()}, {network.Id}, {token.Id}, {userId}, {addressId}, {log.To}, {log.From}, {txHash}, {log.LogIndex}, {log.RawAmount}, {finalAmount}, {finalFee}, {finalActual}, {finalFeeRate}, {log.BlockNumber}, {now}, {(int)status}, NULL, {now})
             ON CONFLICT ("TxHash", "LogIndex") DO NOTHING
             """, ct);
 
-
-        if (status == DepositOrderStatus.PrecisionOverflow)
+        if (inserted > 0 && status == DepositOrderStatus.PrecisionOverflow)
         {
             // 超精度进款要告警（告警清单；冷却靠「同哈希只建一次单」天然节流）
             await _alerts.RaiseAsync(null, "精度放不下的转入",
-                $"代币 {token.Symbol} 进款 {log.RawAmount} 超出 numeric(28,18)，已记进款单（{log.TxHash}#{log.LogIndex}）。");
+                $"代币 {token.Symbol} 进款 {log.RawAmount} 超出 numeric(28,18)，已记进款单（{txHash}#{log.LogIndex}）。");
         }
     }
 
+    /// <summary>确认成熟进款，并在地址锁内挂队。批次截尾后的人工放行单保留入队资格。</summary>
     private async Task ConfirmPendingAsync(
         ColNetwork network, ColToken token, CollectionDbContext dbContext,
         long head, int confirmations, CancellationToken ct)
     {
-        var now = _clock.Now;
-        var pending = await dbContext.DepositOrders
-            .Where(o => o.TokenId == token.Id
-                        && ((o.Status == DepositOrderStatus.PendingConfirm
-                             && o.BlockNumber <= head - confirmations)
-                            || (o.Status == DepositOrderStatus.Confirmed && o.SweepTaskId == null)))
-            .OrderBy(o => o.BlockNumber)
-            .ToListAsync(ct);
-        if (pending.Count == 0)
+        var safeHead = head - confirmations;
+        var observedMax = Math.Max(0m, network.AutoCreditMaxAmount);
+        var addressIds = await UnqueuedDeposits(dbContext, token.Id, safeHead)
+            .Where(o => o.Status == DepositOrderStatus.PendingConfirm || o.ManuallyReleased || o.Amount <= observedMax)
+            .Select(o => o.AddressId).Distinct().ToListAsync(ct);
+        foreach (var addressId in addressIds)
         {
-            return;
-        }
+            using var queueUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+            var queueDb = await _dbContextProvider.GetDbContextAsync();
+            await DepositSweepQueue.LockAddressAsync(queueDb, addressId, ct);
+            var orders = await UnqueuedDeposits(queueDb, token.Id, safeHead)
+                .Where(o => o.AddressId == addressId)
+                .OrderBy(o => o.BlockNumber).ThenBy(o => o.LogIndex).ThenBy(o => o.Id)
+                .ToListAsync(ct);
+            if (orders.Count == 0)
+            {
+                continue;
+            }
 
-        // 本轮 Queued 任务一次载入（AddressId → 任务）：逐单查询是 N+1，
-        // 且 (AddressId, TokenId) 的部分唯一索引过滤 Status IN (1,2) 不覆盖 Queued
-        var addressIds = pending.Select(o => o.AddressId).Distinct().ToList();
-        var queuedByAddress = await dbContext.SweepTasks
-            .Where(t => t.TokenId == token.Id && t.Status == SweepTaskStatus.Queued
-                        && addressIds.Contains(t.AddressId))
-            .OrderBy(t => t.CreationTime)
-            .ToListAsync(ct);
-        // 部分唯一索引不覆盖 Queued：历史/手工数据可能出现同址多任务——
-        // 取最旧的一条并入，其余本轮回避（绝不因字典键冲突打断整个通道）
-        var queuedByAddressDict = queuedByAddress
-            .GroupBy(t => t.AddressId)
-            .ToDictionary(g => g.Key, g => g.First());
-
-        // 地址行补载（AddressIndex 是归集签名的必需品：缺它=用 index-0 错误密钥签名）
-        var addressIndexes = await dbContext.DepositAddresses
-            .Where(a => addressIds.Contains(a.Id))
-            .ToDictionaryAsync(a => a.Id, a => (int?)a.AddressIndex, ct);
-
-        var heldCount = 0;
-        var heldTotal = 0m;
-        foreach (var order in pending)
-        {
-            if (order.Status == DepositOrderStatus.PendingConfirm)
+            var autoMax = Math.Max(0m, await queueDb.Networks.AsNoTracking()
+                .Where(n => n.Id == network.Id).Select(n => n.AutoCreditMaxAmount).SingleAsync(ct));
+            foreach (var order in orders)
             {
                 order.Status = DepositOrderStatus.Confirmed;
             }
 
-            // 大额放行门（线上 AutoCreditMaxAmount 同款）：毛额超过自动额度的单停在 Confirmed
-            // 不挂归集任务，等管理端放行（放行只入队，入账仍走归集确认的净额路径）。
-            // 复扫谓词会每轮重选这些单——每轮重判一次门槛，放行前幂等跳过。
-            // 负值钳为 0（实体文档口径「负值视为 0」＝全部等放行）——不得把负值当
-            // fail-closed 前置条件关闭整个门（对停机语义是 fail-open）
-            var gross = order.Amount ?? 0m;
-            var autoMax = Math.Max(0m, network.AutoCreditMaxAmount);
-            if (gross > autoMax)
+            var automatic = orders.Where(o => o.ManuallyReleased || o.Amount <= autoMax).ToList();
+            await DepositSweepQueue.EnqueueAsync(queueDb, automatic, () => _guidGenerator.Create(), _clock.Now, ct);
+            await queueUow.CompleteAsync(ct);
+            if (automatic.Count > 0)
             {
-                heldCount++;
-                heldTotal += gross;
-                continue;
+                Logger.LogInformation("代币 {Symbol} 确认进款 {Count} 笔（待归集）", token.Symbol, automatic.Count);
             }
-
-            // 已 Confirmed 的解链尾巴单：保持状态，仅重新链接到（新）Queued 任务
-
-            if (!queuedByAddressDict.TryGetValue(order.AddressId, out var task))
-            {
-                task = new ColSweepTask(_guidGenerator.Create())
-                {
-                    NetworkId = network.Id,
-                    TokenId = token.Id,
-                    UserId = order.UserId,
-                    AddressId = order.AddressId,
-                    Address = order.ToAddress,
-                    // 归集签名的 HD 索引：缺省 0 是未用地址，签出来的是错误密钥
-                    AddressIndex = addressIndexes.TryGetValue(order.AddressId, out var idx) ? idx ?? 0 : 0,
-                    Amount = 0m, // 激活时按已链接进款单求和（每轮取出上限在归集侧）
-                    Status = SweepTaskStatus.Queued,
-                    StatusChangedAt = now,
-                    CreationTime = now,
-                };
-                await dbContext.SweepTasks.AddAsync(task, ct);
-                await dbContext.SaveChangesAsync(ct); // 同轮后续单要能查到（合并语义）
-                queuedByAddressDict[order.AddressId] = task;
-            }
-
-            order.SweepTaskId = task.Id;
-        }
-
-        if (heldCount > 0)
-        {
-            // 门持有单每轮重扫重判（幂等）：逐单日志会以 20s/条无限刷屏——聚合为一行/轮
-            Logger.LogInformation(
-                "代币 {Symbol} 确认入队 {Enqueued} 笔；大额门持有 {Held} 笔合计 {HeldTotal}（AutoCreditMaxAmount={Max}，等管理端放行）",
-                token.Symbol, pending.Count - heldCount, heldCount, heldTotal, Math.Max(0m, network.AutoCreditMaxAmount));
-        }
-        else
-        {
-            Logger.LogInformation("代币 {Symbol} 确认进款 {Count} 笔（待归集）", token.Symbol, pending.Count);
         }
     }
+
+    private static IQueryable<ColDepositOrder> UnqueuedDeposits(CollectionDbContext db, Guid tokenId, long safeHead) =>
+        db.DepositOrders.Where(o => o.TokenId == tokenId && o.SweepTaskId == null
+            && (o.Status == DepositOrderStatus.Confirmed
+                || (o.Status == DepositOrderStatus.PendingConfirm && o.BlockNumber <= safeHead)));
 
     private async Task CheckSkipRatioAsync(
         ColToken token, CollectionDbContext dbContext, DateTime now,

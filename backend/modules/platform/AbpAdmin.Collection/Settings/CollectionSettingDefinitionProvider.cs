@@ -23,7 +23,7 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
                 .WithProviders(
                     GlobalSettingValueProvider.ProviderName,
                     DefaultValueSettingValueProvider.ProviderName)
-                .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Text),
+                .WithUi(CollectionSettings.SettingUiGroups.WechatPay, group2: null, SettingUiConst.Components.Text),
             new SettingDefinition(
                 CollectionSettings.MaxAmount.AlipayPrecreateCny,
                 defaultValue: "",
@@ -32,7 +32,7 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
                 .WithProviders(
                     GlobalSettingValueProvider.ProviderName,
                     DefaultValueSettingValueProvider.ProviderName)
-                .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Text),
+                .WithUi(CollectionSettings.SettingUiGroups.Alipay, group2: null, SettingUiConst.Components.Text),
             new SettingDefinition(
                 CollectionSettings.MaxAmount.StripeCheckoutUsd,
                 defaultValue: "",
@@ -41,7 +41,7 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
                 .WithProviders(
                     GlobalSettingValueProvider.ProviderName,
                     DefaultValueSettingValueProvider.ProviderName)
-                .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Text),
+                .WithUi(CollectionSettings.SettingUiGroups.Stripe, group2: null, SettingUiConst.Components.Text),
             new SettingDefinition(
                 CollectionSettings.Balance.DebitCommandTimeoutSeconds,
                 defaultValue: "15",
@@ -85,13 +85,18 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             W(CollectionSettings.Chain.BlockRange, DefBlockRange),
             W(CollectionSettings.Chain.ScanBehindBlocks, DefScanBehindBlocks),
             W(CollectionSettings.Chain.SweepRoundLimit, ""),
+            W(CollectionSettings.Chain.SweepTaskBatchSize, DefSweepTaskBatchSize),
             W(CollectionSettings.Chain.FuelBnbLimit, DefFuelBnbLimit),
             W(CollectionSettings.Chain.GasBnbAlertThreshold, DefGasBnbAlertThreshold),
             W(CollectionSettings.Chain.RetryCooldownMinutes, DefRetryCooldownMinutes),
             W(CollectionSettings.Chain.RebroadcastGraceMinutes, DefRebroadcastGraceMinutes),
             W(CollectionSettings.Chain.SweepStuckMinutes, DefSweepStuckMinutes),
             W(CollectionSettings.Chain.SkipRatioWindowMinutes, DefSkipRatioWindowMinutes),
-            W(CollectionSettings.Chain.SkipRatioThreshold, DefSkipRatioThreshold));
+            W(CollectionSettings.Chain.SkipRatioThreshold, DefSkipRatioThreshold),
+            new SettingDefinition(CollectionSettings.Chain.Runtime, defaultValue: "")
+                .WithProviders(GlobalSettingValueProvider.ProviderName, DefaultValueSettingValueProvider.ProviderName),
+            new SettingDefinition(CollectionSettings.Chain.MasterKey, isEncrypted: true)
+                .WithProviders(GlobalSettingValueProvider.ProviderName, DefaultValueSettingValueProvider.ProviderName));
     }
 
     // 常量 → 设置默认值字符串（不变文化）。静态字段而非方法调用——csc 10.0.401 对本文件
@@ -111,6 +116,7 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
     private static readonly string DefAutoApproveBatchSize = Inv(WithdrawDefaults.AutoApproveBatchSize);
     private static readonly string DefScanIntervalSeconds = Inv(ChainDefaults.ScanIntervalSeconds);
     private static readonly string DefSweepIntervalSeconds = Inv(ChainDefaults.SweepIntervalSeconds);
+    private static readonly string DefSweepTaskBatchSize = Inv(ChainDefaults.SweepTaskBatchSize);
     private static readonly string DefHotWalletWatchIntervalSeconds = Inv(ChainDefaults.HotWalletWatchIntervalSeconds);
     private static readonly string DefConfirmations = Inv(ChainDefaults.Confirmations);
     private static readonly string DefBlockRange = Inv(ChainDefaults.BlockRange);
@@ -144,7 +150,11 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             .WithProviders(
                 GlobalSettingValueProvider.ProviderName,
                 DefaultValueSettingValueProvider.ProviderName)
-            .WithUi(CollectionSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Text);
+            .WithUi(CollectionSettings.SettingUiGroups.Web3,
+                key.StartsWith(CollectionSettings.Prefix + ".Withdraw.", System.StringComparison.Ordinal)
+                    ? "Withdraw"
+                    : "Chain",
+                SettingUiConst.Components.Text);
     }
 
     /// <summary>

@@ -12,7 +12,6 @@ using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Timing;
-using AbpAdmin.Collection.Settings;
 using Volo.Abp.Uow;
 
 namespace AbpAdmin.Collection.Services;
@@ -25,6 +24,8 @@ public class MyDepositAddressDto
     public bool DepositEnabled { get; set; }
 
     public string? Notice { get; set; }
+
+    public int? EstimatedArrivalMinutes { get; set; }
 }
 
 /// <summary>我的进款单行（链上转入，含跳过类终态——用户页写明最低额口径）。</summary>
@@ -55,18 +56,18 @@ public class CollectionDepositAppService : ApplicationService
 {
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly DepositAddressManager _depositAddressManager;
-    private readonly Microsoft.Extensions.Configuration.IConfiguration _configuration;
+    private readonly ChainKeyProvider _chainKeyProvider;
     private readonly IClock _clock;
 
     public CollectionDepositAppService(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         DepositAddressManager depositAddressManager,
-        Microsoft.Extensions.Configuration.IConfiguration configuration,
+        ChainKeyProvider chainKeyProvider,
         IClock clock)
     {
         _dbContextProvider = dbContextProvider;
         _depositAddressManager = depositAddressManager;
-        _configuration = configuration;
+        _chainKeyProvider = chainKeyProvider;
         _clock = clock;
     }
 
@@ -74,12 +75,18 @@ public class CollectionDepositAppService : ApplicationService
     public virtual async Task<MyDepositAddressDto> GetMyDepositAddressAsync()
     {
         AssertHost();
-        var networkId = await _depositAddressManager
-            .WithMasterKey(_configuration[CollectionSettings.Host.MasterKey])
-            .ResolveBscNetworkIdAsync();
+        var (networkId, estimatedArrivalMinutes) = await _depositAddressManager
+            .WithMasterKey(await _chainKeyProvider.GetAsync())
+            .ResolveBscDepositNetworkAsync();
         var (address, enabled, notice) = await _depositAddressManager
             .GetOrDeriveAsync(networkId, CurrentUser.Id!.Value);
-        return new MyDepositAddressDto { Address = address, DepositEnabled = enabled, Notice = notice };
+        return new MyDepositAddressDto
+        {
+            Address = address,
+            DepositEnabled = enabled,
+            Notice = notice,
+            EstimatedArrivalMinutes = estimatedArrivalMinutes,
+        };
     }
 
     /// <summary>我的进款单（倒序分页；含各代币符号映射）。</summary>

@@ -200,6 +200,11 @@ public class HotWalletWatchManager : DomainService
         {
             var result = await gateway.GetTransfersForAddressAsync(
                 token.ContractAddress, walletAddress, fromBlock, toBlock, page, PageSize, ct);
+            if (result.HasUnresolvedLogs)
+            {
+                return null;
+            }
+
             logs.AddRange(result.Logs);
             if (!result.Incomplete)
             {

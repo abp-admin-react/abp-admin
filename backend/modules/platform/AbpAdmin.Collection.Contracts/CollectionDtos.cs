@@ -142,4 +142,7 @@ public class DepositAddressDto
 
     /// <summary>DepositEnabled 为 false 时的用户可读说明。</summary>
     public string? Notice { get; set; }
+
+    /// <summary>BSC 充值页面展示的预计到账分钟数。</summary>
+    public int? EstimatedArrivalMinutes { get; set; }
 }

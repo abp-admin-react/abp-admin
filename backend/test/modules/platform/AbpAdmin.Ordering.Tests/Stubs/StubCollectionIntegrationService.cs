@@ -38,7 +38,9 @@ public class StubCollectionIntegrationService : ICollectionIntegrationService, I
     /// <summary>CreateAsync 抛出的异常（渠道拒绝 / 上限 / Stripe 时限）。</summary>
     public System.Exception? CreateException { get; set; }
 
-    public Task<CollectionDto> CreateAsync(CreateCollectionInput input)
+    public Func<CollectionDto, Task>? OnChannelCreate { get; set; }
+
+    public async Task<CollectionDto> CreateAsync(CreateCollectionInput input, Func<CollectionDto, Task>? onPrepared = null)
     {
         lock (_gate) { CreateCallCount++; }
         if (CreateException != null)
@@ -61,8 +63,18 @@ public class StubCollectionIntegrationService : ICollectionIntegrationService, I
             ChannelPayload = "stub://" + input.Channel,
         };
 
+        if (onPrepared != null)
+        {
+            await onPrepared(dto);
+        }
+
         Track(dto);
-        return Task.FromResult(dto);
+        if (OnChannelCreate != null)
+        {
+            await OnChannelCreate(dto);
+        }
+
+        return dto;
     }
 
     public Task<CancelCollectionResult> CancelAsync(Guid collectionId)
@@ -73,6 +85,7 @@ public class StubCollectionIntegrationService : ICollectionIntegrationService, I
         if (dto != null)
         {
             dto.Status = status;
+            dto.ChannelResultUnknown = status == CollectionStatus.Pending;
         }
 
         return Task.FromResult(new CancelCollectionResult

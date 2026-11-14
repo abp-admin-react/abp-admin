@@ -1,21 +1,18 @@
 using System;
 using System.Linq;
+using AbpAdmin.Collection.Contracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 链上 worker 的宿主配置残留项（appsettings/secrets，冒号键）：密钥/端点/告警收件人与
-/// 墙钟预算——都不热改（预算是挂死防护阀；密钥不进设置页）。
-/// 开关/间隔/确认数/归集阈值等运行期参数已迁设置页（Collection.Chain.* / Collection.Withdraw.*，
-/// SettingUi 热改，worker 每轮热读，默认值单源 ChainDefaults/WithdrawDefaults）。
+/// 部署默认值和解密配置。网页保存的运行设置优先于部署预算和告警收件人。
 /// </summary>
 public class CollectionChainWorkerOptions
 {
-    public string? MasterKey { get; set; }
 
-    public string? EtherscanV2Endpoint { get; set; } = "https://api.etherscan.io/v2/api";
+    public string? EtherscanV2Endpoint { get; set; } = AnkrBscChainGateway.DefaultEtherscanV2Endpoint;
 
     public Guid[] AlertRecipientUserIds { get; set; } = Array.Empty<Guid>();
 
@@ -25,12 +22,18 @@ public class CollectionChainWorkerOptions
     /// <summary>提现广播每轮墙钟预算（秒）。</summary>
     public int WithdrawRoundBudgetSeconds { get; set; } = 120;
 
+    internal ChainRuntimeSettingsDto ToRuntimeSettings() => new()
+    {
+        ChainRoundBudgetSeconds = ChainRoundBudgetSeconds,
+        WithdrawRoundBudgetSeconds = WithdrawRoundBudgetSeconds,
+        AlertRecipientUserIds = AlertRecipientUserIds,
+    };
+
     public static CollectionChainWorkerOptions FromConfiguration(IConfiguration configuration)
     {
         // 宿主键单源 = CollectionSettings.Host（完整冒号键从根配置直读；回退 = 本类默认值）
         var options = new CollectionChainWorkerOptions
         {
-            MasterKey = configuration[Settings.CollectionSettings.Host.MasterKey],
             AlertRecipientUserIds = (configuration[Settings.CollectionSettings.Host.AlertRecipientUserIds] ?? "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(x => Guid.TryParse(x, out var g) ? g : Guid.Empty)
@@ -66,7 +69,8 @@ public static class CollectionChainWorkersCollectionExtensions
         services.AddSingleton<ChainAlertService>(sp => new ChainAlertService(
             options.AlertRecipientUserIds,
             sp.GetRequiredService<Volo.Abp.EventBus.Distributed.IDistributedEventBus>(),
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChainAlertService>>()));
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChainAlertService>>(),
+            sp.GetRequiredService<IServiceScopeFactory>()));
         services.AddHostedService<DepositScanWorker>();
         services.AddHostedService<SweepWorker>();
         // 提现广播（M3）：同一 Redis 锁纪律；Collection.Withdraw.Enabled=false 时每轮纯睡眠（基类开关语义）

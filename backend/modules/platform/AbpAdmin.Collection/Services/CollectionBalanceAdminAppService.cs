@@ -151,7 +151,7 @@ public class CollectionBalanceAdminAppService : ApplicationService
             .ToListAsync();
 
         var held = await dbContext.DepositOrders.AsNoTracking()
-            .Where(o => o.Status == DepositOrderStatus.Confirmed && o.SweepTaskId == null)
+            .Where(o => o.Status == DepositOrderStatus.Confirmed && o.SweepTaskId == null && !o.ManuallyReleased)
             .GroupBy(_ => 1)
             .Select(g => new { Count = g.Count(), Total = g.Sum(o => o.Amount ?? 0m) })
             .FirstOrDefaultAsync();

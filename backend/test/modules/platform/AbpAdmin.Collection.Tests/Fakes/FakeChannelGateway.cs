@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Channels;
@@ -17,17 +18,24 @@ public class FakeChannelGateway : ICollectionChannelGateway
     public static FakeChannelGateway Alipay { get; } = new(CollectionChannel.AlipayPrecreate);
 
     /// <summary>按收款号决定创建结果；未配置时默认成功（带回二维码载荷）。</summary>
-    public System.Collections.Generic.Dictionary<string, ChannelCreateResult> CreateResults { get; } = new();
+    public ConcurrentDictionary<string, ChannelCreateResult> CreateResults { get; } = new();
 
     /// <summary>按收款号决定关单结果；未配置时默认 Closed。</summary>
-    public System.Collections.Generic.Dictionary<string, ChannelCloseResult> CloseResults { get; } = new();
+    public ConcurrentDictionary<string, ChannelCloseResult> CloseResults { get; } = new();
+
+    public ConcurrentDictionary<string, ChannelQueryResult> QueryResults { get; } = new();
 
     /// <summary>一次性创建结果（下一次 CreateAsync 消费后清空）。</summary>
     public ChannelCreateResult? NextCreateResult { get; set; }
 
-    public int CreateCallCount { get; private set; }
+    public Func<ChannelCreateRequest, Task<ChannelCreateResult>>? OnCreate { get; set; }
 
-    public int CloseCallCount { get; private set; }
+    public Func<ChannelCloseRequest, Task<ChannelCloseResult>>? OnClose { get; set; }
+
+    private int _createCallCount;
+    private int _closeCallCount;
+    public int CreateCallCount => _createCallCount;
+    public int CloseCallCount => _closeCallCount;
 
     private readonly CollectionChannel _channel;
 
@@ -38,9 +46,16 @@ public class FakeChannelGateway : ICollectionChannelGateway
 
     public CollectionChannel Channel => _channel;
 
+    public string MerchantAccountId => "test-" + _channel;
+
     public Task<ChannelCreateResult> CreateAsync(ChannelCreateRequest request, CancellationToken cancellationToken = default)
     {
-        CreateCallCount++;
+        var count = Interlocked.Increment(ref _createCallCount);
+        if (OnCreate is { } onCreate)
+        {
+            return onCreate(request);
+        }
+
         if (NextCreateResult != null)
         {
             var oneShot = NextCreateResult;
@@ -50,12 +65,24 @@ public class FakeChannelGateway : ICollectionChannelGateway
 
         return Task.FromResult(CreateResults.TryGetValue(request.CollectionNo, out var result)
             ? result
-            : new ChannelCreateResult(Succeeded: true, TradeNo: "fake-trade-" + _channel + CreateCallCount, Payload: "fake://" + _channel));
+            : new ChannelCreateResult(Succeeded: true, TradeNo: "fake-trade-" + _channel + count, Payload: "fake://" + _channel));
+    }
+
+    public Task<ChannelQueryResult> QueryAsync(ChannelQueryRequest request, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(QueryResults.TryGetValue(request.CollectionNo, out var result)
+            ? result
+            : new ChannelQueryResult(ChannelQueryOutcome.Pending));
     }
 
     public Task<ChannelCloseResult> CloseAsync(ChannelCloseRequest request, CancellationToken cancellationToken = default)
     {
-        CloseCallCount++;
+        Interlocked.Increment(ref _closeCallCount);
+        if (OnClose is { } onClose)
+        {
+            return onClose(request);
+        }
+
         return Task.FromResult(CloseResults.TryGetValue(request.CollectionNo, out var result)
             ? result
             : new ChannelCloseResult(ChannelCloseOutcome.Closed));
@@ -66,8 +93,11 @@ public class FakeChannelGateway : ICollectionChannelGateway
     {
         CreateResults.Clear();
         CloseResults.Clear();
+        QueryResults.Clear();
         NextCreateResult = null;
-        CreateCallCount = 0;
-        CloseCallCount = 0;
+        OnCreate = null;
+        OnClose = null;
+        _createCallCount = 0;
+        _closeCallCount = 0;
     }
 }

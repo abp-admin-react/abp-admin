@@ -62,6 +62,10 @@ public static class CollectionErrorCodes
     /// <summary>扫链响应上限数值非法（需 ≥100）。</summary>
     public const string InvalidCap = Namespace + ":InvalidCap";
 
+    public const string InvalidChainRuntimeSettings = Namespace + ":InvalidChainRuntimeSettings";
+    public const string InvalidAnkrSettings = Namespace + ":InvalidAnkrSettings";
+    public const string InvalidEstimatedArrivalMinutes = Namespace + ":InvalidEstimatedArrivalMinutes";
+
     /// <summary>扫链 API KEY 格式非法（Ankr 64 位十六进制 / Etherscan 34 位字母数字）。</summary>
     public const string InvalidApiKey = Namespace + ":InvalidApiKey";
 
@@ -112,6 +116,9 @@ public static class CollectionErrorCodes
     /// <summary>提现热钱包未配置（地址/私钥）。</summary>
     public const string HotWalletNotConfigured = Namespace + ":HotWalletNotConfigured";
 
+    /// <summary>所选网络尚未接入当前提现流程，禁止保存不会生效的打款钱包。</summary>
+    public const string WithdrawNetworkUnsupported = Namespace + ":WithdrawNetworkUnsupported";
+
     /// <summary>热钱包链上余额不足以支付本次提现。</summary>
     public const string HotWalletInsolvent = Namespace + ":HotWalletInsolvent";
 
@@ -123,6 +130,12 @@ public static class CollectionErrorCodes
 
     /// <summary>热钱包存在待确认出站交易（nonce 卡在 mempool），禁止重播。</summary>
     public const string WithdrawPendingOutbound = Namespace + ":WithdrawPendingOutbound";
+
+    public const string WithdrawBroadcastSenderUnknown = Namespace + ":WithdrawBroadcastSenderUnknown";
+
+    public const string WithdrawReceiptMismatch = Namespace + ":WithdrawReceiptMismatch";
+
+    public const string VaultHasLegacySweep = Namespace + ":VaultHasLegacySweep";
 
     /// <summary>近期已向该地址付过款（双花门），禁止盲目重播。</summary>
     public const string WithdrawRecentPayoutExists = Namespace + ":WithdrawRecentPayoutExists";
