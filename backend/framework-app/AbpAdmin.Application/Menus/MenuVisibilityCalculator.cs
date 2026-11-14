@@ -29,8 +29,12 @@ public static class MenuVisibilityCalculator
     {
         var byId = menus.ToDictionary(x => x.Id);
 
-        bool ConstraintPassed(Menu m) =>
-            m.PermissionName == null || grantedPermissions.Contains(m.PermissionName);
+        bool ConstraintPassed(Menu menu)
+        {
+            var anyPermissions = menu.GetAnyPermissionNames();
+            return (menu.PermissionName == null || grantedPermissions.Contains(menu.PermissionName)) &&
+                   (anyPermissions.Length == 0 || anyPermissions.Any(grantedPermissions.Contains));
+        }
 
         // 1) 可见集合：自身启用 + 祖先链完整且全启用 + 约束通过（断链视作不可见，保守）
         var visibleIds = ComputeVisibleIds(menus, byId, ConstraintPassed);

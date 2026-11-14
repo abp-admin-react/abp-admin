@@ -34,6 +34,7 @@ public static class MenuTreeBuilder
                 IsHide = x.IsHide,
                 IsEnabled = x.IsEnabled,
                 PermissionName = x.PermissionName,
+                AnyPermissionNames = x.AnyPermissionNames,
                 Remark = x.Remark,
                 ConcurrencyStamp = x.ConcurrencyStamp
             });

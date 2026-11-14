@@ -89,7 +89,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         await CleanMenusAsync();
         await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
 
-        // 模拟旧布局：SaaS 和示例是顶层组，设置在管理目录，收付款目录绑定订单权限。
+        // 模拟旧布局：SaaS 和示例是顶层组，设置在管理目录，链上页面混在收付款目录。
         var existingIdsByPath = await WithUnitOfWorkAsync(async () =>
         {
             var all = await _menuRepository.GetListAsync();
@@ -114,6 +114,55 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
             collection.SetParent(null);
             collection.SetPermissionName("AbpAdmin.Ordering.Orders");
             await _menuRepository.UpdateAsync(collection);
+            var previousRulesPage = byPath["/web3/settings"];
+            previousRulesPage.Show();
+            previousRulesPage.SetParent(byPath["/web3"].Id);
+            await _menuRepository.UpdateAsync(previousRulesPage);
+
+            foreach (var path in new[]
+                     {
+                         "/collection/dashboard", "/collection/deposits", "/collection/withdrawals",
+                         "/collection/sweeps", "/collection/network", "/collection/wallets", "/web3/rules"
+                     })
+            {
+                var page = byPath[path];
+                page.Show();
+                await _menuRepository.UpdateAsync(page);
+            }
+
+            // 上一个版本的 Web3 运营和配置是同目录内的两个现有页面。
+            foreach (var path in new[] { "/web3/operations", "/web3/config" })
+            {
+                byPath[path].SetParent(byPath["/web3"].Id);
+                await _menuRepository.UpdateAsync(byPath[path]);
+            }
+
+            foreach (var path in new[]
+                     {
+                         "/configuration", "/configuration/content", "/configuration/integrations",
+                         "/configuration/payments", "/operations/payments"
+                     })
+            {
+                await _menuRepository.HardDeleteAsync(x => x.Path == path);
+                byPath.Remove(path);
+            }
+
+            foreach (var path in new[] { "/web3", "/collection", "/alipay", "/wechat", "/stripe" })
+            {
+                byPath[path].Show();
+                await _menuRepository.UpdateAsync(byPath[path]);
+            }
+
+            foreach (var path in new[]
+                     {
+                         "/collection/dashboard", "/collection/deposits", "/collection/withdrawals",
+                         "/collection/sweeps", "/collection/vault", "/collection/hot-wallet", "/collection/network"
+                     })
+            {
+                var page = byPath[path];
+                page.SetParent(collection.Id);
+                await _menuRepository.UpdateAsync(page);
+            }
 
             var custom = new Menu(
                 _guidGenerator.Create(), null, saas.Id, MenuTypeEnum.Menu,
@@ -138,12 +187,113 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
             var saas = byPath["/administration/saas"];
             saas.ParentId.ShouldBe(byPath["/administration"].Id);
             saas.OrderNo.ShouldBe(MenuTemplateDefinition.All.Single(d => d.Key == "saas").OrderNo);
-            saas.Title.ShouldBe("租户与功能");
+            saas.Title.ShouldBe("租户管理");
             byPath["/custom-page"].ParentId.ShouldBe(saas.Id);
             byPath["/demos"].ParentId.ShouldBe(byPath["/system"].Id);
             byPath["/administration/settings"].ParentId.ShouldBe(byPath["/administration/base-settings"].Id);
-            byPath["/collection"].ParentId.ShouldBe(byPath["/business"].Id);
+            byPath["/collection"].ParentId.ShouldBe(byPath["/order-payments"].Id);
+            byPath["/web3"].ParentId.ShouldBe(byPath["/order-payments"].Id);
+            byPath["/order-payments"].ParentId.ShouldBeNull();
+            byPath["/order-payments"].Title.ShouldBe("交易运营");
+            byPath["/welcome"].Title.ShouldBe("工作台");
+            byPath["/business"].IsHide.ShouldBeTrue();
             byPath["/collection"].PermissionName.ShouldBeNull();
+            byPath["/collection"].Title.ShouldBe("订单");
+            byPath["/collection"].IsHide.ShouldBeTrue();
+            byPath["/collection/orders"].Title.ShouldBe("订单管理");
+            byPath["/collection/orders"].ParentId.ShouldBe(byPath["/order-payments"].Id);
+            byPath["/collection/orders"].GetAnyPermissionNames().ShouldBe(new[]
+            {
+                "AbpAdmin.Ordering.Orders", "AbpAdmin.Ordering.Orders.ViewAll"
+            });
+            byPath["/administration/payments"].Title.ShouldBe("跨渠道收款与退款");
+            byPath["/administration/payments"].IsHide.ShouldBeTrue();
+            byPath["/collection/dashboard"].Title.ShouldBe("链上监控");
+            byPath["/collection/deposits"].Title.ShouldBe("充值记录");
+            byPath["/collection/withdrawals"].Title.ShouldBe("提现审核与打款");
+            var web3 = byPath["/web3"];
+            web3.IsHide.ShouldBeTrue();
+            foreach (var path in new[]
+                     {
+                         "/collection/dashboard", "/collection/deposits", "/collection/withdrawals",
+                         "/collection/sweeps", "/collection/vault", "/collection/hot-wallet",
+                         "/collection/network", "/collection/wallets", "/web3/rules", "/web3/configuration"
+                     })
+            {
+                byPath[path].ParentId.ShouldBe(web3.Id);
+                byPath[path].IsHide.ShouldBeTrue();
+            }
+
+            all.Where(x => x.ParentId == byPath["/order-payments"].Id && !x.IsHide)
+                .OrderBy(x => x.OrderNo).Select(x => x.Path)
+                .ShouldBe(new[] { "/collection/orders", "/operations/payments", "/web3/operations" });
+            byPath["/operations/payments"].PermissionName.ShouldBe("AbpAdmin.Collection.Payments.View");
+            byPath["/web3/operations"].Title.ShouldBe("链上充提");
+            byPath["/web3/config"].Title.ShouldBe("链上充提");
+            byPath["/web3/operations"].Type.ShouldBe(MenuTypeEnum.Menu);
+            byPath["/web3/config"].Type.ShouldBe(MenuTypeEnum.Menu);
+            byPath["/collection/network"].PermissionName.ShouldBe("AbpAdmin.Collection.Network.Admin");
+            byPath["/collection/network"].GetAnyPermissionNames().ShouldBeEmpty();
+            byPath["/web3/rules"].GetAnyPermissionNames().ShouldBe(new[]
+            {
+                "AbpAdmin.Collection.Network.Admin", "SettingUi.ShowSettingPage"
+            });
+            byPath["/collection/wallets"].GetAnyPermissionNames().ShouldBe(new[]
+            {
+                "AbpAdmin.Collection.Network.Admin", "AbpAdmin.Collection.WithdrawAdmin"
+            });
+
+            foreach (var channel in new[] { "alipay", "wechat", "stripe" })
+            {
+                byPath[$"/{channel}"].ParentId.ShouldBe(byPath["/order-payments"].Id);
+                byPath[$"/{channel}"].IsHide.ShouldBeTrue();
+                byPath[$"/{channel}"].PermissionName.ShouldBeNull();
+                byPath[$"/{channel}/payments"].ParentId.ShouldBe(byPath[$"/{channel}"].Id);
+                byPath[$"/{channel}/payments"].PermissionName.ShouldBe("AbpAdmin.Collection.Payments.View");
+                byPath[$"/{channel}/payments"].IsHide.ShouldBeTrue();
+                byPath[$"/{channel}/settings"].ParentId.ShouldBe(byPath[$"/{channel}"].Id);
+                byPath[$"/{channel}/settings"].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
+                byPath[$"/{channel}/settings"].IsHide.ShouldBeTrue();
+            }
+
+            byPath["/web3/settings"].ParentId.ShouldBe(byPath["/web3/configuration"].Id);
+            byPath["/web3/settings"].IsHide.ShouldBeTrue();
+            byPath["/web3/settings"].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
+            byPath["/collection/settings"].ParentId.ShouldBe(byPath["/collection"].Id);
+            byPath["/collection/settings"].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
+            byPath["/collection/settings"].IsHide.ShouldBeTrue();
+            byPath["/collection/order-settings"].IsHide.ShouldBeTrue();
+            byPath["/collection/member-funds"].ParentId.ShouldBe(byPath["/user-funds"].Id);
+            byPath["/finance/balance-adjustments"].ParentId.ShouldBe(byPath["/user-funds"].Id);
+            byPath["/financial-management"].ParentId.ShouldBeNull();
+            byPath["/user-funds"].ParentId.ShouldBe(byPath["/financial-management"].Id);
+            byPath["/finance"].ParentId.ShouldBe(byPath["/financial-management"].Id);
+            byPath["/finance/vouchers"].ParentId.ShouldBe(byPath["/finance"].Id);
+            byPath["/finance/transactions"].IsHide.ShouldBeTrue();
+            byPath["/finance/biz-docs"].PermissionName.ShouldBe("Finance.BizDoc.View");
+
+            var configuration = byPath["/configuration"];
+            configuration.ParentId.ShouldBeNull();
+            all.Where(x => x.ParentId == null && !x.IsHide).OrderBy(x => x.OrderNo).Select(x => x.Path)
+                .ShouldBe(new[] { "/welcome", "/order-payments", "/financial-management", "/administration", "/system", "/configuration" });
+            all.Where(x => x.ParentId == configuration.Id).OrderBy(x => x.OrderNo).Select(x => x.Path)
+                .ShouldBe(new[]
+                {
+                    "/configuration/payments", "/web3/config", "/finance/configuration", "/administration/base-settings",
+                    "/configuration/content", "/configuration/integrations"
+                });
+            byPath["/configuration/payments"].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
+            byPath["/administration/localization"].Title.ShouldBe("内容与通知");
+            byPath["/administration/files"].ParentId.ShouldBe(byPath["/administration/localization"].Id);
+            byPath["/system/notifications"].ParentId.ShouldBe(byPath["/administration/localization"].Id);
+            byPath["/administration/text-templates"].ParentId.ShouldBe(byPath["/configuration/content"].Id);
+            byPath["/administration/localization/languages"].ParentId.ShouldBe(byPath["/configuration/content"].Id);
+            byPath["/administration/localization/texts"].ParentId.ShouldBe(byPath["/configuration/content"].Id);
+            byPath["/administration/openiddict"].Title.ShouldBe("登录与令牌");
+            byPath["/administration/openiddict/token-management"].ParentId.ShouldBe(byPath["/administration/openiddict"].Id);
+            byPath["/administration/openiddict/applications"].ParentId.ShouldBe(byPath["/configuration/integrations"].Id);
+            byPath["/administration/openiddict/scopes"].ParentId.ShouldBe(byPath["/configuration/integrations"].Id);
+            byPath["/administration/webhooks"].ParentId.ShouldBe(byPath["/configuration/integrations"].Id);
         });
     }
 
@@ -460,8 +610,42 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         paths.ShouldContain(publicMenu.Path);
     }
 
-    [Fact]
-    public async Task MyMenu_Keeps_Collection_Group_When_Only_Collection_Permission_Is_Granted()
+    [Theory]
+    [InlineData("AbpAdmin.Collection.Collections", new[]
+    {
+        "/welcome", "/order-payments", "/web3/operations",
+        "/financial-management", "/user-funds", "/collection/member-funds"
+    })]
+    [InlineData("AbpAdmin.Collection.Payments.View", new[]
+    {
+        "/welcome", "/order-payments", "/operations/payments"
+    })]
+    [InlineData("AbpAdmin.Ordering.Orders", new[] { "/welcome", "/order-payments", "/collection/orders" })]
+    [InlineData("AbpAdmin.Ordering.Orders.ViewAll", new[] { "/welcome", "/order-payments", "/collection/orders" })]
+    [InlineData("SettingUi.ShowSettingPage", new[]
+    {
+        "/welcome", "/configuration", "/configuration/payments", "/web3/config", "/finance/configuration", "/finance/settings",
+        "/administration/base-settings", "/administration/settings"
+    })]
+    [InlineData("AbpAdmin.Collection.Network.Admin", new[]
+    {
+        "/welcome", "/order-payments", "/web3/operations", "/configuration", "/web3/config"
+    })]
+    [InlineData("AbpAdmin.Collection.WithdrawAdmin", new[]
+    {
+        "/welcome", "/order-payments", "/web3/operations", "/configuration", "/web3/config"
+    })]
+    [InlineData("AbpAdmin.Collection.BalanceAdjustments.View", new[]
+    {
+        "/welcome", "/financial-management", "/user-funds", "/finance/balance-adjustments"
+    })]
+    [InlineData("Finance.BizDoc.View", new[] { "/welcome", "/financial-management", "/finance", "/finance/biz-docs" })]
+    [InlineData("Finance.Voucher.View", new[] { "/welcome", "/financial-management", "/finance", "/finance/vouchers" })]
+    [InlineData("Finance.Rule.View", new[] { "/welcome", "/configuration", "/finance/configuration", "/finance/rules" })]
+    [InlineData("AbpAdmin.Languages", new[] { "/welcome", "/configuration", "/configuration/content", "/administration/localization/languages" })]
+    [InlineData("AbpAdmin.Webhooks.Subscriptions", new[] { "/welcome", "/configuration", "/configuration/integrations", "/administration/webhooks" })]
+    public async Task MyMenu_Keeps_Separate_Channel_Groups_With_Only_The_Granted_Children(
+        string grantedPermission, string[] expectedPaths)
     {
         await CleanMenusAsync();
         await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
@@ -472,7 +656,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
             var grants = new MultiplePermissionGrantResult();
             foreach (var name in call.Arg<string[]>())
             {
-                grants.Result[name] = name == "AbpAdmin.Collection.Collections"
+                grants.Result[name] = name == grantedPermission
                     ? PermissionGrantResult.Granted
                     : PermissionGrantResult.Prohibited;
             }
@@ -485,18 +669,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         };
 
         var myMenu = await WithUnitOfWorkAsync(() => service.GetAsync());
-        myMenu.Items.Select(x => x.Path).ShouldBe(new[] { "/welcome", "/business" });
-        var business = myMenu.Items.Single(x => x.Path == "/business");
-        var collection = business.Children.ShouldHaveSingleItem();
-        collection.Path.ShouldBe("/collection");
-        collection.Children.Select(x => x.Path).ShouldBe(new[]
-        {
-            "/collection/dashboard",
-            "/collection/deposits",
-            "/collection/sweeps",
-            "/collection/vault",
-            "/collection/member-funds"
-        });
+        Flatten(myMenu.Items).Select(x => x.Path).ShouldBe(expectedPaths);
     }
 
     [Fact]
@@ -578,6 +751,21 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
             // 懒拷贝包含现行模板节点，不包含已退役调试页。
             var paths = Flatten(myMenu.Items).Select(x => x.Path).ToList();
             paths.ShouldContain("/system/server-monitor");
+            paths.ShouldNotContain("/collection/orders");
+            paths.ShouldContain("/administration/settings");
+            paths.ShouldNotContain("/operations/payments");
+            paths.ShouldNotContain("/configuration/payments");
+            paths.ShouldNotContain("/collection/order-settings");
+            paths.ShouldNotContain("/collection/settings");
+            paths.ShouldNotContain("/web3/rules");
+            paths.ShouldNotContain("/web3/operations");
+            paths.ShouldNotContain("/web3/config");
+            paths.ShouldNotContain("/finance/settings");
+            paths.ShouldNotContain("/collection/member-funds");
+            paths.ShouldNotContain("/collection/network");
+            paths.ShouldNotContain("/alipay/settings");
+            paths.ShouldNotContain("/wechat/settings");
+            paths.ShouldNotContain("/stripe/settings");
             paths.ShouldNotContain("/current-session");
 
             // 租户内删除一个节点不影响 Host 模板

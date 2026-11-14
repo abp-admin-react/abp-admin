@@ -52,10 +52,14 @@ export function buildMenuColumns(
       dataIndex: 'permissionName',
       width: 210,
       ellipsis: true,
-      renderText: (v) =>
-        v ? (
+      render: (_, record) =>
+        record.anyPermissionNames?.length ? (
+          <span title={record.anyPermissionNames.join(' / ')}>
+            任一权限 · {record.anyPermissionNames.join(' / ')}
+          </span>
+        ) : record.permissionName ? (
           <Tag color="blue" style={{ marginInlineEnd: 0 }}>
-            {v}
+            {record.permissionName}
           </Tag>
         ) : (
           '-'

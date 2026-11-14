@@ -20,6 +20,7 @@ import { Button, Skeleton } from 'antd';
 import { createStyles } from 'antd-style';
 import { useContext } from 'react';
 import { getAuditLogErrorRate } from '@/abp/proModules';
+import OperationsOverview from './workspace/OperationsOverview';
 
 const auditLogPath = '/administration/audit-logs';
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'full' });
@@ -35,8 +36,8 @@ const useStyles = createStyles(({ css, token }) => ({
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 20px 32px;
-    padding: clamp(22px, 3vw, 42px);
+    gap: 12px 24px;
+    padding: clamp(16px, 2vw, 24px);
     background:
       radial-gradient(ellipse at 92% 0%, ${token.colorPrimaryBg} 0%, transparent 65%),
       ${token.colorBgContainer};
@@ -46,7 +47,7 @@ const useStyles = createStyles(({ css, token }) => ({
   title: css`
     margin: 0 0 6px;
     color: ${token.colorTextHeading};
-    font-size: clamp(27px, 3vw, 36px);
+    font-size: clamp(24px, 2.4vw, 30px);
     font-weight: 650;
     line-height: 1.2;
   `,
@@ -61,7 +62,7 @@ const useStyles = createStyles(({ css, token }) => ({
     flex-wrap: wrap;
     align-items: center;
     gap: 6px 14px;
-    margin-top: 18px;
+    margin-top: 10px;
     color: ${token.colorTextSecondary};
     font-size: 13px;
   `,
@@ -305,6 +306,12 @@ export default function WorkbenchPage() {
           </Link>
         </header>
 
+        <OperationsOverview
+          access={access}
+          userId={user?.userid}
+          tenantId={tenant?.id ?? undefined}
+        />
+
         <div className={canViewAudit ? styles.columns : undefined}>
           <section
             className={styles.panel}
@@ -312,7 +319,7 @@ export default function WorkbenchPage() {
           >
             <div className={styles.panelHeader}>
               <h2 className={styles.sectionTitle} id="workbench-shortcuts">
-                常用入口
+                系统管理入口
               </h2>
             </div>
             {shortcuts.length ? (

@@ -85,7 +85,7 @@ const ClaimTypesPage: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer title="用户身份属性">
       <AutoHeightProTable<ClaimTypeDto>
         rowKey="id"
         actionRef={actionRef}

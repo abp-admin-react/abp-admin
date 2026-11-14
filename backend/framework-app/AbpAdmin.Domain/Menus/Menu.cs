@@ -1,5 +1,8 @@
 using System;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json;
 using Volo.Abp;
+using Volo.Abp.Data;
 using Volo.Abp.Domain.Entities.Auditing;
 using Volo.Abp.MultiTenancy;
 
@@ -13,6 +16,22 @@ namespace AbpAdmin.Menus;
 /// </summary>
 public class Menu : FullAuditedAggregateRoot<Guid>, IMultiTenant
 {
+    private const string AnyPermissionNamesProperty = "AnyPermissionNames";
+
+    [NotMapped]
+    public string[] AnyPermissionNames => GetAnyPermissionNames();
+
+    public string[] GetAnyPermissionNames()
+    {
+        var value = this.GetProperty<string?>(AnyPermissionNamesProperty);
+        return string.IsNullOrEmpty(value) ? [] : JsonSerializer.Deserialize<string[]>(value) ?? [];
+    }
+
+    public void SetAnyPermissionNames(string[] names)
+    {
+        this.SetProperty(AnyPermissionNamesProperty, JsonSerializer.Serialize(names));
+    }
+
     public virtual Guid? TenantId { get; protected set; }
 
     /// <summary>父节点；null 表示顶级。</summary>

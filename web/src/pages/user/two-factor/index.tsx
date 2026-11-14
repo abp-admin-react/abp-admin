@@ -119,7 +119,7 @@ const TwoFactorVerification: React.FC = () => {
 
       // 跳转到原来的目标页面或首页（守卫与读后即清收口在 utils/redirect——此前这里是
       // 无校验直读，登录侧的过滤对它不生效）
-      history.replace(consumeIntendedRedirect('/'));
+      history.replace(consumeIntendedRedirect());
     } catch {
       // 错误由全局 errorHandler 统一提示
     } finally {

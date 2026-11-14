@@ -198,7 +198,7 @@ const WebhooksPage: React.FC = () => {
   ];
 
   return (
-    <PageContainer title="Webhook 管理">
+    <PageContainer title="事件回调订阅">
       <Tabs
         items={[
           {

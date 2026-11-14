@@ -69,7 +69,7 @@ const EditionsPage: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer title="租户功能版本">
       <AutoHeightProTable<EditionItem>
         rowKey="id"
         actionRef={actionRef}

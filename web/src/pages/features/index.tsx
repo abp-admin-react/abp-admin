@@ -7,15 +7,15 @@ const FeaturesPage: React.FC = () => {
   const [open, setOpen] = useState(true);
 
   return (
-    <PageContainer>
+    <PageContainer title="平台功能开关">
       <ProCard>
         <Button type="primary" onClick={() => setOpen(true)}>
-          配置 Host 功能
+          编辑功能开关
         </Button>
       </ProCard>
       <FeatureModal
         open={open}
-        title="Host 功能"
+        title="平台功能开关"
         providerName="T"
         onClose={() => setOpen(false)}
       />

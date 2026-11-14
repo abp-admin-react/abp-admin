@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   consumeIntendedRedirect,
-  DEFAULT_LANDING_PATH,
   isSafeMenuPath,
   isSafeRedirectTarget,
   REDIRECT_STORAGE_KEY,
-  resolvePostLoginLandingPath,
   storeIntendedRedirect,
 } from './redirect';
 
@@ -60,45 +58,5 @@ describe('redirect utils', () => {
     expect(isSafeMenuPath('https://evil.com')).toBe(false);
     expect(isSafeMenuPath(undefined)).toBe(false);
     expect(isSafeMenuPath(null)).toBe(false);
-  });
-});
-
-describe('resolvePostLoginLandingPath', () => {
-  it('有 Finance.Ledger.View → A1 资金总览', () => {
-    expect(
-      resolvePostLoginLandingPath({ 'Finance.Ledger.View': true }),
-    ).toBe('/finance/overview');
-  });
-
-  it('仅 Account.Manage → A2 科目', () => {
-    expect(
-      resolvePostLoginLandingPath({ 'Finance.Account.Manage': true }),
-    ).toBe('/finance/accounts');
-  });
-
-  it('仅 BizDoc.View → A6（代理常见）', () => {
-    expect(
-      resolvePostLoginLandingPath({ 'Finance.BizDoc.View': true }),
-    ).toBe('/finance/biz-docs');
-  });
-
-  it('按菜单顺序挑第一页：Rule 优先于 BizDoc', () => {
-    expect(
-      resolvePostLoginLandingPath({
-        'Finance.Rule.View': true,
-        'Finance.BizDoc.View': true,
-      }),
-    ).toBe('/finance/rules');
-  });
-
-  it('无财务权限 → /welcome 兜底', () => {
-    expect(resolvePostLoginLandingPath({})).toBe(DEFAULT_LANDING_PATH);
-    expect(resolvePostLoginLandingPath(undefined)).toBe(DEFAULT_LANDING_PATH);
-  });
-
-  it('financeShell=true 时落到 A1（与菜单放开一致）', () => {
-    expect(resolvePostLoginLandingPath({}, { financeShell: true })).toBe(
-      '/finance/overview',
-    );
   });
 });

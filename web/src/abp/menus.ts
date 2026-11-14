@@ -28,6 +28,8 @@ export type MenuDto = {
   isHide: boolean;
   isEnabled: boolean;
   permissionName?: string | null;
+  /** 系统模板的任一权限条件。 */
+  anyPermissionNames?: string[];
   remark?: string | null;
   /** 并发戳：编辑时原样回传，服务端检测到不一致返回 409（防止编辑冲突被静默覆盖）。 */
   concurrencyStamp?: string | null;

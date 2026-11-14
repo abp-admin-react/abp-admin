@@ -1,4 +1,5 @@
 import {
+  AlipayCircleOutlined,
   AppstoreOutlined,
   AuditOutlined,
   BankOutlined,
@@ -10,6 +11,7 @@ import {
   ClockCircleOutlined,
   ClusterOutlined,
   ControlOutlined,
+  CreditCardOutlined,
   ExperimentOutlined,
   DatabaseOutlined,
   DesktopOutlined,
@@ -38,6 +40,7 @@ import {
   ThunderboltOutlined,
   UserOutlined,
   WalletOutlined,
+  WechatOutlined,
 } from '@ant-design/icons';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
@@ -54,6 +57,9 @@ const menuIcons: Record<string, ReactNode> = {
   fileSearch: createElement(FileSearchOutlined),
   folder: createElement(FolderOutlined),
   payCircle: createElement(PayCircleOutlined),
+  alipayCircle: createElement(AlipayCircleOutlined),
+  wechat: createElement(WechatOutlined),
+  creditCard: createElement(CreditCardOutlined),
   setting: createElement(SettingOutlined),
   desktop: createElement(DesktopOutlined),
   thunderbolt: createElement(ThunderboltOutlined),

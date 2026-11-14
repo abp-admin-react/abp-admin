@@ -108,7 +108,7 @@ const TenantPackagePage: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer title="租户菜单套餐">
       <AutoHeightProTable<TenantPackageDto>
         rowKey="id"
         headerTitle="租户套餐"

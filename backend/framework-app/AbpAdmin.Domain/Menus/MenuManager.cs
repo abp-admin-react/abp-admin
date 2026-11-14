@@ -28,7 +28,9 @@ public record MenuDefinition(
     string? Icon,
     int OrderNo,
     string? PermissionName = null,
-    bool IsHide = false);
+    bool IsHide = false,
+    string[]? AnyPermissionNames = null,
+    bool HostOnly = false);
 
 /// <summary>
 /// 同步宿主菜单模板，并按租户套餐创建或重置租户菜单。
@@ -117,6 +119,7 @@ public class MenuManager : DomainService, ITransientDependency
                     def.IsHide,
                     isEnabled: true,
                     def.PermissionName);
+                menu.SetAnyPermissionNames(def.AnyPermissionNames ?? []);
                 await _menuRepository.InsertAsync(menu, autoSave: true);
                 keyToId[def.Key] = menu.Id;
             }
@@ -132,6 +135,13 @@ public class MenuManager : DomainService, ITransientDependency
                 if (menu.Title != def.Title) { menu.SetTitle(def.Title); changed = true; }
                 if (menu.Icon != def.Icon) { menu.SetIcon(def.Icon); changed = true; }
                 if (menu.PermissionName != def.PermissionName) { menu.SetPermissionName(def.PermissionName); changed = true; }
+                if (def.IsHide && !menu.IsHide) { menu.Hide(); changed = true; }
+                var anyPermissionNames = def.AnyPermissionNames ?? [];
+                if (!menu.GetAnyPermissionNames().SequenceEqual(anyPermissionNames))
+                {
+                    menu.SetAnyPermissionNames(anyPermissionNames);
+                    changed = true;
+                }
                 if (changed)
                 {
                     await _menuRepository.UpdateAsync(menu, autoSave: true);
@@ -313,7 +323,7 @@ public class MenuManager : DomainService, ITransientDependency
                     : (Guid?)null;
                 // 逐行 autoSave 会在锁临界段内做 N 次 SaveChanges 往返、放大持锁时长；
                 // 改为收集后一次性收口（随所在事务一并提交）
-                await _menuRepository.InsertAsync(new Menu(
+                var tenantMenu = new Menu(
                     idMap[template.Id],
                     tenantId,
                     parentId,
@@ -325,7 +335,9 @@ public class MenuManager : DomainService, ITransientDependency
                     template.OrderNo,
                     template.IsHide,
                     template.IsEnabled,
-                    template.PermissionName));
+                    template.PermissionName);
+                tenantMenu.SetAnyPermissionNames(template.GetAnyPermissionNames());
+                await _menuRepository.InsertAsync(tenantMenu);
             }
 
             if (_unitOfWorkManager.Current != null)

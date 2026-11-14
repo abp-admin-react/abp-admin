@@ -22,6 +22,23 @@ export default function access(
     typeof localStorage !== 'undefined' &&
     localStorage.getItem(STORAGE_KEYS.financeShellAccess) === '1';
   const isHost = !initialState?.currentTenant?.isAvailable;
+  const canViewOwnOrders = isHost && !!policies['AbpAdmin.Ordering.Orders'];
+  const canViewAllOrders =
+    isHost && !!policies['AbpAdmin.Ordering.Orders.ViewAll'];
+  const canManagePaymentSettings =
+    isHost && !!policies['SettingUi.ShowSettingPage'];
+  const canViewWeb3Operations =
+    isHost &&
+    (!!policies['AbpAdmin.Collection.Collections'] ||
+      !!policies['AbpAdmin.Collection.WithdrawAdmin'] ||
+      !!policies['AbpAdmin.Collection.Network.Admin']);
+  const canManageWeb3Configuration =
+    canManagePaymentSettings ||
+    (isHost &&
+      (!!policies['AbpAdmin.Collection.Network.Admin'] ||
+        !!policies['AbpAdmin.Collection.WithdrawAdmin']));
+  const canViewBalanceAdjustments =
+    isHost && !!policies['AbpAdmin.Collection.BalanceAdjustments.View'];
   return {
     canAdmin: !!policies['AbpIdentity.Users'],
     canManageUsers: !!policies['AbpIdentity.Users'],
@@ -147,14 +164,59 @@ export default function access(
       (!!policies['AbpAdmin.DataScopes.Manage'] &&
         !!policies['AbpIdentity.Roles']),
     // 订单/收款模块（只给 Host 用户：后端应用服务有 Host 守卫，这里只管菜单可见性）
-    canViewOrders: !!policies['AbpAdmin.Ordering.Orders'],
+    canViewOrders: canViewOwnOrders || canViewAllOrders,
+    canViewOwnOrders,
+    canViewAllOrders,
     canViewCollections: !!policies['AbpAdmin.Collection.Collections'],
-    // 收付款父组（订单/收付款子页共用入口）：任一子域可见即显示父组
+    canViewMemberFunds: isHost && !!policies['AbpAdmin.Collection.Collections'],
+    canViewCollectionPayments:
+      !!policies['AbpAdmin.Collection.Payments.View'] && isHost,
+    canReconcileCollectionPayments:
+      !!policies['AbpAdmin.Collection.Payments.View'] &&
+      !!policies['AbpAdmin.Collection.Payments.Reconcile'] &&
+      isHost,
+    canRefundCollectionPayments:
+      !!policies['AbpAdmin.Collection.Payments.View'] &&
+      !!policies['AbpAdmin.Collection.Payments.Refund'] &&
+      isHost,
+    // 订单、用户资金和渠道查询沿用此路由组，单页独立校验权限。
     canViewTrade:
-      !!policies['AbpAdmin.Ordering.Orders'] ||
-      !!policies['AbpAdmin.Collection.Collections'],
+      canViewOwnOrders ||
+      canViewAllOrders ||
+      !!policies['AbpAdmin.Collection.Collections'] ||
+      canManagePaymentSettings ||
+      (isHost && !!policies['AbpAdmin.Collection.Payments.View']),
+    canManagePaymentSettings,
+    canViewPaymentChannel:
+      isHost &&
+      (!!policies['AbpAdmin.Collection.Payments.View'] ||
+        !!policies['SettingUi.ShowSettingPage']),
+    canViewWeb3: canViewWeb3Operations || canManageWeb3Configuration,
+    canViewWeb3Operations,
+    canManageWeb3Configuration,
     // 链网配置（高危运维：RPC/助记词/金库/上限），独立权限仅授予运维角色
     canAdminNetwork: !!policies['AbpAdmin.Collection.Network.Admin'],
+    canConfigureCollectionNetwork:
+      isHost &&
+      (!!policies['AbpAdmin.Collection.Network.Admin'] ||
+        !!policies['SettingUi.ShowSettingPage']),
+    canManageCollectionWallets:
+      isHost &&
+      (!!policies['AbpAdmin.Collection.Network.Admin'] ||
+        !!policies['AbpAdmin.Collection.WithdrawAdmin']),
+    canViewBalanceAdjustments,
+    canCreateBalanceAdjustments:
+      canViewBalanceAdjustments &&
+      !!policies['AbpAdmin.Collection.BalanceAdjustments.Create'],
+    canApproveBalanceAdjustments:
+      canViewBalanceAdjustments &&
+      !!policies['AbpAdmin.Collection.BalanceAdjustments.Approve'],
+    canRejectBalanceAdjustments:
+      canViewBalanceAdjustments &&
+      !!policies['AbpAdmin.Collection.BalanceAdjustments.Reject'],
+    canApproveOwnBalanceAdjustments:
+      canViewBalanceAdjustments &&
+      !!policies['AbpAdmin.Collection.BalanceAdjustments.ApproveOwn'],
     // 提现管理（资金出账高危动作，Host 专用独立权限）
     canAdminWithdrawals: !!policies['AbpAdmin.Collection.WithdrawAdmin'],
     // 用户导出
@@ -175,7 +237,6 @@ export default function access(
     // T3.5 通知管理页（看全量发送记录用模块的 Manage；用户侧铃铛不依赖它）
     canManageNotifications:
       !!policies['EasyAbp.NotificationService.Notification.Manage'],
-    canManagePayments: !!policies['AbpAdmin.Payments'],
     // 动态菜单管理（结构维护；可见性跟随 ABP 功能权限）
     canManageMenus: !!policies['AbpAdmin.Menus'],
     canCreateMenus: !!policies['AbpAdmin.Menus.Create'],
@@ -196,6 +257,9 @@ export default function access(
     // 不变量：canApproveOwnFinanceAdjust / canFinanceScopeAgent 故意不吃 shellAccess。
     // 调账动作与五态：Create/Submit/Approve/Reject/Reverse + ApproveOwn（自批，默认关）。
     canViewFinanceLedger: !!policies['Finance.Ledger.View'] || financeShell,
+    canViewFinanceReconcile:
+      (!!policies['Finance.Ledger.View'] || financeShell) &&
+      (!policies['Finance.Scope.Agent'] || !!policies['Finance.Scope.All']),
     canExportFinanceLedger: !!policies['Finance.Ledger.Export'] || financeShell,
     canManageFinanceAccounts:
       !!policies['Finance.Account.Manage'] || financeShell,
@@ -221,6 +285,13 @@ export default function access(
     canViewFinanceBizDocs: !!policies['Finance.BizDoc.View'] || financeShell,
     canViewFinanceBalances: !!policies['Finance.Balance.View'] || financeShell,
     canFinanceScopeAgent: !!policies['Finance.Scope.Agent'],
+    canViewFinanceConfiguration:
+      !!policies['Finance.Ledger.View'] ||
+      !!policies['Finance.Account.Manage'] ||
+      !!policies['Finance.Rule.View'] ||
+      !!policies['Finance.Period.View'] ||
+      canManagePaymentSettings ||
+      financeShell,
     // 财务总菜单可见性：产品主口径是 Finance.Ledger.View；子页各绑各的码。
     // 代理若只有 BizDoc/Balance.View，父路由 access=false 会整枝藏掉子菜单，
     // 故父级用「任一子页权限 ∪ shellAccess」并集；细权仍在子路由 / 按钮上。
@@ -232,6 +303,8 @@ export default function access(
       !!policies['Finance.Period.View'] ||
       !!policies['Finance.BizDoc.View'] ||
       !!policies['Finance.Balance.View'] ||
+      canManagePaymentSettings ||
+      canViewBalanceAdjustments ||
       financeShell,
   };
 }

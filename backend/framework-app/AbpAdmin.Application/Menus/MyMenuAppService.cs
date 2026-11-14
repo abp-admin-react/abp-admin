@@ -42,6 +42,11 @@ public class MyMenuAppService : AbpAdminAppService, IMyMenuAppService
         }
 
         var menus = await _menuRepository.GetListAsync();
+        if (CurrentTenant.Id != null)
+        {
+            // 租户菜单快照可能仍含宿主专属目录。移除该目录后，断链的子树会一起不可见。
+            menus.RemoveAll(menu => MenuTemplateDefinition.IsHostOnlyPath(menu.Path));
+        }
         if (menus.Count == 0)
         {
             return new ListResultDto<MyMenuItemDto>(new List<MyMenuItemDto>());
@@ -56,8 +61,9 @@ public class MyMenuAppService : AbpAdminAppService, IMyMenuAppService
     private async Task<HashSet<string>> GetGrantedPermissionsAsync(IReadOnlyCollection<Menu> menus)
     {
         var permissionNames = menus
-            .Where(x => !string.IsNullOrWhiteSpace(x.PermissionName))
-            .Select(x => x.PermissionName!)
+            .SelectMany(menu => menu.PermissionName == null
+                ? menu.GetAnyPermissionNames()
+                : menu.GetAnyPermissionNames().Append(menu.PermissionName))
             .Distinct()
             .ToArray();
         if (permissionNames.Length == 0)

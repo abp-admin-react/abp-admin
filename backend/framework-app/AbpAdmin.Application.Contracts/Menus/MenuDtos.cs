@@ -56,6 +56,9 @@ public class MenuDto : EntityDto<Guid>
 
     public string? PermissionName { get; set; }
 
+    /// <summary>系统模板要求至少具备其中一项权限。</summary>
+    public string[] AnyPermissionNames { get; set; } = [];
+
     public string? Remark { get; set; }
 
     /// <summary>

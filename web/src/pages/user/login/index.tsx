@@ -24,7 +24,7 @@ import {
   setStoredTenant,
 } from '@/abp/tenant';
 import {
-  resolvePostLoginLandingPathFromServer,
+  consumeIntendedRedirect,
   storeIntendedRedirect,
 } from '@/utils/redirect';
 import Settings from '../../../../config/defaultSettings';
@@ -109,9 +109,7 @@ const Login: React.FC = () => {
   ) => {
     await applyTokensForNewSession(result);
     message.success('登录成功，正在进入系统…');
-    // 按 grantedPolicies 立刻进财务落地页，不再停登录页 / 仅 toast
-    const landing = await resolvePostLoginLandingPathFromServer();
-    window.location.replace(landing);
+    window.location.replace(consumeIntendedRedirect());
   };
 
   const consumeMagicLink = async (
@@ -260,7 +258,7 @@ const Login: React.FC = () => {
                 <Alert
                   type="error"
                   showIcon
-                  message={magicError ?? '登录链接无效或已过期'}
+                  title={magicError ?? '登录链接无效或已过期'}
                 />
                 <Typography.Text type="secondary">
                   邮件里还有 6
