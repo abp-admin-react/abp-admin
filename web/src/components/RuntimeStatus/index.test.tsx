@@ -45,14 +45,16 @@ describe('RuntimeStatus', () => {
         '后端 1.0.0+abc1234',
       );
     });
-    const text = screen.getByTestId('runtime-status').textContent ?? '';
+    const status = screen.getByTestId('runtime-status');
+    const text = status.textContent ?? '';
     expect(text).toContain('前端 ');
     expect(text).not.toContain('后端 6.');
     expect(text).toContain('服务器时间');
-    expect(text).toContain('2026-11-13 10:34:05');
-    expect(text).toMatch(/本机时间\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}（/);
-    expect(text).toContain('Asia/Shanghai，UTC+08:00');
-    expect(text).toContain('北京，重庆，香港特别行政区，乌鲁木齐');
+    expect(text).toContain('2026-11-13 10:34:05（UTC +8）');
+    expect(text).toMatch(
+      /本机时间\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}（UTC [+-]\d+(?::\d{2})?）/,
+    );
+    expect(status.getAttribute('title')).toBe(runtime.timeZoneDisplayName);
   });
 
   it('接口失败时不改用浏览器时间', async () => {

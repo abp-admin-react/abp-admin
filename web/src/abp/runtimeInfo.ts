@@ -6,7 +6,7 @@
  * 服务器时钟：Unix 毫秒 + 操作系统 UTC 偏移走时，不转成浏览器时区。
  */
 import { request } from '@umijs/max';
-import { parseUtcOffsetMinutes } from '@/utils/time';
+import { formatCompactUtcOffset, parseUtcOffsetMinutes } from '@/utils/time';
 
 export type RuntimeInfoDto = {
   apiVersion: string;
@@ -54,9 +54,7 @@ export function readWebVersion(): string {
   return formatWebVersion(version, commit);
 }
 
-const OFFSET_PREFIX = /^\(UTC[^)]*\)\s*/;
-
-/** 时区文案：IANA（或操作系统 ID）+ UTC 偏移 + 去掉重复偏移后的显示名。偏移非法时返回 null。 */
+/** 顶栏显示简短 UTC 偏移，悬停显示服务器时区详情。 */
 export function formatServerZoneLabel(
   info: Pick<
     RuntimeInfoDto,
@@ -72,19 +70,6 @@ export function formatServerZoneLabel(
   const iana = (info.ianaTimeZoneId ?? '').trim();
   const primary = iana || id;
   if (!primary) return null;
-  const display = info.timeZoneDisplayName
-    .trim()
-    .replace(OFFSET_PREFIX, '')
-    .trim();
-  const showDisplay =
-    display.length > 0 &&
-    display !== id &&
-    display !== iana &&
-    display !== primary &&
-    display !== offset;
-  const text = [primary, offset, showDisplay ? display : '']
-    .filter(Boolean)
-    .join('，');
-  const title = info.timeZoneDisplayName.trim() || text;
-  return { text, title };
+  const title = info.timeZoneDisplayName.trim() || `${primary}，${offset}`;
+  return { text: formatCompactUtcOffset(minutes), title };
 }

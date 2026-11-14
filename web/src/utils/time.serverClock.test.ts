@@ -31,10 +31,13 @@ describe('服务器墙上时间', () => {
 
   it('本机时间按传入的浏览器时区换算，并写明偏移', () => {
     expect(formatBrowserWallClock(instant, 'Asia/Shanghai')).toBe(
-      '2026-11-13 10:34:05（Asia/Shanghai，UTC+08:00）',
+      '2026-11-13 10:34:05（UTC +8）',
     );
     expect(formatBrowserWallClock(instant, 'UTC')).toBe(
-      '2026-11-13 02:34:05（UTC，UTC+00:00）',
+      '2026-11-13 02:34:05（UTC +0）',
+    );
+    expect(formatBrowserWallClock(instant, 'America/St_Johns')).toBe(
+      '2026-11-12 23:04:05（UTC -3:30）',
     );
     expect(formatBrowserWallClock(Number.NaN, 'UTC')).toBeNull();
   });

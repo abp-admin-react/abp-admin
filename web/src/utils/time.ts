@@ -27,6 +27,15 @@ export function parseUtcOffsetMinutes(utcOffset: string): number | null {
   return sign * (hours * 60 + minutes);
 }
 
+export function formatCompactUtcOffset(offsetMinutes: number): string {
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  const absolute = Math.abs(offsetMinutes);
+  const hours = Math.floor(absolute / 60);
+  const minutes = absolute % 60;
+  const remainder = minutes ? `:${String(minutes).padStart(2, '0')}` : '';
+  return `UTC ${sign}${hours}${remainder}`;
+}
+
 /**
  * 按服务器 UTC 偏移格式化墙上时间。不用浏览器时区。
  * 业务字段展示仍走 formatForDisplay。
@@ -42,7 +51,7 @@ export function formatServerWallClock(
   return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())} ${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}`;
 }
 
-/** 浏览器所在电脑的墙上时间（IANA + UTC 偏移）。不是服务器时钟。 */
+/** 浏览器所在电脑的墙上时间和 UTC 偏移。 */
 export function formatBrowserWallClock(
   epochMs: number,
   timeZone = userTimeZone(),
@@ -52,8 +61,8 @@ export function formatBrowserWallClock(
   if (!zone) return null;
   const local = dayjs(epochMs).tz(zone);
   if (!local.isValid()) return null;
-  const offset = local.format('Z');
-  return `${local.format('YYYY-MM-DD HH:mm:ss')}（${zone}，UTC${offset}）`;
+  const offset = formatCompactUtcOffset(local.utcOffset());
+  return `${local.format('YYYY-MM-DD HH:mm:ss')}（${offset}）`;
 }
 
 /** 浏览器本地 IANA 时区（Intl → dayjs.tz.guess）；禁止写死 Asia/Shanghai。 */

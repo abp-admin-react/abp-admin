@@ -11,22 +11,20 @@ describe('formatWebVersion', () => {
 });
 
 describe('formatServerZoneLabel', () => {
-  it('写出 IANA、UTC 偏移，以及去掉重复偏移后的显示名', () => {
+  it('显示简短 UTC 偏移，悬停时保留时区详情', () => {
     const label = formatServerZoneLabel({
       timeZoneId: 'China Standard Time',
       ianaTimeZoneId: 'Asia/Shanghai',
       timeZoneDisplayName: '(UTC+08:00) 北京，重庆，香港特别行政区，乌鲁木齐',
       utcOffset: '+08:00',
     });
-    expect(label?.text).toBe(
-      'Asia/Shanghai，UTC+08:00，北京，重庆，香港特别行政区，乌鲁木齐',
-    );
+    expect(label?.text).toBe('UTC +8');
     expect(label?.title).toBe(
       '(UTC+08:00) 北京，重庆，香港特别行政区，乌鲁木齐',
     );
   });
 
-  it('UTC 不重复堆显示名', () => {
+  it('零偏移显示 UTC +0', () => {
     expect(
       formatServerZoneLabel({
         timeZoneId: 'UTC',
@@ -34,7 +32,7 @@ describe('formatServerZoneLabel', () => {
         timeZoneDisplayName: 'UTC',
         utcOffset: '+00:00',
       })?.text,
-    ).toBe('UTC，UTC+00:00');
+    ).toBe('UTC +0');
   });
 
   it('负偏移跨时区时保留负号', () => {
@@ -45,7 +43,7 @@ describe('formatServerZoneLabel', () => {
         timeZoneDisplayName: '(UTC-05:00) 东部时间（美国和加拿大）',
         utcOffset: '-05:00',
       })?.text,
-    ).toBe('America/New_York，UTC-05:00，东部时间（美国和加拿大）');
+    ).toBe('UTC -5');
   });
 
   it('偏移非法时不编造时区', () => {
