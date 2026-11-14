@@ -1,4 +1,5 @@
 import { PageContainer } from '@ant-design/pro-components';
+import { Link, useAccess } from '@umijs/max';
 import {
   Alert,
   App,
@@ -17,35 +18,40 @@ import {
 } from 'antd';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  type ChainConnState,
   onChainConnState,
   onChainHotWalletChanged,
   startChainSignalR,
-  type ChainConnState,
 } from '@/abp/chainSignalR';
+import { financeErrorText } from '@/abp/finance';
 import {
   ackHotWalletTxn,
   getHotWallet,
   getHotWalletTxns,
   getHotWalletWatchStatus,
   getWithdrawStatus,
-  HW_DIRECTION_LABELS,
-  HW_TXN_STATUS_LABELS,
   type HotWalletTxnDto,
   type HotWalletWatchStatusDto,
+  HW_DIRECTION_LABELS,
+  HW_TXN_STATUS_LABELS,
   type WithdrawHotWalletStatusDto,
   type WithdrawStatusDto,
 } from '@/abp/withdrawal';
-import { financeErrorText } from '@/abp/finance';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 
 const { Text } = Typography;
 
 /**
- * 热钱包逐笔监控页（/collection/hot-wallet）：
+ * 提现钱包监控（/collection/hot-wallet）：
  * 状态卡（热钱包余额/熔断 + 各币监控游标 + 未处置异常红点）+ 流水表
  * （出/入方向、匹配提现单、异常行「确认已知」终态化）；SignalR 新异常实时刷新。
  */
-export default function HotWalletWatchPage() {
+export default function HotWalletWatchPage({
+  embedded = false,
+}: {
+  embedded?: boolean;
+} = {}) {
+  const access = useAccess();
   const { message } = App.useApp();
   const [data, setData] = useState<HotWalletTxnDto[]>([]);
   const [total, setTotal] = useState(0);
@@ -184,7 +190,10 @@ export default function HotWalletWatchPage() {
         const addr = row.direction === 'Out' ? row.to : row.from;
         return (
           <Tooltip title={addr}>
-            <Text copyable={{ text: addr }} style={{ fontFamily: 'monospace', fontSize: 11 }}>
+            <Text
+              copyable={{ text: addr }}
+              style={{ fontFamily: 'monospace', fontSize: 11 }}
+            >
               {`${addr.slice(0, 10)}...${addr.slice(-6)}`}
             </Text>
           </Tooltip>
@@ -219,7 +228,9 @@ export default function HotWalletWatchPage() {
       render: (v: string | undefined) =>
         v ? (
           <Tooltip title={v}>
-            <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{`${v.slice(0, 8)}...`}</Text>
+            <Text
+              style={{ fontFamily: 'monospace', fontSize: 11 }}
+            >{`${v.slice(0, 8)}...`}</Text>
           </Tooltip>
         ) : (
           '-'
@@ -231,7 +242,10 @@ export default function HotWalletWatchPage() {
       width: 160,
       ellipsis: true,
       render: (v: string) => (
-        <Text copyable={{ text: v }} style={{ fontFamily: 'monospace', fontSize: 11 }}>
+        <Text
+          copyable={{ text: v }}
+          style={{ fontFamily: 'monospace', fontSize: 11 }}
+        >
           {`${v.slice(0, 12)}...${v.slice(-6)}`}
         </Text>
       ),
@@ -280,13 +294,13 @@ export default function HotWalletWatchPage() {
     scrollX,
   } = useResizableColumns(columns);
 
-  return (
-    <PageContainer>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+  const content = (
+    <>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <Alert
           type="info"
           showIcon
-          message="热钱包逐笔监控：出站流水逐笔对账提现单哈希；未匹配出账即异常（高危——私钥泄漏/误操作），确认前请先链上核实。入站为外部补币，提示性展示。"
+          title="提现钱包出账按交易哈希与提现单核对。请先在链上核实未匹配的出账，再确认异常。转入为外部补币。"
         />
         <Card
           title="监控状态"
@@ -296,7 +310,9 @@ export default function HotWalletWatchPage() {
           {watch ? (
             <Space size={32} wrap>
               {watch.anomalyOpenCount > 0 ? (
-                <Tag color="error">未处置异常出账 {watch.anomalyOpenCount} 笔</Tag>
+                <Tag color="error">
+                  未处置异常出账 {watch.anomalyOpenCount} 笔
+                </Tag>
               ) : (
                 <Tag color="success">无未处置异常</Tag>
               )}
@@ -322,8 +338,11 @@ export default function HotWalletWatchPage() {
             {hotWallet?.configured ? (
               <Space size={24} wrap>
                 <Text>
-                  热钱包{' '}
-                  <Text copyable style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                  提现钱包{' '}
+                  <Text
+                    copyable
+                    style={{ fontFamily: 'monospace', fontSize: 11 }}
+                  >
                     {hotWallet.address}
                   </Text>
                 </Text>
@@ -338,16 +357,20 @@ export default function HotWalletWatchPage() {
                 ) : (
                   <Tag color="success">偿付正常</Tag>
                 )}
-                {status && <Text>待审 {status.pendingCount} · 待广播 {status.processingCount}</Text>}
+                {status && (
+                  <Text>
+                    待审 {status.pendingCount} · 待广播 {status.processingCount}
+                  </Text>
+                )}
               </Space>
             ) : (
-              <Tag color="warning">热钱包未配置（监控无对象）</Tag>
+              <Tag color="warning">提现钱包未配置</Tag>
             )}
           </div>
         </Card>
 
         <Card
-          title="热钱包流水"
+          title="提现钱包流水"
           extra={
             <Space>
               <Select
@@ -359,10 +382,12 @@ export default function HotWalletWatchPage() {
                   setStatusFilter(v);
                   setPage(1);
                 }}
-                options={Object.entries(HW_TXN_STATUS_LABELS).map(([value, cfg]) => ({
-                  value,
-                  label: cfg.text,
-                }))}
+                options={Object.entries(HW_TXN_STATUS_LABELS).map(
+                  ([value, cfg]) => ({
+                    value,
+                    label: cfg.text,
+                  }),
+                )}
               />
               <Select
                 placeholder="方向"
@@ -373,10 +398,12 @@ export default function HotWalletWatchPage() {
                   setDirectionFilter(v);
                   setPage(1);
                 }}
-                options={Object.entries(HW_DIRECTION_LABELS).map(([value, cfg]) => ({
-                  value,
-                  label: cfg.text,
-                }))}
+                options={Object.entries(HW_DIRECTION_LABELS).map(
+                  ([value, cfg]) => ({
+                    value,
+                    label: cfg.text,
+                  }),
+                )}
               />
             </Space>
           }
@@ -415,7 +442,11 @@ export default function HotWalletWatchPage() {
           </Descriptions.Item>
           <Descriptions.Item label="对手方">
             <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>
-              {ackTarget ? (ackTarget.direction === 'Out' ? ackTarget.to : ackTarget.from) : ''}
+              {ackTarget
+                ? ackTarget.direction === 'Out'
+                  ? ackTarget.to
+                  : ackTarget.from
+                : ''}
             </Text>
           </Descriptions.Item>
         </Descriptions>
@@ -430,6 +461,27 @@ export default function HotWalletWatchPage() {
           确认后终态留痕（操作人/时间/备注）；请先在区块链浏览器核实该笔转账的来龙去脉。
         </Text>
       </Modal>
+    </>
+  );
+  if (embedded) return content;
+  return (
+    <PageContainer
+      title="提现钱包监控"
+      breadcrumb={{
+        items: [{ title: 'Web3 充值提现' }, { title: '提现钱包监控' }],
+      }}
+      extra={
+        <Space wrap>
+          {access.canViewCollections && (
+            <Link to="/collection/dashboard">返回链上监控</Link>
+          )}
+          {access.canAdminWithdrawals && (
+            <Link to="/collection/withdrawals">返回提现审核与打款</Link>
+          )}
+        </Space>
+      }
+    >
+      {content}
     </PageContainer>
   );
 }

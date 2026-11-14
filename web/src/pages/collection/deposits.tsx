@@ -1,5 +1,5 @@
 import { PageContainer } from '@ant-design/pro-components';
-import { useAccess } from '@umijs/max';
+import { Link, useAccess } from '@umijs/max';
 import {
   App,
   Button,
@@ -12,10 +12,11 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   approveLargeDeposit,
   DEPOSIT_STATUS_LABELS,
+  depositStatusLabel,
   type DepositOrderListDto,
   getDepositOrders,
 } from '@/abp/chainAdmin';
@@ -26,51 +27,84 @@ import {
   startChainSignalR,
 } from '@/abp/chainSignalR';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import { depositVouchersUrl } from '@/pages/finance/vouchers/navigation';
+import { isValidRecordId, RecordFocus } from './record-focus';
+import { useChainRecordRefresh } from './use-chain-record-refresh';
 
 const { Text } = Typography;
 
 /**
- * 充值单页（/collection/deposits）：SignalR 实时推送新进款单，无需刷新按钮。
+ * 充值单页（/collection/deposits）：接收链上推送，并定时核对最终状态。
  */
-export default function DepositsPage() {
+export default function DepositsPage({
+  embedded = false,
+  depositId,
+}: {
+  embedded?: boolean;
+  depositId?: string;
+} = {}) {
   const { message } = App.useApp();
   const access = useAccess();
   const [data, setData] = useState<DepositOrderListDto[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const focused = depositId !== undefined;
+  const invalidId = focused && !isValidRecordId(depositId);
+  const [loading, setLoading] = useState(focused && !invalidId);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [symbolFilter, setSymbolFilter] = useState<string | undefined>();
   const [connState, setConnState] = useState<ChainConnState>('disconnected');
+  const latestRequest = useRef(0);
   const pageSize = 20;
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await getDepositOrders({
-        skipCount: (page - 1) * pageSize,
-        maxResultCount: pageSize,
-        status: statusFilter,
-        symbol: symbolFilter,
-      });
-      setData(result.items);
-      setTotal(result.totalCount);
-    } catch {
-      /* interceptor */
-    } finally {
-      setLoading(false);
-    }
-  }, [page, statusFilter, symbolFilter]);
+  const reload = useCallback(
+    async (background = false) => {
+      if (invalidId) return;
+      const request = ++latestRequest.current;
+      if (!background) setLoading(true);
+      try {
+        const result = await getDepositOrders(
+          focused
+            ? { skipCount: 0, maxResultCount: 1, depositId }
+            : {
+                skipCount: (page - 1) * pageSize,
+                maxResultCount: pageSize,
+                status: statusFilter,
+                symbol: symbolFilter,
+              },
+        );
+        if (request !== latestRequest.current) return;
+        const rows = focused
+          ? result.items.filter(
+              (item) => item.id.toLowerCase() === depositId.toLowerCase(),
+            )
+          : result.items;
+        setData(rows);
+        setTotal(focused ? rows.length : result.totalCount);
+        setLoadFailed(false);
+      } catch {
+        if (focused && !background && request === latestRequest.current) {
+          setData([]);
+          setLoadFailed(true);
+        }
+      } finally {
+        if (request === latestRequest.current) setLoading(false);
+      }
+    },
+    [depositId, focused, invalidId, page, statusFilter, symbolFilter],
+  );
 
   useEffect(() => {
     reload();
   }, [reload]);
+  useChainRecordRefresh(reload);
 
   useEffect(() => {
     const offConn = onChainConnState(setConnState);
     const offDeposit = onChainDepositChanged(() => {
       // 收到推送：重新拉当前页（轻量，全量刷新保序）
-      reload();
+      void reload(true);
     });
     startChainSignalR();
     return () => {
@@ -89,6 +123,11 @@ export default function DepositsPage() {
       : connState === 'connecting'
         ? { color: 'warning' as const, text: '连接中…' }
         : { color: 'error' as const, text: '已断开，重连中' };
+
+  const renderStatus = (_value: string, row: DepositOrderListDto) => {
+    const config = depositStatusLabel(row);
+    return <Tag color={config.color}>{config.text}</Tag>;
+  };
 
   const columns = [
     {
@@ -160,15 +199,7 @@ export default function DepositsPage() {
       title: '状态',
       dataIndex: 'status',
       width: 120,
-      render: (v: string, row?: DepositOrderListDto) => {
-        // Confirmed 且未挂任务 = 大额门持有（等放行）——区别于普通"已确认/待归集"，
-        // 运营一眼看出哪些单在等放行按钮（与操作列的放行按钮同判据）
-        if (v === 'Confirmed' && row && !row.sweepTaskId) {
-          return <Tag color="purple">大额待放行</Tag>;
-        }
-        const cfg = DEPOSIT_STATUS_LABELS[v] ?? { color: 'default', text: v };
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
-      },
+      render: renderStatus,
     },
     {
       title: '区块',
@@ -205,7 +236,9 @@ export default function DepositsPage() {
             width: 90,
             fixed: 'right' as const,
             render: (_: unknown, row: DepositOrderListDto) =>
-              row.status === 'Confirmed' && !row.sweepTaskId ? (
+              row.status === 'Confirmed' &&
+              !row.sweepTaskId &&
+              !row.manuallyReleased ? (
                 <Popconfirm
                   title={`放行进款 ${row.amount} ${row.symbol} 进归集？`}
                   onConfirm={async () => {
@@ -236,43 +269,74 @@ export default function DepositsPage() {
     scrollX,
   } = useResizableColumns(columns);
 
-  return (
-    <PageContainer>
-      <Card
-        title="充值单（SignalR 实时推送新进款）"
-        extra={
-          <Space>
-            <Tag color={connView.color}>{connView.text}</Tag>
-            <Select
-              placeholder="状态"
-              allowClear
-              style={{ width: 140 }}
-              value={statusFilter}
-              onChange={(v) => {
-                setStatusFilter(v);
-                setPage(1);
-              }}
-              options={Object.entries(DEPOSIT_STATUS_LABELS).map(
-                ([value, cfg]) => ({ value, label: cfg.text }),
-              )}
-            />
-            <Select
-              placeholder="代币"
-              allowClear
-              style={{ width: 100 }}
-              value={symbolFilter}
-              onChange={(v) => {
-                setSymbolFilter(v);
-                setPage(1);
-              }}
-              options={[
-                { value: 'USDT', label: 'USDT' },
-                { value: 'USDC', label: 'USDC' },
-              ]}
-            />
-          </Space>
-        }
-      >
+  const record = focused ? data[0] : undefined;
+  const content = (
+    <Card
+      extra={
+        <Space>
+          <Tag color={connView.color}>{connView.text}</Tag>
+          {!focused && (
+            <>
+              <Select
+                placeholder="状态"
+                allowClear
+                style={{ width: 140 }}
+                value={statusFilter}
+                onChange={(v) => {
+                  setStatusFilter(v);
+                  setPage(1);
+                }}
+                options={Object.entries(DEPOSIT_STATUS_LABELS).map(
+                  ([value, cfg]) => ({ value, label: cfg.text }),
+                )}
+              />
+              <Select
+                placeholder="代币"
+                allowClear
+                style={{ width: 100 }}
+                value={symbolFilter}
+                onChange={(v) => {
+                  setSymbolFilter(v);
+                  setPage(1);
+                }}
+                options={[
+                  { value: 'USDT', label: 'USDT' },
+                  { value: 'USDC', label: 'USDC' },
+                ]}
+              />
+            </>
+          )}
+        </Space>
+      }
+    >
+      {focused && (
+        <RecordFocus
+          kind="充值"
+          listPath="/web3/operations?view=deposits"
+          invalid={invalidId}
+          failed={loadFailed}
+          loading={loading}
+          reload={reload}
+          summary={
+            record && (
+              <Space wrap>
+                <Text>{record.networkName}</Text>
+                <Text strong>
+                  {record.amount == null
+                    ? `超精度 ${record.symbol}`
+                    : `${record.amount} ${record.symbol}`}
+                </Text>
+                {renderStatus(record.status, record)}
+                <Text copyable>充值单号 {record.id}</Text>
+                {record.status === 'Swept' && access.canViewFinanceVouchers && (
+                  <Link to={depositVouchersUrl(record.id)}>查看会计凭证</Link>
+                )}
+              </Space>
+            )
+          }
+        />
+      )}
+      {(!focused || record) && (
         <Table<DepositOrderListDto>
           rowKey="id"
           loading={loading}
@@ -281,15 +345,30 @@ export default function DepositsPage() {
           components={components}
           scroll={{ x: scrollX }}
           size="small"
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: false,
-            onChange: (p) => setPage(p),
-          }}
+          pagination={
+            !focused && {
+              current: page,
+              pageSize,
+              total,
+              showSizeChanger: false,
+              onChange: (p) => setPage(p),
+            }
+          }
         />
-      </Card>
+      )}
+    </Card>
+  );
+  if (embedded) return content;
+  return (
+    <PageContainer
+      title="充值记录"
+      extra={
+        access.canConfigureCollectionNetwork && (
+          <Link to="/web3/config?view=deposit">充值规则</Link>
+        )
+      }
+    >
+      {content}
     </PageContainer>
   );
 }

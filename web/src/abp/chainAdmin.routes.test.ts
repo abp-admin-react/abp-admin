@@ -4,8 +4,11 @@ const request = vi.fn();
 vi.mock('@umijs/max', () => ({ request: (...a: unknown[]) => request(...a) }));
 
 import {
-  addApiKey,
   approveLargeDeposit,
+  configureNetwork,
+  configureNetworkToken,
+  createNetworkApiKey,
+  getWalletStatus,
   removeApiKey,
   retrySweepTask,
   setApiKeyEnabled,
@@ -55,14 +58,7 @@ describe('chainAdmin write endpoint URL shapes', () => {
     });
   });
 
-  it('KEY 池另两个端点形状（add=query / remove=路径段）', async () => {
-    request.mockClear();
-    await addApiKey('RpcBsc', 'key', 'label');
-    expect(request.mock.calls[0][0]).toBe(
-      '/api/app/collection-network-admin/api-key',
-    );
-
-    request.mockClear();
+  it('删除 KEY 使用路径段', async () => {
     await removeApiKey('k1');
     expect(request.mock.calls[0][0]).toBe(
       '/api/app/collection-network-admin/k1/api-key',
@@ -79,5 +75,63 @@ describe('chainAdmin write endpoint URL shapes', () => {
       method: 'POST',
       params: { scanEnabled: true },
     });
+  });
+
+  it('集中配置把网络 ID 和敏感字段放在请求体中', async () => {
+    await configureNetwork({
+      networkId: 'network-2',
+      rpcUrl: 'https://rpc.example/key',
+      nodeLogResultCap: 1000,
+      depositFeeRate: '0.01',
+      autoCreditMaxAmount: '50',
+    });
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/app/collection-network-admin/configure-network',
+      {
+        method: 'POST',
+        data: {
+          networkId: 'network-2',
+          rpcUrl: 'https://rpc.example/key',
+          nodeLogResultCap: 1000,
+          depositFeeRate: '0.01',
+          autoCreditMaxAmount: '50',
+        },
+      },
+    );
+    await createNetworkApiKey({
+      networkId: 'network-2',
+      provider: 'RpcBsc',
+      key: 'sensitive',
+    });
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/app/collection-network-admin/add-api-key',
+      {
+        method: 'POST',
+        data: { networkId: 'network-2', provider: 'RpcBsc', key: 'sensitive' },
+      },
+    );
+    await configureNetworkToken({
+      networkId: 'network-2',
+      tokenId: 'token-2',
+      minDeposit: '5',
+      isEnabled: true,
+    });
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/app/collection-network-admin/configure-token',
+      {
+        method: 'POST',
+        data: {
+          networkId: 'network-2',
+          tokenId: 'token-2',
+          minDeposit: '5',
+          isEnabled: true,
+        },
+      },
+    );
+    await getWalletStatus('network-2', true);
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/app/collection-wallet-admin/network-2',
+      { params: { IncludeBalances: true } },
+    );
   });
 });

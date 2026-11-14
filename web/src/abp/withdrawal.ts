@@ -27,6 +27,7 @@ export type WithdrawOrderDto = {
   actualAmount: string;
   status: string;
   txHash?: string;
+  broadcastSenderAddress?: string | null;
   retryCount: number;
   failReason?: string;
   auditRemark?: string;
@@ -112,11 +113,13 @@ export const HW_TXN_STATUS_LABELS: Record<
   Acked: { color: 'default', text: '已确认' },
 };
 
-export const HW_DIRECTION_LABELS: Record<string, { color: string; text: string }> =
-  {
-    Out: { color: 'volcano', text: '出' },
-    In: { color: 'geekblue', text: '入' },
-  };
+export const HW_DIRECTION_LABELS: Record<
+  string,
+  { color: string; text: string }
+> = {
+  Out: { color: 'volcano', text: '出' },
+  In: { color: 'geekblue', text: '入' },
+};
 
 /** 提现单状态（与后端 WithdrawStatus 对齐）：色板与文案是页面唯一口径 */
 export const WD_STATUS_LABELS: Record<string, { color: string; text: string }> =
@@ -134,12 +137,13 @@ type PagedResult<T> = { totalCount: number; items: T[] };
 
 // ── 查询 ───────────────────────────────────────────────────────────────────────────────
 
-/** 提现单列表（可按状态/用户过滤，倒序分页；PascalCase 查询参数在镜像层收口） */
+/** 提现单列表（可按订单 ID、状态、用户过滤，倒序分页）。 */
 export async function getWithdrawals(params: {
   skipCount?: number;
   maxResultCount?: number;
   status?: string;
   userId?: string;
+  withdrawalId?: string;
 }): Promise<PagedResult<WithdrawOrderDto>> {
   return request(`${BASE}/withdrawals`, {
     params: {
@@ -147,6 +151,7 @@ export async function getWithdrawals(params: {
       MaxResultCount: params.maxResultCount ?? 20,
       Status: params.status,
       UserId: params.userId,
+      WithdrawalId: params.withdrawalId,
     },
   });
 }
@@ -214,14 +219,13 @@ export async function refundWithdraw(
   });
 }
 
-/** 重试广播失败单（有哈希先验回执；无哈希过近期同地址付款双花门） */
-// 单 Guid 参数端点为路径段形态（?id= 会 302——E2E 实测）
+/** 重试广播失败单，服务端按原打款钱包核验广播结果。 */
 export async function retryWithdraw(id: string): Promise<void> {
   await request(`${BASE}/${id}/retry`, { method: 'POST', ...WD_REQ });
 }
 
-/** 人工完结（BroadcastFailed 单补录链上哈希；服务端强制回执且状态必须成功） */
-// id 为路径段，txHash 是附加查询参数（?id= 形态会 302——E2E 实测）
+/** 人工完结，补录哈希须匹配原广播钱包、nonce 和代币转账。 */
+// 提现单 ID 在路径中，补录哈希在查询参数中。
 export async function completeWithdraw(
   id: string,
   txHash: string,
@@ -236,10 +240,11 @@ export async function completeWithdraw(
 export async function setWithdrawVault(
   address: string,
   privateKey: string,
+  networkId?: string,
 ): Promise<void> {
   await request(`${BASE}/set-withdraw-vault`, {
     method: 'POST',
-    data: { address, privateKey },
+    data: { address, privateKey, ...(networkId ? { networkId } : {}) },
     ...WD_REQ,
   });
 }
@@ -250,10 +255,10 @@ export async function backfillOpening(): Promise<WithdrawOpeningBackfillResultDt
 }
 
 /** 确认已知（Anomaly → Acked 终态；note 为核实备注） */
-// 单 Guid 参数端点为路径段形态（?id= 会 302——E2E 实测，同 retryWithdraw）；
-// 段名以 api-definition 实测为准是 /ack-hot-wallet-txn（AckHotWalletTxnAsync 去 Async 缀），
-// 不是 /ack——与归集重试同款「前端形状自嗨」类别（E2E 全量路由比对实锤）。
-export async function ackHotWalletTxn(id: string, note?: string): Promise<void> {
+export async function ackHotWalletTxn(
+  id: string,
+  note?: string,
+): Promise<void> {
   await request(`${BASE}/${id}/ack-hot-wallet-txn`, {
     method: 'POST',
     params: note ? { note } : undefined,

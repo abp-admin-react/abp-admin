@@ -1,26 +1,27 @@
 import { PageContainer } from '@ant-design/pro-components';
+import { Link, useAccess } from '@umijs/max';
 import {
+  Alert,
   App,
   Button,
   Card,
-  Descriptions,
   Input,
   Modal,
   Popconfirm,
   Select,
   Space,
   Spin,
-  Switch,
   Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { financeErrorText } from '@/abp/finance';
+import { queryClient } from '@/queryClient';
+import { currencyLabel } from '@/abp/ordering';
 import {
   approveWithdraw,
-  backfillOpening,
   completeWithdraw,
   getHotWallet,
   getWithdrawals,
@@ -28,66 +29,111 @@ import {
   refundWithdraw,
   rejectWithdraw,
   retryWithdraw,
-  setWithdrawEnabled,
-  setWithdrawHalt,
-  setWithdrawVault,
   WD_STATUS_LABELS,
   type WithdrawHotWalletStatusDto,
   type WithdrawOrderDto,
   type WithdrawStatusDto,
 } from '@/abp/withdrawal';
+import { withdrawalVouchersUrl } from '@/pages/finance/vouchers/navigation';
+import { isValidRecordId, RecordFocus } from './record-focus';
 
 const { Text } = Typography;
 
-/**
- * 提现管理页（/collection/withdrawals，提现 M2/M3）：
- * 状态卡（开关/总闸/限额 + 热钱包余额/熔断）+ 列表（默认待审）；
- * 审批/拒绝/重试/人工完结/退款拒绝 + 批量通过/批量拒绝（串行逐单、偿付护栏逐单检查）；
- * 写动作错误就地提示（skipErrorHandler 语义）。
- */
-export default function WithdrawalsPage() {
+/** 列表默认显示待审提现单，单据详情跟踪打款与回执结果。 */
+export default function WithdrawalsPage({
+  embedded = false,
+  initialStatus,
+  withdrawalId,
+}: {
+  embedded?: boolean;
+  initialStatus?: string;
+  withdrawalId?: string;
+} = {}) {
+  const access = useAccess();
   const { message, modal } = App.useApp();
   const [data, setData] = useState<WithdrawOrderDto[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string>('Pending');
+  const focused = withdrawalId !== undefined;
+  const invalidId = focused && !isValidRecordId(withdrawalId);
+  const [loading, setLoading] = useState(focused && !invalidId);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(
+    initialStatus === 'all'
+      ? ''
+      : initialStatus && Object.hasOwn(WD_STATUS_LABELS, initialStatus)
+        ? initialStatus
+        : 'Pending',
+  );
   const [status, setStatus] = useState<WithdrawStatusDto>();
+  const [statusError, setStatusError] = useState(false);
   const [hotWallet, setHotWallet] = useState<WithdrawHotWalletStatusDto>();
-  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletLoading, setWalletLoading] = useState(true);
+  const [walletError, setWalletError] = useState(false);
+  const latestLoad = useRef(0);
   const pageSize = 20;
+  const record = focused ? data[0] : undefined;
+  const followingPayout =
+    record?.status === 'Processing' || record?.status === 'Broadcasting';
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await getWithdrawals({
-        skipCount: (page - 1) * pageSize,
-        maxResultCount: pageSize,
-        status: statusFilter,
-      });
-      setData(result.items);
-      setTotal(result.totalCount);
-    } catch {
-      /* interceptor */
-    } finally {
-      setLoading(false);
-    }
-  }, [page, statusFilter]);
+  const reload = useCallback(
+    async (background = false) => {
+      if (invalidId) return;
+      const version = ++latestLoad.current;
+      if (!background) setLoading(true);
+      setLoadFailed(false);
+      try {
+        const result = await getWithdrawals(
+          focused
+            ? { skipCount: 0, maxResultCount: 1, withdrawalId }
+            : {
+                skipCount: (page - 1) * pageSize,
+                maxResultCount: pageSize,
+                status: statusFilter,
+              },
+        );
+        if (version !== latestLoad.current) return;
+        const rows = focused
+          ? result.items.filter(
+              (item) => item.id.toLowerCase() === withdrawalId.toLowerCase(),
+            )
+          : result.items;
+
+        if (background) {
+          // 先读单据再查汇总，确保停止轮询时的汇总已纳入最新单据状态。
+          const nextStatus = await getWithdrawStatus().catch(() => null);
+          if (version !== latestLoad.current) return;
+          if (nextStatus) setStatus(nextStatus);
+          setStatusError(!nextStatus);
+        }
+
+        setData(rows);
+        setTotal(focused ? rows.length : result.totalCount);
+      } catch {
+        if (version === latestLoad.current && focused && !background) {
+          setData([]);
+          setLoadFailed(true);
+        }
+      } finally {
+        if (version === latestLoad.current) setLoading(false);
+      }
+    },
+    [focused, invalidId, page, statusFilter, withdrawalId],
+  );
 
   const reloadCards = useCallback(async () => {
-    try {
-      setStatus(await getWithdrawStatus());
-    } catch {
-      /* interceptor */
-    }
+    setStatusError(false);
+    setWalletError(false);
     setWalletLoading(true);
-    try {
-      setHotWallet(await getHotWallet());
-    } catch {
-      setHotWallet(undefined); // 热钱包未配置或 RPC 不可用：状态卡显示未配置即可
-    } finally {
-      setWalletLoading(false);
-    }
+    await Promise.all([
+      getWithdrawStatus()
+        .then(setStatus)
+        .catch(() => setStatusError(true)),
+      getHotWallet()
+        .then(setHotWallet)
+        .catch(() => setWalletError(true))
+        .finally(() => setWalletLoading(false)),
+    ]);
   }, []);
 
   useEffect(() => {
@@ -97,19 +143,40 @@ export default function WithdrawalsPage() {
     reloadCards();
   }, [reloadCards]);
 
-  const [walletModal, setWalletModal] = useState(false);
-  const [walletForm, setWalletForm] = useState({ address: '', privateKey: '' });
+  useEffect(() => {
+    if (!followingPayout) return;
+    let active = true;
+    let timer: number;
+    const refresh = async () => {
+      if (document.visibilityState === 'visible') {
+        await reload(true);
+        void queryClient.invalidateQueries({
+          predicate: ({ queryKey }) =>
+            queryKey[0] === 'workbench' && queryKey[4] === 'withdrawals',
+          refetchType: 'none',
+        });
+      }
+      if (active) timer = window.setTimeout(refresh, 5_000);
+    };
+    timer = window.setTimeout(refresh, 5_000);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [followingPayout, reload]);
+
   const [rejectTarget, setRejectTarget] = useState<WithdrawOrderDto>();
   const [refundTarget, setRefundTarget] = useState<WithdrawOrderDto>();
   const [completeTarget, setCompleteTarget] = useState<WithdrawOrderDto>();
   const [remark, setRemark] = useState('');
   const [txHashInput, setTxHashInput] = useState('');
   const [acting, setActing] = useState(false);
+  const actionInProgress = useRef(false);
   const [selectedIds, setSelectedIds] = useState<React.Key[]>([]);
   const [batchRejectOpen, setBatchRejectOpen] = useState(false);
   const [batchRunning, setBatchRunning] = useState(false);
 
-  /** 批量动作：串行逐单（对齐线上做法），逐单成败计数汇总；失败的单保持原状态不影响后续。 */
+  /** 串行提交，让服务端按每笔审批后的余额校验下一笔。 */
   const runBatch = async (
     action: (id: string) => Promise<void>,
     okText: string,
@@ -133,6 +200,7 @@ export default function WithdrawalsPage() {
     } finally {
       setBatchRunning(false);
     }
+    if (ok > 0) void queryClient.invalidateQueries({ queryKey: ['workbench'] });
     if (fail === 0) {
       message.success(`${okText}：${ok} 笔全部成功`);
     } else if (ok === 0) {
@@ -148,9 +216,12 @@ export default function WithdrawalsPage() {
   };
 
   const guard = async (fn: () => Promise<void>, ok: string) => {
+    if (actionInProgress.current) return;
+    actionInProgress.current = true;
     setActing(true);
     try {
       await fn();
+      void queryClient.invalidateQueries({ queryKey: ['workbench'] });
       message.success(ok);
       setRejectTarget(undefined);
       setRefundTarget(undefined);
@@ -162,6 +233,7 @@ export default function WithdrawalsPage() {
     } catch (e) {
       message.error(financeErrorText(e));
     } finally {
+      actionInProgress.current = false;
       setActing(false);
     }
   };
@@ -172,6 +244,10 @@ export default function WithdrawalsPage() {
     }
     const d = new Date(v);
     return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
+  };
+  const renderStatus = (value: string) => {
+    const config = WD_STATUS_LABELS[value] ?? { color: 'default', text: value };
+    return <Tag color={config.color}>{config.text}</Tag>;
   };
   const columns = [
     {
@@ -223,10 +299,7 @@ export default function WithdrawalsPage() {
       title: '状态',
       dataIndex: 'status',
       width: 110,
-      render: (v: string) => {
-        const cfg = WD_STATUS_LABELS[v] ?? { color: 'default', text: v };
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
-      },
+      render: renderStatus,
     },
     {
       title: '链上哈希',
@@ -286,12 +359,14 @@ export default function WithdrawalsPage() {
             <>
               <Button
                 size="small"
+                loading={acting}
                 onClick={() => guard(() => retryWithdraw(row.id), '已重试')}
               >
                 重试
               </Button>
               <Button
                 size="small"
+                disabled={acting}
                 onClick={() => {
                   setCompleteTarget(row);
                   setTxHashInput(row.txHash ?? '');
@@ -302,12 +377,13 @@ export default function WithdrawalsPage() {
               <Button
                 size="small"
                 danger
+                disabled={acting}
                 onClick={() => {
                   setRefundTarget(row);
                   setRemark('');
                 }}
               >
-                退款拒绝
+                退回余额
               </Button>
             </>
           )}
@@ -319,104 +395,35 @@ export default function WithdrawalsPage() {
     },
   ];
 
-  return (
-    <PageContainer>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+  const content = (
+    <>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <Card
           title="提现状态"
           size="small"
           extra={
-            <Space size={8}>
-              <Button
-                size="small"
-                onClick={() => {
-                  setWalletModal(true);
-                  setWalletForm({ address: '', privateKey: '' });
-                }}
-              >
-                配置热钱包
-              </Button>
-              <Popconfirm
-                title="存量余额开账回填？"
-                description="把 ColBalance 与账本 2201 的差额一次性过账（幂等可重跑），上线提现前执行一次。"
-                onConfirm={() =>
-                  guard(async () => {
-                    const r = await backfillOpening();
-                    message.success(
-                      `开账完成：用户 ${r.users}，过账 ${r.posted}，跳过 ${r.skipped}`,
-                    );
-                  }, '开账完成')
-                }
-              >
-                <Button size="small" loading={acting}>
-                  存量开账
-                </Button>
-              </Popconfirm>
-            </Space>
+            access.canAdminWithdrawals && (
+              <Link to="/web3/config?view=withdraw">提现规则与启停</Link>
+            )
           }
         >
-          {status ? (
+          {statusError ? (
+            <Alert
+              type="error"
+              title="加载提现状态失败"
+              action={<Button onClick={reloadCards}>重试</Button>}
+            />
+          ) : status ? (
             <Space size={32} wrap>
-              <Space size={6}>
-                功能开关：
-                <Popconfirm
-                  title={`确认${status.enabled ? '关闭' : '开启'}提现功能？`}
-                  description="关闭后拒绝新提交、广播 worker 睡眠；开启即恢复付币（下一轮热生效）。"
-                  onConfirm={async () => {
-                    try {
-                      await setWithdrawEnabled(!status.enabled);
-                      message.success(
-                        `提现功能已${status.enabled ? '关闭' : '开启'}`,
-                      );
-                      await reloadCards();
-                    } catch (e) {
-                      message.error(financeErrorText(e));
-                    }
-                  }}
-                  okText="确认"
-                  cancelText="取消"
-                >
-                  <Switch checked={status.enabled} size="small" />
-                </Popconfirm>
-              </Space>
-              <Space size={6}>
-                总闸（紧急停机）：
-                <Popconfirm
-                  title={`确认${status.halt ? '恢复' : '拉下'}提现总闸？`}
-                  description={
-                    status.halt
-                      ? '恢复后新提交与审批立即放行（下一轮热生效）。'
-                      : '拉闸后拒绝新提交、阻断全部审批（广播中订单仍走卡单恢复处置）。'
-                  }
-                  onConfirm={async () => {
-                    try {
-                      await setWithdrawHalt(!status.halt);
-                      message.success(
-                        `总闸已${status.halt ? '恢复' : '拉下'}`,
-                      );
-                      await reloadCards();
-                    } catch (e) {
-                      message.error(financeErrorText(e));
-                    }
-                  }}
-                  okText="确认"
-                  cancelText="取消"
-                >
-                  <Switch
-                    checked={status.halt}
-                    checkedChildren="已拉闸"
-                    unCheckedChildren="正常"
-                    size="small"
-                  />
-                </Popconfirm>
-              </Space>
-              <Text>单笔最小 {status.minAmount}</Text>
-              <Text>费率 {status.feeRate}</Text>
-              <Text>
-                单笔上限 {status.maxDailyAmount} · 每日 {status.maxDailyCount}{' '}
-                笔
-              </Text>
-              <Text>小额自动审 ≤ {status.autoApproveMaxAmount}</Text>
+              <Tag
+                color={!status.halt && status.enabled ? 'success' : 'warning'}
+              >
+                {status.halt
+                  ? '紧急停机中'
+                  : status.enabled
+                    ? '提现已开启'
+                    : '提现已关闭'}
+              </Tag>
               <Text>待审 {status.pendingCount}</Text>
               <Text>待广播 {status.processingCount}</Text>
               <Text>广播中 {status.broadcastingCount}</Text>
@@ -428,6 +435,12 @@ export default function WithdrawalsPage() {
           <div style={{ marginTop: 8 }}>
             {walletLoading ? (
               <Spin size="small" />
+            ) : walletError ? (
+              <Alert
+                type="error"
+                title="加载提现钱包余额失败"
+                action={<Button onClick={reloadCards}>重试</Button>}
+              />
             ) : hotWallet?.configured ? (
               <Space size={24} wrap>
                 <Text>
@@ -445,7 +458,6 @@ export default function WithdrawalsPage() {
                   </Text>
                 ))}
                 <Text>BNB {hotWallet.bnb}</Text>
-                <Text>熔断地板 {hotWallet.usdtFloor}</Text>
                 {hotWallet.breakerOpen ? (
                   <Tag color="error">
                     熔断中（余额低于地板，审批已全部阻断）
@@ -463,77 +475,119 @@ export default function WithdrawalsPage() {
         <Card
           title="提现单"
           extra={
-            <Space>
-              <Select
-                style={{ width: 140 }}
-                value={statusFilter}
-                onChange={(v) => {
-                  setStatusFilter(v);
-                  setPage(1);
-                }}
-                options={[
-                  { value: '', label: '全部状态' },
-                  ...Object.entries(WD_STATUS_LABELS).map(([value, cfg]) => ({
-                    value,
-                    label: cfg.text,
-                  })),
-                ]}
-              />
-              <Button
-                size="small"
-                type="primary"
-                disabled={!selectedIds.length}
-                loading={batchRunning}
-                onClick={() =>
-                  modal.confirm({
-                    title: `批量通过 ${selectedIds.length} 笔提现？`,
-                    content:
-                      '逐单执行（偿付护栏逐单检查），中途失败的单保持待审不影响后续。',
-                    okText: '批量通过',
-                    cancelText: '取消',
-                    onOk: () => runBatch(approveWithdraw, '批量通过'),
-                  })
-                }
-              >
-                批量通过（{selectedIds.length}）
-              </Button>
-              <Button
-                size="small"
-                danger
-                disabled={!selectedIds.length}
-                onClick={() => {
-                  setRemark('');
-                  setBatchRejectOpen(true);
-                }}
-              >
-                批量拒绝（{selectedIds.length}）
-              </Button>
-            </Space>
+            !focused && (
+              <Space>
+                <Select
+                  style={{ width: 140 }}
+                  value={statusFilter}
+                  onChange={(v) => {
+                    setStatusFilter(v);
+                    setPage(1);
+                  }}
+                  options={[
+                    { value: '', label: '全部状态' },
+                    ...Object.entries(WD_STATUS_LABELS).map(([value, cfg]) => ({
+                      value,
+                      label: cfg.text,
+                    })),
+                  ]}
+                />
+                <Button
+                  size="small"
+                  type="primary"
+                  disabled={!selectedIds.length}
+                  loading={batchRunning}
+                  onClick={() =>
+                    modal.confirm({
+                      title: `批量通过 ${selectedIds.length} 笔提现？`,
+                      content:
+                        '逐单执行（偿付护栏逐单检查），中途失败的单保持待审不影响后续。',
+                      okText: '批量通过',
+                      cancelText: '取消',
+                      onOk: () => runBatch(approveWithdraw, '批量通过'),
+                    })
+                  }
+                >
+                  批量通过（{selectedIds.length}）
+                </Button>
+                <Button
+                  size="small"
+                  danger
+                  disabled={!selectedIds.length}
+                  onClick={() => {
+                    setRemark('');
+                    setBatchRejectOpen(true);
+                  }}
+                >
+                  批量拒绝（{selectedIds.length}）
+                </Button>
+              </Space>
+            )
           }
         >
-          <Table<WithdrawOrderDto>
-            rowKey="id"
-            loading={loading}
-            dataSource={data}
-            columns={columns}
-            size="small"
-            scroll={{ x: 1500 }}
-            rowSelection={{
-              selectedRowKeys: selectedIds,
-              preserveSelectedRowKeys: true,
-              onChange: (keys) => setSelectedIds(keys),
-              getCheckboxProps: (row) => ({
-                disabled: row.status !== 'Pending',
-              }),
-            }}
-            pagination={{
-              current: page,
-              pageSize,
-              total,
-              showSizeChanger: false,
-              onChange: (p) => setPage(p),
-            }}
-          />
+          {focused && (
+            <RecordFocus
+              kind="提现"
+              listPath="/web3/operations?view=withdrawals&status=all"
+              invalid={invalidId}
+              failed={loadFailed}
+              loading={loading}
+              reload={reload}
+              summary={
+                record && (
+                  <Space wrap>
+                    <Text>{record.networkName}</Text>
+                    <Text strong>
+                      {record.amount} {currencyLabel(record.currency)}
+                    </Text>
+                    {renderStatus(record.status)}
+                    <Text copyable>提现单号 {record.id}</Text>
+                    {record.broadcastSenderAddress && (
+                      <Text copyable={{ text: record.broadcastSenderAddress }}>
+                        打款钱包 {record.broadcastSenderAddress}
+                      </Text>
+                    )}
+                    {access.canViewFinanceVouchers && (
+                      <Link to={withdrawalVouchersUrl(record.id)}>
+                        查看会计凭证
+                      </Link>
+                    )}
+                  </Space>
+                )
+              }
+            />
+          )}
+          {(!focused || record) && (
+            <Table<WithdrawOrderDto>
+              rowKey="id"
+              loading={loading}
+              dataSource={data}
+              columns={columns}
+              size="small"
+              scroll={{ x: 1500 }}
+              rowSelection={
+                focused
+                  ? undefined
+                  : {
+                      selectedRowKeys: selectedIds,
+                      preserveSelectedRowKeys: true,
+                      onChange: (keys) => setSelectedIds(keys),
+                      getCheckboxProps: (row) => ({
+                        disabled: row.status !== 'Pending',
+                      }),
+                    }
+              }
+              pagination={
+                !focused && {
+                  current: page,
+                  pageSize,
+                  total,
+                  showSizeChanger: false,
+                  onChange: (p) => setPage(p),
+                }
+              }
+            />
+          )}
         </Card>
       </Space>
 
@@ -577,10 +631,7 @@ export default function WithdrawalsPage() {
             message.warning('拒绝原因必填');
             return;
           }
-          await runBatch(
-            (id) => rejectWithdraw(id, remark.trim()),
-            '批量拒绝',
-          );
+          await runBatch((id) => rejectWithdraw(id, remark.trim()), '批量拒绝');
           setBatchRejectOpen(false);
         }}
       >
@@ -598,10 +649,10 @@ export default function WithdrawalsPage() {
       </Modal>
 
       <Modal
-        title={`退款拒绝 ${refundTarget?.id.slice(0, 8)}...`}
+        title={`退回提现余额 ${refundTarget?.id.slice(0, 8)}...`}
         open={!!refundTarget}
         confirmLoading={acting}
-        okText="退款拒绝"
+        okText="确认退回"
         okButtonProps={{ danger: true }}
         cancelText="取消"
         onCancel={() => setRefundTarget(undefined)}
@@ -610,7 +661,7 @@ export default function WithdrawalsPage() {
           remark.trim()
             ? guard(
                 () => refundWithdraw(refundTarget.id, remark.trim()),
-                '已退款拒绝',
+                '已退回用户余额',
               )
             : message.warning('退款原因必填');
         }}
@@ -623,7 +674,7 @@ export default function WithdrawalsPage() {
           placeholder="退款原因（必填；前提：已核实链上未付出）"
         />
         <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-          净额 + 手续费将退回用户可用余额；请先在浏览器核对链上确实未付出。
+          核验原打款钱包的交易结果后，净额和手续费将退回用户可用余额。
         </Text>
       </Modal>
 
@@ -655,55 +706,14 @@ export default function WithdrawalsPage() {
           style={{ fontFamily: 'monospace' }}
         />
         <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-          服务端会强制核对该哈希的回执且状态必须成功。
+          补录时会核对原打款钱包、交易 nonce、收款地址和实际到账金额。
         </Text>
       </Modal>
-      <Modal
-        title="配置提现热钱包"
-        open={walletModal}
-        confirmLoading={acting}
-        okText="保存"
-        cancelText="取消"
-        onCancel={() => setWalletModal(false)}
-        onOk={() => {
-          if (!/^0x[0-9a-fA-F]{40}$/.test(walletForm.address.trim())) {
-            message.warning('地址需为 0x + 40 位十六进制');
-            return;
-          }
-          guard(async () => {
-            await setWithdrawVault(
-              walletForm.address.trim(),
-              walletForm.privateKey.trim(),
-            );
-            message.success('热钱包已配置（密文入库）');
-          }, '热钱包已配置');
-        }}
-      >
-        <Descriptions column={1} size="small" style={{ marginBottom: 12 }}>
-          <Descriptions.Item label="地址">
-            热钱包地址（0x + 40 位十六进制）
-          </Descriptions.Item>
-          <Descriptions.Item label="私钥">
-            服务端校验私钥与地址匹配后加密入库；明文不落日志不回显。必须与归集助记词不同源。
-          </Descriptions.Item>
-        </Descriptions>
-        <Input
-          placeholder="热钱包地址"
-          value={walletForm.address}
-          onChange={(e) =>
-            setWalletForm((f) => ({ ...f, address: e.target.value }))
-          }
-          style={{ fontFamily: 'monospace', marginBottom: 8 }}
-        />
-        <Input.Password
-          placeholder="热钱包私钥"
-          value={walletForm.privateKey}
-          onChange={(e) =>
-            setWalletForm((f) => ({ ...f, privateKey: e.target.value }))
-          }
-          style={{ fontFamily: 'monospace' }}
-        />
-      </Modal>
-    </PageContainer>
+    </>
+  );
+  return embedded ? (
+    content
+  ) : (
+    <PageContainer title="提现审核与打款">{content}</PageContainer>
   );
 }

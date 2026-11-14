@@ -1,935 +1,1085 @@
-import { PageContainer } from '@ant-design/pro-components';
+import { useAccess } from '@umijs/max';
 import {
   Alert,
   App,
   Button,
   Card,
-  Descriptions,
+  Col,
+  Divider,
+  Drawer,
+  Empty,
+  Form,
   Input,
   InputNumber,
   Modal,
   Popconfirm,
-  Select,
+  Row,
   Space,
+  Spin,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
 import {
-  addApiKey,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
+import {
+  type AnkrSettingsDto,
   type ChainApiKeyDto,
-  generateMnemonic,
+  type ChainApiKeysDto,
+  type CollectionNetworkSummaryDto,
+  type ConfigureNetworkInput,
+  configureAnkr,
+  configureNetwork,
+  configureNetworkToken,
+  createNetworkApiKey,
+  getAnkrSettings,
   getApiKeys,
   getNetworkStatus,
+  getNetworks,
   type NetworkStatusDto,
   removeApiKey,
   setApiKeyEnabled,
-  setChainSwitches,
-  setDepositPolicy,
-  setMinDeposit,
-  setNodeLogResultCap,
-  // 组件内有同名 useState setter（rpcUrl 输入框），别名避免遮蔽——
-  // 不别名的话 submitRpc 里 await 的是 setter，后端接口永远不会被调用
-  setRpcUrl as setRpcUrlApi,
-  setTokenEnabled,
-  setVaultAddress,
+  type TestNodeCredentialDto,
+  testNodeCredential,
   type TokenStatusDto,
 } from '@/abp/chainAdmin';
-import {
-  type ChainConnState,
-  type ChainScanProgressPayload,
-  onChainConnState,
-  onChainScanProgress,
-  startChainSignalR,
-} from '@/abp/chainSignalR';
-import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import { isNotFound } from '@/requestErrorConfig';
+import AnkrBalanceCard, { AnkrBalanceAmounts } from './AnkrBalanceCard';
 
-const { Text, Paragraph } = Typography;
+type SaveNetworkChange = (
+  action: () => Promise<unknown>,
+  success: string,
+) => Promise<boolean>;
 
-/**
- * 链网配置页（/collection/network）。扫链进度由 SignalR 实时推送（ChainScanProgress），无需刷新按钮。
- */
-export default function NetworkConfigPage() {
-  const { message, modal } = App.useApp();
-  const [status, setStatus] = useState<NetworkStatusDto | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [connState, setConnState] = useState<ChainConnState>('disconnected');
-  const [progressMap, setProgressMap] = useState<
-    Map<string, ChainScanProgressPayload>
-  >(new Map());
+function useCredentialTest() {
+  const latest = useRef(0);
+  const pending = useRef(false);
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<TestNodeCredentialDto>();
 
-  const [rpcOpen, setRpcOpen] = useState(false);
-  const [rpcUrl, setRpcUrl] = useState('');
-  const [rpcSaving, setRpcSaving] = useState(false);
-  const [capOpen, setCapOpen] = useState(false);
-  const [capVal, setCapVal] = useState<number>(10000);
-  const [capSaving, setCapSaving] = useState(false);
-  const [vaultOpen, setVaultOpen] = useState(false);
-  const [vaultSymbol, setVaultSymbol] = useState('USDT');
-  const [vaultAddr, setVaultAddr] = useState('');
-  const [vaultSaving, setVaultSaving] = useState(false);
-  const [minDepOpen, setMinDepOpen] = useState(false);
-  const [minDepSymbol, setMinDepSymbol] = useState('USDT');
-  const [minDepVal, setMinDepVal] = useState('');
-  const [minDepSaving, setMinDepSaving] = useState(false);
-  const [policyOpen, setPolicyOpen] = useState(false);
-  const [policyFeeRate, setPolicyFeeRate] = useState('');
-  const [policyMax, setPolicyMax] = useState('');
-  const [policySaving, setPolicySaving] = useState(false);
-  const [mnemonicResult, setMnemonicResult] = useState<string | null>(null);
+  function clear() {
+    // 输入有变更时，忽略旧密钥或分组仍在进行的查询结果。
+    latest.current += 1;
+    setResult(undefined);
+  }
 
-  // 扫链 KEY 池（同服务商多把，网关遇限流/认证错误自动轮换）
-  const [rpcKeys, setRpcKeys] = useState<ChainApiKeyDto[]>([]);
-  const [etherscanKeys, setEtherscanKeys] = useState<ChainApiKeyDto[]>([]);
-  const [rpcFallbackMasked, setRpcFallbackMasked] = useState<string | null>(
-    null,
+  async function test(input: Parameters<typeof testNodeCredential>[0]) {
+    if (pending.current) return;
+    pending.current = true;
+    const request = ++latest.current;
+    setTesting(true);
+    setResult(undefined);
+    try {
+      const response = await testNodeCredential(input);
+      if (latest.current === request) setResult(response);
+    } catch {
+      if (latest.current === request) {
+        setResult({
+          passed: false,
+          message: '暂时无法验证，请稍后重试',
+          credits: null,
+          balanceUsd: null,
+        });
+      }
+    } finally {
+      pending.current = false;
+      setTesting(false);
+    }
+  }
+
+  return { clear, result, test, testing };
+}
+
+function CredentialTestResult({
+  result,
+  label,
+  children,
+}: {
+  result?: TestNodeCredentialDto;
+  label?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div role="status" style={result ? { marginBlockStart: 8 } : undefined}>
+      {result && (
+        <Typography.Text type={result.passed ? 'success' : 'danger'}>
+          {label && `${label} · `}
+          {result.passed ? '测试通过：' : '测试失败：'}
+          {result.message}
+        </Typography.Text>
+      )}
+      {children}
+    </div>
   );
-  const [etherscanFallbackPresent, setEtherscanFallbackPresent] =
-    useState(false);
-  const [newKeyProvider, setNewKeyProvider] = useState<string>('RpcBsc');
-  const [newKeyValue, setNewKeyValue] = useState('');
-  const [newKeyLabel, setNewKeyLabel] = useState('');
-  const [newKeySaving, setNewKeySaving] = useState(false);
+}
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      setStatus(await getNetworkStatus());
-    } catch {
-      /* interceptor */
-    } finally {
-      setLoading(false);
-    }
-    try {
-      const keys = await getApiKeys();
-      setRpcKeys(keys.rpcKeys ?? []);
-      setEtherscanKeys(keys.etherscanKeys ?? []);
-      setRpcFallbackMasked(keys.rpcFallbackMasked ?? null);
-      setEtherscanFallbackPresent(keys.etherscanFallbackPresent);
-    } catch {
-      /* interceptor */
-    }
-  }, []);
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
-  useEffect(() => {
-    const offConn = onChainConnState(setConnState);
-    const offProgress = onChainScanProgress((p) => {
-      setProgressMap((prev) => {
-        const next = new Map(prev);
-        next.set(p.symbol, p);
-        return next;
-      });
-    });
-    startChainSignalR();
-    return () => {
-      offConn();
-      offProgress();
-    };
-  }, []);
-
-  const mergedTokens: TokenStatusDto[] = (status?.tokens ?? []).map((t) => {
-    const p = progressMap.get(t.symbol);
-    if (!p) return t;
-    return {
-      ...t,
-      lastScannedBlock: p.lastScannedBlock ?? t.lastScannedBlock,
-      lastScanAt: p.lastScanAt ?? t.lastScanAt,
-      isEnabled: p.isEnabled,
-    };
-  });
-  const mergedHead =
-    [...progressMap.values()][0]?.latestChainHead ?? status?.latestChainHead;
-
-  const submitRpc = async () => {
-    if (!rpcUrl.startsWith('https://')) {
-      message.warning('RPC 地址必须以 https:// 开头');
-      return;
-    }
-    setRpcSaving(true);
-    try {
-      await setRpcUrlApi(rpcUrl);
-      message.success('RPC 已配置');
-      setRpcOpen(false);
-      setRpcUrl('');
-      reload();
-    } finally {
-      setRpcSaving(false);
-    }
-  };
-  const submitCap = async () => {
-    if (capVal < 100) {
-      message.warning('上限必须不小于 100');
-      return;
-    }
-    setCapSaving(true);
-    try {
-      await setNodeLogResultCap(capVal);
-      message.success('测量上限已更新');
-      setCapOpen(false);
-      reload();
-    } finally {
-      setCapSaving(false);
-    }
-  };
-  const submitVault = async () => {
-    if (!/^0x[0-9a-fA-F]{40}$/.test(vaultAddr)) {
-      message.warning('金库地址需 0x 开头的 40 位十六进制');
-      return;
-    }
-    setVaultSaving(true);
-    try {
-      await setVaultAddress(vaultSymbol, vaultAddr);
-      message.success('金库地址已更新');
-      setVaultOpen(false);
-      setVaultAddr('');
-      reload();
-    } finally {
-      setVaultSaving(false);
-    }
-  };
-  const submitMinDep = async () => {
-    const v = parseFloat(minDepVal);
-    if (Number.isNaN(v) || v <= 0) {
-      message.warning('最低充值额必须为正数');
-      return;
-    }
-    setMinDepSaving(true);
-    try {
-      await setMinDeposit(minDepSymbol, minDepVal);
-      message.success('最低充值额已更新');
-      setMinDepOpen(false);
-      reload();
-    } finally {
-      setMinDepSaving(false);
-    }
-  };
-  const submitPolicy = async () => {
-    const fee = parseFloat(policyFeeRate);
-    const max = parseFloat(policyMax);
-    if (Number.isNaN(fee) || fee < 0 || fee > 1) {
-      message.warning('充值费率必须是 [0,1] 内的小数');
-      return;
-    }
-    if (Number.isNaN(max) || max < 0) {
-      message.warning('大额放行门必须 ≥ 0（0 = 全部等放行）');
-      return;
-    }
-    setPolicySaving(true);
-    try {
-      // 发送解析后的值（原始串里 1e-3/尾空格类输入能过 parseFloat 但过不了后端模型绑定）
-      await setDepositPolicy(String(fee), String(max));
-      message.success('充值政策已更新（费率只影响新单——建单快照）');
-      setPolicyOpen(false);
-      reload();
-    } catch {
-      /* interceptor：全局弹错，Modal 保持打开可改可重试 */
-    } finally {
-      setPolicySaving(false);
-    }
-  };
-  const doToggleSwitch = async (
-    key: 'scanEnabled' | 'sweepEnabled' | 'hotWalletWatchEnabled',
-    checked: boolean,
-  ) => {
-    const label =
-      key === 'scanEnabled' ? '扫链' : key === 'sweepEnabled' ? '归集' : '热钱包监控';
-    try {
-      await setChainSwitches({ [key]: checked });
-      message.success(`${label}已${checked ? '开启' : '关闭'}（worker 下一轮生效）`);
-      reload();
-    } catch {
-      /* interceptor */
-    }
-  };
-  const doGenerateMnemonic = () => {
-    modal.confirm({
-      title: '生成助记词',
-      content:
-        '将生成新的 24 词助记词。如果已有充值地址或未完成归集，会被拒绝。助记词只显示一次，请立即抄写并安全保管。',
-      okText: '生成',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          setMnemonicResult(await generateMnemonic());
-        } catch {
-          /* interceptor */
-        }
-      },
-    });
-  };
-
-  const submitAddKey = async () => {
-    const k = newKeyValue.trim();
-    if (newKeyProvider === 'RpcBsc' && !/^[0-9a-fA-F]{64}$/.test(k)) {
-      message.warning('Ankr 项目密钥为 64 位十六进制');
-      return;
-    }
-    if (newKeyProvider === 'EtherscanV2' && !/^[A-Za-z0-9]{34}$/.test(k)) {
-      message.warning('Etherscan API Key 为 34 位字母数字');
-      return;
-    }
-    setNewKeySaving(true);
-    try {
-      await addApiKey(newKeyProvider, k, newKeyLabel.trim() || undefined);
-      message.success('KEY 已添加并进入轮换（下一轮扫链生效）');
-      setNewKeyValue('');
-      setNewKeyLabel('');
-      reload();
-    } catch {
-      /* interceptor */
-    } finally {
-      setNewKeySaving(false);
-    }
-  };
-  const doRemoveKey = async (row: ChainApiKeyDto) => {
-    try {
-      await removeApiKey(row.id);
-      message.success('KEY 已删除');
-      reload();
-    } catch {
-      /* interceptor */
-    }
-  };
-  const doToggleKey = async (row: ChainApiKeyDto, checked: boolean) => {
-    try {
-      await setApiKeyEnabled(row.id, checked);
-      message.success(`KEY 已${checked ? '启用' : '停用'}`);
-      reload();
-    } catch {
-      /* interceptor */
-    }
-  };
-
-  const fmtBlock = (v?: number) =>
-    v == null ? '-' : Number(v).toLocaleString();
-  const fmtTime = (v?: string) => {
-    if (!v) return '-';
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
-  };
-  const connView =
-    connState === 'connected'
-      ? { color: 'success' as const, text: '实时推送：已连接' }
-      : connState === 'connecting'
-        ? { color: 'warning' as const, text: '实时推送：连接中…连上后自动更新' }
-        : { color: 'error' as const, text: '实时推送：已断开，自动重连中' };
-
-  const tokenColumns = [
-    { title: '代币', dataIndex: 'symbol', width: 80 },
-    {
-      title: '合约',
-      dataIndex: 'contractAddress',
-      width: 140,
-      ellipsis: true,
-      render: (v: string) => (
-        <Text
-          copyable={{ text: v }}
-          style={{ fontSize: 12 }}
-        >{`${v.slice(0, 10)}...${v.slice(-6)}`}</Text>
-      ),
-    },
-    {
-      title: '最低充值',
-      dataIndex: 'minDeposit',
-      width: 100,
-      render: (v: string, row: TokenStatusDto) => (
-        <Space size={4}>
-          <Text>{v}</Text>
-          <Button
-            size="small"
-            type="link"
-            onClick={() => {
-              setMinDepSymbol(row.symbol);
-              setMinDepVal(row.minDeposit);
-              setMinDepOpen(true);
-            }}
-          >
-            改
-          </Button>
-        </Space>
-      ),
-    },
-    {
-      title: '金库地址',
-      dataIndex: 'vaultAddress',
-      width: 140,
-      ellipsis: true,
-      render: (v: string | null | undefined, row: TokenStatusDto) => (
-        <Space size={4}>
-          {v ? (
-            <Text
-              copyable={{ text: v }}
-              style={{ fontSize: 12 }}
-            >{`${v.slice(0, 10)}...${v.slice(-6)}`}</Text>
-          ) : (
-            <Tag color="warning">未配置</Tag>
-          )}
-          <Button
-            size="small"
-            type="link"
-            onClick={() => {
-              setVaultSymbol(row.symbol);
-              setVaultAddr(row.vaultAddress ?? '');
-              setVaultOpen(true);
-            }}
-          >
-            改
-          </Button>
-        </Space>
-      ),
-    },
-    {
-      title: '扫链游标',
-      dataIndex: 'lastScannedBlock',
-      width: 120,
-      render: (v?: number | null) => (
-        <Text style={{ fontFamily: 'monospace' }}>
-          {fmtBlock(v ?? undefined)}
-        </Text>
-      ),
-    },
-    {
-      title: '落后',
-      dataIndex: 'blocksBehind',
-      width: 80,
-      render: (v?: number | null) =>
-        v != null ? (
-          <span
-            style={{
-              color: v > 5000 ? '#cf1322' : v > 1000 ? '#fa8c16' : '#389e0d',
-            }}
-          >
-            {fmtBlock(v)}
-          </span>
-        ) : (
-          '-'
-        ),
-    },
-    {
-      title: '最近扫链',
-      dataIndex: 'lastScanAt',
-      width: 150,
-      render: (v?: string | null) => fmtTime(v ?? undefined),
-    },
-    {
-      title: '启用',
-      dataIndex: 'isEnabled',
-      width: 70,
-      render: (v: boolean, row: TokenStatusDto) => (
-        <Switch
-          checked={v}
-          size="small"
-          onChange={async (checked: boolean) => {
-            try {
-              await setTokenEnabled(row.symbol, checked);
-              message.success(`${row.symbol} 已${checked ? '启用' : '停用'}`);
-              reload();
-            } catch {
-              /* interceptor */
-            }
-          }}
-        />
-      ),
-    },
-  ];
-
-  const {
-    columns: tokenResizableColumns,
-    components: tokenComponents,
-    scrollX: tokenScrollX,
-  } = useResizableColumns(tokenColumns);
-
-  const keyRows: ChainApiKeyDto[] = [...rpcKeys, ...etherscanKeys];
-  const keyColumns = [
-    {
-      title: '服务商',
-      dataIndex: 'provider',
-      width: 120,
-      render: (v: string) =>
-        v === 'RpcBsc' ? (
-          <Tag color="purple">Ankr RPC</Tag>
-        ) : (
-          <Tag color="geekblue">Etherscan V2</Tag>
-        ),
-    },
-    {
-      title: '备注',
-      dataIndex: 'label',
-      width: 140,
-      render: (v?: string | null) => v || '-',
-    },
-    {
-      title: 'KEY（掩码）',
-      dataIndex: 'maskedKey',
-      width: 140,
-      render: (v: string) => (
-        <Text style={{ fontFamily: 'monospace' }}>{v}</Text>
-      ),
-    },
-    {
-      title: '启用',
-      dataIndex: 'isEnabled',
-      width: 70,
-      render: (v: boolean, row: ChainApiKeyDto) => (
-        <Switch
-          checked={v}
-          size="small"
-          onChange={(checked: boolean) => doToggleKey(row, checked)}
-        />
-      ),
-    },
-    {
-      title: '限流次数',
-      dataIndex: 'consecutiveFailures',
-      width: 90,
-      render: (v: number) =>
-        v > 0 ? <Tag color="warning">{v}</Tag> : <Tag>0</Tag>,
-    },
-    {
-      title: '最近使用',
-      dataIndex: 'lastUsedAt',
-      width: 150,
-      render: (v?: string | null) => fmtTime(v ?? undefined),
-    },
-    {
-      title: '添加时间',
-      dataIndex: 'creationTime',
-      width: 150,
-      render: (v: string) => fmtTime(v),
-    },
-    {
-      title: '操作',
-      width: 70,
-      render: (_: unknown, row: ChainApiKeyDto) => (
-        <Popconfirm
-          title={`确定删除 KEY ${row.maskedKey}？`}
-          onConfirm={() => doRemoveKey(row)}
-          okText="删除"
-          cancelText="取消"
-        >
-          <Button size="small" type="link" danger>
-            删除
-          </Button>
-        </Popconfirm>
-      ),
-    },
-  ];
-
-  const {
-    columns: keyResizableColumns,
-    components: keyComponents,
-    scrollX: keyScrollX,
-  } = useResizableColumns(keyColumns);
+function NetworkApiKeyPool({
+  networkId,
+  provider,
+  keys,
+  busy,
+  save,
+  canTest,
+}: {
+  networkId: string;
+  provider: 'RpcBsc' | 'EtherscanV2';
+  keys: ChainApiKeyDto[];
+  busy: boolean;
+  save: SaveNetworkChange;
+  canTest: boolean;
+}) {
+  const [form] = Form.useForm<{ key: string; label?: string }>();
+  const probe = useCredentialTest();
+  const savedProbe = useCredentialTest();
+  const [testedKey, setTestedKey] = useState<string>();
+  const isAnkr = provider === 'RpcBsc';
+  const titleId = useId();
 
   return (
-    <PageContainer>
-      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
+    <Card
+      title={
+        <span id={titleId}>
+          {isAnkr ? 'Ankr Project API Key' : 'Etherscan V2 API Key'}
+        </span>
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        {isAnkr
+          ? '用于 BSC 充值检测、归集和提现。多把密钥可自动轮换。'
+          : canTest
+            ? '用于按地址补查代币转账。BSC 补查需要 Etherscan 的付费套餐。'
+            : '用于按地址补查代币转账。'}
+      </Typography.Paragraph>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+        <Form
+          name={`keys-${provider}`}
+          aria-labelledby={titleId}
+          form={form}
+          disabled={busy}
+          layout="vertical"
+          onValuesChange={(changed) => {
+            if ('key' in changed) probe.clear();
+          }}
+          onFinish={async (values) => {
+            if (
+              await save(
+                () => createNetworkApiKey({ ...values, provider, networkId }),
+                '节点密钥已添加',
+              )
+            ) {
+              form.resetFields();
+              probe.clear();
+            }
+          }}
+        >
+          <Row gutter={16}>
+            <Col xs={24} sm={15}>
+              <Form.Item
+                name="key"
+                label={isAnkr ? '新项目密钥' : '新 Etherscan 密钥'}
+                rules={[
+                  { required: true, whitespace: true, message: '请输入密钥' },
+                ]}
+              >
+                <Input.Password
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  placeholder="输入 API Key"
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={9}>
+              <Form.Item name="label" label="备注（选填）">
+                <Input maxLength={128} placeholder="例如：主用密钥" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Space wrap>
+            {canTest && (
+              <Button
+                htmlType="button"
+                loading={probe.testing}
+                disabled={busy}
+                onClick={async () => {
+                  const values = await form
+                    .validateFields(['key'])
+                    .catch(() => undefined);
+                  if (values)
+                    await probe.test({
+                      networkId,
+                      provider,
+                      key: values.key.trim(),
+                    });
+                }}
+              >
+                测试连接
+              </Button>
+            )}
+            <Button type="primary" htmlType="submit" loading={busy}>
+              添加密钥
+            </Button>
+          </Space>
+          <CredentialTestResult result={probe.result} />
+        </Form>
+        <div>
+          <Typography.Text strong>已保存的密钥</Typography.Text>
+          {keys.length === 0 && (
+            <Typography.Paragraph
+              type="secondary"
+              style={{ marginBlock: '8px 0' }}
+            >
+              还没有添加密钥。
+            </Typography.Paragraph>
+          )}
+          {keys.length > 0 && (
+            <Table<ChainApiKeyDto>
+              rowKey="id"
+              dataSource={keys}
+              pagination={false}
+              size="small"
+              scroll={{ x: canTest ? 440 : 360 }}
+              style={{ marginBlockStart: 8 }}
+              columns={[
+                { title: '备注', dataIndex: 'label', ellipsis: true },
+                { title: '密钥', dataIndex: 'maskedKey' },
+                {
+                  title: '启用',
+                  render: (_, row) => (
+                    <Switch
+                      aria-label={`启用密钥 ${row.maskedKey}`}
+                      checked={row.isEnabled}
+                      disabled={busy}
+                      onChange={(value) => {
+                        savedProbe.clear();
+                        return save(
+                          () => setApiKeyEnabled(row.id, value, networkId),
+                          '密钥状态已更新',
+                        );
+                      }}
+                    />
+                  ),
+                },
+                {
+                  title: '操作',
+                  render: (_, row) => (
+                    <Space wrap size="small">
+                      {canTest && (
+                        <Button
+                          type="link"
+                          size="small"
+                          aria-label={`测试已保存密钥 ${row.maskedKey}`}
+                          loading={savedProbe.testing && testedKey === row.id}
+                          disabled={
+                            busy || (savedProbe.testing && testedKey !== row.id)
+                          }
+                          onClick={() => {
+                            setTestedKey(row.id);
+                            return savedProbe.test({
+                              networkId,
+                              provider,
+                              keyId: row.id,
+                            });
+                          }}
+                        >
+                          测试
+                        </Button>
+                      )}
+                      <Popconfirm
+                        title="删除这把节点密钥？"
+                        onConfirm={() => {
+                          savedProbe.clear();
+                          return save(
+                            () => removeApiKey(row.id, networkId),
+                            '密钥已删除',
+                          );
+                        }}
+                      >
+                        <Button danger type="link" size="small" disabled={busy}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+          )}
+          <CredentialTestResult
+            result={savedProbe.result}
+            label={keys.find((key) => key.id === testedKey)?.maskedKey}
+          />
+        </div>
+      </Space>
+      {isAnkr && (
+        <>
+          <Divider />
+          <DepositScanIntervalForm networkId={networkId} />
+        </>
+      )}
+    </Card>
+  );
+}
+
+function DepositScanIntervalForm({ networkId }: { networkId: string }) {
+  const { message } = App.useApp();
+  const labelId = useId();
+  const [interval, setInterval] = useState<number>();
+  const [saving, setSaving] = useState(false);
+  const [faulted, setFaulted] = useState(false);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setFaulted(false);
+    getAnkrSettings(networkId)
+      .then((settings) => {
+        if (active) setInterval(settings.scanIntervalSeconds);
+      })
+      .catch(() => {
+        if (active) setFaulted(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [networkId, revision]);
+
+  if (faulted) {
+    return (
+      <Alert
+        type="error"
+        title="加载全局充值检测间隔失败"
+        action={
+          <Button onClick={() => setRevision((value) => value + 1)}>
+            重试
+          </Button>
+        }
+      />
+    );
+  }
+  if (interval === undefined) return <Spin />;
+
+  return (
+    <Form<{ scanIntervalSeconds: number }>
+      name="deposit-scan-interval"
+      aria-labelledby={labelId}
+      layout="vertical"
+      initialValues={{ scanIntervalSeconds: interval }}
+      disabled={saving}
+      onFinish={async ({ scanIntervalSeconds }) => {
+        setSaving(true);
+        try {
+          await configureAnkr({ networkId, scanIntervalSeconds });
+          message.success('全局充值检测间隔已保存');
+        } catch (error) {
+          if (isNotFound(error)) message.error('无法保存全局充值检测间隔');
+        } finally {
+          setSaving(false);
+        }
+      }}
+    >
+      <Form.Item
+        name="scanIntervalSeconds"
+        label={<span id={labelId}>全局充值检测间隔（秒）</span>}
+        extra="控制系统每轮自动充值检测之间的等待时间，由所有项目密钥共用。"
+        rules={[{ required: true, type: 'integer', min: 5, max: 4294967 }]}
+      >
+        <InputNumber min={5} max={4294967} precision={0} />
+      </Form.Item>
+      <Button type="primary" htmlType="submit" loading={saving}>
+        保存检测间隔
+      </Button>
+    </Form>
+  );
+}
+
+function AnkrSettingsForm({ networkId }: { networkId: string }) {
+  const { message } = App.useApp();
+  const [form] = Form.useForm<{
+    platformAuthKey?: string;
+    group?: string;
+  }>();
+  const probe = useCredentialTest();
+  const titleId = useId();
+  const [settings, setSettings] = useState<AnkrSettingsDto>();
+  const [busy, setBusy] = useState(true);
+  const [faulted, setFaulted] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const reload = () => setRevision((n) => n + 1);
+  const testedBalance = probe.result;
+
+  useEffect(() => {
+    let active = true;
+    setBusy(true);
+    setFaulted(false);
+    getAnkrSettings(networkId)
+      .then((value) => {
+        if (!active) return;
+        setSettings(value);
+        form.setFieldsValue({
+          platformAuthKey: '',
+          group: value.group ?? '',
+        });
+      })
+      .catch(() => {
+        if (active) setFaulted(true);
+      })
+      .finally(() => {
+        if (active) setBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form, networkId, revision]);
+
+  async function save(
+    input: Parameters<typeof configureAnkr>[0],
+    success: string,
+  ) {
+    setBusy(true);
+    try {
+      await configureAnkr(input);
+      form.setFieldValue('platformAuthKey', '');
+      probe.clear();
+      message.success(success);
+      setSettings(undefined);
+      reload();
+    } catch (error) {
+      if (isNotFound(error)) message.error('无法保存 Ankr 配置');
+      setBusy(false);
+    }
+  }
+
+  if (faulted) {
+    return (
+      <Alert
+        type="error"
+        title="加载 Ankr 配置失败"
+        action={<Button onClick={reload}>重试</Button>}
+      />
+    );
+  }
+
+  const settingsCard = (
+    <Card title={<span id={titleId}>Ankr Platform Auth Key</span>}>
+      <Typography.Paragraph type="secondary">
+        用于查看 Ankr 账户的 Credits 和美元余额。在 Ankr 的 Settings → Platform
+        Swagger 创建密钥。
+      </Typography.Paragraph>
+      <Spin spinning={busy && !settings}>
+        <Form
+          name="ankr-settings"
+          aria-labelledby={titleId}
+          form={form}
+          disabled={busy || !settings}
+          layout="vertical"
+          onValuesChange={(changed) => {
+            if ('platformAuthKey' in changed || 'group' in changed)
+              probe.clear();
+          }}
+          onFinish={({ platformAuthKey, group }) => {
+            const key = platformAuthKey?.trim();
+            const accountGroup = group?.trim() || null;
+            return save(
+              {
+                networkId,
+                ...(key && { platformAuthKey: key }),
+                ...(settings?.group !== accountGroup && {
+                  group: accountGroup,
+                }),
+              },
+              'Ankr 配置已保存',
+            );
+          }}
+        >
+          <Form.Item
+            name="platformAuthKey"
+            label="账户查询密钥"
+            rules={[{ max: 2048 }]}
+            extra={
+              settings?.platformAuthKeyMasked
+                ? `已保存 ${settings.platformAuthKeyMasked}。留空保留当前密钥。`
+                : '未配置'
+            }
+          >
+            <Input.Password
+              autoComplete="new-password"
+              maxLength={2048}
+              spellCheck={false}
+              placeholder="输入 Platform Auth Key"
+            />
+          </Form.Item>
+          <Row gutter={16}>
+            <Col xs={24} sm={15}>
+              <Form.Item
+                name="group"
+                label="Ankr 账户分组"
+                extra="选填，留空使用个人账户。"
+                rules={[
+                  {
+                    transform: (value?: string) => value?.trim(),
+                    pattern: /^\S*$/,
+                    message: '分组标识不能包含空格',
+                  },
+                  { max: 128 },
+                ]}
+              >
+                <Input allowClear maxLength={128} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Space wrap>
+            <Button
+              htmlType="button"
+              loading={probe.testing}
+              disabled={busy || !settings}
+              onClick={async () => {
+                const values = await form
+                  .validateFields(['platformAuthKey', 'group'])
+                  .catch(() => undefined);
+                if (!values) return;
+                const key = values.platformAuthKey?.trim();
+                if (!key && !settings?.platformAuthKeyMasked) {
+                  form.setFields([
+                    {
+                      name: 'platformAuthKey',
+                      errors: ['请输入要测试的平台密钥'],
+                    },
+                  ]);
+                  return;
+                }
+                await probe.test({
+                  networkId,
+                  provider: 'AnkrPlatform',
+                  ...(key && { key }),
+                  group: values.group?.trim() || null,
+                });
+              }}
+            >
+              测试连接
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={busy && !!settings}
+            >
+              保存 Ankr 配置
+            </Button>
+            {settings?.platformAuthKeyMasked && (
+              <Popconfirm
+                title="清除已保存的 Ankr 账户查询密钥？"
+                okText="确认清除"
+                onConfirm={() =>
+                  save(
+                    { networkId, clearPlatformAuthKey: true },
+                    'Ankr 账户查询密钥已清除',
+                  )
+                }
+              >
+                <Button danger type="link" disabled={busy}>
+                  清除账户查询密钥
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+          <CredentialTestResult result={testedBalance}>
+            {testedBalance?.passed &&
+              testedBalance.credits != null &&
+              testedBalance.balanceUsd != null && (
+                <Card
+                  size="small"
+                  title="本次测试余额"
+                  role="region"
+                  aria-label="本次测试余额"
+                  style={{ marginBlockStart: 8 }}
+                >
+                  <AnkrBalanceAmounts
+                    credits={testedBalance.credits}
+                    balanceUsd={testedBalance.balanceUsd}
+                  />
+                </Card>
+              )}
+          </CredentialTestResult>
+        </Form>
+      </Spin>
+    </Card>
+  );
+
+  return (
+    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      {settings && (
+        <AnkrBalanceCard networkId={networkId} savedGroup={settings.group} />
+      )}
+      {settingsCard}
+    </Space>
+  );
+}
+
+function NetworkEditor({
+  network,
+  onSaved,
+  runtimeNetwork,
+}: {
+  network: CollectionNetworkSummaryDto;
+  onSaved: () => void;
+  runtimeNetwork?: CollectionNetworkSummaryDto;
+}) {
+  const { message } = App.useApp();
+  const [form] = Form.useForm<ConfigureNetworkInput>();
+  const [tokenForm] = Form.useForm();
+  const [status, setStatus] = useState<NetworkStatusDto>();
+  const [keys, setKeys] = useState<ChainApiKeysDto>();
+  const [token, setToken] = useState<TokenStatusDto>();
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const resetRules = useRef(true);
+  const savedArrival = useRef<number | null>(null);
+  const isBsc = network.name === 'BSC' && network.chainId === 56;
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setFailed(false);
+    Promise.all([getNetworkStatus(network.id), getApiKeys(network.id)])
+      .then(([value, pool]) => {
+        if (!active) return;
+        setStatus(value);
+        setKeys(pool);
+        // 修改节点密钥或代币时，保留充值规则表单中尚未保存的输入。
+        if (resetRules.current) {
+          savedArrival.current = value.estimatedArrivalMinutes ?? null;
+          form.setFieldsValue({
+            networkId: network.id,
+            rpcUrl: '',
+            nodeLogResultCap: value.nodeLogResultCap ?? null,
+            estimatedArrivalMinutes: savedArrival.current,
+            depositFeeRate: String(value.depositFeeRate),
+            autoCreditMaxAmount: value.autoCreditMaxAmount,
+          });
+          resetRules.current = false;
+        }
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [network.id, form, revision]);
+
+  async function save(
+    action: () => Promise<unknown>,
+    success: string,
+    refreshRules = false,
+  ) {
+    setBusy(true);
+    try {
+      await action();
+      message.success(success);
+      resetRules.current = refreshRules;
+      setRevision((n) => n + 1);
+      onSaved();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (loading && !status) return <Spin />;
+  if (!status)
+    return (
+      <Alert
+        type="error"
+        title="加载网络配置失败"
+        action={<Button onClick={() => setRevision((n) => n + 1)}>重试</Button>}
+      />
+    );
+  return (
+    <Spin spinning={loading}>
+      {runtimeNetwork && network.id !== runtimeNetwork.id && (
         <Alert
           type="info"
           showIcon
-          message="链网配置（高危运维）：RPC、助记词、金库、扫链上限全部在此页面管理。扫链进度由 SignalR 实时推送，无需刷新。"
-        />
-        <div>
-          <Tag color={connView.color}>{connView.text}</Tag>
-        </div>
-        <Card title="网络状态" loading={loading}>
-          {status && (
-            <Descriptions bordered size="small" column={4}>
-              <Descriptions.Item label="网络">
-                {status.network}
-              </Descriptions.Item>
-              <Descriptions.Item label="Chain ID">
-                {status.chainId}
-              </Descriptions.Item>
-              <Descriptions.Item label="链上高度">
-                <Text style={{ fontFamily: 'monospace' }}>
-                  {fmtBlock(mergedHead ?? undefined)}
-                </Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="扫链心跳">
-                {fmtTime(status.scanHeartbeatAt)}
-              </Descriptions.Item>
-              <Descriptions.Item label="助记词">
-                <Space>
-                  {status.hasMnemonic ? (
-                    <Tag color="green">已配置</Tag>
-                  ) : (
-                    <Tag color="red">未配置</Tag>
-                  )}
-                  <Button size="small" danger onClick={doGenerateMnemonic}>
-                    生成
-                  </Button>
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label="RPC 地址">
-                <Space>
-                  <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                    {status.rpcUrlMasked ?? '未配置'}
-                  </Text>
-                  <Button
-                    size="small"
-                    type="link"
-                    onClick={() => setRpcOpen(true)}
-                  >
-                    配置
-                  </Button>
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label="扫链上限">
-                <Space>
-                  <Text>{status.nodeLogResultCap ?? '未配置（不开扫链）'}</Text>
-                  <Button
-                    size="small"
-                    type="link"
-                    onClick={() => {
-                      setCapVal(status.nodeLogResultCap ?? 10000);
-                      setCapOpen(true);
-                    }}
-                  >
-                    改
-                  </Button>
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label="归集心跳">
-                {fmtTime(status.sweepHeartbeatAt)}
-              </Descriptions.Item>
-              <Descriptions.Item label="大额门持有">
-                {status.heldDepositCount > 0 ? (
-                  <Tag color="purple">
-                    {status.heldDepositCount} 笔 / {status.heldDepositTotal}
-                    （等放行）
-                  </Tag>
-                ) : (
-                  <Tag color="default">无持有</Tag>
-                )}
-              </Descriptions.Item>
-              <Descriptions.Item label="充值费率">
-                <Space>
-                  <Text>{(status.depositFeeRate * 100).toFixed(2)}%</Text>
-                  <Button
-                    size="small"
-                    type="link"
-                    onClick={() => {
-                      setPolicyFeeRate(String(status.depositFeeRate));
-                      setPolicyMax(status.autoCreditMaxAmount);
-                      setPolicyOpen(true);
-                    }}
-                  >
-                    政策
-                  </Button>
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label="大额放行门">
-                <Text>{status.autoCreditMaxAmount}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="链上开关">
-                <Space size={12}>
-                  <Space size={4}>
-                    <Text type="secondary">扫链</Text>
-                    <Popconfirm
-                      title={`确认${status.scanEnabled ? '关闭' : '开启'}扫链？`}
-                      description="误开会扫链烧 Gas；worker 下一轮热生效。"
-                      onConfirm={() => doToggleSwitch('scanEnabled', !status.scanEnabled)}
-                      okText="确认"
-                      cancelText="取消"
-                    >
-                      <Switch checked={status.scanEnabled} size="small" />
-                    </Popconfirm>
-                  </Space>
-                  <Space size={4}>
-                    <Text type="secondary">归集</Text>
-                    <Popconfirm
-                      title={`确认${status.sweepEnabled ? '关闭' : '开启'}归集？`}
-                      description="归集会向用户地址打 BNB 并签名转账；worker 下一轮热生效。"
-                      onConfirm={() => doToggleSwitch('sweepEnabled', !status.sweepEnabled)}
-                      okText="确认"
-                      cancelText="取消"
-                    >
-                      <Switch checked={status.sweepEnabled} size="small" />
-                    </Popconfirm>
-                  </Space>
-                  <Space size={4}>
-                    <Text type="secondary">热钱包监控</Text>
-                    <Popconfirm
-                      title={`确认${status.hotWalletWatchEnabled ? '关闭' : '开启'}热钱包逐笔监控？`}
-                      description="只读监控不碰签名面；worker 下一轮热生效。"
-                      onConfirm={() =>
-                        doToggleSwitch('hotWalletWatchEnabled', !status.hotWalletWatchEnabled)
-                      }
-                      okText="确认"
-                      cancelText="取消"
-                    >
-                      <Switch checked={status.hotWalletWatchEnabled} size="small" />
-                    </Popconfirm>
-                  </Space>
-                </Space>
-              </Descriptions.Item>
-            </Descriptions>
-          )}
-        </Card>
-        <Card title="扫链 KEY 池（同服务商多把，限流自动轮换）">
-          <Space orientation="vertical" style={{ width: '100%' }} size={12}>
-            <Alert
-              type="info"
-              showIcon
-              message={
-                <>
-                  扫链 RPC 与 Etherscan 各自可挂多把 KEY：网关遇 429/401/403
-                  或配额类错误自动切下一把，逐轮从不同 KEY 起步分摊限流。
-                  {rpcKeys.length === 0 && rpcFallbackMasked && (
-                    <>
-                      {' '}
-                      当前 RPC 池为空，使用回退地址{' '}
-                      <Text code>{rpcFallbackMasked}</Text>（网络状态里的 RPC
-                      地址）。
-                    </>
-                  )}
-                  {etherscanKeys.length === 0 && etherscanFallbackPresent && (
-                    <> Etherscan 池为空，使用宿主配置端点回退。</>
-                  )}
-                </>
-              }
-            />
-            <Space wrap>
-              <Select
-                value={newKeyProvider}
-                onChange={(v: string) => setNewKeyProvider(v)}
-                style={{ width: 200 }}
-                popupMatchSelectWidth={false}
-                options={[
-                  { value: 'RpcBsc', label: 'Ankr RPC（扫链）' },
-                  { value: 'EtherscanV2', label: 'Etherscan V2（兜底）' },
-                ]}
-              />
-              <Input.Password
-                placeholder="粘贴 KEY（明文只传不存）"
-                value={newKeyValue}
-                onChange={(e) => setNewKeyValue(e.target.value)}
-                style={{ width: 380, fontFamily: 'monospace' }}
-                onPressEnter={submitAddKey}
-              />
-              <Input
-                placeholder="备注（如 ankr-backup）"
-                value={newKeyLabel}
-                onChange={(e) => setNewKeyLabel(e.target.value)}
-                style={{ width: 200 }}
-                onPressEnter={submitAddKey}
-              />
-              <Button
-                type="primary"
-                loading={newKeySaving}
-                onClick={submitAddKey}
-              >
-                添加
-              </Button>
-            </Space>
-            <Table<ChainApiKeyDto>
-              rowKey="id"
-              dataSource={keyRows}
-              columns={keyResizableColumns}
-              components={keyComponents}
-              scroll={{ x: keyScrollX }}
-              pagination={false}
-              size="small"
-              locale={{ emptyText: '暂无 KEY（使用回退来源）' }}
-            />
-          </Space>
-        </Card>
-        <Card title="代币通道（SignalR 实时推送）">
-          <Table<TokenStatusDto>
-            rowKey="id"
-            dataSource={mergedTokens}
-            columns={tokenResizableColumns}
-            components={tokenComponents}
-            scroll={{ x: tokenScrollX }}
-            pagination={false}
-            size="small"
-          />
-        </Card>
-        {status &&
-          (status.scanBehindAlertedAt ||
-            status.sweepStuckAlertedAt ||
-            status.gasLowAlertedAt) && (
-            <Card title="最近告警" size="small">
-              <Space orientation="vertical">
-                {status.scanBehindAlertedAt && (
-                  <Text type="warning">
-                    扫链落后告警：{fmtTime(status.scanBehindAlertedAt)}
-                  </Text>
-                )}
-                {status.sweepStuckAlertedAt && (
-                  <Text type="danger">
-                    归集卡住告警：{fmtTime(status.sweepStuckAlertedAt)}
-                  </Text>
-                )}
-                {status.gasLowAlertedAt && (
-                  <Text type="warning">
-                    Gas 不足告警：{fmtTime(status.gasLowAlertedAt)}
-                  </Text>
-                )}
-              </Space>
-            </Card>
-          )}
-      </Space>
-
-      <Modal
-        title="配置 RPC 地址"
-        open={rpcOpen}
-        onOk={submitRpc}
-        onCancel={() => setRpcOpen(false)}
-        confirmLoading={rpcSaving}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          填写 Ankr BSC RPC 完整地址（含项目密钥）。仅允许
-          https。密文入库，不落日志。
-        </Paragraph>
-        <Input
-          placeholder="https://rpc.ankr.com/bsc/你的密钥"
-          value={rpcUrl}
-          onChange={(e) => setRpcUrl(e.target.value)}
-        />
-      </Modal>
-      <Modal
-        title="设置扫链响应上限"
-        open={capOpen}
-        onOk={submitCap}
-        onCancel={() => setCapOpen(false)}
-        confirmLoading={capSaving}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          单次 getLogs 响应的条数上限。达到上限八成时游标不推进。
-        </Paragraph>
-        <InputNumber
-          min={100}
-          value={capVal}
-          onChange={(v) => setCapVal(v ?? 10000)}
-          style={{ width: '100%' }}
-        />
-      </Modal>
-      <Modal
-        title={`设置金库地址（${vaultSymbol}）`}
-        open={vaultOpen}
-        onOk={submitVault}
-        onCancel={() => setVaultOpen(false)}
-        confirmLoading={vaultSaving}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Paragraph
-          type="secondary"
-          style={{ marginBottom: 12, color: '#cf1322' }}
-        >
-          金库地址是归集转账的目标地址。填错意味着用户资金会不可逆地转到错误地址。
-        </Paragraph>
-        <Input
-          placeholder="0x..."
-          value={vaultAddr}
-          onChange={(e) => setVaultAddr(e.target.value)}
-          style={{ fontFamily: 'monospace' }}
-        />
-      </Modal>
-      <Modal
-        title={`设置最低充值额（${minDepSymbol}）`}
-        open={minDepOpen}
-        onOk={submitMinDep}
-        onCancel={() => setMinDepOpen(false)}
-        confirmLoading={minDepSaving}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          低于此金额的转入会被跳过。
-        </Paragraph>
-        <Input
-          placeholder="10"
-          value={minDepVal}
-          onChange={(e) => setMinDepVal(e.target.value)}
-        />
-      </Modal>
-      <Modal
-        title="充值政策（费率 + 大额放行门）"
-        open={policyOpen}
-        onOk={submitPolicy}
-        onCancel={() => setPolicyOpen(false)}
-        confirmLoading={policySaving}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          费率对充值毛额计（建单时快照，修改只影响新单）；毛额超过放行门的进款单停在
-          Confirmed 等管理端放行，0 = 全部等放行。
-        </Paragraph>
-        <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <div>
-            <Text type="secondary">充值手续费率（0-1，如 0.001 = 0.1%）</Text>
-            <Input
-              placeholder="0.001"
-              value={policyFeeRate}
-              onChange={(e) => setPolicyFeeRate(e.target.value)}
-            />
-          </div>
-          <div>
-            <Text type="secondary">
-              大额放行门（≥ 0；超过它的进款单等人工放行）
-            </Text>
-            <Input
-              placeholder="5000"
-              value={policyMax}
-              onChange={(e) => setPolicyMax(e.target.value)}
-            />
-          </div>
-        </Space>
-      </Modal>
-      <Modal
-        title="助记词（只显示这一次）"
-        open={!!mnemonicResult}
-        onCancel={() => setMnemonicResult(null)}
-        footer={[
-          <Button
-            key="copy"
-            type="primary"
-            onClick={() => {
-              navigator.clipboard?.writeText(mnemonicResult ?? '');
-              message.success('已复制');
-            }}
-          >
-            复制
-          </Button>,
-          <Button key="ok" danger onClick={() => setMnemonicResult(null)}>
-            我已安全保管
-          </Button>,
-        ]}
-        width={600}
-      >
-        <Alert
-          type="warning"
-          showIcon
+          title={`当前自动充值与归集运行于 ${runtimeNetwork.name}。${network.name} 的自动处理尚待接入。`}
           style={{ marginBottom: 16 }}
-          message="请立即抄写并安全保管。关闭后无法再次查看。"
         />
-        <Paragraph
-          style={{
-            fontFamily: 'monospace',
-            fontSize: 16,
-            wordBreak: 'break-all',
-            padding: 16,
-            background: '#fafafa',
-            borderRadius: 8,
+      )}
+      {failed && (
+        <Alert
+          type="error"
+          title="刷新网络配置失败"
+          action={
+            <Button onClick={() => setRevision((n) => n + 1)}>重试</Button>
+          }
+        />
+      )}
+      <Tabs
+        items={[
+          {
+            key: 'rules',
+            label: '节点与充值规则',
+            children: (
+              <Form
+                form={form}
+                disabled={busy}
+                layout="vertical"
+                onFinish={({ estimatedArrivalMinutes, ...values }) => {
+                  const arrival = estimatedArrivalMinutes ?? null;
+                  return save(
+                    () =>
+                      configureNetwork({
+                        ...values,
+                        networkId: network.id,
+                        ...(isBsc &&
+                          arrival !== savedArrival.current && {
+                            estimatedArrivalMinutes: arrival,
+                          }),
+                      }),
+                    '网络配置已保存',
+                    true,
+                  );
+                }}
+              >
+                <Space
+                  orientation="vertical"
+                  size={16}
+                  style={{ width: '100%' }}
+                >
+                  <Card title={`${network.name} 充值规则`} size="small">
+                    <Table<TokenStatusDto>
+                      rowKey="id"
+                      dataSource={status.tokens}
+                      pagination={false}
+                      size="small"
+                      columns={[
+                        { title: '代币', dataIndex: 'symbol' },
+                        { title: '最低充值', dataIndex: 'minDeposit' },
+                        {
+                          title: '状态',
+                          dataIndex: 'isEnabled',
+                          render: (enabled: boolean) => (
+                            <Tag color={enabled ? 'success' : 'default'}>
+                              {enabled ? '启用' : '停用'}
+                            </Tag>
+                          ),
+                        },
+                        {
+                          title: '操作',
+                          render: (_, row) => (
+                            <Button
+                              type="link"
+                              aria-label={`配置 ${row.symbol} 充值规则`}
+                              onClick={() => {
+                                tokenForm.setFieldsValue(row);
+                                setToken(row);
+                              }}
+                            >
+                              配置
+                            </Button>
+                          ),
+                        },
+                      ]}
+                      style={{ marginBottom: 16 }}
+                    />
+                    <Row gutter={16}>
+                      {isBsc && (
+                        <Col xs={24} sm={12}>
+                          <Form.Item
+                            name="estimatedArrivalMinutes"
+                            label="预计到账（分钟）"
+                            extra="仅用于展示，实际到账以区块确认为准。"
+                            rules={[
+                              {
+                                required: true,
+                                type: 'integer',
+                                min: 1,
+                                max: 1440,
+                                message: '请输入 1–1440 之间的整数',
+                              },
+                            ]}
+                          >
+                            <InputNumber
+                              min={1}
+                              max={1440}
+                              style={{ width: '100%' }}
+                            />
+                          </Form.Item>
+                        </Col>
+                      )}
+                      <Col xs={24} sm={12}>
+                        <Form.Item
+                          name="depositFeeRate"
+                          label="充值费率"
+                          extra="0.05 表示 5%，保存后用于新充值单。"
+                          rules={[{ required: true }]}
+                        >
+                          <Input inputMode="decimal" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Form.Item
+                      name="autoCreditMaxAmount"
+                      label="自动归集金额上限"
+                      extra="超过此金额需人工放行。0 表示全部需人工放行。"
+                      rules={[{ required: true }]}
+                    >
+                      <Input inputMode="decimal" />
+                    </Form.Item>
+                  </Card>
+                  <Card title="节点配置" size="small">
+                    <Form.Item
+                      name="rpcUrl"
+                      label="RPC 地址"
+                      extra={`已保存 ${status.rpcUrlMasked || '未配置'}。留空沿用已保存地址。`}
+                    >
+                      <Input.Password
+                        autoComplete="new-password"
+                        placeholder="https://"
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      name="nodeLogResultCap"
+                      label="单次日志响应上限"
+                      extra="根据节点实测或服务商文档填写。"
+                      rules={[{ type: 'number', min: 100 }]}
+                    >
+                      <InputNumber
+                        min={100}
+                        precision={0}
+                        style={{ width: '100%' }}
+                      />
+                    </Form.Item>
+                  </Card>
+                  <Button type="primary" htmlType="submit" loading={busy}>
+                    保存网络配置
+                  </Button>
+                </Space>
+              </Form>
+            ),
+          },
+          {
+            key: 'keys',
+            label: '节点密钥',
+            children: isBsc ? (
+              <>
+                <Typography.Paragraph type="secondary">
+                  选一个服务来配置。测试连接只发起查询；确认后可另行保存。
+                </Typography.Paragraph>
+                <Tabs
+                  type="card"
+                  size="small"
+                  items={[
+                    {
+                      key: 'ankr-rpc',
+                      label: 'Ankr RPC',
+                      children: (
+                        <NetworkApiKeyPool
+                          networkId={network.id}
+                          provider="RpcBsc"
+                          keys={keys?.rpcKeys ?? []}
+                          busy={busy}
+                          save={save}
+                          canTest
+                        />
+                      ),
+                    },
+                    {
+                      key: 'ankr-platform',
+                      label: 'Ankr 账户余额',
+                      children: <AnkrSettingsForm networkId={network.id} />,
+                    },
+                    {
+                      key: 'etherscan',
+                      label: 'Etherscan 补查',
+                      children: (
+                        <NetworkApiKeyPool
+                          networkId={network.id}
+                          provider="EtherscanV2"
+                          keys={keys?.etherscanKeys ?? []}
+                          busy={busy}
+                          save={save}
+                          canTest
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              </>
+            ) : (
+              <NetworkApiKeyPool
+                networkId={network.id}
+                provider="EtherscanV2"
+                keys={keys?.etherscanKeys ?? []}
+                busy={busy}
+                save={save}
+                canTest={false}
+              />
+            ),
+          },
+        ]}
+      />
+      <Modal
+        title={`${token?.symbol ?? ''} 代币规则`}
+        open={!!token}
+        onCancel={() => setToken(undefined)}
+        confirmLoading={busy}
+        onOk={() => tokenForm.submit()}
+      >
+        <Form
+          form={tokenForm}
+          disabled={busy}
+          layout="vertical"
+          onFinish={async (values) => {
+            if (
+              token &&
+              (await save(
+                () =>
+                  configureNetworkToken({
+                    networkId: network.id,
+                    tokenId: token.id,
+                    minDeposit: values.minDeposit,
+                    isEnabled: values.isEnabled,
+                  }),
+                '代币规则已保存',
+              ))
+            )
+              setToken(undefined);
           }}
         >
-          {mnemonicResult}
-        </Paragraph>
+          <Form.Item
+            name="minDeposit"
+            label="最低充值"
+            rules={[{ required: true }]}
+          >
+            <Input inputMode="decimal" />
+          </Form.Item>
+          <Form.Item name="isEnabled" label="启用代币" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+        </Form>
       </Modal>
-    </PageContainer>
+    </Spin>
+  );
+}
+
+export default function NetworkConfigPage() {
+  const access = useAccess();
+  const [networks, setNetworks] = useState<CollectionNetworkSummaryDto[]>([]);
+  const [selected, setSelected] = useState<CollectionNetworkSummaryDto>();
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const load = useCallback(async () => {
+    if (!access.canAdminNetwork) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      setNetworks(await getNetworks());
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [access.canAdminNetwork]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  if (!access.canAdminNetwork) {
+    return <Empty description="暂无链网络管理权限" />;
+  }
+
+  return (
+    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      {failed && (
+        <Alert
+          type="error"
+          title="加载网络列表失败"
+          action={<Button onClick={load}>重试</Button>}
+        />
+      )}
+      <Card
+        extra={
+          <Button onClick={load} loading={loading}>
+            刷新
+          </Button>
+        }
+      >
+        <Table<CollectionNetworkSummaryDto>
+          rowKey="id"
+          dataSource={networks}
+          loading={loading}
+          scroll={{ x: 720 }}
+          pagination={false}
+          locale={{ emptyText: <Empty description="暂无链网络" /> }}
+          columns={[
+            { title: '网络', dataIndex: 'name' },
+            { title: 'Chain ID', dataIndex: 'chainId' },
+            {
+              title: '自动处理',
+              key: 'processing',
+              render: (_, row) => (
+                <Tag color={row.id === networks[0]?.id ? 'success' : 'default'}>
+                  {row.id === networks[0]?.id ? '当前运行网络' : '待接入'}
+                </Tag>
+              ),
+            },
+            {
+              title: '节点',
+              dataIndex: 'rpcConfigured',
+              render: (configured: boolean) => (
+                <Tag color={configured ? 'success' : 'warning'}>
+                  {configured ? '已配置' : '未配置'}
+                </Tag>
+              ),
+            },
+            {
+              title: '充值费率',
+              dataIndex: 'depositFeeRate',
+              render: (rate: number) => `${(rate * 100).toFixed(2)}%`,
+            },
+            { title: '自动归集上限', dataIndex: 'autoCreditMaxAmount' },
+            {
+              title: '操作',
+              render: (_, row) => (
+                <Button type="link" onClick={() => setSelected(row)}>
+                  配置
+                </Button>
+              ),
+            },
+          ]}
+        />
+      </Card>
+      <Drawer
+        title={selected ? `${selected.name} 网络配置` : '网络配置'}
+        open={!!selected}
+        onClose={() => setSelected(undefined)}
+        size="min(1280px, 100%)"
+        focusable={{ trap: true, focusTriggerAfterClose: true }}
+        styles={{ body: { overscrollBehavior: 'contain' } }}
+      >
+        {selected && (
+          <NetworkEditor
+            key={selected.id}
+            network={selected}
+            onSaved={load}
+            runtimeNetwork={networks[0]}
+          />
+        )}
+      </Drawer>
+    </Space>
   );
 }

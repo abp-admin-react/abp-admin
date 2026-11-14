@@ -2,7 +2,7 @@ import { request } from '@umijs/max';
 
 /**
  * 链网管理 API 镜像（对应 CollectionNetworkAdminAppService）。
- * 全部需要 AbpAdmin.Collection.Network.Admin 权限 + Host 身份。
+ * 网络配置要求 Network.Admin 与 Host 身份，钱包读取也允许 Withdraw.Admin。
  */
 
 export interface TokenStatusDto {
@@ -18,6 +18,7 @@ export interface TokenStatusDto {
 }
 
 export interface NetworkStatusDto {
+  id: string;
   network: string;
   chainId: number;
   hasMnemonic: boolean;
@@ -31,11 +32,12 @@ export interface NetworkStatusDto {
   gasLowAlertedAt?: string;
   scanEnabled: boolean;
   sweepEnabled: boolean;
-  /** 热钱包监控开关（三开关写入在 setChainSwitches 端点，Network.Admin 权限） */
+  /** 热钱包逐笔监控开关。 */
   hotWalletWatchEnabled: boolean;
   /** 充值手续费率（网络级 [0,1]；建单快照，改只影响新单） */
   depositFeeRate: number;
-  /** 大额放行门（毛额超过它停在 Confirmed 等放行；0 = 全部等放行；十进制字符串） */
+  estimatedArrivalMinutes: number | null;
+  /** 超过此毛额的充值须人工放行，0 表示全部人工放行。 */
   autoCreditMaxAmount: string;
   /** 大额门持有中进款单数（Confirmed 且未挂归集任务，等放行敞口） */
   heldDepositCount: number;
@@ -63,6 +65,7 @@ export interface DepositOrderListDto {
   blockNumber: number;
   status: string;
   sweepTaskId?: string;
+  manuallyReleased: boolean;
   creationTime: string;
 }
 
@@ -114,10 +117,178 @@ export interface ChainApiKeysDto {
   etherscanFallbackPresent: boolean;
 }
 
+export interface AnkrSettingsDto {
+  platformAuthKeyMasked: string | null;
+  group: string | null;
+  scanIntervalSeconds: number;
+}
+
+export interface AnkrBalanceDto {
+  status: 'notConfigured' | 'available' | 'unavailable';
+  credits: string | null;
+  balanceUsd: string | null;
+  checkedAt: string | null;
+}
+
+export interface TestNodeCredentialDto {
+  /** 服务商检查结果。HTTP 200 也可能返回验证未通过。 */
+  passed: boolean;
+  message: string;
+  /** 仅 Ankr Platform 验证成功时返回该次查询的余额。 */
+  credits: string | null;
+  balanceUsd: string | null;
+}
+
 const BASE = '/api/app/collection-network-admin';
 
-export async function getNetworkStatus(): Promise<NetworkStatusDto> {
-  return request(`${BASE}/status`);
+export interface CollectionNetworkSummaryDto {
+  id: string;
+  name: string;
+  chainId: number;
+  rpcConfigured: boolean;
+  hasMnemonic: boolean;
+  latestChainHead: number | null;
+  scanHeartbeatAt: string | null;
+  depositFeeRate: number;
+  autoCreditMaxAmount: string;
+}
+
+export interface CollectionWalletTokenDto {
+  symbol: string;
+  vaultAddress: string | null;
+  vaultBalance: string | null;
+  withdrawBalance: string | null;
+}
+
+export interface CollectionWalletStatusDto {
+  networkId: string;
+  networkName: string;
+  hasMnemonic: boolean;
+  fuelAddress: string | null;
+  fuelBnb: string | null;
+  withdrawAddress: string | null;
+  hasWithdrawKey: boolean;
+  isWithdrawalNetwork: boolean;
+  withdrawalNetworkName: string | null;
+  withdrawBnb: string | null;
+  balancesAvailable: boolean;
+  tokens: CollectionWalletTokenDto[];
+}
+
+export interface ConfigureNetworkInput {
+  networkId: string;
+  rpcUrl?: string | null;
+  nodeLogResultCap: number | null;
+  depositFeeRate: string;
+  autoCreditMaxAmount: string;
+  estimatedArrivalMinutes?: number | null;
+}
+
+export interface ChainRuntimeSettingsDto {
+  chainRoundBudgetSeconds: number;
+  withdrawRoundBudgetSeconds: number;
+  alertRecipientUserIds: string[];
+  useLegacyExplorerFallback: boolean;
+  hasEncryptionKey: boolean;
+}
+
+export type ChainRuntimeSettingsInput = Omit<
+  ChainRuntimeSettingsDto,
+  'hasEncryptionKey'
+>;
+
+export function getChainRuntimeSettings(): Promise<ChainRuntimeSettingsDto> {
+  return request(`${BASE}/runtime-settings`);
+}
+
+export function updateChainRuntimeSettings(
+  data: ChainRuntimeSettingsInput,
+): Promise<ChainRuntimeSettingsDto> {
+  return request(`${BASE}/runtime-settings`, { method: 'PUT', data });
+}
+
+export function initializeChainCredentialEncryption(): Promise<void> {
+  return request(`${BASE}/initialize-encryption`, { method: 'POST' });
+}
+
+export function getNetworks(): Promise<CollectionNetworkSummaryDto[]> {
+  return request(`${BASE}/networks`);
+}
+
+export function getWalletNetworks(): Promise<CollectionNetworkSummaryDto[]> {
+  return request('/api/app/collection-wallet-admin/networks');
+}
+
+export function getWalletStatus(
+  networkId: string,
+  includeBalances = false,
+): Promise<CollectionWalletStatusDto> {
+  return request(`/api/app/collection-wallet-admin/${networkId}`, {
+    params: { IncludeBalances: includeBalances },
+  });
+}
+
+export function configureNetwork(input: ConfigureNetworkInput): Promise<void> {
+  return request(`${BASE}/configure-network`, { method: 'POST', data: input });
+}
+
+export function configureNetworkToken(input: {
+  networkId: string;
+  tokenId: string;
+  minDeposit: string;
+  isEnabled: boolean;
+}): Promise<void> {
+  return request(`${BASE}/configure-token`, { method: 'POST', data: input });
+}
+
+export function createNetworkApiKey(input: {
+  networkId: string;
+  provider: string;
+  key: string;
+  label?: string;
+}): Promise<ChainApiKeyDto> {
+  return request(`${BASE}/add-api-key`, { method: 'POST', data: input });
+}
+
+export async function getNetworkStatus(
+  networkId?: string,
+): Promise<NetworkStatusDto> {
+  return request(`${BASE}/status`, { params: { NetworkId: networkId } });
+}
+
+export function getAnkrSettings(networkId: string): Promise<AnkrSettingsDto> {
+  return request(`${BASE}/ankr-settings`, { params: { NetworkId: networkId } });
+}
+
+export function configureAnkr(input: {
+  networkId: string;
+  platformAuthKey?: string;
+  clearPlatformAuthKey?: boolean;
+  group?: string | null;
+  scanIntervalSeconds?: number;
+}): Promise<void> {
+  return request(`${BASE}/configure-ankr`, { method: 'POST', data: input });
+}
+
+export function getAnkrBalance(networkId?: string): Promise<AnkrBalanceDto> {
+  return request(`${BASE}/ankr-balance`, {
+    params: { NetworkId: networkId },
+    skipErrorHandler: true,
+  });
+}
+
+export function testNodeCredential(input: {
+  networkId: string;
+  provider: 'RpcBsc' | 'AnkrPlatform' | 'EtherscanV2';
+  key?: string | null;
+  keyId?: string | null;
+  group?: string | null;
+}): Promise<TestNodeCredentialDto> {
+  return request(`${BASE}/test-node-credential`, {
+    method: 'POST',
+    data: input,
+    skipErrorHandler: true,
+  });
 }
 
 export async function getDepositOrders(params: {
@@ -125,8 +296,17 @@ export async function getDepositOrders(params: {
   maxResultCount?: number;
   status?: string;
   symbol?: string;
+  depositId?: string;
 }): Promise<{ totalCount: number; items: DepositOrderListDto[] }> {
-  return request(`${BASE}/deposit-orders`, { params });
+  return request(`${BASE}/deposit-orders`, {
+    params: {
+      SkipCount: params.skipCount,
+      MaxResultCount: params.maxResultCount,
+      Status: params.status,
+      Symbol: params.symbol,
+      DepositId: params.depositId,
+    },
+  });
 }
 
 export async function getSweepTasks(params: {
@@ -137,19 +317,12 @@ export async function getSweepTasks(params: {
   return request(`${BASE}/sweep-tasks`, { params });
 }
 
-/** 大额进款放行（只入队；入账仍走归集确认的净额路径）。仅 Confirmed 且未挂任务的单。 */
-// ABP 自动路由对单 Guid 参数生成路径段（?id= 形态 302 未处理——E2E 实测）
+/** 保存人工放行资格并加入归集队列。已有任务时重复请求成功。 */
 export async function approveLargeDeposit(id: string): Promise<void> {
   await request(`${BASE}/${id}/approve-large-deposit`, { method: 'POST' });
 }
 
-/**
- * 手动重试归集任务（对齐线上 retrySweepTask）：仅 Failed 可重试，跳过冷却立即拉回 Queued；
- * 仅人工失败（打油超限/链上 revert 等）同样允许——管理员显式决策。
- * 单 Guid 参数走路径段（同 approveLargeDeposit 的 302 实测教训）；
- * 段名以 api-definition 实测为准是 /retry-sweep-task（RetrySweepTaskAsync 去 Async 缀），
- * 不是想当然的 /retry——E2E 客户视角点击实测踩中（前端形状锁曾锁了自嗨形状）。
- */
+/** 手动将失败任务重新入队，包括需要人工处置的任务。 */
 export async function retrySweepTask(id: string): Promise<void> {
   await request(`${BASE}/${id}/retry-sweep-task`, { method: 'POST' });
 }
@@ -172,20 +345,13 @@ export async function getVaultChecks(params: {
   return request(`${BASE}/vault-checks`, { params });
 }
 
-/**
- * 链上总开关（高危：误开扫链/归集烧 Gas）。写设置库，worker 下一轮热生效；
- * 只传要改的参数（未传的不动）。
- */
+/** 仅写入显式传入的开关，后台任务每轮读取。 */
 export async function setChainSwitches(params: {
   scanEnabled?: boolean;
   sweepEnabled?: boolean;
   hotWalletWatchEnabled?: boolean;
 }): Promise<void> {
   await request(`${BASE}/set-chain-switches`, { method: 'POST', params });
-}
-
-export async function setRpcUrl(rpcUrl: string): Promise<void> {
-  await request(`${BASE}/set-rpc-url`, { method: 'POST', params: { rpcUrl } });
 }
 
 export async function setNodeLogResultCap(cap: number): Promise<void> {
@@ -198,10 +364,11 @@ export async function setNodeLogResultCap(cap: number): Promise<void> {
 export async function setVaultAddress(
   symbol: string,
   vaultAddress: string,
+  networkId?: string,
 ): Promise<void> {
   await request(`${BASE}/set-vault-address`, {
     method: 'POST',
-    params: { symbol, vaultAddress },
+    params: { symbol, vaultAddress, NetworkId: networkId },
   });
 }
 
@@ -225,40 +392,38 @@ export async function setTokenEnabled(
   });
 }
 
-export async function generateMnemonic(): Promise<string> {
-  return request(`${BASE}/generate-mnemonic`, { method: 'POST' });
-}
-
-/** 扫链 KEY 池全量（掩码回显 + 回退来源可见度） */
-export async function getApiKeys(): Promise<ChainApiKeysDto> {
-  return request(`${BASE}/api-keys`);
-}
-
-/** 添加一把扫链 KEY（明文只传不存；provider: RpcBsc / EtherscanV2）。ABP 约定路由：Add 前缀动词省略 → POST /api-key */
-export async function addApiKey(
-  provider: string,
-  key: string,
-  label?: string,
-): Promise<ChainApiKeyDto> {
-  return request(`${BASE}/api-key`, {
+export async function generateMnemonic(networkId?: string): Promise<string> {
+  return request(`${BASE}/generate-mnemonic`, {
     method: 'POST',
-    params: { provider, key, label },
+    params: { NetworkId: networkId },
   });
 }
 
-export async function removeApiKey(id: string): Promise<void> {
-  await request(`${BASE}/${id}/api-key`, { method: 'DELETE' });
+/** 扫链 KEY 池全量（掩码回显 + 回退来源可见度） */
+export async function getApiKeys(networkId?: string): Promise<ChainApiKeysDto> {
+  return request(`${BASE}/api-keys`, { params: { NetworkId: networkId } });
+}
+
+export async function removeApiKey(
+  id: string,
+  networkId?: string,
+): Promise<void> {
+  await request(`${BASE}/${id}/api-key`, {
+    method: 'DELETE',
+    params: { NetworkId: networkId },
+  });
 }
 
 export async function setApiKeyEnabled(
   id: string,
   isEnabled: boolean,
+  networkId?: string,
 ): Promise<void> {
   // 单 Guid 参数端点为路径段（?id= 形态不命中路由→SPA 兜底 200 HTML→开关“假成功”——
   // api-definition 实测：POST /{id}/set-api-key-enabled；E2E 二轮实锤）
   await request(`${BASE}/${id}/set-api-key-enabled`, {
     method: 'POST',
-    params: { isEnabled },
+    params: { isEnabled, NetworkId: networkId },
   });
 }
 
@@ -274,6 +439,15 @@ export const DEPOSIT_STATUS_LABELS: Record<
   Sweeping: { color: 'orange', text: '归集中' },
   Swept: { color: 'success', text: '已入账' },
 };
+
+export function depositStatusLabel(row: DepositOrderListDto) {
+  if (row.status === 'Confirmed' && !row.sweepTaskId && !row.manuallyReleased) {
+    return { color: 'purple', text: '大额待放行' };
+  }
+  return (
+    DEPOSIT_STATUS_LABELS[row.status] ?? { color: 'default', text: row.status }
+  );
+}
 
 export const SWEEP_STATUS_LABELS: Record<
   string,
