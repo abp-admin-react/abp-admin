@@ -20,6 +20,10 @@ import {
   updateTimezone,
 } from '@/abp/settings';
 import { getSettingGroups } from '@/abp/settingUi';
+import {
+  dedicatedSettingGroupNames,
+  tenantGeneralSettingGroupNames,
+} from './channelGroups';
 import SettingGroupPanel from './SettingGroupPanel';
 
 const SettingsPage: React.FC = () => {
@@ -36,13 +40,22 @@ const SettingsPage: React.FC = () => {
     setLoadingGroups(true);
     try {
       const groups = await getSettingGroups();
-      setSettingGroups(groups || []);
+      setSettingGroups(
+        (groups || []).filter((group) => {
+          const name = group.groupName ?? '';
+          return (
+            !dedicatedSettingGroupNames.has(name) ||
+            (!access.canManagePaymentSettings &&
+              tenantGeneralSettingGroupNames.has(name))
+          );
+        }),
+      );
     } catch (e: any) {
       message.error(e?.message || '加载设置失败');
     } finally {
       setLoadingGroups(false);
     }
-  }, [access.canManageSettings, message]);
+  }, [access.canManageSettings, access.canManagePaymentSettings, message]);
 
   useEffect(() => {
     loadSettingGroups();
@@ -224,7 +237,7 @@ const SettingsPage: React.FC = () => {
   const items = [...settingUiItems, ...customItems];
 
   return (
-    <PageContainer>
+    <PageContainer title="通用设置">
       <Spin spinning={loadingGroups}>
         {items.length ? (
           <ProCard tabs={{ items: items as any }} />

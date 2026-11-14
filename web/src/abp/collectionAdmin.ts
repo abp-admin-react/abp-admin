@@ -6,6 +6,103 @@
 import { request } from '@umijs/max';
 
 const BASE = '/api/app/collection-balance-admin';
+const PAYMENTS_BASE = '/api/app/collection-payment-admin';
+const PAYMENT_OPERATIONS = '/api/app/collection-payments';
+const REFUNDS_BASE = '/api/app/collection-refunds';
+
+/** 管理端收款记录。金额保留服务端十进制字符串。 */
+export interface CollectionPaymentAdminDto {
+  id: string;
+  collectionNo: string;
+  businessType: string;
+  businessId: string;
+  userId: string;
+  channel: string;
+  currency: string;
+  amount: string;
+  status: string;
+  statusNote: string | null;
+  channelResultUnknown: boolean;
+  expiresAt: string | null;
+  channelTradeNo: string | null;
+  completedAt: string | null;
+  creationTime: string;
+}
+
+export function getCollectionPayments(params: {
+  skipCount: number;
+  maxResultCount: number;
+  filter?: string;
+  status?: string;
+  channel?: string;
+}): Promise<{ totalCount: number; items: CollectionPaymentAdminDto[] }> {
+  return request(PAYMENTS_BASE, {
+    params: {
+      SkipCount: params.skipCount,
+      MaxResultCount: params.maxResultCount,
+      Filter: params.filter,
+      Status: params.status,
+      Channel: params.channel,
+    },
+  });
+}
+
+export function getCollectionPayment(
+  id: string,
+): Promise<CollectionPaymentAdminDto> {
+  return request(`${PAYMENTS_BASE}/${id}`);
+}
+
+export interface CollectionRefundDto {
+  id: string;
+  collectionId: string;
+  requestId: string;
+  merchantRefundNo: string;
+  channelRefundNo: string | null;
+  channel: number;
+  amount: string;
+  currency: number;
+  status: number | 'Pending' | 'Succeeded' | 'Failed';
+  channelResultUnknown: boolean;
+  statusNote: string | null;
+  creationTime: string;
+  succeededAt: string | null;
+}
+
+export interface RequestCollectionRefundInput {
+  collectionId: string;
+  requestId: string;
+  amount: string;
+  currency: number;
+}
+
+export function queryCollectionPayment(
+  id: string,
+): Promise<CollectionPaymentAdminDto> {
+  return request(`${PAYMENT_OPERATIONS}/${id}/query`, { method: 'POST' });
+}
+
+export function getCollectionRefunds(
+  collectionId: string,
+): Promise<CollectionRefundDto[]> {
+  return request(`${PAYMENT_OPERATIONS}/${collectionId}/refunds`);
+}
+
+export function requestCollectionRefund(
+  input: RequestCollectionRefundInput,
+): Promise<CollectionRefundDto> {
+  return request(REFUNDS_BASE, {
+    method: 'POST',
+    data: input,
+    skipErrorHandler: true,
+  });
+}
+
+export function queryCollectionRefund(
+  id: string,
+): Promise<CollectionRefundDto> {
+  return request(`${REFUNDS_BASE}/${id}/query`, { method: 'POST' });
+}
 
 /** 会员余额行（与用户侧 MyBalanceDto 同形） */
 export type MemberBalanceDto = {
@@ -29,8 +126,7 @@ export type BalanceTxnDto = {
   txHash?: string;
 };
 
-// 单 Guid 参数端点 ABP 生成路径段（?userId= 形态不匹配路由→SPA 兜底 HTML，E2E 实测同
-// approveLargeDeposit 教训；api-definition 确认：GET api/app/collection-balance-admin/member-balances/{userId}）
+// ABP 把 userId 绑定为路径参数。
 export async function getMemberBalances(
   userId: string,
 ): Promise<{ items: MemberBalanceDto[] }> {
@@ -44,7 +140,10 @@ export async function getMemberTxns(params: {
   maxResultCount?: number;
 }): Promise<{ totalCount: number; items: BalanceTxnDto[] }> {
   return request(`${BASE}/member-txns/${params.userId}`, {
-    params: { skipCount: params.skipCount, maxResultCount: params.maxResultCount },
+    params: {
+      skipCount: params.skipCount,
+      maxResultCount: params.maxResultCount,
+    },
   });
 }
 
@@ -56,6 +155,7 @@ export const BALANCE_ACTION_LABELS: Record<
   DepositCredit: { color: 'success', text: '充值入账' },
   BusinessDebit: { color: 'warning', text: '业务扣款' },
   DebitReverse: { color: 'processing', text: '扣款回冲' },
+  ManualAdjust: { color: 'blue', text: '人工调账' },
   WithdrawFreeze: { color: 'orange', text: '提现冻结' },
   WithdrawUnfreeze: { color: 'cyan', text: '提现解冻' },
   WithdrawSettle: { color: 'purple', text: '提现出账' },

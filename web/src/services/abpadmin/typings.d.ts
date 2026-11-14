@@ -4,22 +4,6 @@ declare namespace API {
     description?: string;
   };
 
-  type AccountDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    accountGroupName?: string;
-    userId?: string;
-    balance?: number;
-    lockedBalance?: number;
-    pendingTopUpPaymentId?: string;
-    pendingWithdrawalRecordId?: string;
-    pendingWithdrawalAmount?: number;
-  };
-
   type AccountStatusDto = {
     shouldChangePassword?: boolean;
     reason?: string;
@@ -261,14 +245,6 @@ declare namespace API {
     id?: string;
     /** data:image/png;base64,... 形式的图片。 */
     imageDataUrl?: string;
-  };
-
-  type ChangeBalanceInput = {
-    changedBalance?: number;
-  };
-
-  type ChangeLockedBalanceInput = {
-    changedLockedBalance?: number;
   };
 
   type ChangePasswordInput = {
@@ -1543,93 +1519,6 @@ declare namespace API {
     MaxResultCount?: number;
   };
 
-  type getApiPaymentServicePaymentIdParams = {
-    id: string;
-  };
-
-  type getApiPaymentServicePaymentParams = {
-    UserId?: string;
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiPaymentServicePrepaymentAccountIdParams = {
-    id: string;
-  };
-
-  type getApiPaymentServicePrepaymentAccountParams = {
-    UserId?: string;
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiPaymentServicePrepaymentTransactionIdParams = {
-    id: string;
-  };
-
-  type getApiPaymentServicePrepaymentTransactionParams = {
-    AccountId?: string;
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiPaymentServicePrepaymentWithdrawalRecordIdParams = {
-    id: string;
-  };
-
-  type getApiPaymentServicePrepaymentWithdrawalRecordParams = {
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiPaymentServicePrepaymentWithdrawalRequestIdParams = {
-    id: string;
-  };
-
-  type getApiPaymentServicePrepaymentWithdrawalRequestParams = {
-    PendingOnly?: boolean;
-    AccountId?: string;
-    AccountUserId?: string;
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiPaymentServiceRefundIdParams = {
-    id: string;
-  };
-
-  type getApiPaymentServiceRefundParams = {
-    PaymentId?: string;
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiPaymentServiceWechatPayPaymentRecordIdParams = {
-    id: string;
-  };
-
-  type getApiPaymentServiceWechatPayPaymentRecordParams = {
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
-  type getApiPaymentServiceWechatPayRefundRecordIdParams = {
-    id: string;
-  };
-
-  type getApiPaymentServiceWechatPayRefundRecordParams = {
-    Sorting?: string;
-    SkipCount?: number;
-    MaxResultCount?: number;
-  };
-
   type getApiPermissionManagementPermissionsByGroupParams = {
     groupName?: string;
     providerName?: string;
@@ -1721,12 +1610,6 @@ declare namespace API {
 
   type GetResourceProviderListResultDto = {
     providers?: ResourceProviderDto[];
-  };
-
-  type getWechatPayJsSdkConfigParametersParams = {
-    mchId?: string;
-    appId?: string;
-    prepayId?: string;
   };
 
   type GrantedResourcePermissionDto = {
@@ -2027,10 +1910,6 @@ BaseCultureName 未传、key 不在基准文化里时为 null（前端显示为�
 
   type ListResultDto1OrganizationUnitRoleDto = {
     items?: OrganizationUnitRoleDto[];
-  };
-
-  type ListResultDto1PaymentMethodDto = {
-    items?: PaymentMethodDto[];
   };
 
   type ListResultDto1ScheduledJobTypeDto = {
@@ -2374,11 +2253,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     email?: string;
   };
 
-  type PagedResultDto1AccountDto = {
-    items?: AccountDto[];
-    totalCount?: number;
-  };
-
   type PagedResultDto1AuditLogDto = {
     items?: AuditLogDto[];
     totalCount?: number;
@@ -2484,26 +2358,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     totalCount?: number;
   };
 
-  type PagedResultDto1PaymentDto = {
-    items?: PaymentDto[];
-    totalCount?: number;
-  };
-
-  type PagedResultDto1PaymentRecordDto = {
-    items?: PaymentRecordDto[];
-    totalCount?: number;
-  };
-
-  type PagedResultDto1RefundDto = {
-    items?: RefundDto[];
-    totalCount?: number;
-  };
-
-  type PagedResultDto1RefundRecordDto = {
-    items?: RefundRecordDto[];
-    totalCount?: number;
-  };
-
   type PagedResultDto1RoleDataScopeDto = {
     items?: RoleDataScopeDto[];
     totalCount?: number;
@@ -2534,21 +2388,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     totalCount?: number;
   };
 
-  type PagedResultDto1TransactionDto = {
-    items?: TransactionDto[];
-    totalCount?: number;
-  };
-
-  type PagedResultDto1WithdrawalRecordDto = {
-    items?: WithdrawalRecordDto[];
-    totalCount?: number;
-  };
-
-  type PagedResultDto1WithdrawalRequestDto = {
-    items?: WithdrawalRequestDto[];
-    totalCount?: number;
-  };
-
   type ParameterApiDescriptionModel = {
     nameOnMethod?: string;
     name?: string;
@@ -2572,100 +2411,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
 
   type PasskeyJsonDto = {
     json?: string;
-  };
-
-  type PayInput = {
-    extraProperties?: Record<string, any>;
-  };
-
-  type PaymentDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    isDeleted?: boolean;
-    deleterId?: string;
-    deletionTime?: string;
-    userId?: string;
-    paymentMethod?: string;
-    payeeAccount?: string;
-    externalTradingCode?: string;
-    currency?: string;
-    originalPaymentAmount?: number;
-    paymentDiscount?: number;
-    actualPaymentAmount?: number;
-    refundAmount?: number;
-    pendingRefundAmount?: number;
-    completionTime?: string;
-    canceledTime?: string;
-    paymentItems?: PaymentItemDto[];
-  };
-
-  type PaymentItemDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    isDeleted?: boolean;
-    deleterId?: string;
-    deletionTime?: string;
-    itemType?: string;
-    itemKey?: string;
-    originalPaymentAmount?: number;
-    paymentDiscount?: number;
-    actualPaymentAmount?: number;
-    refundAmount?: number;
-    pendingRefundAmount?: number;
-  };
-
-  type PaymentMethodDto = {
-    paymentMethod?: string;
-    name?: string;
-  };
-
-  type PaymentRecordDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    paymentId?: string;
-    appId?: string;
-    mchId?: string;
-    outTradeNo?: string;
-    transactionId?: string;
-    tradeType?: string;
-    bankType?: string;
-    attach?: string;
-    returnCode?: string;
-    returnMsg?: string;
-    deviceInfo?: string;
-    resultCode?: string;
-    errCode?: string;
-    errCodeDes?: string;
-    openid?: string;
-    isSubscribe?: string;
-    totalFee?: number;
-    settlementTotalFee?: number;
-    feeType?: string;
-    cashFee?: number;
-    cashFeeType?: string;
-    couponFee?: number;
-    couponCount?: number;
-    couponTypes?: string;
-    couponIds?: string;
-    couponFees?: string;
-    timeEnd?: string;
-    tradeState?: string;
-    tradeStateDesc?: string;
-    successTime?: string;
-    payer?: string;
-    amount?: string;
-    sceneInfo?: string;
-    promotionDetail?: string;
   };
 
   type PermissionGrantInfoDto = {
@@ -2791,10 +2536,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     id: string;
   };
 
-  type postApiAppPaymentAdminIdRefundParams = {
-    id: string;
-  };
-
   type postApiAppScheduledJobIdSetEnabledParams = {
     id: string;
     isEnabled?: boolean;
@@ -2832,80 +2573,8 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     ExtraProperties?: Record<string, any>;
   };
 
-  type postApiPaymentServicePaymentIdCancelParams = {
-    id: string;
-  };
-
-  type postApiPaymentServicePaymentIdPayParams = {
-    id: string;
-  };
-
-  type postApiPaymentServicePaymentIdRefundRollbackParams = {
-    id: string;
-  };
-
-  type postApiPaymentServicePrepaymentAccountIdChangeBalanceParams = {
-    id: string;
-  };
-
-  type postApiPaymentServicePrepaymentAccountIdChangeLockedBalanceParams = {
-    id: string;
-  };
-
-  type postApiPaymentServicePrepaymentAccountIdTopUpParams = {
-    id: string;
-  };
-
-  type postApiPaymentServicePrepaymentAccountIdWithdrawParams = {
-    id: string;
-  };
-
-  type postApiPaymentServicePrepaymentWithdrawalRequestIdReviewParams = {
-    id: string;
-  };
-
   type postApiSettingManagementTimezoneParams = {
     timezone?: string;
-  };
-
-  type postWechatPayNotifyMchIdMchIdParams = {
-    tenantId?: string;
-    mchId: string;
-  };
-
-  type postWechatPayNotifyParams = {
-    tenantId?: string;
-    mchId?: string;
-  };
-
-  type postWechatPayNotifyTenantIdTenantIdMchIdMchIdParams = {
-    tenantId: string;
-    mchId: string;
-  };
-
-  type postWechatPayNotifyTenantIdTenantIdParams = {
-    tenantId: string;
-    mchId?: string;
-  };
-
-  type postWechatPayRefundNotifyMchIdMchIdParams = {
-    tenantId?: string;
-    mchId: string;
-  };
-
-  type postWechatPayRefundNotifyParams = {
-    tenantId?: string;
-    mchId?: string;
-  };
-
-  type postWechatPayRefundNotifyTenantIdTenantIdMchIdMchIdParams = {
-    tenantId: string;
-    mchId: string;
-  };
-
-  type postWechatPayRefundNotifyTenantIdTenantIdParams = {
-    tenantId: string;
-    mchId?: string;
   };
 
   type ProfileDto = {
@@ -3079,93 +2748,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     resourceKey?: string;
   };
 
-  type RefundDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    isDeleted?: boolean;
-    deleterId?: string;
-    deletionTime?: string;
-    paymentId?: string;
-    refundPaymentMethod?: string;
-    externalTradingCode?: string;
-    currency?: string;
-    refundAmount?: number;
-    displayReason?: string;
-    customerRemark?: string;
-    staffRemark?: string;
-    completedTime?: string;
-    canceledTime?: string;
-    refundItems?: RefundItemDto[];
-  };
-
-  type RefundItemDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    isDeleted?: boolean;
-    deleterId?: string;
-    deletionTime?: string;
-    paymentItemId?: string;
-    refundAmount?: number;
-    customerRemark?: string;
-    staffRemark?: string;
-  };
-
-  type RefundPaymentInput = {
-    /** 退款金额。null 表示全额退款：按行项剩余可退总额由服务端计算
-（前端不做 decimal 运算，避免 IEEE-754 精度尾差导致"超额 0.0000…1"被拒）。 */
-    refundAmount?: number;
-    displayReason?: string;
-  };
-
-  type RefundRecordDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    paymentId?: string;
-    outRefundNo?: string;
-    transactionId?: string;
-    outTradeNo?: string;
-    successTime?: string;
-    returnCode?: string;
-    returnMsg?: string;
-    appId?: string;
-    mchId?: string;
-    refundId?: string;
-    totalFee?: number;
-    settlementTotalFee?: number;
-    refundFee?: number;
-    settlementRefundFee?: number;
-    feeType?: string;
-    cashFee?: number;
-    cashFeeType?: string;
-    cashRefundFee?: number;
-    couponRefundFee?: number;
-    couponRefundCount?: number;
-    couponTypes?: string;
-    couponIds?: string;
-    couponRefundFees?: string;
-    refundStatus?: string;
-    refundRecvAccout?: string;
-    refundAccount?: string;
-    refundRequestSource?: string;
-    channel?: string;
-    userReceivedAccount?: string;
-    createTime?: string;
-    status?: string;
-    fundsAccount?: string;
-    amount?: string;
-    promotionDetail?: string;
-  };
-
   type RegisterDto = {
     extraProperties?: Record<string, any>;
     userName: string;
@@ -3233,10 +2815,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     summary?: string;
     contentTypes?: string[];
     isRemoteStream?: boolean;
-  };
-
-  type ReviewWithdrawalRequestInput = {
-    isApproved?: boolean;
   };
 
   type RoleDataScopeDto = {
@@ -3517,30 +3095,6 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
   type TimingDto = {
     timeZone?: TimeZone;
   };
-
-  type TopUpInput = {
-    paymentMethod?: string;
-    amount?: number;
-  };
-
-  type TransactionDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    accountId?: string;
-    accountUserId?: string;
-    paymentId?: string;
-    transactionType?: TransactionType;
-    actionName?: string;
-    paymentMethod?: string;
-    externalTradingCode?: string;
-    currency?: string;
-    changedBalance?: number;
-    originalBalance?: number;
-  };
-
-  type TransactionType = 1 | 2;
 
   type TwoFactorStatusDto = {
     twoFactorEnabled?: boolean;
@@ -3849,45 +3403,4 @@ DTO 层注解把超长输入转成 400（AppService 里 Check.Length 兜底抛�
     timeZoneId?: string;
   };
 
-  type WithdrawalRecordDto = {
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    isDeleted?: boolean;
-    deleterId?: string;
-    deletionTime?: string;
-    accountId?: string;
-    withdrawalMethod?: string;
-    amount?: number;
-    completionTime?: string;
-    cancellationTime?: string;
-    resultErrorCode?: string;
-    resultErrorMessage?: string;
-  };
-
-  type WithdrawalRequestDto = {
-    extraProperties?: Record<string, any>;
-    id?: string;
-    creationTime?: string;
-    creatorId?: string;
-    lastModificationTime?: string;
-    lastModifierId?: string;
-    isDeleted?: boolean;
-    deleterId?: string;
-    deletionTime?: string;
-    accountId?: string;
-    accountUserId?: string;
-    amount?: number;
-    reviewTime?: string;
-    reviewerUserId?: string;
-    isApproved?: boolean;
-  };
-
-  type WithdrawInput = {
-    extraProperties?: Record<string, any>;
-    withdrawalMethod?: string;
-    amount?: number;
-  };
 }

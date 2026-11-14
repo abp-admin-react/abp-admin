@@ -40,15 +40,10 @@ import * as openIddictApplication from "./openIddictApplication";
 import * as openIddictScope from "./openIddictScope";
 import * as openIddictTokenAdmin from "./openIddictTokenAdmin";
 import * as operationLog from "./operationLog";
-import * as payment from "./payment";
-import * as paymentAdmin from "./paymentAdmin";
-import * as paymentRecord from "./paymentRecord";
 import * as permissions from "./permissions";
 import * as personalData from "./personalData";
 import * as profile from "./profile";
 import * as profileAvatar from "./profileAvatar";
-import * as refund from "./refund";
-import * as refundRecord from "./refundRecord";
 import * as role from "./role";
 import * as roleDataScope from "./roleDataScope";
 import * as scheduledJob from "./scheduledJob";
@@ -58,14 +53,10 @@ import * as tenant from "./tenant";
 import * as tenantPackage from "./tenantPackage";
 import * as textTemplate from "./textTemplate";
 import * as timeZoneSettings from "./timeZoneSettings";
-import * as transaction from "./transaction";
 import * as user from "./user";
 import * as userExport from "./userExport";
 import * as userLookup from "./userLookup";
 import * as virtualFileExplorer from "./virtualFileExplorer";
-import * as weChatPay from "./weChatPay";
-import * as withdrawalRecord from "./withdrawalRecord";
-import * as withdrawalRequest from "./withdrawalRequest";
 export default {
   abpApiDefinition,
   abpApplicationConfiguration,
@@ -105,15 +96,10 @@ export default {
   openIddictScope,
   openIddictTokenAdmin,
   operationLog,
-  payment,
-  paymentAdmin,
-  paymentRecord,
   permissions,
   personalData,
   profile,
   profileAvatar,
-  refund,
-  refundRecord,
   role,
   roleDataScope,
   scheduledJob,
@@ -123,12 +109,8 @@ export default {
   tenantPackage,
   textTemplate,
   timeZoneSettings,
-  transaction,
   user,
   userExport,
   userLookup,
   virtualFileExplorer,
-  weChatPay,
-  withdrawalRecord,
-  withdrawalRequest,
 };

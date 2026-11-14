@@ -1,6 +1,7 @@
 import { PlusOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
+import { history, useAccess, useLocation } from '@umijs/max';
 import {
   App,
   Button,
@@ -20,6 +21,8 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
+  adminGetOrder,
+  adminGetOrders,
   type OrderDto,
   PAY_CHANNEL_META,
   PAY_METHOD_GROUPS,
@@ -39,21 +42,9 @@ import {
   getMyBalances,
   getMyTxns,
 } from '@/abp/collection';
+import { isNotFound } from '@/requestErrorConfig';
 
-/**
- * 订单页（/ordering，计划第 4.3 节）：列表、创建、发起支付、取消 + 资金流水。
- * 金额是十进制字符串，不在前端解析成 number。管理端动作（标履约、人工退款记录）
- * 由 Host 管理员在此页按权限操作。
- *
- * 两个页签：
- * - 订单：AutoHeightProTable 服务端分页；行展开是订单时间线（创建→支付→履约→关闭）
- *   + 渠道单号 + 退款/异常明细——对齐正常商城的订单详情口径。
- * - 流水：余额资金流水（充值/支付扣款/回冲），充值行带链上凭证（BscScan 跳转），
- *   扣款/回冲行可查看来源订单；按时间范围过滤。
- *
- * 列表走全站统一的 AutoHeightProTable：服务端分页（request 回调里
- * current/pageSize → SkipCount/MaxResultCount）、变更后 actionRef.reload()。
- */
+/** 订单及余额流水。个人与管理视图按各自权限请求数据。 */
 
 const STATUS_TAGS: Record<string, { color: string; text: string }> = {
   PendingPayment: { color: 'processing', text: '待支付' },
@@ -67,11 +58,29 @@ const CLOSE_REASON_LABELS: Record<string, string> = {
   Expired: '超时未付',
 };
 
-const fmtTime = (v?: string | null) =>
-  v ? new Date(v).toLocaleString() : '-';
+const fmtTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '-');
 
 /** 链上交易哈希形状（写入侧来自链上 log，渲染侧仍守形状——非 0x64hex 只显示文本不出链接） */
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+
+type PaymentCredential = { method: string; value: string };
+
+/** 仅为标准 Stripe Checkout 地址提供跳转。其他渠道凭据以文字展示。 */
+function stripeCheckoutUrl(payload: string): string | undefined {
+  try {
+    const url = new URL(payload);
+    if (
+      url.origin === 'https://checkout.stripe.com' &&
+      !url.username &&
+      !url.password
+    ) {
+      return url.href;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
 
 /** 链上凭证：短哈希 + BscScan 跳转（主网 chainid=56）；target=_blank 必带 noopener */
 const TxHashLink: React.FC<{ txHash?: string | null }> = ({ txHash }) =>
@@ -86,7 +95,9 @@ const TxHashLink: React.FC<{ txHash?: string | null }> = ({ txHash }) =>
       {`${txHash.slice(0, 10)}...${txHash.slice(-8)}`}
     </Typography.Link>
   ) : txHash ? (
-    <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{txHash}</Typography.Text>
+    <Typography.Text style={{ fontFamily: 'monospace', fontSize: 12 }}>
+      {txHash}
+    </Typography.Text>
   ) : (
     '-'
   );
@@ -97,20 +108,23 @@ const OrderDetailFacts: React.FC<{ order: OrderDto }> = ({ order }) => (
     {order.channelTradeNo && (
       <Typography.Paragraph style={{ marginBottom: 4 }} type="secondary">
         渠道单号：
-        <Typography.Text copyable={{ text: order.channelTradeNo }}>{order.channelTradeNo}</Typography.Text>
+        <Typography.Text copyable={{ text: order.channelTradeNo }}>
+          {order.channelTradeNo}
+        </Typography.Text>
       </Typography.Paragraph>
     )}
     {order.refundedAmount != null && (
       <Typography.Paragraph style={{ marginBottom: 4 }}>
-        退款累计：<Typography.Text type="warning">{order.refundedAmount}</Typography.Text>
+        退款累计：
+        <Typography.Text type="warning">{order.refundedAmount}</Typography.Text>
       </Typography.Paragraph>
     )}
     {order.anomalyLines?.length ? (
       <ul style={{ margin: 0, paddingLeft: 16 }}>
         {order.anomalyLines.map((line) => (
           <li key={line.id}>
-            {fmtTime(line.creationTime)} · {line.amount ?? '-'} {line.currency ?? ''} ·{' '}
-            {line.channelTradeNo ?? ''} · {line.note}
+            {fmtTime(line.creationTime)} · {line.amount ?? '-'}{' '}
+            {line.currency ?? ''} · {line.channelTradeNo ?? ''} · {line.note}
           </li>
         ))}
       </ul>
@@ -152,64 +166,137 @@ const OrderTimeline: React.FC<{ order: OrderDto }> = ({ order }) => {
 };
 
 export default function OrderingPage() {
+  const access = useAccess();
+  const { pathname, search } = useLocation();
+  const query = new URLSearchParams(search);
+  const view = query.get('view');
+  const personalAllowed = access.canViewOwnOrders;
+  const showAll =
+    access.canViewAllOrders && (view === 'all' || !personalAllowed || !view);
+  const activeTab = showAll ? 'all' : view === 'txns' ? 'txns' : 'orders';
+  const hasAnomaly = showAll && query.get('hasAnomaly') === 'true';
+  const requestedId = query.get('orderId');
   const { message, modal } = App.useApp();
   const actionRef = useRef<ActionType | undefined>(undefined);
   const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const createInFlight = useRef(false);
   const [payTarget, setPayTarget] = useState<OrderDto | null>(null);
   const [payMethod, setPayMethod] = useState<string>('WechatNative');
-  const [payPayload, setPayPayload] = useState<string | null>(null);
+  const [payCredential, setPayCredential] = useState<PaymentCredential | null>(
+    null,
+  );
+  const [paying, setPaying] = useState(false);
+  const payInFlight = useRef(false);
   const [balances, setBalances] = useState<MyBalanceDto[]>([]);
   const [form] = Form.useForm<{ subject: string; amount: string }>();
 
   const reload = () => actionRef.current?.reload();
 
   useEffect(() => {
-    // 余额展示（计划第 4.3 节）：来自收款模块的用户接口，失败不阻塞订单列表
-    getMyBalances().then(setBalances).catch(() => {});
-  }, []);
+    if (!personalAllowed || activeTab === 'all') return;
+    // 余额读取失败时仍可继续查看订单。
+    getMyBalances()
+      .then(setBalances)
+      .catch(() => {});
+  }, [personalAllowed, activeTab]);
 
   const submitCreate = async () => {
-    const values = await form.validateFields();
+    // 同一拍内的重复点击仍读到旧的 React state，先拿同步提交锁。
+    if (createInFlight.current) return;
+    createInFlight.current = true;
+    setCreating(true);
     try {
+      const values = await form.validateFields().catch(() => undefined);
+      if (!values) return;
       await createOrder(values);
-    } catch {
-      // 后端拒绝（如金额格式非法）时保持弹窗打开；全局拦截器已有错误提示，
-      // 这里兜底提示，避免静默无反馈让用户以为没点上
-      message.error('订单创建失败，请检查金额格式（两位小数）后重试');
-      return;
+      message.success('订单已创建');
+      setCreateOpen(false);
+      form.resetFields();
+      reload();
+    } catch (error) {
+      if (isNotFound(error)) message.error('创建订单接口暂不可用');
+    } finally {
+      createInFlight.current = false;
+      setCreating(false);
     }
-    message.success('订单已创建');
-    setCreateOpen(false);
-    form.resetFields();
-    reload();
+  };
+
+  const closePayment = () => {
+    if (payInFlight.current) return;
+    setPayTarget(null);
+    setPayCredential(null);
+  };
+
+  const copyPayment = async () => {
+    if (!payCredential) return;
+    try {
+      await navigator.clipboard.writeText(payCredential.value);
+      message.success('支付凭据已复制');
+    } catch {
+      message.error('复制失败，请手动选中并复制支付凭据');
+    }
   };
 
   const submitPay = async () => {
-    if (!payTarget) return;
-    const result = await startPay(payTarget.id, payMethod);
-    if (result.outcome === 'ChannelCreated' && result.channelPayload) {
-      setPayPayload(result.channelPayload);
-      message.success('收款已创建，请扫码或跳转支付');
-    } else if (result.outcome === 'BalancePaid') {
-      message.success('余额支付成功');
-      setPayTarget(null);
-    } else if (result.outcome === 'AlreadyCompleted') {
-      message.info('该订单已按到账标记为已支付');
-      setPayTarget(null);
-    } else if (result.outcome === 'Closed') {
-      message.warning('订单已关闭');
-      setPayTarget(null);
+    if (!payTarget || payCredential || payInFlight.current) return;
+    payInFlight.current = true;
+    setPaying(true);
+    try {
+      const result = await startPay(payTarget.id, payMethod);
+      switch (result.outcome) {
+        case 'ChannelCreated':
+          if (result.channelPayload) {
+            setPayCredential({
+              method: payMethod,
+              value: result.channelPayload,
+            });
+          } else {
+            message.info('暂未取得支付凭据，请确认订单状态后重试');
+          }
+          break;
+        case 'BalancePaid':
+          message.success('余额支付成功');
+          setPayTarget(null);
+          break;
+        case 'AlreadyCompleted':
+          message.info('该订单已支付');
+          setPayTarget(null);
+          break;
+        case 'Closed':
+          message.warning('订单已关闭');
+          setPayTarget(null);
+          break;
+      }
+    } catch (error) {
+      if (isNotFound(error)) message.error('订单不存在，请刷新后重试');
+    } finally {
+      payInFlight.current = false;
+      setPaying(false);
+      reload();
     }
-    reload();
   };
+
+  const checkoutUrl =
+    payCredential?.method === 'StripeCheckout'
+      ? stripeCheckoutUrl(payCredential.value)
+      : undefined;
 
   const doCancel = (order: OrderDto) => {
     modal.confirm({
       title: `取消订单 ${order.orderNo}？`,
-      content: '关闭后不可支付；用户取消后的到账只告警、不复活。',
+      content: '确认取消后，此订单将关闭。若已完成付款，请先查看订单状态。',
+      okText: '确认取消',
+      cancelText: '返回',
       onOk: async () => {
-        await cancelOrder(order.id);
-        message.success('订单已取消');
+        const result = await cancelOrder(order.id);
+        if (result.status === 'Closed') {
+          message.success('订单已关闭');
+        } else if (result.status === 'Paid' || result.status === 'Fulfilled') {
+          message.info('订单已支付，请查看订单详情');
+        } else {
+          message.warning('订单未取消，请刷新后查看状态');
+        }
         reload();
       },
     });
@@ -228,27 +315,61 @@ export default function OrderingPage() {
 
   // ── 流水页签 ────────────────────────────────────────────────────────────────────────
   const txnActionRef = useRef<ActionType | undefined>(undefined);
-  const [, setTxnRange] = useState<[string | null, string | null]>([null, null]);
-  // request 闭包读 ref 而不是 state：onChange 里 setState+reload 同拍发起的请求
-  // 拿到的还是旧闭包（实测首次过滤失效），ref 立即可见
+  const [, setTxnRange] = useState<[string | null, string | null]>([
+    null,
+    null,
+  ]);
+  // 表格立即重查，使用 ref 读取本次选择的起止时间。
   const txnRangeRef = useRef<[string | null, string | null]>([null, null]);
   const [orderDetail, setOrderDetail] = useState<OrderDto | null>(null);
+  useEffect(() => {
+    setOrderDetail(null);
+    if (!requestedId) return;
+    let active = true;
+    const getDetails = showAll ? adminGetOrder : getOrder;
+    getDetails(requestedId)
+      .then((order) => {
+        if (active) setOrderDetail(order);
+      })
+      .catch((error: unknown) => {
+        if (active && isNotFound(error)) message.error('订单不存在');
+      });
+    return () => {
+      active = false;
+    };
+  }, [requestedId, showAll, message]);
+
+  function closeOrderDetail() {
+    setOrderDetail(null);
+    if (requestedId) {
+      const next = new URLSearchParams(search);
+      next.delete('orderId');
+      history.replace(next.size ? `${pathname}?${next}` : pathname);
+    }
+  }
   /** 扣款/回冲行 → 来源订单（request 回调里批量反查后写入；回冲按原扣款流水关联） */
-  const [txnRefs, setTxnRefs] = useState<Record<string, { orderId: string; orderNo: string }>>({});
+  const [txnRefs, setTxnRefs] = useState<
+    Record<string, { orderId: string; orderNo: string }>
+  >({});
 
   /** 回冲行按原扣款流水（RefTxnId）关联到原订单；其余行用自身 Id——规则唯一出处 */
   const orderLookupTxnId = (t: BalanceTxnDto) =>
-    t.action === 'DebitReverse' ? t.refTxnId ?? t.id : t.id;
+    t.action === 'DebitReverse' ? (t.refTxnId ?? t.id) : t.id;
 
-  const txnOrderRef = (t: BalanceTxnDto) => txnRefs[orderLookupTxnId(t)] ?? null;
+  const txnOrderRef = (t: BalanceTxnDto) =>
+    txnRefs[orderLookupTxnId(t)] ?? null;
 
   const txnColumns: ProColumns<BalanceTxnDto>[] = [
-    { title: '时间', dataIndex: 'creationTime', width: 170, render: (_, t) => fmtTime(t.creationTime) },
+    {
+      title: '时间',
+      dataIndex: 'creationTime',
+      width: 170,
+      render: (_, t) => fmtTime(t.creationTime),
+    },
     {
       title: '类型',
       dataIndex: 'action',
       width: 110,
-      // 色板单源后值为 {color,text}（原用户侧裸字符串副本缺 4 个提现动作）
       render: (_, t) => {
         const cfg = BALANCE_ACTION_LABELS[t.action];
         return cfg ? <Tag color={cfg.color}>{cfg.text}</Tag> : t.action;
@@ -278,7 +399,9 @@ export default function OrderingPage() {
       dataIndex: 'balanceAfter',
       width: 140,
       render: (_, t) => (
-        <Typography.Text style={{ fontFamily: 'monospace' }}>{t.balanceAfter}</Typography.Text>
+        <Typography.Text style={{ fontFamily: 'monospace' }}>
+          {t.balanceAfter}
+        </Typography.Text>
       ),
     },
     {
@@ -309,189 +432,334 @@ export default function OrderingPage() {
   ];
 
   return (
-    <PageContainer>
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Space>{headerTitle}</Space>
-      </Card>
+    <PageContainer title="订单管理">
+      {activeTab !== 'all' && !!balances.length && (
+        <Card size="small" style={{ marginBottom: 16 }}>
+          {headerTitle}
+        </Card>
+      )}
       <Tabs
-        defaultActiveKey="orders"
+        activeKey={activeTab}
+        onChange={(key) => history.push(`${pathname}?view=${key}`)}
+        destroyOnHidden
         items={[
-          {
-            key: 'orders',
-            label: '订单',
-            children: (
-              <AutoHeightProTable<OrderDto>
-                rowKey="id"
-                actionRef={actionRef}
-                search={false}
-                pagination={{ pageSize: 10 }}
-                request={async (params) => {
-                  // 服务端分页（全站惯用法，与 files/audit-logs 等页一致）；
-                  // 后端钳制页大小上限 100
-                  const result = await getMyOrders({
-                    skipCount: ((params.current || 1) - 1) * (params.pageSize || 10),
-                    maxResultCount: params.pageSize || 10,
-                  });
-                  return { data: result.items, total: result.totalCount, success: true };
-                }}
-                toolBarRender={() => [
-                  <Button
-                    key="create"
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={() => setCreateOpen(true)}
-                  >
-                    创建订单
-                  </Button>,
-                ]}
-                columns={[
-                  { title: '订单号', dataIndex: 'orderNo', width: 220 },
-                  { title: '标题', dataIndex: 'subject', ellipsis: true },
-                  {
-                    title: '标价 (USD)',
-                    dataIndex: 'amount',
-                    width: 110,
-                    render: (_, record) => record.amount ?? '-',
-                  },
-                  {
-                    title: '状态',
-                    dataIndex: 'status',
-                    width: 160,
-                    render: (_, record) => {
-                      const tag = STATUS_TAGS[record.status] ?? { color: 'default', text: record.status };
-                      return (
-                        <Space size={4} wrap>
-                          <Tag color={tag.color}>{tag.text}</Tag>
-                          {record.refundedAmount != null && (
-                            <Tooltip title={`人工退款累计 ${record.refundedAmount}`}>
-                              <Tag color="orange">已退款</Tag>
-                            </Tooltip>
-                          )}
-                        </Space>
-                      );
-                    },
-                  },
-                  {
-                    title: '应付',
-                    width: 140,
-                    render: (_, order) =>
-                      order.payAmount
-                        ? `${order.payAmount} ${order.payCurrency ?? ''}`
-                        : '-',
-                  },
-                  {
-                    title: '支付方式',
-                    dataIndex: 'payChannel',
-                    width: 150,
-                    render: (_, record) => {
-                      const label = payChannelLabel(record);
-                      if (!label) return '-';
-                      const meta = record.payChannel
-                        ? PAY_CHANNEL_META[record.payChannel]
-                        : undefined;
-                      return <Tag color={meta?.color ?? 'default'}>{label}</Tag>;
-                    },
-                  },
-                  {
-                    title: '操作',
-                    width: 160,
-                    render: (_, order) => (
-                      <Space>
+          ...(access.canViewAllOrders
+            ? [
+                {
+                  key: 'all',
+                  label: '全部订单',
+                  children: showAll && (
+                    <AutoHeightProTable<OrderDto>
+                      key={hasAnomaly ? 'anomalies' : 'all'}
+                      rowKey="id"
+                      search={false}
+                      pagination={{ defaultPageSize: 20 }}
+                      headerTitle={hasAnomaly ? '有支付异常的订单' : undefined}
+                      toolBarRender={() => [
                         <Button
-                          size="small"
-                          type="primary"
-                          disabled={order.status !== 'PendingPayment'}
-                          onClick={() => {
-                            setPayTarget(order);
-                            setPayPayload(null);
-                            setPayMethod(order.payChannel ?? 'WechatNative');
-                          }}
+                          key="anomaly"
+                          onClick={() =>
+                            history.push(
+                              `${pathname}?view=all${hasAnomaly ? '' : '&hasAnomaly=true'}`,
+                            )
+                          }
                         >
-                          支付
-                        </Button>
-                        <Button
-                          size="small"
-                          danger
-                          disabled={order.status !== 'PendingPayment'}
-                          onClick={() => doCancel(order)}
-                        >
-                          取消
-                        </Button>
-                      </Space>
-                    ),
-                  },
-                ]}
-                expandable={{
-                  expandedRowRender: (order) => (
-                    <div style={{ padding: '4px 0' }}>
-                      <OrderTimeline order={order} />
-                      <OrderDetailFacts order={order} />
-                    </div>
+                          {hasAnomaly ? '查看全部' : '仅看支付异常'}
+                        </Button>,
+                      ]}
+                      request={async ({ current = 1, pageSize = 20 }) => {
+                        const result = await adminGetOrders({
+                          skipCount: (current - 1) * pageSize,
+                          maxResultCount: pageSize,
+                          hasAnomaly: hasAnomaly || undefined,
+                        });
+                        return {
+                          data: result.items,
+                          total: result.totalCount,
+                          success: true,
+                        };
+                      }}
+                      columns={[
+                        { title: '订单号', dataIndex: 'orderNo', width: 210 },
+                        {
+                          title: '用户 ID',
+                          dataIndex: 'userId',
+                          ellipsis: true,
+                          width: 170,
+                        },
+                        { title: '标题', dataIndex: 'subject', ellipsis: true },
+                        {
+                          title: '标价（USD）',
+                          dataIndex: 'amount',
+                          width: 115,
+                        },
+                        {
+                          title: '支付方式',
+                          width: 150,
+                          render: (_, order) => payChannelLabel(order) ?? '—',
+                        },
+                        {
+                          title: '状态',
+                          width: 160,
+                          render: (_, order) => (
+                            <Space size={4} wrap>
+                              <Tag color={STATUS_TAGS[order.status]?.color}>
+                                {STATUS_TAGS[order.status]?.text ??
+                                  order.status}
+                              </Tag>
+                              {order.paymentAnomaly && (
+                                <Tag color="warning">支付异常</Tag>
+                              )}
+                            </Space>
+                          ),
+                        },
+                        {
+                          title: '创建时间',
+                          dataIndex: 'creationTime',
+                          width: 160,
+                          render: (_, order) => fmtTime(order.creationTime),
+                        },
+                        {
+                          title: '操作',
+                          width: 72,
+                          render: (_, order) => (
+                            <Button
+                              size="small"
+                              type="link"
+                              onClick={() => {
+                                const next = new URLSearchParams(search);
+                                next.set('view', 'all');
+                                next.set('orderId', order.id);
+                                history.push(`${pathname}?${next}`);
+                              }}
+                            >
+                              详情
+                            </Button>
+                          ),
+                        },
+                      ]}
+                    />
                   ),
-                }}
-              />
-            ),
-          },
-          {
-            key: 'txns',
-            label: '流水',
-            children: (
-              <AutoHeightProTable<BalanceTxnDto>
-                rowKey="id"
-                actionRef={txnActionRef}
-                search={false}
-                pagination={{ pageSize: 10 }}
-                headerTitle={
-                  <DatePicker.RangePicker
-                    showTime
-                    onChange={(range) => {
-                      const next: [string | null, string | null] = [
-                        range?.[0]?.toISOString() ?? null,
-                        range?.[1]?.toISOString() ?? null,
-                      ];
-                      txnRangeRef.current = next;
-                      setTxnRange(next);
-                      txnActionRef.current?.reload();
-                    }}
-                  />
-                }
-                request={async (params) => {
-                  const result = await getMyTxns({
-                    skipCount: ((params.current || 1) - 1) * (params.pageSize || 10),
-                    maxResultCount: params.pageSize || 10,
-                    fromTime: txnRangeRef.current[0] ?? undefined,
-                    toTime: txnRangeRef.current[1] ?? undefined,
-                  });
-                  // 扣款/回冲行批量反查来源订单号（后端只按当前用户过滤，不泄露他人单号）
-                  const ids = result.items.map(orderLookupTxnId);
-                  if (ids.length > 0) {
-                    const orderRefs = await getOrderRefsByBalanceTxn(ids).catch(() => []);
-                    setTxnRefs(
-                      Object.fromEntries(
-                        orderRefs.map((r) => [
-                          r.balanceTxnId,
-                          { orderId: r.orderId, orderNo: r.orderNo },
-                        ]),
-                      ),
-                    );
-                  }
-                  return { data: result.items, total: result.totalCount, success: true };
-                }}
-                columns={txnColumns}
-              />
-            ),
-          },
+                },
+              ]
+            : []),
+          ...(personalAllowed
+            ? [
+                {
+                  key: 'orders',
+                  label: '我的订单',
+                  children: (
+                    <AutoHeightProTable<OrderDto>
+                      rowKey="id"
+                      actionRef={actionRef}
+                      search={false}
+                      pagination={{ pageSize: 10 }}
+                      request={async (params) => {
+                        const result = await getMyOrders({
+                          skipCount:
+                            ((params.current || 1) - 1) *
+                            (params.pageSize || 10),
+                          maxResultCount: params.pageSize || 10,
+                        });
+                        return {
+                          data: result.items,
+                          total: result.totalCount,
+                          success: true,
+                        };
+                      }}
+                      toolBarRender={() => [
+                        <Button
+                          key="create"
+                          type="primary"
+                          icon={<PlusOutlined />}
+                          onClick={() => setCreateOpen(true)}
+                        >
+                          创建订单
+                        </Button>,
+                      ]}
+                      columns={[
+                        { title: '订单号', dataIndex: 'orderNo', width: 220 },
+                        { title: '标题', dataIndex: 'subject', ellipsis: true },
+                        {
+                          title: '标价 (USD)',
+                          dataIndex: 'amount',
+                          width: 110,
+                          render: (_, record) => record.amount ?? '-',
+                        },
+                        {
+                          title: '状态',
+                          dataIndex: 'status',
+                          width: 160,
+                          render: (_, record) => {
+                            const tag = STATUS_TAGS[record.status] ?? {
+                              color: 'default',
+                              text: record.status,
+                            };
+                            return (
+                              <Space size={4} wrap>
+                                <Tag color={tag.color}>{tag.text}</Tag>
+                                {record.refundedAmount != null && (
+                                  <Tooltip
+                                    title={`人工退款累计 ${record.refundedAmount}`}
+                                  >
+                                    <Tag color="orange">已退款</Tag>
+                                  </Tooltip>
+                                )}
+                              </Space>
+                            );
+                          },
+                        },
+                        {
+                          title: '应付',
+                          width: 140,
+                          render: (_, order) =>
+                            order.payAmount
+                              ? `${order.payAmount} ${order.payCurrency ?? ''}`
+                              : '-',
+                        },
+                        {
+                          title: '支付方式',
+                          dataIndex: 'payChannel',
+                          width: 150,
+                          render: (_, record) => {
+                            const label = payChannelLabel(record);
+                            if (!label) return '-';
+                            const meta = record.payChannel
+                              ? PAY_CHANNEL_META[record.payChannel]
+                              : undefined;
+                            return (
+                              <Tag color={meta?.color ?? 'default'}>
+                                {label}
+                              </Tag>
+                            );
+                          },
+                        },
+                        {
+                          title: '操作',
+                          width: 160,
+                          render: (_, order) => (
+                            <Space>
+                              <Button
+                                size="small"
+                                type="primary"
+                                disabled={order.status !== 'PendingPayment'}
+                                onClick={() => {
+                                  if (payInFlight.current) return;
+                                  setPayTarget(order);
+                                  setPayCredential(null);
+                                  setPayMethod(
+                                    order.payChannel ?? 'WechatNative',
+                                  );
+                                }}
+                              >
+                                支付
+                              </Button>
+                              <Button
+                                size="small"
+                                danger
+                                disabled={order.status !== 'PendingPayment'}
+                                onClick={() => doCancel(order)}
+                              >
+                                取消
+                              </Button>
+                            </Space>
+                          ),
+                        },
+                      ]}
+                      expandable={{
+                        expandedRowRender: (order) => (
+                          <div style={{ padding: '4px 0' }}>
+                            <OrderTimeline order={order} />
+                            <OrderDetailFacts order={order} />
+                          </div>
+                        ),
+                      }}
+                    />
+                  ),
+                },
+                {
+                  key: 'txns',
+                  label: '我的余额流水',
+                  children: (
+                    <AutoHeightProTable<BalanceTxnDto>
+                      rowKey="id"
+                      actionRef={txnActionRef}
+                      search={false}
+                      pagination={{ pageSize: 10 }}
+                      headerTitle={
+                        <DatePicker.RangePicker
+                          showTime
+                          onChange={(range) => {
+                            const next: [string | null, string | null] = [
+                              range?.[0]?.toISOString() ?? null,
+                              range?.[1]?.toISOString() ?? null,
+                            ];
+                            txnRangeRef.current = next;
+                            setTxnRange(next);
+                            txnActionRef.current?.reload();
+                          }}
+                        />
+                      }
+                      request={async (params) => {
+                        const result = await getMyTxns({
+                          skipCount:
+                            ((params.current || 1) - 1) *
+                            (params.pageSize || 10),
+                          maxResultCount: params.pageSize || 10,
+                          fromTime: txnRangeRef.current[0] ?? undefined,
+                          toTime: txnRangeRef.current[1] ?? undefined,
+                        });
+                        // 扣款/回冲行批量反查来源订单号（后端只按当前用户过滤，不泄露他人单号）
+                        const ids = result.items.map(orderLookupTxnId);
+                        if (ids.length > 0) {
+                          const orderRefs = await getOrderRefsByBalanceTxn(
+                            ids,
+                          ).catch(() => []);
+                          setTxnRefs(
+                            Object.fromEntries(
+                              orderRefs.map((r) => [
+                                r.balanceTxnId,
+                                { orderId: r.orderId, orderNo: r.orderNo },
+                              ]),
+                            ),
+                          );
+                        }
+                        return {
+                          data: result.items,
+                          total: result.totalCount,
+                          success: true,
+                        };
+                      }}
+                      columns={txnColumns}
+                    />
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
 
       <Modal
         title="创建订单"
         open={createOpen}
+        okText="创建订单"
         onOk={submitCreate}
-        onCancel={() => setCreateOpen(false)}
-        destroyOnClose
+        onCancel={() => {
+          if (!createInFlight.current) setCreateOpen(false);
+        }}
+        confirmLoading={creating}
+        closable={!creating}
+        keyboard={!creating}
+        mask={{ closable: !creating }}
+        cancelButtonProps={{ disabled: creating }}
+        destroyOnHidden
       >
-        <Form form={form} layout="vertical" initialValues={{ amount: '10.00' }}>
+        <Form
+          form={form}
+          layout="vertical"
+          disabled={creating}
+          initialValues={{ amount: '10.00' }}
+        >
           <Form.Item
             name="subject"
             label="标题"
@@ -510,36 +778,71 @@ export default function OrderingPage() {
       </Modal>
 
       <Modal
-        title={`发起支付 · ${payTarget?.orderNo ?? ''}`}
+        title={`${payCredential ? '支付凭据' : '发起支付'} · ${payTarget?.orderNo ?? ''}`}
         open={payTarget != null}
+        okText="发起支付"
         onOk={submitPay}
-        onCancel={() => {
-          setPayTarget(null);
-          setPayPayload(null);
-        }}
-        destroyOnClose
+        onCancel={closePayment}
+        confirmLoading={paying}
+        closable={!paying}
+        keyboard={!paying}
+        mask={{ closable: !paying }}
+        cancelButtonProps={{ disabled: paying }}
+        footer={
+          payCredential ? (
+            <Space wrap>
+              <Button onClick={() => setPayCredential(null)}>
+                更换支付方式
+              </Button>
+              <Button onClick={copyPayment}>复制支付凭据</Button>
+              {checkoutUrl && (
+                <Button
+                  type="primary"
+                  href={checkoutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  打开 Stripe 支付页
+                </Button>
+              )}
+              <Button onClick={closePayment}>关闭</Button>
+            </Space>
+          ) : undefined
+        }
+        destroyOnHidden
       >
         <Space orientation="vertical" style={{ width: '100%' }}>
-          <Select
-            style={{ width: '100%' }}
-            value={payMethod}
-            onChange={setPayMethod}
-            options={PAY_METHOD_GROUPS.map((g) => ({
-              label: g.groupLabel,
-              options: g.methods.map((m) => ({
-                value: m.value,
-                label: m.note ? `${m.label}（${m.note} 实装前不可真实支付）` : m.label,
-                disabled: false,
-              })),
-            }))}
-          />
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            法币渠道（微信/支付宝/Stripe）在 M3/M4 实装前为开发态假网关，仅联调路径可用。
-          </Typography.Text>
-          {payPayload && (
-            <Card size="small" title="支付凭据（扫码 / 跳转）">
-              <div style={{ wordBreak: 'break-all' }}>{payPayload}</div>
+          {payCredential ? (
+            <Card
+              size="small"
+              title={
+                PAY_CHANNEL_META[payCredential.method]?.label ??
+                payCredential.method
+              }
+            >
+              <div style={{ wordBreak: 'break-all' }}>
+                {payCredential.value}
+              </div>
             </Card>
+          ) : (
+            <>
+              <Select
+                aria-label="支付方式"
+                style={{ width: '100%' }}
+                value={payMethod}
+                disabled={paying}
+                onChange={(method) => {
+                  if (!payInFlight.current) setPayMethod(method);
+                }}
+                options={PAY_METHOD_GROUPS.map(({ groupLabel, methods }) => ({
+                  label: groupLabel,
+                  options: methods,
+                }))}
+              />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                第三方支付需要启用对应渠道。
+              </Typography.Text>
+            </>
           )}
         </Space>
       </Modal>
@@ -548,7 +851,7 @@ export default function OrderingPage() {
         title={`订单详情 · ${orderDetail?.orderNo ?? ''}`}
         open={orderDetail != null}
         footer={null}
-        onCancel={() => setOrderDetail(null)}
+        onCancel={closeOrderDetail}
         width={560}
       >
         {orderDetail && (

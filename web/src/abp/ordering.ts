@@ -1,16 +1,7 @@
-/**
- * 订单域 API 封装。
- *
- * - 相对路径与分页口径与其它 abp/* 一致（SkipCount/MaxResultCount）。
- * - 支付结果展示以后端状态机为准，前端不做乐观「已支付」终态。
- */
 import { request } from '@umijs/max';
 
 /**
- * 订单模块（AbpAdmin.Ordering）的 API 镜像。
- * 端点由模块 ConventionalControllers 自动暴露（/api/app/order、/api/app/order-admin），
- * 生成器不可信（见 docs/framework-contracts.md §3），按 src/abp 手写镜像约定书写。
- * 金额字段一律十进制字符串（最多 18 位小数）——业务契约，不解析成 JS number。
+ * 订单 API 镜像。金额用十进制字符串保留精度，支付状态以后端返回为准。
  */
 
 export type OrderDto = {
@@ -30,7 +21,7 @@ export type OrderDto = {
   payAmount?: string;
   payCurrency?: string;
   paidAt?: string;
-  /** 致付收款的渠道单号（微信/支付宝交易号、Stripe 单号）；余额支付为 null */
+  /** 外部收款渠道单号，余额支付为 null。 */
   channelTradeNo?: string;
   /** 支付网络（Web3 渠道如 "BSC"；法币渠道为 null） */
   payNetwork?: string;
@@ -109,7 +100,11 @@ export const PAY_CHANNEL_META: Record<
 > = {
   WechatNative: { category: 'Fiat', label: '微信 Native', color: 'green' },
   AlipayPrecreate: { category: 'Fiat', label: '支付宝当面付', color: 'blue' },
-  StripeCheckout: { category: 'Fiat', label: 'Stripe Checkout', color: 'purple' },
+  StripeCheckout: {
+    category: 'Fiat',
+    label: 'Stripe Checkout',
+    color: 'purple',
+  },
   BalanceUsdt: { category: 'Balance', label: '余额 USDT', color: 'default' },
   BalanceUsdc: { category: 'Balance', label: '余额 USDC', color: 'default' },
 };
@@ -118,7 +113,15 @@ export const PAY_CHANNEL_META: Record<
 const DEFAULT_NETWORK = 'BSC';
 
 export const currencyLabel = (c?: string) =>
-  c === 'Usdt' ? 'USDT' : c === 'Usdc' ? 'USDC' : c === 'Cny' ? 'CNY' : c === 'Usd' ? 'USD' : c ?? '';
+  c === 'Usdt'
+    ? 'USDT'
+    : c === 'Usdc'
+      ? 'USDC'
+      : c === 'Cny'
+        ? 'CNY'
+        : c === 'Usd'
+          ? 'USD'
+          : (c ?? '');
 
 /**
  * 订单支付方式的组合显示标签：
@@ -126,7 +129,9 @@ export const currencyLabel = (c?: string) =>
  * - Web3/余额：网络·币种（如 BSC·USDT / 余额·USDT）
  * 网络读 order.payNetwork，缺失按单链兜底 BSC（余额单网络含义是「余额来源链」）。
  */
-export function payChannelLabel(order: Pick<OrderDto, 'payChannel' | 'payCurrency' | 'payNetwork'>): string | null {
+export function payChannelLabel(
+  order: Pick<OrderDto, 'payChannel' | 'payCurrency' | 'payNetwork'>,
+): string | null {
   if (!order.payChannel) return null;
   const meta = PAY_CHANNEL_META[order.payChannel];
   if (!meta) return order.payChannel;
@@ -136,25 +141,26 @@ export function payChannelLabel(order: Pick<OrderDto, 'payChannel' | 'payCurrenc
   if (meta.category === 'Web3') {
     return `${order.payNetwork ?? DEFAULT_NETWORK}·${currencyLabel(order.payCurrency)}`;
   }
-  return order.payCurrency ? `${meta.label}·${currencyLabel(order.payCurrency)}` : meta.label;
+  return order.payCurrency
+    ? `${meta.label}·${currencyLabel(order.payCurrency)}`
+    : meta.label;
 }
 
-/** 支付方式三组（发起支付下拉用）；label 一律回指 PAY_CHANNEL_META（单一出处），
- * 法币渠道 M3/M4 实装前不可真实支付（开发态 Fake 网关，下拉里标注）。 */
-export const PAY_METHOD_GROUPS: { groupLabel: string; methods: { value: string; label: string; note?: string }[] }[] = [
+/** 订单可选的支付方式。渠道实际可用性由服务端决定。 */
+export const PAY_METHOD_GROUPS = [
   {
-    groupLabel: '余额支付（账本划扣）',
+    groupLabel: '余额支付',
     methods: [
       { value: 'BalanceUsdt', label: PAY_CHANNEL_META.BalanceUsdt.label },
       { value: 'BalanceUsdc', label: PAY_CHANNEL_META.BalanceUsdc.label },
     ],
   },
   {
-    groupLabel: '法币渠道',
+    groupLabel: '第三方支付',
     methods: [
-      { value: 'WechatNative', label: PAY_CHANNEL_META.WechatNative.label, note: 'M3' },
-      { value: 'AlipayPrecreate', label: PAY_CHANNEL_META.AlipayPrecreate.label, note: 'M3' },
-      { value: 'StripeCheckout', label: `${PAY_CHANNEL_META.StripeCheckout.label} (USD)`, note: 'M4' },
+      { value: 'WechatNative', label: '微信支付（扫码）' },
+      { value: 'AlipayPrecreate', label: '支付宝（扫码）' },
+      { value: 'StripeCheckout', label: 'Stripe（USD）' },
     ],
   },
 ];
@@ -186,7 +192,7 @@ export async function getOrder(id: string) {
   return request<OrderDto>(`/api/app/order/${id}`, { method: 'GET' });
 }
 
-/** 获取（必要时创建）某支付方式的有效报价（orderId 走路径段——ABP 自动路由如此绑定，swagger 钉住） */
+/** 获取指定支付方式的有效报价，缺少报价时由服务端创建。 */
 export async function getOrderQuote(orderId: string, payMethod: string) {
   return request<QuoteDto>(`/api/app/order/quote/${orderId}`, {
     method: 'GET',
@@ -214,19 +220,24 @@ export type OrderRefDto = {
   orderNo: string;
 };
 
-/** 按余额流水 Id 反查自己的订单号（只返回当前用户名下的订单）。
- * List<Guid> 绑定按「重复的查询键」（balanceTxnIds=a&balanceTxnIds=b）——CSV 串和
- * umi 默认的 ids[]=x 括号风格都绑不上（实测 400），这里手工拼查询串 */
+/** 反查当前用户的订单号。ABP 按重复的 balanceTxnIds 查询键绑定列表。 */
 export async function getOrderRefsByBalanceTxn(balanceTxnIds: string[]) {
-  const qs = balanceTxnIds.map((id) => `balanceTxnIds=${encodeURIComponent(id)}`).join('&');
-  return request<OrderRefDto[]>(`/api/app/order/order-refs-by-balance-txn?${qs}`, {
-    method: 'GET',
-  });
+  const qs = balanceTxnIds
+    .map((id) => `balanceTxnIds=${encodeURIComponent(id)}`)
+    .join('&');
+  return request<OrderRefDto[]>(
+    `/api/app/order/order-refs-by-balance-txn?${qs}`,
+    {
+      method: 'GET',
+    },
+  );
 }
 
 // ── 管理端（Host；全部订单、标履约、人工退款记录）────────────────────────────────────
 
-export async function adminGetOrders(params: OrderListFilterDto & { maxResultCount?: number }) {
+export async function adminGetOrders(
+  params: OrderListFilterDto & { skipCount?: number; maxResultCount?: number },
+) {
   return request<PagedResult<OrderDto>>('/api/app/order-admin', {
     method: 'GET',
     params: {
@@ -234,6 +245,7 @@ export async function adminGetOrders(params: OrderListFilterDto & { maxResultCou
       Status: params.status,
       HasAnomaly: params.hasAnomaly,
       UserId: params.userId,
+      SkipCount: params.skipCount ?? 0,
       MaxResultCount: params.maxResultCount ?? 200,
     },
   });
@@ -245,7 +257,9 @@ export async function adminGetOrder(id: string) {
 
 /** 把业务单从 Paid 标成 Fulfilled（不可回冲；退款只做人工记录） */
 export async function markOrderFulfilled(id: string) {
-  return request<OrderDto>(`/api/app/order-admin/${id}/mark-fulfilled`, { method: 'POST' });
+  return request<OrderDto>(`/api/app/order-admin/${id}/mark-fulfilled`, {
+    method: 'POST',
+  });
 }
 
 /** 人工退款记录：追加异常明细，不改订单状态 */

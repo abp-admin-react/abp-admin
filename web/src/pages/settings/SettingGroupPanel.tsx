@@ -9,7 +9,7 @@ import {
   ProFormText,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm, Space, Tooltip } from 'antd';
+import { App, Button, Col, Popconfirm, Row, Space, Tooltip } from 'antd';
 import React, { useEffect, useMemo } from 'react';
 import {
   fromSettingString,
@@ -23,39 +23,58 @@ import {
 } from '@/abp/settingUi';
 
 type Props = {
-  group: API.SettingGroup;
+  group: API.SettingGroup | API.SettingGroup[];
+  columns?: 1 | 2;
   /** 保存/重置成功后回调（用于刷新外层数据） */
   onChanged?: () => void;
 };
 
-/**
- * SettingUi 通用渲染面板（T1.4）
- * 按 Group2 分块（ProCard），按 Type 选控件。
- * 提交 PUT /api/setting-ui/set-setting-values，重置 PUT /api/setting-ui/reset-setting-values。
- */
-const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
+const web3BlockTitles: Record<string, string> = {
+  Chain: '链上收款与归集',
+  Withdraw: '提现与热钱包',
+};
+
+/** 根据设置元数据渲染表单，提交和重置只作用于传入字段。 */
+const SettingGroupPanel: React.FC<Props> = ({ group, columns = 1, onChanged }) => {
   const { message } = App.useApp();
   const access = useAccess();
   const [form] = ProForm.useForm();
   const [saving, setSaving] = React.useState(false);
   const [resetting, setResetting] = React.useState(false);
 
-  // 读写分离（模块五收口）：无 AbpAdmin.SettingUi.Update 权限时只读，
-  // 后端方法级 Authorize 是真防线，这里只做按钮态与提示
   const canUpdate = access.canUpdateSettings;
 
-  const settingInfos = useMemo(() => group.settingInfos || [], [group]);
+  const groups = useMemo(
+    () => (Array.isArray(group) ? group : [group]),
+    [group],
+  );
+  const settingInfos = useMemo(
+    () => groups.flatMap((item) => item.settingInfos || []),
+    [groups],
+  );
 
-  // 按 Group2 分块：{ "": [...], "General": [...], "Appearance": [...] }
+  // 每个来源组内按 Group2 分块，跨组表单的提交范围仍以传入字段为准。
   const blocks = useMemo(() => {
-    const map = new Map<string, API.SettingInfo[]>();
-    for (const info of settingInfos) {
-      const g2 = getSettingGroup2(info);
-      if (!map.has(g2)) map.set(g2, []);
-      map.get(g2)?.push(info);
-    }
-    return Array.from(map.entries());
-  }, [settingInfos]);
+    return groups.flatMap((item) => {
+      const sections = new Map<string, API.SettingInfo[]>();
+      for (const info of item.settingInfos || []) {
+        const section = getSettingGroup2(info);
+        const fields = sections.get(section);
+        if (fields) fields.push(info);
+        else sections.set(section, [info]);
+      }
+      return Array.from(sections, ([group2, infos]) => ({
+        key: `${item.groupName ?? '_default'}:${group2}:${infos[0]?.name ?? ''}`,
+        title:
+          (item.groupName === 'Web3' && web3BlockTitles[group2]) ||
+          (group2 === 'Others' ? undefined : group2) ||
+          item.groupDisplayName ||
+          item.groupName ||
+          '通用',
+        infos,
+      }));
+    });
+  }, [groups]);
 
   // 初始值：把后端 string 按控件类型转回表单值
   const initialValues = useMemo(() => {
@@ -68,10 +87,7 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
     return values;
   }, [settingInfos]);
 
-  // antd 的 initialValues 只在表单 mount 时生效；保存/重置后 onChanged 触发外层重载，
-  // group 换了新数据但 form 实例不变——不回灌的话界面停在旧值，再点保存会把旧值写回去。
-  // 回灌语义 = 以服务端真值为准：本分组的数据重载由本分组保存/重置触发；此外挂载和
-  // 权限态变化也会触发外层整体重载（同样回灌服务端真值）。方向始终朝服务端收敛，不会丢服务端数据。
+  // initialValues 只在挂载时生效，保存或重置后用新读到的设置回填。
   useEffect(() => {
     form.setFieldsValue(initialValues);
   }, [form, initialValues]);
@@ -85,8 +101,6 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
       name: info.name,
       label,
       tooltip,
-      // 只读账号（缺 AbpAdmin.SettingUi.Update）字段一并禁用——
-      // 只藏提交按钮不够：表单仍可编辑、Enter 提交仍会发 PUT 然后吃 403
       disabled: !canUpdate,
     };
     switch (type) {
@@ -112,7 +126,7 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
       case SettingUiComponentTypes.DateTime:
         return <ProFormDateTimePicker key={info.name} {...common} width="md" />;
       case SettingUiComponentTypes.Password:
-        // T3.5：加密设置项永不下发值（后端脱敏），留空保存 = 不修改
+        // 服务端不回传加密设置的原值，留空保留已存值。
         return (
           <ProFormText.Password
             key={info.name}
@@ -125,8 +139,6 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
     }
   };
 
-  // 按组提交：payload 只含本分组的 settingInfos（表单值经 toSettingString 转回服务端字符串），
-  // 其它分组不受影响；无 name 的条目跳过，不进 payload
   const handleFinish = async (values: Record<string, unknown>) => {
     setSaving(true);
     try {
@@ -170,8 +182,6 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
         canUpdate
           ? {
               searchConfig: { submitText: '保存' },
-              // saving 只在 handleFinish 写入、唯一消费点就是这里的保存按钮 loading
-              //（与下方重置按钮 loading=resetting 同口径）；漏接时保存期间按钮无反馈
               submitButtonProps: { loading: saving },
               resetButtonProps: { style: { display: 'none' } },
               render: (_, dom) => (
@@ -191,8 +201,6 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
               ),
             }
           : {
-              // 只读态：render 完全替换提交区，只留一条只读提示（与后端 403 语义对齐）。
-              // 不再配 searchConfig/submitButtonProps 等——custom render 下它们是死配置。
               render: () => (
                 <Tooltip title="缺少修改设置值权限（AbpAdmin.SettingUi.Update），仅可查看">
                   <span style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
@@ -204,17 +212,23 @@ const SettingGroupPanel: React.FC<Props> = ({ group, onChanged }) => {
       }
     >
       <ProCard ghost gutter={[0, 12]} direction="column">
-        {blocks.map(([group2, infos]) => (
+        {blocks.map(({ key, title, infos }) => (
           <ProCard
-            key={group2 || '_default'}
-            title={
-              group2 || group.groupDisplayName || group.groupName || '通用'
-            }
+            key={key}
+            title={title}
             size="small"
             headerBordered
             colSpan={24}
           >
-            {infos.map(renderField)}
+            {columns === 2 ? (
+              <Row gutter={24}>
+                {infos.map((info) => (
+                  <Col key={info.name} xs={24} md={12}>
+                    {renderField(info)}
+                  </Col>
+                ))}
+              </Row>
+            ) : infos.map(renderField)}
           </ProCard>
         ))}
       </ProCard>

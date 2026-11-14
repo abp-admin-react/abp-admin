@@ -19,7 +19,10 @@ vi.mock('@/abp/settings', () => mocks);
 vi.mock('@/abp/settingUi', () => ({
   getSettingGroups: mocks.getSettingGroups,
 }));
-vi.mock('./SettingGroupPanel', () => ({ default: () => null }));
+vi.mock('./SettingGroupPanel', () => ({
+  default: ({ group }: { group: API.SettingGroup }) =>
+    group.settingInfos?.map((info) => <div key={info.name}>{info.name}</div>),
+}));
 
 const emailSettings = {
   defaultFromDisplayName: '管理员',
@@ -43,6 +46,7 @@ describe('设置页简化', () => {
     vi.resetAllMocks();
     mocks.useAccess.mockReturnValue({
       canManageSettings: true,
+      canManagePaymentSettings: true,
       canManageEmailing: true,
       canManageEmailingTest: true,
       canManageLanguages: true,
@@ -108,5 +112,82 @@ describe('设置页简化', () => {
     expect(screen.queryByLabelText('收件人')).toBeNull();
     expect(mocks.getSettingGroups).not.toHaveBeenCalled();
     expect(mocks.sendTestEmail).not.toHaveBeenCalled();
+  });
+
+  it('业务设置移到专用页面，系统设置保留其他配置组', async () => {
+    const dedicatedGroups = [
+      'Web3',
+      'Alipay',
+      'WechatPay',
+      'Stripe',
+      'Ordering',
+      'Finance',
+    ];
+    mocks.getSettingGroups.mockResolvedValue([
+      ...dedicatedGroups.map((groupName) => ({
+        groupName,
+        groupDisplayName: `${groupName} 配置`,
+      })),
+      { groupName: 'System', groupDisplayName: '系统通用' },
+    ]);
+    renderPage();
+    expect(await screen.findByRole('tab', { name: '系统通用' })).toBeTruthy();
+    for (const groupName of dedicatedGroups) {
+      expect(
+        screen.queryByRole('tab', { name: `${groupName} 配置` }),
+      ).toBeNull();
+    }
+  });
+
+  it('宿主的余额操作超时归入余额支付设置', async () => {
+    const name = 'Collection.Balance.DebitCommandTimeoutSeconds';
+    mocks.getSettingGroups.mockResolvedValue([
+      { groupName: 'Collection', groupDisplayName: '余额操作', settingInfos: [{ name }] },
+      { groupName: 'Site', groupDisplayName: '站点设置' },
+    ]);
+    renderPage();
+    await screen.findByRole('tab', { name: '站点设置' });
+    expect(screen.queryByRole('tab', { name: '余额操作' })).toBeNull();
+  });
+
+  it('租户通用设置保留整组订单和记账字段', async () => {
+    mocks.useAccess.mockReturnValue({
+      canManageSettings: true,
+      canManagePaymentSettings: false,
+      canUpdateSettings: true,
+    });
+    mocks.getSettingGroups.mockResolvedValue([
+      {
+        groupName: 'Ordering',
+        groupDisplayName: '订单配置',
+        settingInfos: [
+          { name: 'Ordering.Order.ExpiryHours' },
+          { name: 'Ordering.Quote.Alipay.FixedFee' },
+          { name: 'Ordering.Quote.BalanceUsdc.PercentRate' },
+        ],
+      },
+      {
+        groupName: 'Finance',
+        groupDisplayName: '记账配置',
+        settingInfos: [
+          { name: 'Finance.Ledger.Enabled' },
+          { name: 'Finance.Wallet.UseLedgerProjection' },
+        ],
+      },
+      { groupName: 'Alipay', groupDisplayName: '支付宝配置' },
+      { groupName: 'Collection', groupDisplayName: '余额操作' },
+    ]);
+    renderPage();
+    fireEvent.click(await screen.findByRole('tab', { name: '订单配置' }));
+    expect(screen.getByText('Ordering.Order.ExpiryHours')).toBeTruthy();
+    expect(screen.getByText('Ordering.Quote.Alipay.FixedFee')).toBeTruthy();
+    expect(
+      screen.getByText('Ordering.Quote.BalanceUsdc.PercentRate'),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: '记账配置' }));
+    expect(screen.getByText('Finance.Ledger.Enabled')).toBeTruthy();
+    expect(screen.getByText('Finance.Wallet.UseLedgerProjection')).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: '支付宝配置' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: '余额操作' })).toBeNull();
   });
 });
