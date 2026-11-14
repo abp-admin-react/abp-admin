@@ -1,6 +1,4 @@
-# CI 门禁：把仓库的机器契约（后端全量测试——含契约快照/宿主建图/姿态测试，
-# 前端类型检查 + vitest）从"本地纪律"升级为"合并前必红/必绿"。刻意保持最小：
-# 不发布、不打包，只守门。
+# CI 检查后端测试、迁移模型、前端类型与生产构建，并构建 Docker 镜像做验证。
 #
 # 安全姿态：顶权 contents:read（只读拉代码+跑测试，够用且最小）；第三方/官方 action
 # 一律钉 commit SHA（tag 可变，SHA 不可变），升级时换 SHA 并保留版本注释。
@@ -11,7 +9,7 @@ on:
     branches: [main]
   pull_request:
 
-# 同分支连续 push 只跑最新一次（全量测试 + 双镜像构建较贵，旧跑立即取消）
+# 同分支有新运行时取消旧运行。
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -32,21 +30,14 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Restore solution
-        # drift check 的 dotnet ef -p 需要 -p 工程的 obj/project.assets.json——dotnet tool restore
-        # 只装工具、不还原任何工程的包，全新 runner 上第一条 has-pending-model-changes 必然
-        # NETSDK1004（首次真实运行踩到）；后面的 dotnet test 自带隐式 restore，但排在 drift
-        # check 之后救不了它。一次全量 restore，五条 -p 工程的 assets 全齐。
+        # EF 模型检查运行在测试之前，需要先为各迁移项目生成 project.assets.json。
         run: dotnet restore backend/AbpAdmin.slnx
       - name: Restore dotnet-ef
-        # 五套迁移历史（框架 / Biz.Template / Webhooks / Collection / Ordering）的模型漂移检查用，
-        # 版本钉死在 .config/dotnet-tools.json（与 EF Core 运行时同版）
+        # .config/dotnet-tools.json 中的工具版本与 EF Core 运行时一致。
         run: dotnet tool restore
       - name: EF model drift check
-        # 实体/配置改了但没 dotnet ef migrations add 时必红——七本迁移账各查一遍。
-        # -p 覆盖 framework-app（宿主分层）与 modules/{platform,biz}（平台功能/业务模块）两区
-        # 全部建账工程；framework/ 是无 DbContext 的基础库，不建账。
-        # startup 统一走 DbMigrator。连接串占位由 env 注入：设计时建模不拨号，但工厂解析不到串会直接抛
-        # （全新克隆无 Database.json/secrets，OCR R2 修复）
+        # 使用 DbMigrator 启动项目比对七个上下文与各自的迁移快照。
+        # 设计时工厂需要连接串生成模型，检查过程不连接数据库。
         env:
           ConnectionStrings__Default: Host=localhost;Database=ef_model_drift_check
         run: |

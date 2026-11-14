@@ -6,6 +6,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <RootNamespace>AbpAdmin</RootNamespace>
+    <!-- 测试基础库提供夹具和数据库设施，解决方案测试无需为它启动 testhost。 -->
+    <IsTestProject>false</IsTestProject>
   </PropertyGroup>
 
   <ItemGroup>
