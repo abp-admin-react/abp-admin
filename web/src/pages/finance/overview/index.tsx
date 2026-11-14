@@ -1,119 +1,105 @@
-import { financeHelpHeader } from '@/components/FinanceHelp';
-import { PageContainer, ProCard, StatisticCard } from '@ant-design/pro-components';
-import { Alert, Button, Space, Spin } from 'antd';
-import React, { useEffect, useState } from 'react';
-import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
-import { history, useAccess } from '@umijs/max';
+import {
+  PageContainer,
+  ProCard,
+  StatisticCard,
+} from '@ant-design/pro-components';
+import { Link, useAccess } from '@umijs/max';
+import { Alert, Spin } from 'antd';
+import { useEffect, useState } from 'react';
 import { type FinOverviewDto, getFinanceOverview } from '@/abp/finance';
+import { financeHelpHeader } from '@/components/FinanceHelp';
+import {
+  FinanceEmpty,
+  FinanceStateView,
+  useFinanceLoad,
+} from '@/components/FinanceState';
 
-const OverviewPage: React.FC = () => {
+const amounts = new Intl.NumberFormat('zh-CN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+export default function OverviewPage() {
   const access = useAccess();
+  const load = useFinanceLoad();
+  const { guard, nonce } = load;
   const [data, setData] = useState<FinOverviewDto>();
   const [loading, setLoading] = useState(true);
 
-  const load = useFinanceLoad();
-
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    load
-      .guard(() => getFinanceOverview())
-      .then((d) => setData(d ?? undefined))
-      .finally(() => setLoading(false));
-  }, [load.nonce]);
+    guard(getFinanceOverview)
+      .then((overview) => {
+        if (active) setData(overview);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [guard, nonce]);
 
-  const fmt = (n?: number) =>
-    new Intl.NumberFormat('zh-CN', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(n ?? 0);
+  const hasDifference = !!data && (!data.balanced || data.unreconciledCount > 0);
 
   return (
-    <PageContainer {...financeHelpHeader('A1', '资金总览')}>
+    <PageContainer {...financeHelpHeader('A1', '会计概览')}>
       <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
-      <Spin spinning={loading}>
-        {!loading && !data ? (
-          <FinanceEmpty text="暂无资金数据" />
-        ) : (
-        <>
-        {data && !data.balanced && (
-          <Alert
-            type="error"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message="账本借贷不平衡"
-            action={
-              access.canViewFinanceLedger ? (
-                <Button
-                  size="small"
-                  type="link"
-                  onClick={() => history.push('/finance/reconcile')}
-                >
-                  去对账
-                </Button>
-              ) : null
-            }
-          />
-        )}
-        {(data?.unreconciledCount ?? 0) > 0 && (
-          <Alert
-            type="warning"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message={`未对账 ${data?.unreconciledCount} 笔`}
-            action={
-              <Button
-                size="small"
-                type="link"
-                onClick={() => history.push('/finance/reconcile')}
-              >
-                查看
-              </Button>
-            }
-          />
-        )}
-        <StatisticCard.Group direction="row">
-          <StatisticCard statistic={{ title: '今日收款', value: fmt(data?.todayIn) }} />
-          <StatisticCard
-            statistic={{ title: '今日退款/支出', value: fmt(data?.todayOut) }}
-          />
-          <StatisticCard
-            statistic={{
-              title: '借贷平衡',
-              value: data?.balanced ? '平衡' : '不平衡',
-            }}
-          />
-          <StatisticCard
-            statistic={{ title: '未对账笔数', value: data?.unreconciledCount ?? 0 }}
-          />
-        </StatisticCard.Group>
-        <ProCard title="余额与预收" style={{ marginTop: 16 }} gutter={16} wrap>
-          <StatisticCard
-            statistic={{ title: '可用合计', value: fmt(data?.availableTotal) }}
-          />
-          <StatisticCard
-            statistic={{ title: '冻结合计', value: fmt(data?.frozenTotal) }}
-          />
-          <StatisticCard
-            statistic={{ title: '预收合计', value: fmt(data?.prepaymentTotal) }}
-          />
-          <StatisticCard
-            statistic={{ title: '本期确认收入', value: fmt(data?.recognizedIncome) }}
-          />
-        </ProCard>
-        <Space style={{ marginTop: 16 }}>
-          {access.canViewFinanceVouchers && (
-            <Button onClick={() => history.push('/finance/vouchers')}>凭证与调账</Button>
+        <Spin spinning={loading}>
+          {data ? (
+            <>
+              {hasDifference && (
+                <Alert
+                  type={data.balanced ? 'warning' : 'error'}
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                  title={
+                    data.balanced
+                      ? `有差异的对账批次 ${data.unreconciledCount} 次`
+                      : '账簿借贷不平衡'
+                  }
+                  action={
+                    access.canViewFinanceReconcile && (
+                      <Link to="/finance/reconcile">查看账务对账</Link>
+                    )
+                  }
+                />
+              )}
+              <StatisticCard.Group direction="row">
+                <StatisticCard
+                  statistic={{ title: '今日收款', value: amounts.format(data.todayIn) }}
+                />
+                <StatisticCard
+                  statistic={{ title: '今日退款与支出', value: amounts.format(data.todayOut) }}
+                />
+                <StatisticCard
+                  statistic={{ title: '借贷试算', value: data.balanced ? '平衡' : '不平衡' }}
+                />
+                <StatisticCard
+                  statistic={{ title: '有差异的对账批次', value: data.unreconciledCount }}
+                />
+              </StatisticCard.Group>
+              <ProCard title="账面余额与收入" style={{ marginTop: 16 }} gutter={16} wrap>
+                <StatisticCard
+                  statistic={{ title: '可用余额合计', value: amounts.format(data.availableTotal) }}
+                />
+                <StatisticCard
+                  statistic={{ title: '冻结余额合计', value: amounts.format(data.frozenTotal) }}
+                />
+                <StatisticCard
+                  statistic={{ title: '预收款合计', value: amounts.format(data.prepaymentTotal) }}
+                />
+                <StatisticCard
+                  statistic={{ title: '已确认收入', value: amounts.format(data.recognizedIncome) }}
+                />
+              </ProCard>
+            </>
+          ) : (
+            !loading && <FinanceEmpty text="暂无账务数据" />
           )}
-          {access.canViewFinanceBalances && (
-            <Button onClick={() => history.push('/finance/balances')}>余额投影</Button>
-          )}
-        </Space>
-        </>
-        )}
-      </Spin>
+        </Spin>
       </FinanceStateView>
     </PageContainer>
   );
-};
-
-export default OverviewPage;
+}

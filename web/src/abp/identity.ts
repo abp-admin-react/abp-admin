@@ -88,6 +88,12 @@ export async function createUser(data: IdentityUserCreateDto) {
   });
 }
 
+export function getUser(id: string) {
+  return request<IdentityUserDto>(`/api/identity/users/${encodeURIComponent(id)}`, {
+    method: 'GET',
+  });
+}
+
 export async function updateUser(id: string, data: IdentityUserUpdateDto) {
   return request<IdentityUserDto>(`/api/identity/users/${id}`, {
     method: 'PUT',

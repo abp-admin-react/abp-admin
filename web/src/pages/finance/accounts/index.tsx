@@ -62,7 +62,7 @@ const AccountsPage: React.FC = () => {
 
   return (
     <PageContainer
-      {...financeHelpHeader('A2', '科目表')}
+      {...financeHelpHeader('A2', '会计科目')}
     >
       <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
         <AutoHeightProTable<FinAccountDto>

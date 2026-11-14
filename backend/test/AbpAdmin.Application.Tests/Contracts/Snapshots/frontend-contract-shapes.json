@@ -124,6 +124,786 @@
       }
     }
   },
+  "AbpAdmin.Collection.Contracts.ChainRuntimeSettingsDto": {
+    "kind": "dto",
+    "properties": {
+      "AlertRecipientUserIds": {
+        "type": "Guid[]",
+        "nullable": false
+      },
+      "ChainRoundBudgetSeconds": {
+        "type": "int",
+        "nullable": false
+      },
+      "HasEncryptionKey": {
+        "type": "bool",
+        "nullable": false
+      },
+      "UseLegacyExplorerFallback": {
+        "type": "bool",
+        "nullable": false
+      },
+      "WithdrawRoundBudgetSeconds": {
+        "type": "int",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Contracts.CollectionBalanceAdjustmentDto": {
+    "kind": "dto",
+    "properties": {
+      "Amount": {
+        "type": "string",
+        "nullable": false
+      },
+      "ApplicantId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "BalanceAfter": {
+        "type": "string",
+        "nullable": true
+      },
+      "BalanceTxnId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Currency": {
+        "type": "CollectionCurrency",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "LedgerVoucherId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "Reason": {
+        "type": "string",
+        "nullable": false
+      },
+      "RequestId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "ReviewedAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "ReviewerId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "ReviewNote": {
+        "type": "string",
+        "nullable": true
+      },
+      "Status": {
+        "type": "CollectionBalanceAdjustmentStatus",
+        "nullable": false
+      },
+      "UserId": {
+        "type": "Guid",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Contracts.CollectionBalanceAdjustmentListInput": {
+    "kind": "dto",
+    "properties": {
+      "Filter": {
+        "type": "string",
+        "nullable": true
+      },
+      "MaxResultCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "SkipCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "Status": {
+        "type": "CollectionBalanceAdjustmentStatus?",
+        "nullable": true
+      },
+      "UserId": {
+        "type": "Guid?",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Contracts.CollectionBalanceAdjustmentStatus": {
+    "kind": "enum",
+    "members": [
+      "Pending",
+      "Approved",
+      "Rejected"
+    ]
+  },
+  "AbpAdmin.Collection.Contracts.CollectionChannel": {
+    "kind": "enum",
+    "members": [
+      "WechatNative",
+      "AlipayPrecreate",
+      "StripeCheckout"
+    ]
+  },
+  "AbpAdmin.Collection.Contracts.CollectionCurrency": {
+    "kind": "enum",
+    "members": [
+      "Cny",
+      "Usd",
+      "Usdt",
+      "Usdc"
+    ]
+  },
+  "AbpAdmin.Collection.Contracts.CollectionPaymentAdminDto": {
+    "kind": "dto",
+    "properties": {
+      "Amount": {
+        "type": "string",
+        "nullable": false
+      },
+      "BusinessId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "BusinessType": {
+        "type": "string",
+        "nullable": false
+      },
+      "Channel": {
+        "type": "string",
+        "nullable": false
+      },
+      "ChannelResultUnknown": {
+        "type": "bool",
+        "nullable": false
+      },
+      "ChannelTradeNo": {
+        "type": "string",
+        "nullable": true
+      },
+      "CollectionNo": {
+        "type": "string",
+        "nullable": false
+      },
+      "CompletedAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Currency": {
+        "type": "string",
+        "nullable": false
+      },
+      "ExpiresAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "Status": {
+        "type": "string",
+        "nullable": false
+      },
+      "StatusNote": {
+        "type": "string",
+        "nullable": true
+      },
+      "UserId": {
+        "type": "Guid",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Contracts.CollectionPaymentListInput": {
+    "kind": "dto",
+    "properties": {
+      "Channel": {
+        "type": "CollectionChannel?",
+        "nullable": true
+      },
+      "Filter": {
+        "type": "string",
+        "nullable": true
+      },
+      "MaxResultCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "SkipCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "Status": {
+        "type": "CollectionStatus?",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Contracts.CollectionRefundDto": {
+    "kind": "dto",
+    "properties": {
+      "Amount": {
+        "type": "string",
+        "nullable": false
+      },
+      "Channel": {
+        "type": "CollectionChannel",
+        "nullable": false
+      },
+      "ChannelRefundNo": {
+        "type": "string",
+        "nullable": true
+      },
+      "ChannelResultUnknown": {
+        "type": "bool",
+        "nullable": false
+      },
+      "CollectionId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Currency": {
+        "type": "CollectionCurrency",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "MerchantRefundNo": {
+        "type": "string",
+        "nullable": false
+      },
+      "RequestId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "Status": {
+        "type": "CollectionRefundStatus",
+        "nullable": false
+      },
+      "StatusNote": {
+        "type": "string",
+        "nullable": true
+      },
+      "SucceededAt": {
+        "type": "DateTime?",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Contracts.CollectionRefundStatus": {
+    "kind": "enum",
+    "members": [
+      "Pending",
+      "Succeeded",
+      "Failed"
+    ]
+  },
+  "AbpAdmin.Collection.Contracts.CollectionStatus": {
+    "kind": "enum",
+    "members": [
+      "Pending",
+      "Completed",
+      "Closed",
+      "ChannelFailed"
+    ]
+  },
+  "AbpAdmin.Collection.Contracts.CreateCollectionBalanceAdjustmentInput": {
+    "kind": "dto",
+    "properties": {
+      "Amount": {
+        "type": "string",
+        "nullable": false
+      },
+      "Currency": {
+        "type": "CollectionCurrency",
+        "nullable": false
+      },
+      "Reason": {
+        "type": "string",
+        "nullable": false
+      },
+      "RequestId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "UserId": {
+        "type": "Guid",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Contracts.RejectCollectionBalanceAdjustmentInput": {
+    "kind": "dto",
+    "properties": {
+      "Reason": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Contracts.RequestCollectionRefundInput": {
+    "kind": "dto",
+    "properties": {
+      "Amount": {
+        "type": "string",
+        "nullable": false
+      },
+      "CollectionId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "Currency": {
+        "type": "CollectionCurrency",
+        "nullable": false
+      },
+      "RequestId": {
+        "type": "Guid",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.AddNetworkApiKeyInput": {
+    "kind": "dto",
+    "properties": {
+      "Key": {
+        "type": "string",
+        "nullable": false
+      },
+      "Label": {
+        "type": "string",
+        "nullable": true
+      },
+      "NetworkId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "Provider": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.AnkrBalanceDto": {
+    "kind": "dto",
+    "properties": {
+      "BalanceUsd": {
+        "type": "string",
+        "nullable": true
+      },
+      "CheckedAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "Credits": {
+        "type": "string",
+        "nullable": true
+      },
+      "Status": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.AnkrSettingsDto": {
+    "kind": "dto",
+    "properties": {
+      "Group": {
+        "type": "string",
+        "nullable": true
+      },
+      "PlatformAuthKeyMasked": {
+        "type": "string",
+        "nullable": true
+      },
+      "ScanIntervalSeconds": {
+        "type": "int",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.CollectionNetworkSummaryDto": {
+    "kind": "dto",
+    "properties": {
+      "AutoCreditMaxAmount": {
+        "type": "string",
+        "nullable": false
+      },
+      "ChainId": {
+        "type": "long",
+        "nullable": false
+      },
+      "DepositFeeRate": {
+        "type": "decimal",
+        "nullable": false
+      },
+      "HasMnemonic": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "LatestChainHead": {
+        "type": "long?",
+        "nullable": true
+      },
+      "Name": {
+        "type": "string",
+        "nullable": false
+      },
+      "RpcConfigured": {
+        "type": "bool",
+        "nullable": false
+      },
+      "ScanHeartbeatAt": {
+        "type": "DateTime?",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.CollectionWalletStatusDto": {
+    "kind": "dto",
+    "properties": {
+      "BalancesAvailable": {
+        "type": "bool",
+        "nullable": false
+      },
+      "FuelAddress": {
+        "type": "string",
+        "nullable": true
+      },
+      "FuelBnb": {
+        "type": "string",
+        "nullable": true
+      },
+      "HasMnemonic": {
+        "type": "bool",
+        "nullable": false
+      },
+      "HasWithdrawKey": {
+        "type": "bool",
+        "nullable": false
+      },
+      "IsWithdrawalNetwork": {
+        "type": "bool",
+        "nullable": false
+      },
+      "NetworkId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "NetworkName": {
+        "type": "string",
+        "nullable": false
+      },
+      "Tokens": {
+        "type": "List\u003CCollectionWalletTokenDto\u003E",
+        "nullable": false
+      },
+      "WithdrawAddress": {
+        "type": "string",
+        "nullable": true
+      },
+      "WithdrawalNetworkName": {
+        "type": "string",
+        "nullable": true
+      },
+      "WithdrawBnb": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.CollectionWalletTokenDto": {
+    "kind": "dto",
+    "properties": {
+      "Symbol": {
+        "type": "string",
+        "nullable": false
+      },
+      "VaultAddress": {
+        "type": "string",
+        "nullable": true
+      },
+      "VaultBalance": {
+        "type": "string",
+        "nullable": true
+      },
+      "WithdrawBalance": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ConfigureAnkrInput": {
+    "kind": "dto",
+    "properties": {
+      "ClearPlatformAuthKey": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Group": {
+        "type": "string",
+        "nullable": true
+      },
+      "NetworkId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "PlatformAuthKey": {
+        "type": "string",
+        "nullable": true
+      },
+      "ScanIntervalSeconds": {
+        "type": "int?",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ConfigureNetworkInput": {
+    "kind": "dto",
+    "properties": {
+      "AutoCreditMaxAmount": {
+        "type": "string",
+        "nullable": false
+      },
+      "DepositFeeRate": {
+        "type": "string",
+        "nullable": false
+      },
+      "EstimatedArrivalMinutes": {
+        "type": "int?",
+        "nullable": true
+      },
+      "NetworkId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "NodeLogResultCap": {
+        "type": "int?",
+        "nullable": true
+      },
+      "RpcUrl": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.NetworkStatusDto": {
+    "kind": "dto",
+    "properties": {
+      "AutoCreditMaxAmount": {
+        "type": "string",
+        "nullable": false
+      },
+      "ChainId": {
+        "type": "long",
+        "nullable": false
+      },
+      "DepositFeeRate": {
+        "type": "decimal",
+        "nullable": false
+      },
+      "EstimatedArrivalMinutes": {
+        "type": "int?",
+        "nullable": true
+      },
+      "GasLowAlertedAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "HasMnemonic": {
+        "type": "bool",
+        "nullable": false
+      },
+      "HeldDepositCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "HeldDepositTotal": {
+        "type": "string",
+        "nullable": false
+      },
+      "HotWalletWatchEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "LatestChainHead": {
+        "type": "long?",
+        "nullable": true
+      },
+      "Network": {
+        "type": "string",
+        "nullable": false
+      },
+      "NodeLogResultCap": {
+        "type": "int?",
+        "nullable": true
+      },
+      "RpcUrlMasked": {
+        "type": "string",
+        "nullable": true
+      },
+      "ScanBehindAlertedAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "ScanEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "ScanHeartbeatAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "SweepEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "SweepHeartbeatAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "SweepStuckAlertedAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "Tokens": {
+        "type": "List\u003CTokenStatusDto\u003E",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.SetWithdrawVaultInput": {
+    "kind": "dto",
+    "properties": {
+      "Address": {
+        "type": "string",
+        "nullable": false
+      },
+      "NetworkId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "PrivateKey": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.TestNodeCredentialDto": {
+    "kind": "dto",
+    "properties": {
+      "BalanceUsd": {
+        "type": "string",
+        "nullable": true
+      },
+      "Credits": {
+        "type": "string",
+        "nullable": true
+      },
+      "Message": {
+        "type": "string",
+        "nullable": false
+      },
+      "Passed": {
+        "type": "bool",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.TestNodeCredentialInput": {
+    "kind": "dto",
+    "properties": {
+      "Group": {
+        "type": "string",
+        "nullable": true
+      },
+      "Key": {
+        "type": "string",
+        "nullable": true
+      },
+      "KeyId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "NetworkId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "Provider": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.TokenStatusDto": {
+    "kind": "dto",
+    "properties": {
+      "BlocksBehind": {
+        "type": "long?",
+        "nullable": true
+      },
+      "ContractAddress": {
+        "type": "string",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "IsEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "LastScanAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "LastScannedBlock": {
+        "type": "long?",
+        "nullable": true
+      },
+      "MinDeposit": {
+        "type": "string",
+        "nullable": false
+      },
+      "Symbol": {
+        "type": "string",
+        "nullable": false
+      },
+      "VaultAddress": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
   "AbpAdmin.Identity.DynamicSearchFieldDto": {
     "kind": "dto",
     "properties": {
@@ -186,9 +966,252 @@
       }
     }
   },
+  "AbpAdmin.Ledger.Services.Dtos.FinEntryDto": {
+    "kind": "dto",
+    "properties": {
+      "AccountCode": {
+        "type": "string",
+        "nullable": false
+      },
+      "AccountName": {
+        "type": "string",
+        "nullable": false
+      },
+      "BalanceAfter": {
+        "type": "decimal?",
+        "nullable": true
+      },
+      "BalanceAfterText": {
+        "type": "string",
+        "nullable": true
+      },
+      "Bucket": {
+        "type": "string",
+        "nullable": false
+      },
+      "ChangeAmountText": {
+        "type": "string",
+        "nullable": false
+      },
+      "Credit": {
+        "type": "decimal",
+        "nullable": false
+      },
+      "CreditText": {
+        "type": "string",
+        "nullable": false
+      },
+      "Debit": {
+        "type": "decimal",
+        "nullable": false
+      },
+      "DebitText": {
+        "type": "string",
+        "nullable": false
+      },
+      "Dimensions": {
+        "type": "string",
+        "nullable": true
+      },
+      "OwnerId": {
+        "type": "string",
+        "nullable": false
+      },
+      "OwnerType": {
+        "type": "FinOwnerType",
+        "nullable": false
+      },
+      "Seq": {
+        "type": "int",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Ledger.Services.Dtos.FinVoucherDto": {
+    "kind": "dto",
+    "properties": {
+      "AgentId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "Amount": {
+        "type": "decimal",
+        "nullable": false
+      },
+      "AmountText": {
+        "type": "string",
+        "nullable": false
+      },
+      "BatchKey": {
+        "type": "string",
+        "nullable": false
+      },
+      "BizRefId": {
+        "type": "string",
+        "nullable": false
+      },
+      "BizType": {
+        "type": "string",
+        "nullable": false
+      },
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "CreatorId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "Currency": {
+        "type": "string",
+        "nullable": false
+      },
+      "Entries": {
+        "type": "List\u003CFinEntryDto\u003E",
+        "nullable": true
+      },
+      "EntryCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "IsDemo": {
+        "type": "bool",
+        "nullable": false
+      },
+      "PeriodId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "PeriodLabel": {
+        "type": "string",
+        "nullable": true
+      },
+      "Phase": {
+        "type": "string",
+        "nullable": false
+      },
+      "ReversalOf": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "ReversedBy": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "RuleVersion": {
+        "type": "int",
+        "nullable": false
+      },
+      "Status": {
+        "type": "FinVoucherStatus",
+        "nullable": false
+      },
+      "Summary": {
+        "type": "string",
+        "nullable": true
+      },
+      "TotalCredit": {
+        "type": "decimal",
+        "nullable": false
+      },
+      "TotalCreditText": {
+        "type": "string",
+        "nullable": false
+      },
+      "TotalDebit": {
+        "type": "decimal",
+        "nullable": false
+      },
+      "TotalDebitText": {
+        "type": "string",
+        "nullable": false
+      },
+      "UserId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "VoucherNo": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Ledger.Services.Dtos.FinVoucherListInput": {
+    "kind": "dto",
+    "properties": {
+      "AgentId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "BizRefId": {
+        "type": "string",
+        "nullable": true
+      },
+      "BizType": {
+        "type": "string",
+        "nullable": true
+      },
+      "Email": {
+        "type": "string",
+        "nullable": true
+      },
+      "EndTime": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "Filter": {
+        "type": "string",
+        "nullable": true
+      },
+      "IsDemo": {
+        "type": "bool?",
+        "nullable": true
+      },
+      "MaxResultCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "Phase": {
+        "type": "string",
+        "nullable": true
+      },
+      "SkipCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "Sorting": {
+        "type": "string",
+        "nullable": true
+      },
+      "StartTime": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "Status": {
+        "type": "string",
+        "nullable": true
+      },
+      "UserId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "VoucherId": {
+        "type": "Guid?",
+        "nullable": true
+      }
+    }
+  },
   "AbpAdmin.Menus.MenuTreeDto": {
     "kind": "dto",
     "properties": {
+      "AnyPermissionNames": {
+        "type": "string[]",
+        "nullable": false
+      },
       "Children": {
         "type": "List\u003CMenuTreeDto\u003E",
         "nullable": false

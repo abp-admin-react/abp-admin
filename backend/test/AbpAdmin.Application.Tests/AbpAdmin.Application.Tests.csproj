@@ -12,6 +12,9 @@
     <ProjectReference Include="..\..\framework-app\AbpAdmin.Application\AbpAdmin.Application.csproj" />
     <!-- T2.1：导出下载端点的跨用户 403 语义测试需要手动构造 AuditLogExportController -->
     <ProjectReference Include="..\..\framework-app\AbpAdmin.HttpApi\AbpAdmin.HttpApi.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Collection.Contracts\AbpAdmin.Collection.Contracts.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Collection\AbpAdmin.Collection.csproj" />
+    <ProjectReference Include="..\..\modules\platform\AbpAdmin.Ledger\AbpAdmin.Ledger.csproj" />
     <ProjectReference Include="..\AbpAdmin.Domain.Tests\AbpAdmin.Domain.Tests.csproj" />
   </ItemGroup>
 

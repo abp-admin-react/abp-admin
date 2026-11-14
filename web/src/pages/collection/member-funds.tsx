@@ -1,6 +1,8 @@
 import { PageContainer } from '@ant-design/pro-components';
+import { Link, useAccess } from '@umijs/max';
 import {
   Alert,
+  Button,
   Card,
   Select,
   Space,
@@ -19,7 +21,9 @@ import {
   getMemberTxns,
 } from '@/abp/collectionAdmin';
 import { getUsers } from '@/abp/identity';
+import { currencyLabel } from '@/abp/ordering';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import { useChainRecordRefresh } from './use-chain-record-refresh';
 
 const { Text } = Typography;
 
@@ -29,7 +33,9 @@ const { Text } = Typography;
  * 与用户侧 my-balances/my-txns 同口径（只读）。
  */
 export default function MemberFundsPage() {
+  const access = useAccess();
   const [userId, setUserId] = useState<string>();
+  const [selectedUserLabel, setSelectedUserLabel] = useState<string>();
   const [userOptions, setUserOptions] = useState<
     { label: string; value: string }[]
   >([]);
@@ -39,28 +45,26 @@ export default function MemberFundsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const pageSize = 20;
+  const fundsRequest = useRef(0);
 
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchVersion = useRef(0);
   useEffect(
     () => () => {
+      searchVersion.current++;
       if (searchTimer.current != null) {
         clearTimeout(searchTimer.current);
       }
     },
     [],
   );
-  const searchUsers = useCallback(async (keyword: string) => {
-    // 至少 2 字符才搜（每键一次 DB LIKE，不设门槛就是噪声）
-    if (keyword.trim().length < 2) {
-      setUserOptions([]);
-      return;
-    }
-    setSearching(true);
-    setSearchError(null);
+  const searchUsers = useCallback(async (keyword: string, version: number) => {
     try {
       const result = await getUsers({ filter: keyword.trim(), pageSize: 20 });
+      if (version !== searchVersion.current) return;
       setUserOptions(
         result.items.map((u) => ({
           label: `${u.userName}${u.email ? ` (${u.email})` : ''}`,
@@ -68,44 +72,49 @@ export default function MemberFundsPage() {
         })),
       );
     } catch {
-      // 用户查询需要身份管理权限（AbpIdentity.Users）——无权限时明示而不是空下拉装死
+      if (version !== searchVersion.current) return;
       setUserOptions([]);
       setSearchError('用户搜索失败（可能缺少身份管理查询权限，或服务不可用）');
     } finally {
-      setSearching(false);
+      if (version === searchVersion.current) setSearching(false);
     }
   }, []);
 
-  const reload = useCallback(async () => {
-    if (!userId) {
-      setBalances([]);
-      setTxns([]);
-      setTotal(0);
-      return;
-    }
-    setLoading(true);
-    try {
-      const [balanceResult, txnResult] = await Promise.all([
-        getMemberBalances(userId),
-        getMemberTxns({
-          userId,
-          skipCount: (page - 1) * pageSize,
-          maxResultCount: pageSize,
-        }),
-      ]);
-      setBalances(balanceResult.items ?? []); // 形态漂移防御：缺 items 不白屏（空列表可自查控制台）
-      setTxns(txnResult.items ?? []);
-      setTotal(txnResult.totalCount ?? 0);
-    } catch {
-      /* interceptor */
-    } finally {
-      setLoading(false);
-    }
-  }, [userId, page]);
-
+  const reloadFunds = useCallback(
+    async (background = false) => {
+      if (!userId) return;
+      const request = ++fundsRequest.current;
+      if (!background) setLoading(true);
+      try {
+        const [balanceResult, txnResult] = await Promise.all([
+          getMemberBalances(userId),
+          getMemberTxns({
+            userId,
+            skipCount: (page - 1) * pageSize,
+            maxResultCount: pageSize,
+          }),
+        ]);
+        if (request !== fundsRequest.current) return;
+        setBalances(balanceResult.items ?? []);
+        setTxns(txnResult.items ?? []);
+        setTotal(txnResult.totalCount ?? 0);
+        setLoadFailed(false);
+      } catch {
+        if (!background && request === fundsRequest.current)
+          setLoadFailed(true);
+      } finally {
+        if (request === fundsRequest.current) setLoading(false);
+      }
+    },
+    [userId, page],
+  );
   useEffect(() => {
-    reload();
-  }, [reload]);
+    void reloadFunds();
+    return () => {
+      fundsRequest.current++;
+    };
+  }, [reloadFunds]);
+  useChainRecordRefresh(reloadFunds);
 
   const fmtTime = (v: string) => {
     const d = new Date(v);
@@ -132,7 +141,7 @@ export default function MemberFundsPage() {
       title: '币种',
       dataIndex: 'currency',
       width: 80,
-      render: (v: string) => <Tag color="cyan">{v}</Tag>,
+      render: (v: string) => <Tag color="cyan">{currencyLabel(v)}</Tag>,
     },
     {
       title: '金额',
@@ -144,7 +153,7 @@ export default function MemberFundsPage() {
       ),
     },
     {
-      title: '余额（after）',
+      title: '变动后余额',
       dataIndex: 'balanceAfter',
       width: 130,
       align: 'right' as const,
@@ -184,47 +193,79 @@ export default function MemberFundsPage() {
     },
   ];
 
-  const { columns: resizableColumns, components, scrollX } =
-    useResizableColumns(columns);
+  const {
+    columns: resizableColumns,
+    components,
+    scrollX,
+  } = useResizableColumns(columns);
+  const options =
+    userId &&
+    selectedUserLabel &&
+    !userOptions.some((option) => option.value === userId)
+      ? [{ label: selectedUserLabel, value: userId }, ...userOptions]
+      : userOptions;
 
   return (
-    <PageContainer>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
-        <Alert
-          type="info"
-          showIcon
-          message="会员资金（只读）：按用户名搜索后查看该用户的稳定币余额与流水；金额与用户侧「我的余额」同口径。"
-        />
-        <Card title="选择用户" size="small">
+    <PageContainer title="用户余额与流水">
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
+        <Card
+          title="选择用户"
+          size="small"
+          extra={
+            userId &&
+            access.canCreateBalanceAdjustments && (
+              <Link
+                to={`/finance/balance-adjustments?createFor=${encodeURIComponent(userId)}`}
+              >
+                申请余额调整
+              </Link>
+            )
+          }
+        >
           {searchError && (
             <Alert
               type="error"
               showIcon
               style={{ marginBottom: 8 }}
-              message={searchError}
+              title={searchError}
             />
           )}
           <Select
-            showSearch
-            filterOption={false}
             placeholder="输入用户名或邮箱搜索（至少 2 个字符）"
             style={{ width: 420 }}
             loading={searching}
             value={userId}
-            onSearch={(kw: string) => {
-              if (searchTimer.current != null) {
-                clearTimeout(searchTimer.current);
-              }
-              searchTimer.current = setTimeout(() => {
-                searchTimer.current = null;
-                searchUsers(kw);
-              }, 300);
+            showSearch={{
+              filterOption: false,
+              onSearch: (keyword) => {
+                const version = ++searchVersion.current;
+                if (searchTimer.current != null) {
+                  clearTimeout(searchTimer.current);
+                }
+                setSearchError(null);
+                setUserOptions([]);
+                setSearching(keyword.trim().length >= 2);
+                if (keyword.trim().length < 2) return;
+                searchTimer.current = setTimeout(() => {
+                  searchTimer.current = null;
+                  void searchUsers(keyword, version);
+                }, 300);
+              },
             }}
-            onChange={(v) => {
+            onChange={(v, option) => {
+              if (v === userId) return;
+              setSelectedUserLabel(
+                !Array.isArray(option) ? option?.label : undefined,
+              );
+              setBalances([]);
+              setTxns([]);
+              setTotal(0);
+              setLoadFailed(false);
+              setLoading(!!v);
               setUserId(v);
               setPage(1);
             }}
-            options={userOptions}
+            options={options}
             allowClear
             popupMatchSelectWidth={false}
           />
@@ -232,36 +273,46 @@ export default function MemberFundsPage() {
 
         {userId && (
           <>
+            {loadFailed && (
+              <Alert
+                type="error"
+                showIcon
+                title="加载余额和流水失败"
+                action={
+                  <Button onClick={() => void reloadFunds()}>重试</Button>
+                }
+              />
+            )}
             <Card title="余额" size="small" loading={loading}>
               <Space size={48} wrap>
                 {balances.map((b) => (
-                  <Space key={b.currency} direction="vertical" size={0}>
-                    <Tag color="cyan">{b.currency}</Tag>
+                  <Space key={b.currency} orientation="vertical" size={0}>
+                    <Tag color="cyan">{currencyLabel(b.currency)}</Tag>
                     <Space size={24}>
                       <Statistic
                         title="可用"
                         value={b.balance}
-                        precision={2}
-                        valueStyle={{ fontSize: 18 }}
+                        formatter={() => b.balance}
+                        styles={{ content: { fontSize: 18 } }}
                       />
                       <Statistic
                         title="冻结"
                         value={b.frozen}
-                        precision={2}
-                        valueStyle={{ fontSize: 18 }}
+                        formatter={() => b.frozen}
+                        styles={{ content: { fontSize: 18 } }}
                       />
                       <Statistic
                         title="合计"
                         value={b.total}
-                        precision={2}
-                        valueStyle={{ fontSize: 18 }}
+                        formatter={() => b.total}
+                        styles={{ content: { fontSize: 18 } }}
                       />
                     </Space>
                   </Space>
                 ))}
               </Space>
             </Card>
-            <Card title="余额流水（充值行带链上凭证）">
+            <Card title="余额流水">
               <Table<BalanceTxnDto>
                 rowKey="id"
                 loading={loading}

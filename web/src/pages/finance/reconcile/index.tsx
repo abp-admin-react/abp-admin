@@ -28,18 +28,17 @@ const ReconcilePage: React.FC = () => {
   /** 产品 v1.1：「包含演示单据」默认关（= 排除 IsDemo），映射 includeDemo */
   const [includeDemo, setIncludeDemo] = useState(false);
   const EMPTY_TEXT = access.canRunFinanceReconcile
-    ? '还没有对账记录，选择日期范围后跑对账'
-    : '还没有对账记录';
+    ? '暂无对账批次，选择日期范围后开始对账'
+    : '暂无对账批次';
   const [running, setRunning] = useState(false);
 
   return (
     <PageContainer
-      {...financeHelpHeader('A5', '对账')}
+      {...financeHelpHeader('A5', '账务对账')}
       extra={
         !load.ok ? null : (
         <Space>
-          {/* 有 Finance.Ledger.View 即可见（页面本身就要 Ledger.View） */}
-          <Access accessible={!!access.canViewFinanceLedger}>
+          <Access accessible={!!access.canViewFinanceReconcile}>
             <span>
               包含演示单据{' '}
               <Switch
@@ -87,7 +86,7 @@ const ReconcilePage: React.FC = () => {
                 }
               }}
             >
-              跑对账
+              开始对账
             </Button>
           </Space>
           </Access>
@@ -113,11 +112,16 @@ const ReconcilePage: React.FC = () => {
           return { data: result.items, total: result.totalCount, success: true };
         }}
         columns={[
-          { title: '类型', dataIndex: 'type', width: 140 },
-          { title: '起始', dataIndex: 'rangeStart', width: 200, render: (_: unknown, r: any) => formatForDisplay(r.rangeStart) },
-          { title: '截止', dataIndex: 'rangeEnd', width: 200, render: (_: unknown, r: any) => formatForDisplay(r.rangeEnd) },
           {
-            title: '差异数',
+            title: '对账类型',
+            dataIndex: 'type',
+            width: 140,
+            render: (_, r) => r.type === 'ledger-internal' ? '账簿内部核对' : r.type,
+          },
+          { title: '过账起始', dataIndex: 'rangeStart', width: 200, render: (_, r) => formatForDisplay(r.rangeStart) },
+          { title: '过账截止', dataIndex: 'rangeEnd', width: 200, render: (_, r) => formatForDisplay(r.rangeEnd) },
+          {
+            title: '差异项数',
             dataIndex: 'diffCount',
             width: 90,
             render: (_, r) => (
@@ -132,12 +136,17 @@ const ReconcilePage: React.FC = () => {
             width: 100,
             render: (_, r) => (r.excludedDemo ? '已排除' : '已包含'),
           },
-          { title: '状态', dataIndex: 'status', width: 90 },
           {
-            title: '时间',
+            title: '对账结果',
+            dataIndex: 'status',
+            width: 100,
+            render: (_, r) => r.diffCount === 0 ? '无差异' : '有差异',
+          },
+          {
+            title: '执行时间',
             dataIndex: 'createdAt',
             search: false,
-            render: (_: unknown, r: any) => formatForDisplay(r.createdAt),
+            render: (_, r) => formatForDisplay(r.createdAt),
             width: 170,
           },
         ]}

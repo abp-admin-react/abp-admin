@@ -10,12 +10,12 @@ const RulesPage: React.FC = () => {
   const actionRef = useRef<ActionType>(undefined);
   const load = useFinanceLoad();
   return (
-    <PageContainer {...financeHelpHeader('A2b', '过账规则')}>
+    <PageContainer {...financeHelpHeader('A2b', '自动记账规则')}>
       <Alert
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="本阶段只读：改规则走配置发布，管理端不提供编辑。"
+        title="本阶段只读：改规则走配置发布，管理端不提供编辑。"
       />
       <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
       <AutoHeightProTable<FinPostingRuleDto>

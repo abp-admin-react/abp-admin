@@ -1,9 +1,9 @@
 import { financeHelpHeader } from '@/components/FinanceHelp';
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
-import { Button, Select, Space, Tag } from 'antd';
+import { Select, Space, Tag } from 'antd';
 import { formatForDisplay } from '@/utils/time';
 import React, { useRef, useState } from 'react';
-import { history, useAccess } from '@umijs/max';
+import { Link, useAccess } from '@umijs/max';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
 import {
@@ -23,7 +23,7 @@ const BalancesPage: React.FC = () => {
 
   return (
     <PageContainer
-      {...financeHelpHeader('A7', '用户余额投影')}
+      {...financeHelpHeader('A7', '用户余额核对')}
       extra={
         !load.ok ? null : (
         !isAgentScoped && mockMode ? (
@@ -71,14 +71,14 @@ const BalancesPage: React.FC = () => {
           return { data: result.items, total: result.totalCount, success: true };
         }}
         columns={[
-          { title: '用户', dataIndex: 'ownerName', width: 120 },
-          { title: '用户Id', dataIndex: 'ownerId', width: 120, ellipsis: true },
+          { title: mockMode ? '用户' : '科目', dataIndex: 'ownerName', width: 120 },
+          { title: mockMode ? '用户 ID' : '归属 ID', dataIndex: 'ownerId', width: 220, ellipsis: true },
           { title: '币种', dataIndex: 'currency', width: 80, search: false },
           { title: '可用', dataIndex: 'available', width: 90, search: false },
           { title: '冻结', dataIndex: 'frozen', width: 90, search: false },
           { title: '预收', dataIndex: 'prepayment', width: 90, search: false },
           {
-            title: '账本推导',
+            title: '账面余额合计',
             dataIndex: 'ledgerDerived',
             width: 100,
             search: false,
@@ -88,50 +88,35 @@ const BalancesPage: React.FC = () => {
             dataIndex: 'diff',
             width: 90,
             search: false,
-            render: (_, r) =>
-              r.diff === 0 ? (
-                <Tag color="success">0</Tag>
-              ) : (
-                <Tag
-                  color="error"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => history.push('/finance/reconcile')}
-                >
-                  {r.diff}
-                </Tag>
-              ),
+            hideInTable: !mockMode,
+            render: (_, r) => (
+              <Tag color={r.diff === 0 ? 'success' : 'error'}>{r.diff}</Tag>
+            ),
           },
           {
             title: '代理',
             dataIndex: 'agentId',
             width: 100,
             search: false,
-            hideInTable: isAgentScoped,
+            hideInTable: isAgentScoped || !mockMode,
           },
           {
             title: '同步时间',
             dataIndex: 'syncedAt',
             search: false,
-            render: (_: unknown, r: any) => formatForDisplay(r.syncedAt),
+            hideInTable: !mockMode,
+            render: (_, r) => formatForDisplay(r.syncedAt),
             width: 170,
           },
           {
             title: '操作',
             valueType: 'option',
-            width: 100,
+            width: 120,
+            hideInTable: !mockMode || !access.canViewFinanceReconcile,
             render: (_, r) =>
-              r.diff !== 0
-                ? [
-                    <Button
-                      key="r"
-                      type="link"
-                      size="small"
-                      onClick={() => history.push('/finance/reconcile')}
-                    >
-                      去对账
-                    </Button>,
-                  ]
-                : [],
+              mockMode && r.diff !== 0 && access.canViewFinanceReconcile ? (
+                <Link to="/finance/reconcile">查看账务对账</Link>
+              ) : null,
           },
         ]}
       />

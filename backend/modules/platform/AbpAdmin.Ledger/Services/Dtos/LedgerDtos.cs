@@ -29,6 +29,13 @@ public class FinListInput : IPagedAndSortedResultRequest
 
 public class FinVoucherListInput : FinListInput
 {
+    public Guid? VoucherId { get; set; }
+
+    public Guid? UserId { get; set; }
+
+    [StringLength(256)]
+    public string? Email { get; set; }
+
     public Guid? AgentId { get; set; }
 
     public bool? IsDemo { get; set; }
@@ -48,7 +55,7 @@ public class FinVoucherDto : EntityDto<Guid>
     public string BatchKey { get; set; } = default!;
     public int RuleVersion { get; set; }
     public Guid? PeriodId { get; set; }
-    /// <summary>展示用凭证号（实体无此列，按 Id 派生）；仅列表/详情展示。</summary>
+    /// <summary>由凭证 ID 派生的展示编号，列表、详情和红冲结果统一返回。</summary>
     public string? VoucherNo { get; set; }
     /// <summary>展示用期间标签（如 2026-10）；按 PeriodId 联出。</summary>
     public string? PeriodLabel { get; set; }
@@ -63,6 +70,10 @@ public class FinVoucherDto : EntityDto<Guid>
     public decimal Amount { get; set; }
     public decimal TotalDebit { get; set; }
     public decimal TotalCredit { get; set; }
+    public string AmountText { get; set; } = default!;
+    public string TotalDebitText { get; set; } = default!;
+    public string TotalCreditText { get; set; } = default!;
+    public int EntryCount { get; set; }
     public Guid? CreatorId { get; set; }
     public DateTime CreationTime { get; set; }
     public List<FinEntryDto>? Entries { get; set; }
@@ -79,6 +90,10 @@ public class FinEntryDto
     public decimal Debit { get; set; }
     public decimal Credit { get; set; }
     public decimal? BalanceAfter { get; set; }
+    public string DebitText { get; set; } = default!;
+    public string CreditText { get; set; } = default!;
+    public string ChangeAmountText { get; set; } = default!;
+    public string? BalanceAfterText { get; set; }
     public string? Dimensions { get; set; }
 }
 

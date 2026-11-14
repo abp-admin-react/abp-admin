@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Data;
@@ -13,38 +14,53 @@ using Microsoft.EntityFrameworkCore;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.Domain.Repositories;
+using Volo.Abp.Identity;
 
 namespace AbpAdmin.Ledger.Services;
 
-/// <summary>A3 凭证（只读 + 红冲）。自动凭证不可改，只能红冲；调账凭证红冲时同步调账单 → Reversed。</summary>
+/// <summary>查询和红冲凭证。总账手工调账红冲时同步调账状态，用户余额调账不允许单独红冲总账。</summary>
 [Authorize(FinancePermissions.Voucher.View)]
 public class FinVoucherAppService : FinanceAppServiceBase
 {
     private readonly IDbContextProvider<LedgerDbContext> _dbContextProvider;
     private readonly LedgerPostingEngine _engine;
     private readonly PostingRuleProvider _rules;
+    private readonly IRepository<IdentityUser, Guid> _users;
 
     public FinVoucherAppService(
         IDbContextProvider<LedgerDbContext> dbContextProvider,
         LedgerPostingEngine engine,
-        PostingRuleProvider rules)
+        PostingRuleProvider rules,
+        IRepository<IdentityUser, Guid> users)
     {
         _dbContextProvider = dbContextProvider;
         _engine = engine;
         _rules = rules;
+        _users = users;
     }
 
     public virtual async Task<PagedResultDto<FinVoucherDto>> GetListAsync(FinVoucherListInput input)
     {
         var db = await _dbContextProvider.GetDbContextAsync();
         var q = db.Vouchers.AsNoTracking();
+        if (input.VoucherId != null) q = q.Where(v => v.Id == input.VoucherId);
+        if (input.UserId != null) q = q.Where(v => v.UserId == input.UserId);
+        if (!string.IsNullOrWhiteSpace(input.Email))
+        {
+            var normalizedEmail = input.Email.Trim().ToUpperInvariant();
+            var userIds = await (await _users.GetQueryableAsync())
+                .Where(user => user.NormalizedEmail == normalizedEmail)
+                .Select(user => user.Id).ToListAsync();
+            q = q.Where(v => v.UserId != null && userIds.Contains(v.UserId.Value));
+        }
         var statuses = ParseStatuses<FinVoucherStatus>(input.Status);
         if (statuses != null)
         {
             q = q.Where(v => statuses.Contains(v.Status));
         }
 
-        // 代理数据边界（与 A6/A7 同口径）：持 Scope.Agent 只能看自己的凭证，客户端传参不改写边界
+        // 代理范围优先于客户端过滤，防止按其他代理 ID 查询。
         var agentScope = await ResolveAgentScopeAsync();
         if (agentScope != null) q = q.Where(v => v.AgentId == agentScope);
         else if (input.AgentId != null) q = q.Where(v => v.AgentId == input.AgentId);
@@ -63,23 +79,34 @@ public class FinVoucherAppService : FinanceAppServiceBase
         var (skip, take) = Paging(input);
         var items = await q.OrderByDescending(v => v.CreationTime).ThenByDescending(v => v.Id).Skip(skip).Take(take).ToListAsync();
         var ids = items.Select(v => v.Id).ToList();
+        var entryTotals = await db.Entries.AsNoTracking()
+            .Where(entry => ids.Contains(entry.VoucherId))
+            .GroupBy(entry => entry.VoucherId)
+            .Select(group => new { Id = group.Key, Count = group.Count(), Debit = group.Sum(entry => entry.Debit), Credit = group.Sum(entry => entry.Credit) })
+            .ToDictionaryAsync(group => group.Id);
         var reversedBy = await db.Vouchers.AsNoTracking().Where(v => v.ReversalOf != null && ids.Contains(v.ReversalOf.Value))
             .ToDictionaryAsync(v => v.ReversalOf!.Value, v => v.Id);
-        // 展示列补齐：凭证号已在 Map 按 Id 派生（单一出处，列表/详情/红冲一致）；
-        // 期间标签需联期间表，在此整页取齐（格式走 PeriodLabel，与详情单查共用）
+        // 批量读取当前页的会计期间，避免逐笔查询。
         var periodIds = items.Where(v => v.PeriodId != null).Select(v => v.PeriodId!.Value).Distinct().ToList();
         var periodLabels = await db.Periods.AsNoTracking().Where(p => periodIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => PeriodLabel(p.Year, p.Month));
         return new PagedResultDto<FinVoucherDto>(total, items.Select(v =>
         {
             var dto = Map(v, reversedBy.GetValueOrDefault(v.Id));
+            if (entryTotals.TryGetValue(v.Id, out var totals))
+            {
+                dto.EntryCount = totals.Count;
+                dto.TotalDebit = totals.Debit;
+                dto.TotalCredit = totals.Credit;
+                dto.TotalDebitText = Money(totals.Debit);
+                dto.TotalCreditText = Money(totals.Credit);
+            }
             dto.PeriodLabel = v.PeriodId != null ? periodLabels.GetValueOrDefault(v.PeriodId!.Value) : null;
             return dto;
         }).ToList());
     }
 
-    /// <summary>按 id 取凭证并套代理边界：范围外一律 VoucherNotFound（不泄露跨属主存在性）。
-    /// 详情与红冲共用同一条边界规则，收在此处避免两份逐字复制漂移。</summary>
+    /// <summary>详情和红冲对代理范围外的凭证返回 VoucherNotFound，避免暴露凭证是否存在。</summary>
     private async Task<FinVoucher> GetScopedVoucherAsync(LedgerDbContext db, Guid id)
     {
         var v = await db.Vouchers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id)
@@ -99,7 +126,6 @@ public class FinVoucherAppService : FinanceAppServiceBase
         var v = await GetScopedVoucherAsync(db, id);
         var reversedBy = await db.Vouchers.AsNoTracking().Where(x => x.ReversalOf == id).Select(x => (Guid?)x.Id).FirstOrDefaultAsync();
         var dto = Map(v, reversedBy);
-        // 期间标签与列表同口径（列表整页取齐、详情单查）；期间行可能已被清理，查不到留空
         if (v.PeriodId != null)
         {
             var period = await db.Periods.AsNoTracking().FirstOrDefaultAsync(p => p.Id == v.PeriodId.Value);
@@ -123,19 +149,32 @@ public class FinVoucherAppService : FinanceAppServiceBase
             Debit = r.e.Debit,
             Credit = r.e.Credit,
             BalanceAfter = r.e.BalanceAfter,
+            DebitText = Money(r.e.Debit),
+            CreditText = Money(r.e.Credit),
+            ChangeAmountText = Money(accounts[r.s.AccountId].NormalSide == FinNormalSide.Debit
+                ? r.e.Debit - r.e.Credit
+                : r.e.Credit - r.e.Debit),
+            BalanceAfterText = r.e.BalanceAfter is { } balanceAfter ? Money(balanceAfter) : null,
             Dimensions = r.e.Dimensions,
         }).ToList();
         dto.TotalDebit = dto.Entries.Sum(e => e.Debit);
         dto.TotalCredit = dto.Entries.Sum(e => e.Credit);
+        dto.TotalDebitText = Money(dto.TotalDebit);
+        dto.TotalCreditText = Money(dto.TotalCredit);
+        dto.EntryCount = dto.Entries.Count;
         return dto;
     }
 
-    /// <summary>红冲：返回红字凭证。重复红冲返回同一张。</summary>
+    /// <summary>对允许红冲的凭证返回对应红字凭证，重复请求返回原红字凭证。</summary>
     [Authorize(FinancePermissions.Voucher.Reverse)]
     public virtual async Task<FinVoucherDto> ReverseAsync(Guid id)
     {
         var db = await _dbContextProvider.GetDbContextAsync();
         var v = await GetScopedVoucherAsync(db, id);
+        if (v.BizType == FinanceBizTypes.WalletAdjustment)
+        {
+            throw new BusinessException(FinanceErrorCodes.VoucherNotReversible).WithData("VoucherId", id);
+        }
         Guid reversalId;
         if (v.BizType == FinanceBizTypes.ManualAdjust && Guid.TryParseExact(v.BizRefId, "N", out var adjustId))
         {
@@ -158,8 +197,6 @@ public class FinVoucherAppService : FinanceAppServiceBase
     private static FinVoucherDto Map(FinVoucher v, Guid? reversedBy) => new()
     {
         Id = v.Id,
-        // 展示用凭证号（实体无此列，按 Id 派生）：派生规则单一出处在此——列表/详情/红冲
-        // 三个端点形状一致，前端不做二次派生（DTO 注释「仅列表/详情展示」由此兑现）
         VoucherNo = "V-" + v.Id.ToString("N")[..10].ToUpperInvariant(),
         BizType = v.BizType,
         BizRefId = v.BizRefId,
@@ -176,14 +213,17 @@ public class FinVoucherAppService : FinanceAppServiceBase
         Summary = v.Summary,
         Currency = v.Currency,
         Amount = v.Amount,
-        // 合计口径：复式记账下单张凭证借贷合计相等且等于凭证金额——列表直接取 Amount 免联分录；
-        // 详情路径由 GetAsync 用分录求和覆盖同一字段（口径一致、粒度到分录）
+        AmountText = Money(v.Amount),
+        // 初始值使用业务金额，列表和详情随后按实际分录覆盖借贷合计。
         TotalDebit = v.Amount,
         TotalCredit = v.Amount,
+        TotalDebitText = Money(v.Amount),
+        TotalCreditText = Money(v.Amount),
         CreatorId = v.CreatorId,
         CreationTime = v.CreationTime,
     };
 
-    /// <summary>期间展示标签（yyyy-MM）。列表整页取齐与详情单查共用同一格式。</summary>
     private static string PeriodLabel(int year, int month) => year.ToString("0000") + "-" + month.ToString("00");
+
+    private static string Money(decimal value) => value.ToString("0.##################", CultureInfo.InvariantCulture);
 }

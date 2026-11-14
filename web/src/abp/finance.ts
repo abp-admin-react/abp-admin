@@ -43,6 +43,9 @@ export type FinanceListQuery = {
   /** A3 凭证「业务单号」精确匹配（后端 BizRefId 等值） */
   bizRefId?: string;
   phase?: string;
+  voucherId?: string;
+  userId?: string;
+  email?: string;
   /** A5 专用：默认 false = 排除演示单据（产品 v1.1） */
   includeDemo?: boolean;
 };
@@ -96,6 +99,12 @@ export type FinEntryDto = {
   debit: number;
   credit: number;
   summary?: string;
+  bucket?: string;
+  balanceAfter?: number | null;
+  debitText?: string;
+  creditText?: string;
+  changeAmountText?: string;
+  balanceAfterText?: string | null;
 };
 
 export type FinVoucherDto = {
@@ -115,6 +124,12 @@ export type FinVoucherDto = {
   agentId?: string | null;
   entries?: FinEntryDto[];
   reversalOf?: string | null;
+  userId?: string | null;
+  currency?: string;
+  amountText?: string;
+  debitTotalText?: string;
+  creditTotalText?: string;
+  entryCount?: number;
 };
 
 export type FinManualAdjustDto = {
@@ -1118,6 +1133,16 @@ function fromLiveVoucher(raw: Record<string, unknown>): FinVoucherDto {
     isDemo: Boolean(raw.isDemo),
     agentId: (raw.agentId as string | null) ?? null,
     reversalOf: (raw.reversalOf as string | null) ?? null,
+    userId: (raw.userId as string | null) ?? null,
+    currency: String(raw.currency || ''),
+    amountText: String(raw.amountText ?? raw.amount ?? ''),
+    debitTotalText: String(
+      raw.totalDebitText ?? raw.totalDebit ?? raw.debitTotal ?? 0,
+    ),
+    creditTotalText: String(
+      raw.totalCreditText ?? raw.totalCredit ?? raw.creditTotal ?? 0,
+    ),
+    entryCount: Number(raw.entryCount ?? 0),
     entries: Array.isArray(raw.entries)
       ? (raw.entries as Record<string, unknown>[]).map((en) => ({
           seq: Number(en.seq ?? 0),
@@ -1128,6 +1153,21 @@ function fromLiveVoucher(raw: Record<string, unknown>): FinVoucherDto {
           ownerId: en.ownerId != null ? String(en.ownerId) : undefined,
           debit: Number(en.debit ?? 0),
           credit: Number(en.credit ?? 0),
+          bucket: String(en.bucket || ''),
+          balanceAfter:
+            en.balanceAfter == null ? null : Number(en.balanceAfter),
+          debitText: String(en.debitText ?? en.debit ?? 0),
+          creditText: String(en.creditText ?? en.credit ?? 0),
+          changeAmountText:
+            en.changeAmountText == null
+              ? undefined
+              : String(en.changeAmountText),
+          balanceAfterText:
+            en.balanceAfterText == null
+              ? en.balanceAfter == null
+                ? null
+                : String(en.balanceAfter)
+              : String(en.balanceAfterText),
         }))
       : undefined,
   };
@@ -1140,7 +1180,22 @@ export async function getVouchers(
     const page = await liveGet<{
       totalCount: number;
       items: Record<string, unknown>[];
-    }>(API.voucher, q as Record<string, unknown>);
+    }>(API.voucher, {
+      SkipCount: q.skipCount,
+      MaxResultCount: q.maxResultCount,
+      Filter: q.filter,
+      VoucherId: q.voucherId,
+      UserId: q.userId,
+      Email: q.email,
+      BizType: q.bizType,
+      BizRefId: q.bizRefId,
+      Phase: q.phase,
+      StartTime: q.startTime,
+      EndTime: q.endTime,
+      Status: q.status,
+      AgentId: q.agentId,
+      IsDemo: q.isDemo,
+    });
     return {
       totalCount: page.totalCount,
       items: (page.items || []).map(fromLiveVoucher),
@@ -1157,6 +1212,13 @@ export async function getVouchers(
   }
   if (q.bizType) list = list.filter((x) => x.bizType === q.bizType);
   if (q.bizRefId) list = list.filter((x) => x.bizRefId === q.bizRefId);
+  if (q.voucherId) list = list.filter((x) => x.id === q.voucherId);
+  if (q.userId) list = list.filter((x) => x.userId === q.userId);
+  if (q.phase) list = list.filter((x) => x.phase === q.phase);
+  const startTime = q.startTime;
+  const endTime = q.endTime;
+  if (startTime) list = list.filter((x) => x.creationTime >= startTime);
+  if (endTime) list = list.filter((x) => x.creationTime < endTime);
   if (q.agentId) list = list.filter((x) => x.agentId === q.agentId);
   if (q.isDemo === true) list = list.filter((x) => x.isDemo);
   if (q.isDemo === false) list = list.filter((x) => !x.isDemo);
@@ -1825,13 +1887,20 @@ export async function getBalanceProjections(
     const pageSize = 200;
     const rows: SubAccountBalanceRow[] = [];
     let total = Number.POSITIVE_INFINITY;
-    for (let skip = 0; skip < 20 * pageSize && rows.length < total; skip += pageSize) {
+    for (
+      let skip = 0;
+      skip < 20 * pageSize && rows.length < total;
+      skip += pageSize
+    ) {
       const raw = await liveGet(API.balanceProjection, {
         ...q,
         SkipCount: skip,
         MaxResultCount: pageSize,
       } as Record<string, unknown>);
-      const page = raw as { items?: SubAccountBalanceRow[]; totalCount?: number };
+      const page = raw as {
+        items?: SubAccountBalanceRow[];
+        totalCount?: number;
+      };
       rows.push(...(page.items ?? []));
       total = page.totalCount ?? rows.length;
       if ((page.items ?? []).length < pageSize) break;

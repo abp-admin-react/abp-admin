@@ -4,13 +4,15 @@ import {
   ModalForm,
   PageContainer,
   ProCard,
+  type ProColumns,
   ProFormDigit,
   ProFormSelect,
   ProFormText,
   ProFormTextArea,
 } from '@ant-design/pro-components';
-import { Access, useAccess, useLocation, useModel } from '@umijs/max';
+import { Link, useAccess, useLocation, useModel } from '@umijs/max';
 import {
+  Alert,
   App,
   Button,
   Descriptions,
@@ -19,7 +21,13 @@ import {
   Space,
   Tag,
 } from 'antd';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ADJUST_STATUS_LABEL,
   type AdjustStatus,
@@ -51,7 +59,17 @@ import {
   FinanceStateView,
   useFinanceLoad,
 } from '@/components/FinanceState';
+import { isValidRecordId } from '@/pages/collection/record-focus';
+import { isNotFound } from '@/requestErrorConfig';
 import { formatForDisplay } from '@/utils/time';
+import {
+  balanceAdjustmentUrl,
+  voucherBusinessTypes,
+  voucherEntriesUrl,
+  voucherSourceUrl,
+  depositRecordUrl,
+  withdrawalRecordUrl,
+} from './navigation';
 
 type TabKey = 'vouchers' | 'drafts' | 'pending';
 
@@ -62,7 +80,6 @@ const VouchersPage: React.FC = () => {
   const currentUser = initialState?.currentUser as
     | { id?: string; userid?: string; userName?: string; name?: string }
     | undefined;
-  // live：ABP application-configuration → currentUser.id（app.tsx 映射 userid）；mock 无登录态回落种子 id
   const meId = resolveFinanceUserId(currentUser);
   const meName = currentUser?.name || currentUser?.userName || '当前用户';
 
@@ -72,7 +89,7 @@ const VouchersPage: React.FC = () => {
   const adjustFormRef = useRef<ProFormInstance>(undefined);
   const [pendingFieldErrors, setPendingFieldErrors] = useState<string[]>([]);
 
-  /** InvalidInput：按 error.data.fields 高亮表单字段（toast 仍由 onActionError 出） */
+  /** 服务端字段名与表单字段名按大小写无关方式匹配。 */
   const ADJUST_FORM_FIELDS = [
     'amount',
     'currency',
@@ -96,6 +113,7 @@ const VouchersPage: React.FC = () => {
   };
   const [tab, setTab] = useState<TabKey>('vouchers');
   const [detail, setDetail] = useState<FinVoucherDto>();
+  const voucherRequest = useRef(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingAdjust, setEditingAdjust] = useState<FinManualAdjustDto>();
   const [adjustDetail, setAdjustDetail] = useState<FinManualAdjustDto>();
@@ -107,6 +125,11 @@ const VouchersPage: React.FC = () => {
   const canReject = !!access.canRejectFinanceAdjust;
   const canApproveOwn = !!access.canApproveOwnFinanceAdjust;
   const canReverse = !!access.canReverseFinanceAdjust;
+  const canViewWithdrawal =
+    access.canViewWeb3Operations && access.canAdminWithdrawals;
+  const canViewDeposit =
+    access.canViewWeb3Operations &&
+    (access.canViewCollections || access.canAdminNetwork);
 
   const auditor = useMemo(() => ({ id: meId, name: meName }), [meId, meName]);
 
@@ -116,7 +139,7 @@ const VouchersPage: React.FC = () => {
     voucherRef.current?.reload();
   };
 
-  /** 业务错误统一提示；InvalidStatus 时自动刷新（v1 §1.2） */
+  /** 单据状态已变化时，重新读取列表并关闭过期详情。 */
   const onActionError = (e: unknown) => {
     message.error(financeErrorText(e));
     if (financeErrorCode(e) === FINANCE_ERROR.InvalidStatus) {
@@ -125,15 +148,22 @@ const VouchersPage: React.FC = () => {
     }
   };
 
-  /** 取凭证并开详情抽屉。404（凭证已删/红冲）全局层刻意静默，这里必须兜 catch 给出反馈
-   *  （OCR 修复：「凭证」链接与「详情」动作曾因逐字复制各自漏修一处，收拢为单一出口）。 */
-  const openVoucher = async (id: string) => {
-    try {
-      setDetail(await getVoucher(id));
-    } catch (e) {
-      onActionError(e);
-    }
-  };
+  const openVoucher = useCallback(
+    async (id: string) => {
+      const request = ++voucherRequest.current;
+      try {
+        const result = await getVoucher(id);
+        if (request === voucherRequest.current) setDetail(result);
+      } catch (error) {
+        if (request === voucherRequest.current) {
+          message.error(
+            isNotFound(error) ? '找不到该张会计凭证' : financeErrorText(error),
+          );
+        }
+      }
+    },
+    [message],
+  );
 
   useEffect(() => {
     if (!pendingFieldErrors.length || !editingAdjust) return;
@@ -144,37 +174,40 @@ const VouchersPage: React.FC = () => {
     return () => clearTimeout(t);
   }, [pendingFieldErrors, editingAdjust]);
 
-  // biz-docs 深链接 ?voucherId=xxx：挂载时解析并打开详情（OCR 修复：此前参数被静默丢弃，
-  // 用户点「关联凭证」只会落到列表顶部）。凭证被删/红冲后 404 走 onActionError 给出中文提示
   const location = useLocation();
-  const deepVoucherId = useMemo(
-    () => new URLSearchParams(location.search).get('voucherId'),
-    [location.search],
-  );
+  const search = new URLSearchParams(location.search);
+  const bizType = search.get('bizType');
+  const recordType =
+    bizType === 'deposit' || bizType === 'withdraw' ? bizType : undefined;
+  const recordLabel = recordType === 'deposit' ? '充值单' : '提现单';
+  const deepVoucherId = recordType ? null : search.get('voucherId');
+  const bizRefId = search.get('bizRefId');
+  const focusedRecordId =
+    recordType && bizRefId && isValidRecordId(bizRefId)
+      ? bizRefId.toLowerCase()
+      : undefined;
+  const invalidRecordFilter = recordType && !focusedRecordId;
+  const canViewRecord =
+    recordType === 'deposit' ? canViewDeposit : canViewWithdrawal;
   useEffect(() => {
-    if (!deepVoucherId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const v = await getVoucher(deepVoucherId);
-        if (!cancelled) setDetail(v);
-      } catch (e) {
-        if (!cancelled) onActionError(e);
-      }
-    })();
+    setDetail(undefined);
+    if (deepVoucherId || recordType) setTab('vouchers');
+    if (deepVoucherId) {
+      void openVoucher(deepVoucherId);
+    }
     return () => {
-      cancelled = true;
+      voucherRequest.current++;
     };
-    // onActionError 每渲染重建但只依赖 message/financeErrorText（稳定），不进依赖数组
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepVoucherId]);
+  }, [deepVoucherId, recordType, focusedRecordId, openVoucher]);
 
   const statusTag = (s: AdjustStatus) => {
     const cfg = ADJUST_STATUS_LABEL[s];
     return <Tag color={cfg.color}>{cfg.text}</Tag>;
   };
 
-  const adjustColumns = (mode: 'drafts' | 'pending') => [
+  const adjustColumns = (
+    mode: 'drafts' | 'pending',
+  ): ProColumns<FinManualAdjustDto>[] => [
     { title: '单号', dataIndex: 'adjustNo', width: 120 },
     { title: '摘要', dataIndex: 'summary', ellipsis: true },
     {
@@ -249,11 +282,11 @@ const VouchersPage: React.FC = () => {
                 ? [
                     <Popconfirm
                       key="submit"
-                      title="提交后进入待批，不可再改，确认？"
+                      title="提交后进入待审批，不可再改，确认？"
                       onConfirm={async () => {
                         try {
                           await submitAdjust(r.id);
-                          message.success('已提交待批');
+                          message.success('已提交审批');
                           reloadAdjusts();
                         } catch (e) {
                           onActionError(e);
@@ -271,7 +304,7 @@ const VouchersPage: React.FC = () => {
                 : []),
             );
           }
-          // Rejected 只读；仅制单人（且有 Adjust.Create）可「重新编辑」→ reopen → Draft
+          // 驳回单据先回到草稿才能编辑。
           if (r.status === 'Rejected') {
             acts.push(
               <Popconfirm
@@ -292,8 +325,7 @@ const VouchersPage: React.FC = () => {
             );
           }
         }
-        // 老板待批：只审批/驳回；本人发起的单不出审批按钮（UI 先拦自批，
-        // 后端兜底 403 Finance:Adjust:SelfApproveNotAllowed，除非有 Finance.Adjust.ApproveOwn）
+        // 本人单据需要额外的自批权限。
         if (
           mode === 'pending' &&
           (canApprove || canReject) &&
@@ -336,7 +368,7 @@ const VouchersPage: React.FC = () => {
           acts.push(
             <Popconfirm
               key="adj-rev"
-              title="冲销该调账，确认？"
+              title="冲销这笔账簿调账，确认？"
               onConfirm={async () => {
                 try {
                   await reverseAdjust(r.id);
@@ -351,13 +383,11 @@ const VouchersPage: React.FC = () => {
             </Popconfirm>,
           );
         }
-        // 先落局部常量再进 onClick 闭包：捕获渲染时的行快照（ProTable 行不可变），
-        // 闭包里直接读 r.voucherId 类型收窄失效、只能靠非空断言——这里避免 `!`。
         const voucherId = r.voucherId;
         if (voucherId) {
           acts.push(
             <a key="voucher" onClick={() => openVoucher(voucherId)}>
-              凭证
+              查看会计凭证
             </a>,
           );
         }
@@ -368,15 +398,21 @@ const VouchersPage: React.FC = () => {
 
   return (
     <PageContainer
-      {...financeHelpHeader('A3', '凭证与调账')}
+      {...financeHelpHeader('A3', '会计凭证')}
       extra={
-        load.ok ? (
-          <Access accessible={canCreate}>
+        <Space wrap>
+          {access.canViewFinanceVouchers && (
+            <Link to="/finance/transactions">分录查询</Link>
+          )}
+          {access.canViewFinanceBizDocs && (
+            <Link to="/finance/biz-docs">凭证来源查询</Link>
+          )}
+          {load.ok && canCreate && (
             <Button type="primary" onClick={() => setCreateOpen(true)}>
-              新建调账
+              新建账簿调账
             </Button>
-          </Access>
-        ) : null
+          )}
+        </Space>
       }
     >
       <FinanceStateView
@@ -397,140 +433,207 @@ const VouchersPage: React.FC = () => {
               {
                 key: 'vouchers',
                 label: '凭证列表',
-                children: (
-                  <AutoHeightProTable<FinVoucherDto>
-                    rowKey="id"
-                    actionRef={voucherRef}
-                    locale={{ emptyText: <FinanceEmpty text="暂无凭证" /> }}
-                    search={{ labelWidth: 'auto' }}
-                    request={async (params) => {
-                      const maxResultCount = params.pageSize ?? 20;
-                      const skipCount =
-                        ((params.current ?? 1) - 1) * maxResultCount;
-                      const result = await load.guard(() =>
-                        getVouchers({
-                          skipCount,
-                          maxResultCount,
-                          filter: params.voucherNo || params.summary,
-                          bizType: params.bizType,
-                          // 「业务单号」搜索列（OCR 修复：此前 params.bizRefId 被静默丢弃，输入后表格原样刷新）
-                          bizRefId: params.bizRefId,
-                        }),
-                      );
-                      if (!result)
-                        return { data: [], total: 0, success: false };
-                      return {
-                        data: result.items,
-                        total: result.totalCount,
-                        success: true,
-                      };
-                    }}
-                    columns={[
-                      // 凭证号是按 Id 派生的展示串，后端 Filter 口径是 BizRefId/Summary 模糊——
-                      // 放行搜索只会恒空结果，禁用该列的搜索（业务单号列承担检索）
-                      {
-                        title: '凭证号',
-                        dataIndex: 'voucherNo',
-                        width: 150,
-                        search: false,
-                      },
-                      { title: '业务类型', dataIndex: 'bizType', width: 120 },
-                      { title: '业务单号', dataIndex: 'bizRefId', width: 120 },
-                      {
-                        title: 'Phase',
-                        dataIndex: 'phase',
-                        width: 100,
-                        search: false,
-                      },
-                      {
-                        title: '期间',
-                        dataIndex: 'periodLabel',
-                        width: 90,
-                        search: false,
-                      },
-                      {
-                        title: '状态',
-                        dataIndex: 'status',
-                        width: 90,
-                        search: false,
-                        render: (_, r) => (
-                          <Tag
-                            color={r.status === 'Posted' ? 'success' : 'error'}
-                          >
-                            {r.status === 'Posted' ? '已过账' : '已冲销'}
-                          </Tag>
-                        ),
-                      },
-                      {
-                        title: '借方合计',
-                        dataIndex: 'debitTotal',
-                        width: 100,
-                        search: false,
-                      },
-                      {
-                        title: '贷方合计',
-                        dataIndex: 'creditTotal',
-                        width: 100,
-                        search: false,
-                      },
-                      {
-                        title: '时间',
-                        dataIndex: 'creationTime',
-                        search: false,
-                        render: (_: unknown, r: any) =>
-                          formatForDisplay(r.creationTime),
-                        width: 170,
-                      },
-                      {
-                        title: '操作',
-                        valueType: 'option',
-                        width: 160,
-                        render: (_, r) => {
-                          const acts = [
-                            <a key="d" onClick={() => openVoucher(r.id)}>
-                              详情
-                            </a>,
-                          ];
-                          if (
-                            access.canReverseFinanceAdjust &&
-                            r.status === 'Posted' &&
-                            r.bizType === 'manual-adjust'
-                          ) {
-                            acts.push(
-                              <Popconfirm
-                                key="rev"
-                                title="红冲将生成反向凭证，确认？"
-                                onConfirm={async () => {
-                                  try {
-                                    await reverseVoucher(r.id);
-                                    message.success('已红冲');
-                                    voucherRef.current?.reload();
-                                  } catch (e) {
-                                    message.error(financeErrorText(e));
-                                  }
-                                }}
-                              >
-                                <a>红冲</a>
-                              </Popconfirm>,
-                            );
-                          }
-                          return acts;
-                        },
-                      },
-                    ]}
+                children: invalidRecordFilter ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    title={
+                      recordType === 'deposit'
+                        ? '充值凭证链接无效'
+                        : '提现凭证链接无效'
+                    }
+                    action={<Link to="/finance/vouchers">查看全部凭证</Link>}
                   />
+                ) : (
+                  <>
+                    {focusedRecordId && (
+                      <Alert
+                        type="info"
+                        showIcon
+                        title={`${recordLabel} ${focusedRecordId} 的会计凭证`}
+                        style={{ marginBottom: 16 }}
+                        action={
+                          <Space wrap>
+                            {canViewRecord && (
+                              <Link
+                                to={
+                                  recordType === 'deposit'
+                                    ? depositRecordUrl(focusedRecordId)
+                                    : withdrawalRecordUrl(focusedRecordId)
+                                }
+                              >
+                                返回{recordLabel}
+                              </Link>
+                            )}
+                            <Link to="/finance/vouchers">查看全部凭证</Link>
+                          </Space>
+                        }
+                      />
+                    )}
+                    <AutoHeightProTable<FinVoucherDto>
+                      key={
+                        focusedRecordId
+                          ? `${recordType}:${focusedRecordId}`
+                          : 'all'
+                      }
+                      rowKey="id"
+                      actionRef={voucherRef}
+                      locale={{
+                        emptyText: (
+                          <FinanceEmpty
+                            text={
+                              focusedRecordId
+                                ? `未找到该${recordLabel}的凭证`
+                                : '暂无凭证'
+                            }
+                          />
+                        ),
+                      }}
+                      search={focusedRecordId ? false : { labelWidth: 'auto' }}
+                      request={async (params) => {
+                        const maxResultCount = params.pageSize ?? 20;
+                        const skipCount =
+                          ((params.current ?? 1) - 1) * maxResultCount;
+                        const result = await load.guard(() =>
+                          getVouchers({
+                            skipCount,
+                            maxResultCount,
+                            filter: focusedRecordId
+                              ? undefined
+                              : params.voucherNo || params.summary,
+                            bizType: focusedRecordId
+                              ? recordType
+                              : params.bizType,
+                            bizRefId: focusedRecordId ?? params.bizRefId,
+                          }),
+                        );
+                        if (!result)
+                          return { data: [], total: 0, success: false };
+                        return {
+                          data: result.items,
+                          total: result.totalCount,
+                          success: true,
+                        };
+                      }}
+                      columns={[
+                        // 凭证号由 ID 派生，检索使用业务单号或摘要。
+                        {
+                          title: '凭证号',
+                          dataIndex: 'voucherNo',
+                          width: 150,
+                          search: false,
+                        },
+                        {
+                          title: '业务类型',
+                          dataIndex: 'bizType',
+                          width: 130,
+                          valueEnum: voucherBusinessTypes,
+                        },
+                        {
+                          title: '业务单号',
+                          dataIndex: 'bizRefId',
+                          width: 120,
+                        },
+                        {
+                          title: '业务阶段',
+                          dataIndex: 'phase',
+                          width: 100,
+                          search: false,
+                        },
+                        {
+                          title: '期间',
+                          dataIndex: 'periodLabel',
+                          width: 90,
+                          search: false,
+                        },
+                        {
+                          title: '状态',
+                          dataIndex: 'status',
+                          width: 90,
+                          search: false,
+                          render: (_, r) => (
+                            <Tag
+                              color={
+                                r.status === 'Posted' ? 'success' : 'error'
+                              }
+                            >
+                              {r.status === 'Posted' ? '已过账' : '已冲销'}
+                            </Tag>
+                          ),
+                        },
+                        {
+                          title: '借方合计',
+                          dataIndex: 'debitTotal',
+                          width: 100,
+                          search: false,
+                        },
+                        {
+                          title: '贷方合计',
+                          dataIndex: 'creditTotal',
+                          width: 100,
+                          search: false,
+                        },
+                        {
+                          title: '时间',
+                          dataIndex: 'creationTime',
+                          search: false,
+                          render: (_: unknown, r: any) =>
+                            formatForDisplay(r.creationTime),
+                          width: 170,
+                        },
+                        {
+                          title: '操作',
+                          valueType: 'option',
+                          width: 160,
+                          render: (_, r) => {
+                            const acts = [
+                              <a key="d" onClick={() => openVoucher(r.id)}>
+                                详情
+                              </a>,
+                            ];
+                            if (
+                              access.canReverseFinanceAdjust &&
+                              r.status === 'Posted' &&
+                              r.bizType === 'manual-adjust'
+                            ) {
+                              acts.push(
+                                <Popconfirm
+                                  key="rev"
+                                  title="红冲将生成反向凭证，确认？"
+                                  onConfirm={async () => {
+                                    try {
+                                      await reverseVoucher(r.id);
+                                      message.success('已红冲');
+                                      voucherRef.current?.reload();
+                                    } catch (e) {
+                                      message.error(financeErrorText(e));
+                                    }
+                                  }}
+                                >
+                                  <a>红冲</a>
+                                </Popconfirm>,
+                              );
+                            }
+                            return acts;
+                          },
+                        },
+                      ]}
+                    />
+                  </>
                 ),
               },
               {
                 key: 'drafts',
-                label: '调账草稿',
+                label: '账簿调账草稿',
                 children: (
                   <AutoHeightProTable<FinManualAdjustDto>
                     rowKey="id"
                     actionRef={draftRef}
                     search={false}
                     locale={{
-                      emptyText: <FinanceEmpty text="没有草稿或被驳回的调账" />,
+                      emptyText: (
+                        <FinanceEmpty text="没有草稿或被驳回的账簿调账" />
+                      ),
                     }}
                     params={{ tab: 'drafts' }}
                     request={async (params) => {
@@ -552,20 +655,20 @@ const VouchersPage: React.FC = () => {
                         success: true,
                       };
                     }}
-                    columns={adjustColumns('drafts') as any}
+                    columns={adjustColumns('drafts')}
                   />
                 ),
               },
               {
                 key: 'pending',
-                label: '待审批',
+                label: '账簿调账待审批',
                 children: (
                   <AutoHeightProTable<FinManualAdjustDto>
                     rowKey="id"
                     actionRef={pendingRef}
                     search={false}
                     locale={{
-                      emptyText: <FinanceEmpty text="没有待审批的调账" />,
+                      emptyText: <FinanceEmpty text="暂无待审批的账簿调账" />,
                     }}
                     params={{ tab: 'pending' }}
                     request={async (params) => {
@@ -587,7 +690,7 @@ const VouchersPage: React.FC = () => {
                         success: true,
                       };
                     }}
-                    columns={adjustColumns('pending') as any}
+                    columns={adjustColumns('pending')}
                   />
                 ),
               },
@@ -605,8 +708,8 @@ const VouchersPage: React.FC = () => {
       <ModalForm
         title={
           editingAdjust
-            ? `编辑调账 ${editingAdjust.adjustNo}`
-            : '新建调账（草稿）'
+            ? `编辑账簿调账 ${editingAdjust.adjustNo}`
+            : '新建账簿调账（草稿）'
         }
         open={createOpen || !!editingAdjust}
         onOpenChange={(open) => {
@@ -624,8 +727,7 @@ const VouchersPage: React.FC = () => {
                 currency: editingAdjust.currency || 'CNY',
                 debitAccountCode:
                   editingAdjust.lines?.[0]?.accountCode || '1002',
-                // 归属字段必须回填记录里的值（OCR 修复：此前硬编码 Channel/default，
-                // 编辑保存会把原始借方归属静默改写）；归一为名称串供 Select 回显
+                // 保留原借方归属，归属类型转为下拉选项使用的名称。
                 debitOwnerType: finOwnerTypeName(editingAdjust.debitOwnerType),
                 debitOwnerId: editingAdjust.debitOwnerId || 'default',
                 reason: editingAdjust.summary,
@@ -723,7 +825,9 @@ const VouchersPage: React.FC = () => {
       </ModalForm>
 
       <ModalForm<{ rejectReason: string }>
-        title={rejecting ? `驳回调账 ${rejecting.adjustNo}` : '驳回调账'}
+        title={
+          rejecting ? `驳回账簿调账 ${rejecting.adjustNo}` : '驳回账簿调账'
+        }
         open={!!rejecting}
         onOpenChange={(v) => {
           if (!v) setRejecting(undefined);
@@ -761,7 +865,9 @@ const VouchersPage: React.FC = () => {
       </ModalForm>
 
       <Drawer
-        title={adjustDetail ? `调账 ${adjustDetail.adjustNo}` : '调账详情'}
+        title={
+          adjustDetail ? `账簿调账 ${adjustDetail.adjustNo}` : '账簿调账详情'
+        }
         open={!!adjustDetail}
         onClose={() => setAdjustDetail(undefined)}
         size={560}
@@ -837,25 +943,63 @@ const VouchersPage: React.FC = () => {
       </Drawer>
 
       <Drawer
-        title={detail ? `凭证 ${detail.voucherNo}` : '凭证详情'}
+        title={detail ? `会计凭证 ${detail.voucherNo}` : '会计凭证详情'}
         open={!!detail}
-        onClose={() => setDetail(undefined)}
-        size={560}
+        onClose={() => {
+          voucherRequest.current++;
+          setDetail(undefined);
+        }}
+        size={920}
+        extra={
+          detail && <Link to={voucherEntriesUrl(detail.id)}>查看分录</Link>
+        }
       >
         {detail && (
           <>
             <Descriptions column={1} size="small">
-              <Descriptions.Item label="业务">
-                {detail.bizType} / {detail.phase}
+              <Descriptions.Item label="业务类型">
+                {voucherBusinessTypes[detail.bizType] ?? detail.bizType}
+              </Descriptions.Item>
+              <Descriptions.Item label="业务阶段">
+                {detail.phase}
               </Descriptions.Item>
               <Descriptions.Item label="业务单号">
-                {detail.bizRefId}
+                <Space wrap>
+                  {detail.bizRefId}
+                  {detail.bizType === 'deposit' &&
+                    detail.bizRefId &&
+                    canViewDeposit &&
+                    isValidRecordId(detail.bizRefId) && (
+                      <Link to={depositRecordUrl(detail.bizRefId)}>
+                        返回充值单
+                      </Link>
+                    )}
+                  {detail.bizType === 'withdraw' &&
+                    detail.bizRefId &&
+                    canViewWithdrawal &&
+                    isValidRecordId(detail.bizRefId) && (
+                      <Link to={withdrawalRecordUrl(detail.bizRefId)}>
+                        返回提现单
+                      </Link>
+                    )}
+                  {detail.bizRefId &&
+                  detail.bizType === 'wallet-adjust' &&
+                  access.canViewBalanceAdjustments ? (
+                    <Link to={balanceAdjustmentUrl(detail.bizRefId)}>
+                      查看用户余额调账
+                    </Link>
+                  ) : detail.bizRefId && access.canViewFinanceBizDocs ? (
+                    <Link to={voucherSourceUrl(detail.bizRefId)}>
+                      查询凭证来源
+                    </Link>
+                  ) : null}
+                </Space>
               </Descriptions.Item>
               <Descriptions.Item label="期间">
                 {detail.periodLabel}
               </Descriptions.Item>
               <Descriptions.Item label="状态">
-                {detail.status}
+                {detail.status === 'Posted' ? '已过账' : '已冲销'}
               </Descriptions.Item>
               <Descriptions.Item label="摘要">
                 {detail.summary || '-'}
@@ -865,6 +1009,7 @@ const VouchersPage: React.FC = () => {
               </Descriptions.Item>
             </Descriptions>
             <AutoHeightProTable
+              fillViewport={false}
               rowKey="seq"
               search={false}
               pagination={false}
@@ -874,8 +1019,15 @@ const VouchersPage: React.FC = () => {
                 { title: '#', dataIndex: 'seq', width: 50 },
                 { title: '科目', dataIndex: 'accountCode', width: 90 },
                 { title: '名称', dataIndex: 'accountName', width: 120 },
+                { title: '归属', dataIndex: 'ownerId', width: 150 },
+                { title: '余额桶', dataIndex: 'bucket', width: 100 },
                 { title: '借', dataIndex: 'debit', width: 90 },
                 { title: '贷', dataIndex: 'credit', width: 90 },
+                {
+                  title: '变动后余额',
+                  dataIndex: 'balanceAfterText',
+                  width: 140,
+                },
               ]}
             />
           </>

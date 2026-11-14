@@ -3,13 +3,16 @@ import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { Select, Space, Tag } from 'antd';
 import { formatForDisplay } from '@/utils/time';
 import React, { useRef, useState } from 'react';
-import { history, useAccess } from '@umijs/max';
+import { Link, useAccess, useLocation } from '@umijs/max';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
 import { type FinBizDocDto, getBizDocs, isMock } from '@/abp/finance';
+import { voucherBusinessTypes, voucherDetailsUrl } from '../vouchers/navigation';
 
 const BizDocsPage: React.FC = () => {
   const access = useAccess();
+  const { search } = useLocation();
+  const sourceReference = new URLSearchParams(search).get('bizRefId') ?? undefined;
   const actionRef = useRef<ActionType>(undefined);
   const load = useFinanceLoad();
   /** null=全部；true=仅演示；false=排除演示。代理 Scope 时 agentId 由后端强制 */
@@ -21,11 +24,13 @@ const BizDocsPage: React.FC = () => {
 
   return (
     <PageContainer
-      {...financeHelpHeader('A6', '业务单据')}
+      {...financeHelpHeader('A6', '凭证来源查询')}
       extra={
-        !load.ok ? null : (
-        <Space>
-          {!isAgentScoped && mockMode && (
+        <Space wrap>
+          {access.canViewFinanceVouchers && (
+            <Link to="/finance/vouchers">会计凭证</Link>
+          )}
+          {load.ok && !isAgentScoped && mockMode && (
             <Select
               allowClear
               placeholder="按代理筛选"
@@ -42,31 +47,33 @@ const BizDocsPage: React.FC = () => {
               ]}
             />
           )}
-          <Select
-            allowClear
-            placeholder="演示单据"
-            style={{ width: 140 }}
-            value={isDemo === null ? undefined : isDemo ? '1' : '0'}
-            onChange={(v) => {
-              setIsDemo(v === undefined ? null : v === '1');
-              actionRef.current?.reload();
-            }}
-            options={[
-              { value: '1', label: '仅演示' },
-              { value: '0', label: '排除演示' },
-            ]}
-          />
+          {load.ok && (
+            <Select
+              allowClear
+              placeholder="演示单据"
+              style={{ width: 140 }}
+              value={isDemo === null ? undefined : isDemo ? '1' : '0'}
+              onChange={(v) => {
+                setIsDemo(v === undefined ? null : v === '1');
+                actionRef.current?.reload();
+              }}
+              options={[
+                { value: '1', label: '仅演示' },
+                { value: '0', label: '排除演示' },
+              ]}
+            />
+          )}
         </Space>
-        )
       }
     >
       <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
       <AutoHeightProTable<FinBizDocDto>
-        key={load.nonce}
+        key={`${load.nonce}:${sourceReference ?? ''}`}
         rowKey="id"
-        locale={{ emptyText: <FinanceEmpty text={'暂无业务单据'} /> }}
+        locale={{ emptyText: <FinanceEmpty text="暂无凭证来源记录" /> }}
         actionRef={actionRef}
         search={{ labelWidth: 'auto' }}
+        form={{ initialValues: { bizRefId: sourceReference } }}
         params={{ isDemo, agentId }}
         request={async (params) => {
           const maxResultCount = params.pageSize ?? 20;
@@ -75,7 +82,8 @@ const BizDocsPage: React.FC = () => {
             getBizDocs({
             skipCount,
             maxResultCount,
-            filter: params.bizRefId || params.bizType,
+            filter: params.bizRefId,
+            bizType: params.bizType,
             // 代理 Scope：不传 agentId，服务端按当前用户 AgentId 强制过滤
             agentId: isAgentScoped ? undefined : agentId,
             isDemo,
@@ -85,9 +93,9 @@ const BizDocsPage: React.FC = () => {
           return { data: result.items, total: result.totalCount, success: true };
         }}
         columns={[
-          { title: '业务类型', dataIndex: 'bizType', width: 120 },
+          { title: '业务类型', dataIndex: 'bizType', width: 130, valueEnum: voucherBusinessTypes },
           { title: '业务单号', dataIndex: 'bizRefId', width: 140 },
-          { title: 'Phase', dataIndex: 'phase', width: 100, search: false },
+          { title: '业务阶段', dataIndex: 'phase', width: 100, search: false },
           {
             title: '金额',
             dataIndex: 'amount',
@@ -122,19 +130,15 @@ const BizDocsPage: React.FC = () => {
             title: '操作',
             valueType: 'option',
             width: 120,
-            render: (_, r) =>
-              r.voucherId
-                ? [
-                    <a
-                      key="v"
-                      onClick={() =>
-                        history.push(`/finance/vouchers?voucherId=${r.voucherId}`)
-                      }
-                    >
-                      关联凭证
-                    </a>,
-                  ]
-                : ['-'],
+            render: (_, row) => {
+              // Live rows come from voucher heads, so their row ID is the voucher ID.
+              const voucherId = mockMode ? row.voucherId : row.id;
+              return access.canViewFinanceVouchers && voucherId ? (
+                <Link to={voucherDetailsUrl(voucherId)}>查看会计凭证</Link>
+              ) : (
+                '—'
+              );
+            },
           },
         ]}
       />

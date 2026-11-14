@@ -56,6 +56,29 @@ public class FrontendContractSnapshotTests
         typeof(AbpAdmin.Menus.MenuTreeDto),
         typeof(AbpAdmin.BackgroundJobs.BackgroundJobDto),
         typeof(AbpAdmin.ClientErrors.ClientFailureDto),
+        typeof(AbpAdmin.Collection.Contracts.CollectionPaymentListInput),
+        typeof(AbpAdmin.Collection.Contracts.CollectionPaymentAdminDto),
+        typeof(AbpAdmin.Collection.Contracts.CollectionRefundDto),
+        typeof(AbpAdmin.Collection.Contracts.RequestCollectionRefundInput),
+        typeof(AbpAdmin.Collection.Contracts.CollectionBalanceAdjustmentDto),
+        typeof(AbpAdmin.Collection.Contracts.CreateCollectionBalanceAdjustmentInput),
+        typeof(AbpAdmin.Collection.Contracts.RejectCollectionBalanceAdjustmentInput),
+        typeof(AbpAdmin.Collection.Contracts.CollectionBalanceAdjustmentListInput),
+        typeof(AbpAdmin.Collection.Services.CollectionNetworkSummaryDto),
+        typeof(AbpAdmin.Collection.Services.CollectionWalletStatusDto),
+        typeof(AbpAdmin.Collection.Services.NetworkStatusDto),
+        typeof(AbpAdmin.Collection.Services.ConfigureNetworkInput),
+        typeof(AbpAdmin.Collection.Services.AddNetworkApiKeyInput),
+        typeof(AbpAdmin.Collection.Services.ConfigureAnkrInput),
+        typeof(AbpAdmin.Collection.Services.AnkrSettingsDto),
+        typeof(AbpAdmin.Collection.Services.AnkrBalanceDto),
+        typeof(AbpAdmin.Collection.Services.TestNodeCredentialInput),
+        typeof(AbpAdmin.Collection.Services.TestNodeCredentialDto),
+        typeof(AbpAdmin.Collection.Contracts.ChainRuntimeSettingsDto),
+        typeof(AbpAdmin.Collection.Services.SetWithdrawVaultInput),
+        typeof(AbpAdmin.Ledger.Services.Dtos.FinVoucherListInput),
+        typeof(AbpAdmin.Ledger.Services.Dtos.FinVoucherDto),
+        typeof(AbpAdmin.Ledger.Services.Dtos.FinEntryDto),
     };
 
     private static readonly NullabilityInfoContext NullabilityCtx = new();
@@ -119,7 +142,7 @@ public class FrontendContractSnapshotTests
     /// <summary>种子类型出发，按「Contracts 程序集内的类/枚举」规则递归发现全部被消费的契约类型。</summary>
     private static SortedDictionary<string, object> SnapshotShapes(Type[] seeds)
     {
-        var contractsAssembly = seeds[0].Assembly;
+        var contractsAssemblies = seeds.Select(type => type.Assembly).ToHashSet();
         var pending = new Queue<Type>(seeds);
         var shapes = new SortedDictionary<string, object>();
 
@@ -152,7 +175,7 @@ public class FrontendContractSnapshotTests
                     ["type"] = DescribeType(property.PropertyType),
                     ["nullable"] = IsNullable(property),
                 };
-                foreach (var nested in ContractTypesOf(property.PropertyType, contractsAssembly))
+                foreach (var nested in ContractTypesOf(property.PropertyType, contractsAssemblies))
                 {
                     pending.Enqueue(nested);
                 }
@@ -169,30 +192,27 @@ public class FrontendContractSnapshotTests
     }
 
     /// <summary>属性类型中的（Contracts 程序集内的）DTO / 枚举：含数组与泛型参数的递归展开。</summary>
-    private static IEnumerable<Type> ContractTypesOf(Type type, Assembly contractsAssembly)
+    private static IEnumerable<Type> ContractTypesOf(Type type, IReadOnlySet<Assembly> contractsAssemblies)
     {
         if (type.IsArray)
         {
-            return ContractTypesOf(type.GetElementType()!, contractsAssembly);
+            return ContractTypesOf(type.GetElementType()!, contractsAssemblies);
         }
 
         if (Nullable.GetUnderlyingType(type) is { } underlying)
         {
-            return ContractTypesOf(underlying, contractsAssembly);
+            return ContractTypesOf(underlying, contractsAssemblies);
         }
 
         if (!type.IsGenericType)
         {
-            return IsContractType(type, contractsAssembly) ? new[] { type } : Array.Empty<Type>();
+            return contractsAssemblies.Contains(type.Assembly) && (type.IsClass || type.IsEnum)
+                ? new[] { type }
+                : Array.Empty<Type>();
         }
 
         return type.GetGenericArguments()
-            .SelectMany(arg => ContractTypesOf(arg, contractsAssembly));
-    }
-
-    private static bool IsContractType(Type type, Assembly contractsAssembly)
-    {
-        return type.Assembly == contractsAssembly && (type.IsClass || type.IsEnum);
+            .SelectMany(arg => ContractTypesOf(arg, contractsAssemblies));
     }
 
     /// <summary>可空性：值类型看 Nullable&lt;T&gt;，引用类型读 NRT 元数据（C# 的 string? / = default! 均正确区分）。</summary>
