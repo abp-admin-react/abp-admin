@@ -29,9 +29,6 @@ using Volo.Abp.TenantManagement.EntityFrameworkCore;
 using EasyAbp.Abp.DataDictionary.EntityFrameworkCore;
 using EasyAbp.FileManagement.EntityFrameworkCore;
 using EasyAbp.NotificationService.EntityFrameworkCore;
-using EasyAbp.PaymentService.EntityFrameworkCore;
-using EasyAbp.PaymentService.Prepayment.EntityFrameworkCore;
-using EasyAbp.PaymentService.WeChatPay.EntityFrameworkCore;
 
 namespace AbpAdmin.EntityFrameworkCore;
 
@@ -240,9 +237,6 @@ public class AbpAdminDbContext :
         // 模块表 EasyAbpNotificationServiceNotifications / EasyAbpNotificationServiceNotificationInfos。
         // 模块自己的 NotificationServiceDbContext 运行时走同名连接串回落到 Default，与本上下文共表。
         builder.ConfigureNotificationService();
-        builder.ConfigurePaymentService();
-        builder.ConfigurePaymentServicePrepayment();
-        builder.ConfigurePaymentServiceWeChatPay();
         // 模块的 ConfigureDataDictionary 没有 optionsAction 参数（表名是模块既定的
         // EasyAbpAbpDataDictionaryDataDictionaries / EasyAbpAbpDataDictionaryDataDictionaryItems，不要改）。
         // 模块自己的 DataDictionaryDbContext 运行时走同名连接串回落到 Default，与本上下文共用这两张表。

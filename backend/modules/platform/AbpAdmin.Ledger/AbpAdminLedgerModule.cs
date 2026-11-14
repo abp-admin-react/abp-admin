@@ -20,7 +20,7 @@ using Volo.Abp.VirtualFileSystem;
 namespace AbpAdmin.Ledger;
 
 /// <summary>
-/// 瘦 Ledger 模块：表骨架 + 权限 + 种子；过账引擎（幂等/锁/红冲）、调账五态、Prepayment 停写。
+/// 瘦 Ledger 模块：表骨架 + 权限 + 种子；过账引擎（幂等/锁/红冲）、调账五态。
 /// 规则 Provider 外置 / ETO；进程内集成门面（LedgerIntegrationService）。
 /// </summary>
 [DependsOn(
@@ -126,7 +126,6 @@ public class AbpAdminLedgerModule : AbpModule
             options.Map(FinanceErrorCodes.InsufficientBalance, HttpStatusCode.BadRequest);
             options.Map(FinanceErrorCodes.VoucherNotFound, HttpStatusCode.NotFound);
             options.Map(FinanceErrorCodes.VoucherNotReversible, HttpStatusCode.BadRequest);
-            options.Map(FinanceErrorCodes.PrepaymentWritesFrozen, HttpStatusCode.Forbidden);
         });
     }
 }

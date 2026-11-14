@@ -21,15 +21,6 @@ public class LedgerSettingDefinitionProvider : SettingDefinitionProvider
                     DefaultValueSettingValueProvider.ProviderName)
                 .WithUi(LedgerSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Checkbox),
             new SettingDefinition(
-                    LedgerSettings.PrepaymentFreezeWrites,
-                    "false",
-                    L("Setting:Finance.Prepayment.FreezeWrites"),
-                    L("Setting:Finance.Prepayment.FreezeWrites.Description"))
-                .WithProviders(
-                    GlobalSettingValueProvider.ProviderName,
-                    DefaultValueSettingValueProvider.ProviderName)
-                .WithUi(LedgerSettings.SettingUiGroup, group2: null, SettingUiConst.Components.Checkbox),
-            new SettingDefinition(
                     LedgerSettings.WalletUseLedgerProjection,
                     "false",
                     L("Setting:Finance.Wallet.UseLedgerProjection"),

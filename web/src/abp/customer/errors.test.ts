@@ -42,8 +42,6 @@ describe('public-error-catalog', () => {
       'AbpAdmin:Export:SyncThresholdExceeded',
       'AbpAdmin:Files:ContentMismatch',
       'AbpAdmin:IdentityClaimsCannotCarryRole',
-      'AbpAdmin:PrepaymentAccountIdRequired',
-      'AbpAdmin:PrepaymentAccountNotFound',
       'BizTemplate:Public:ProjectUnavailable',
       'Client:AuthenticationRequired',
       'Client:Conflict',

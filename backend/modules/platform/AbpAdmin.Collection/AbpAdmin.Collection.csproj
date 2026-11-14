@@ -29,8 +29,6 @@
     <PackageReference Include="Volo.Abp.VirtualFileSystem" />
     <!-- 嵌入清单生成任务依赖此包（缺它则 GenerateEmbeddedFilesManifest 静默不生效） -->
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />
-    <!-- 微信收款走 EasyAbp PaymentService（Payment/PaymentItem 行 + 退款拦截守卫要读支付行项） -->
-    <PackageReference Include="EasyAbp.PaymentService.Domain" />
     <!-- 链上（M5 计划第 5.6 节）：HD 派生与交易签名；本模块可用，Ordering 的边界测试禁止它经 Contracts 传导 -->
     <PackageReference Include="Nethereum.HdWallet" />
     <PackageReference Include="Nethereum.Signer" />

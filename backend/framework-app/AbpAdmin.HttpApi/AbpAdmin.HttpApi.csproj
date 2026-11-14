@@ -37,10 +37,6 @@
     <PackageReference Include="EasyAbp.Abp.SettingUi.HttpApi" />
     <!-- T3.5 -->
     <PackageReference Include="EasyAbp.NotificationService.HttpApi" />
-    <!-- T4.7 PaymentService。不引 .Web -->
-    <PackageReference Include="EasyAbp.PaymentService.HttpApi" />
-    <PackageReference Include="EasyAbp.PaymentService.Prepayment.HttpApi" />
-    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.HttpApi" />
   </ItemGroup>
 
 </Project>

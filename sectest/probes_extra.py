@@ -222,81 +222,6 @@ def p16_host_to_tenant_still_works():
     probe("p16_host_to_tenant_still_works", ok, f"宿主admin→B 用户（宿主运维语义） → {r.status}（须 200）")
 
 
-# ---------------------------------------------------------------- b03 变体：全部金面路由 × 双边界
-PREPAY_ROUTES = [
-    ("/api/payment-service/prepayment/account/{g}/change/balance", {"changedBalance": 1.0}),
-    ("/api/payment-service/prepayment/account/{g}/change/locked-balance", {"changedLockedBalance": 1.0}),
-    ("/api/payment-service/prepayment/account/{g}/top-up", {"amount": 1.0}),
-    ("/api/payment-service/prepayment/account/{g}/withdraw", {"amount": 1.0}),
-]
-
-
-def p17_22_prepayment_all():
-    g = str(uuid.uuid4())
-    details = []
-    ok = True
-    for path, body in PREPAY_ROUTES:
-        p = path.format(g=g)
-        for base, tag in ((HOST, "host"), (WEB, "web")):
-            r = S.req(base, "POST", p, token=tenantB, json_body=body)
-            denied = r.status in (401, 403, 302)
-            ok = ok and denied
-            details.append(f"{tag}:{p.split('/account/')[1].split('/')[0]}={r.status}")
-    probe("p17_22_prepayment_all", ok,
-          "租户B admin 全金面路由×双边界: " + ", ".join(details) + "（须全 403/302）")
-
-
-def p23_prepayment_host_admin_control():
-    g = str(uuid.uuid4())
-    details = []
-    ok = True
-    for path, body in PREPAY_ROUTES[:2]:
-        p = path.format(g=g)
-        r = S.req(HOST, "POST", p, token=admin, json_body=body)
-        passed = r.status not in (401, 403, 302)
-        ok = ok and passed
-        details.append(f"{p.rsplit('/', 1)[1]}={r.status}")
-    probe("p23_prepayment_host_admin_control", ok,
-          "宿主admin 对照组（须过授权门）: " + ", ".join(details))
-
-
-def p24_prepayment_transaction_read():
-    """缺 AccountId 须 400 PrepaymentAccountIdRequired，不得 500。"""
-    for base, tag in ((HOST, "host"), (WEB, "web")):
-        r = S.req(base, "GET", "/api/payment-service/prepayment/transaction?SkipCount=0&MaxResultCount=5",
-                  token=tenantB)
-        ok = r.status == 400
-        probe(f"p24_prepayment_tx_read[{tag}]", ok,
-              f"租户B admin 无 AccountId 读交易列表 → {r.status}（须 400，不得 500）")
-
-
-def p24b_prepayment_transaction_missing_account():
-    """不存在的 AccountId 须 404 PrepaymentAccountNotFound，不得 500。"""
-    missing = str(uuid.uuid4())
-    for base, tag in ((HOST, "host"), (WEB, "web")):
-        r = S.req(base, "GET",
-                  f"/api/payment-service/prepayment/transaction?AccountId={missing}&MaxResultCount=1",
-                  token=tenantB)
-        code = ""
-        try:
-            code = (r.json or {}).get("error", {}).get("code") or ""
-        except Exception:
-            pass
-        ok = r.status == 404 and "PrepaymentAccountNotFound" in code
-        probe(f"p24b_prepayment_tx_missing[{tag}]", ok,
-              f"租户B admin AccountId=随机 → {r.status} code={code}（须 404/PrepaymentAccountNotFound，不得 500）")
-
-
-def p25_prepayment_withdrawal_request_read():
-    """无过滤 GetList = 租户内全量枚举，须 Manage（钉 Host）⇒ 租户 admin 403/302。"""
-    for base, tag in ((HOST, "host"), (WEB, "web")):
-        r = S.req(base, "GET", "/api/payment-service/prepayment/withdrawal-request?SkipCount=0&MaxResultCount=5",
-                  token=tenantB)
-        denied = r.status in (401, 403, 302)
-        probe(f"p25_prepayment_wr_read[{tag}]", denied,
-              f"租户B admin 无过滤读提现申请列表 → {r.status}（须 403/302：Manage 钉 Host）")
-
-
 # ---------------------------------------------------------------- b05 变体：切片操作员换面
 def p26_agent_reconcile_host():
     r = S.req(HOST, "GET", "/api/app/fin-reconcile?SkipCount=0&MaxResultCount=20", token=agent)
@@ -487,9 +412,6 @@ ALL = [p01_withbytes_json_mz, p03_many_withstream, p04_many_form, p05_case_path,
        p09_impersonate_deactivated, p10_impersonate_locked_host_direct, p11_impersonate_restored_ok,
        p12_cross_no_tenant_header, p13_tenant_admin_to_host_user, p14_cross_cookie_tenant_host,
        p15_cross_cookie_tenant_web, p16_host_to_tenant_still_works,
-       p17_22_prepayment_all, p23_prepayment_host_admin_control,
-       p24_prepayment_transaction_read, p24b_prepayment_transaction_missing_account,
-       p25_prepayment_withdrawal_request_read,
        p26_agent_reconcile_host, p27_agent_reconcile_run_granted, p29_admin_reconcile_ok,
        p30_findemo_host_direct, p31_findemo_host_admin,
        p32_email_cross, p33_sms_cross, p34_mixed_delivery, p35_host_to_tenant_abp_change,

@@ -21,10 +21,6 @@
     <PackageReference Include="EasyAbp.Abp.DataDictionary.Domain.Shared" />
     <!-- T3.5 通知服务：ETO 基类 CreateNotificationInfoModel / NotificationUserInfoModel 所在 -->
     <PackageReference Include="EasyAbp.NotificationService.Domain.Shared" />
-    <!-- T4.7 PaymentService -->
-    <PackageReference Include="EasyAbp.PaymentService.Domain.Shared" />
-    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Domain.Shared" />
-    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.Domain.Shared" />
     <PackageReference Include="EasyAbp.Abp.VerificationCode" />
     <PackageReference Include="Volo.Abp.Auditing" />
     <PackageReference Include="Volo.Abp.GlobalFeatures" />

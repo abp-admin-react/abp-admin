@@ -14,7 +14,7 @@
 | 非负 | 仅 User/Agent 子户且科目 `AllowNegative=false` 时拒负余额 |
 | 账户解析 | 2201/2202/2205→User；2203→Agent；1002→Channel(dimensions.channel\|\|default)；其余→Platform |
 | 代理 Scope | F1：`Finance.Scope.Agent` 时 OwnerId=当前用户 Id（代理绑定表 F5 再接） |
-| Prepayment 停写 | 本地实体事件拦 Account/Transaction/Withdrawal* 的 Changed；设置 `Finance.Prepayment.FreezeWrites` |
+| Prepayment 停写 | F1 曾通过本地实体事件冻结旧预存款写入。移除 EasyAbp PaymentService 时同时删除此守卫与设置。 |
 | 开关 | 配置 `Ledger:Enabled` ∧ 设置 `Finance.Ledger.Enabled`；`Ledger:BizTypes:{type}` 灰度；manual-adjust 不受业务开关限制 |
 | A2 科目 CRUD | F1 已做：FinAccountAppService（系统科目只读；有分录不可删/不可改 code·type·direction）；A4 关账/A6 业务联查属后续 |
 | 调账职责分离 | 2026-10-14 海峰定：不写死，改权限配置。删除"申请人==审批人一律拒绝"；建/提交/审批/驳回/冲销分别只看 `Finance.Adjust.Create/Submit/Approve/Reject/Reverse`；新增 `Finance.Adjust.ApproveOwn`（可审批自己提交的调账单），审批/驳回自己的单没有它 → 403 `Finance:Adjust:SelfApproveNotAllowed`（替代 `SelfApproveForbidden`）。admin 不绕过。改/删/提交/reopen 仍限申请人本人（单据归属）。默认：fin_accountant=Create+Submit+Approve+Reject+Reverse，fin_boss=Approve+Reject（无 Create/Submit/Reverse），ApproveOwn 不授任何人；老板可在角色权限页自行勾选。 |

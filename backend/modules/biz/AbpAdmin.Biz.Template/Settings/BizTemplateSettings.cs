@@ -21,12 +21,7 @@ public static class BizTemplateSettings
     /// <summary>词根前缀：参数名由它组合（对齐框架 AbpAdminSettings.Prefix 的形态）。</summary>
     private const string Prefix = "BizTemplate";
 
-    /// <summary>
-    /// 本模块设置页一级 Tab 名（Group1 元数据值）。显示名 = SettingUiResource 链里查这个
-    /// 原样字符串（模块本地化 JSON 里的裸键 "BizTemplate"，经 BizTemplateModule 挂链后生效；
-    /// 框架的 "Payment" → "支付" 是同一机制）。
-    /// 模块自带 Tab 名，不往框架 AbpAdminSettingUiConsts.Groups 里加——业务分组不混进框架分组。
-    /// </summary>
+    /// <summary>设置页一级分组键，通过模块注册到 SettingUiResource 的资源解析显示名。</summary>
     public const string SettingUiGroup = Prefix;
 
     /// <summary>项目域参数。</summary>

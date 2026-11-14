@@ -8,6 +8,5 @@ public static class LedgerSettings
     private const string Prefix = "Finance.Ledger";
 
     public const string Enabled = Prefix + ".Enabled";
-    public const string PrepaymentFreezeWrites = "Finance.Prepayment.FreezeWrites";
     public const string WalletUseLedgerProjection = "Finance.Wallet.UseLedgerProjection";
 }

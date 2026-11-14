@@ -61,11 +61,6 @@
     <!-- 出站 HTTP 声明式客户端（HttpAgent）：Turnstile siteverify 等第三方端点走声明式接口；
          命名 HttpClient 注册仍在 CachingAndTenancyConfigurator（注册跟随消费方）。 -->
     <PackageReference Include="HttpAgent" />
-    <!-- T4.7 PaymentService -->
-    <PackageReference Include="EasyAbp.PaymentService.Domain" />
-    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Domain" />
-    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.Domain" />
-    <PackageReference Include="EasyAbp.Abp.WeChat.Pay" />
   </ItemGroup>
 
   <ItemGroup>

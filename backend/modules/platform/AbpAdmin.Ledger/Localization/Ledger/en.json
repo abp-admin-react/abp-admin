@@ -23,8 +23,6 @@
     "Finance": "Finance",
     "Setting:Finance.Ledger.Enabled": "Enable Ledger",
     "Setting:Finance.Ledger.Enabled.Description": "Master switch; when off, business posting is rejected",
-    "Setting:Finance.Prepayment.FreezeWrites": "Freeze Prepayment writes",
-    "Setting:Finance.Prepayment.FreezeWrites.Description": "When true, reject new Prepayment writes",
     "Setting:Finance.Wallet.UseLedgerProjection": "Wallet uses Ledger projection",
     "Setting:Finance.Wallet.UseLedgerProjection.Description": "When on, balance reads use Ledger projection",
     "Finance:Adjust:SelfApproveNotAllowed": "You are not allowed to approve or reject an adjustment you submitted",
@@ -52,7 +50,6 @@
     "Finance:InsufficientBalance": "Insufficient balance on account {AccountCode}",
     "Finance:VoucherNotFound": "Voucher not found",
     "Finance:VoucherNotReversible": "A reversal voucher cannot be reversed",
-    "Finance:Prepayment:WritesFrozen": "Prepayment writes are frozen; use the ledger",
     "Finance:Adjust:ReopenDenied": "Only the creator can reopen for editing",
     "Finance:Adjust:RejectReasonRequired": "Reject reason is required"
   }

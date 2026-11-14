@@ -20,9 +20,6 @@ using EasyAbp.Abp.SettingUi;
 using EasyAbp.Abp.SettingUi.Localization;
 using EasyAbp.Abp.VerificationCode;
 using EasyAbp.NotificationService;
-using EasyAbp.PaymentService;
-using EasyAbp.PaymentService.Prepayment;
-using EasyAbp.PaymentService.WeChatPay;
 
 namespace AbpAdmin;
 
@@ -40,10 +37,7 @@ namespace AbpAdmin;
     typeof(AbpDataDictionaryDomainSharedModule),
     typeof(AbpSettingUiDomainSharedModule),
     typeof(AbpVerificationCodeModule),
-    typeof(NotificationServiceDomainSharedModule),
-    typeof(PaymentServiceDomainSharedModule),
-    typeof(PaymentServicePrepaymentDomainSharedModule),
-    typeof(PaymentServiceWeChatPayDomainSharedModule)
+    typeof(NotificationServiceDomainSharedModule)
     )]
 public class AbpAdminDomainSharedModule : AbpModule
 {
@@ -79,10 +73,6 @@ public class AbpAdminDomainSharedModule : AbpModule
             // NotificationService 模块资源补丁：模块没本地化自己的权限组名 Permission:NotificationService
             options.Resources
                 .Get<EasyAbp.NotificationService.Localization.NotificationServiceResource>()
-                .AddVirtualJson("/Localization/AbpAdmin");
-
-            options.Resources
-                .Get<EasyAbp.PaymentService.Localization.PaymentServiceResource>()
                 .AddVirtualJson("/Localization/AbpAdmin");
 
             options.DefaultResourceType = typeof(AbpAdminResource);

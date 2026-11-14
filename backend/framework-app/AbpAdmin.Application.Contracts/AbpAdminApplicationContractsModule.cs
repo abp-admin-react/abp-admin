@@ -10,9 +10,6 @@ using EasyAbp.Abp.DataDictionary;
 using EasyAbp.FileManagement;
 using EasyAbp.Abp.SettingUi;
 using EasyAbp.NotificationService;
-using EasyAbp.PaymentService;
-using EasyAbp.PaymentService.Prepayment;
-using EasyAbp.PaymentService.WeChatPay;
 
 namespace AbpAdmin;
 
@@ -27,10 +24,7 @@ namespace AbpAdmin;
     typeof(FileManagementApplicationContractsModule),
     typeof(AbpDataDictionaryApplicationContractsModule),
     typeof(AbpSettingUiApplicationContractsModule),
-    typeof(NotificationServiceApplicationContractsModule),
-    typeof(PaymentServiceApplicationContractsModule),
-    typeof(PaymentServicePrepaymentApplicationContractsModule),
-    typeof(PaymentServiceWeChatPayApplicationContractsModule)
+    typeof(NotificationServiceApplicationContractsModule)
 )]
 public class AbpAdminApplicationContractsModule : AbpModule
 {

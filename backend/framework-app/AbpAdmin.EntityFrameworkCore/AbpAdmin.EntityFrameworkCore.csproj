@@ -24,10 +24,6 @@
     <PackageReference Include="EasyAbp.Abp.DataDictionary.EntityFrameworkCore" />
     <!-- T3.5 -->
     <PackageReference Include="EasyAbp.NotificationService.EntityFrameworkCore" />
-    <!-- T4.7 PaymentService -->
-    <PackageReference Include="EasyAbp.PaymentService.EntityFrameworkCore" />
-    <PackageReference Include="EasyAbp.PaymentService.Prepayment.EntityFrameworkCore" />
-    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.EntityFrameworkCore" />
   </ItemGroup>
 
   <ItemGroup>

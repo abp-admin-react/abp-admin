@@ -40,10 +40,6 @@
     <PackageReference Include="EasyAbp.Abp.DataDictionary.Application.Contracts" />
     <!-- T3.5 -->
     <PackageReference Include="EasyAbp.NotificationService.Application" />
-    <!-- T4.7 PaymentService。不引 .Web -->
-    <PackageReference Include="EasyAbp.PaymentService.Application" />
-    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Application" />
-    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.Application" />
     <!-- T3.5：Dispatcher 直接构造 ETO（门面隔离点，见 INotificationDispatcher 注释） -->
     <PackageReference Include="EasyAbp.NotificationService.Provider.Mailing.Abstractions" />
     <PackageReference Include="EasyAbp.NotificationService.Provider.Sms.Abstractions" />

@@ -44,27 +44,6 @@
       ]
     },
     {
-      "code": "AbpAdmin:PrepaymentAccountIdRequired",
-      "kind": "validation",
-      "httpStatuses": [
-        400
-      ],
-      "dataFields": [
-        "correlationId"
-      ]
-    },
-    {
-      "code": "AbpAdmin:PrepaymentAccountNotFound",
-      "kind": "notFound",
-      "httpStatuses": [
-        404
-      ],
-      "dataFields": [
-        "AccountId",
-        "correlationId"
-      ]
-    },
-    {
       "code": "BizTemplate:Public:ProjectUnavailable",
       "kind": "business",
       "httpStatuses": [

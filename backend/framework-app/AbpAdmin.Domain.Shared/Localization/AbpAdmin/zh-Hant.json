@@ -5,8 +5,6 @@
     "Menu:Home": "Home",
     "LongWelcomeMessage": "Welcome to the application. This is a startup project based on the ABP framework. For more information visit",
     "Welcome": "Welcome",
-    "AbpAdmin:NotificationTenantScopeSwitchDenied": "不能切換到其他租戶發送通知（僅宿主可指定目標租戶）。",
-    "AbpAdmin:PrepaymentAccountIdRequired": "查詢預存款流水必須指定帳戶 Id（AccountId）。",
-    "AbpAdmin:PrepaymentAccountNotFound": "預存款帳戶不存在。"
+    "AbpAdmin:NotificationTenantScopeSwitchDenied": "不能切換到其他租戶發送通知（僅宿主可指定目標租戶）。"
   }
 }

@@ -32,10 +32,6 @@
     <PackageReference Include="EasyAbp.Abp.DataDictionary.Application.Contracts" />
     <!-- T3.5：NotificationServicePermissions 权限常量在该包中 -->
     <PackageReference Include="EasyAbp.NotificationService.Application.Contracts" />
-    <!-- T4.7 PaymentService -->
-    <PackageReference Include="EasyAbp.PaymentService.Application.Contracts" />
-    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Application.Contracts" />
-    <PackageReference Include="EasyAbp.PaymentService.WeChatPay.Application.Contracts" />
     <!-- T2.6：UserImportRowDto 的 [ExcelColumnName] 列名特性（导入模板表头与解析共用 UserImportColumnNames 常量） -->
     <PackageReference Include="MiniExcel" />
   </ItemGroup>

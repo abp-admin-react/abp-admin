@@ -147,16 +147,7 @@ public class AbpAdminBizTemplateModule : AbpModule
                 .Add<BizTemplateClientResource>("en")
                 .AddVirtualJson("/Localization/BizTemplateClient");
 
-            // 设置页分组名本地化：EasyAbp SettingUi 用 IStringLocalizer<SettingUiResource> 解析
-            // Group1 显示名（GroupDisplayName = _localizer["BizTemplate"]），模块资源必须挂到
-            // SettingUiResource 链上才能命中——框架的分组名（"Payment"→"支付"）就是这么生效的
-            //（框架在 DomainSharedModule 把 /Localization/AbpAdmin 挂到了 SettingUiResource）。
-            // 本行在模块内完成同款接线，不碰框架文件；模块整体移除时该贡献随之消失。
-            // 设置项自身的 DisplayName/Description 不依赖这里（LocalizableString.Create<BizTemplateResource>
-            // 走定义自己的资源），只有 Tab 分组名走 SettingUiResource。
-            // 【随挂副作用，刻意接受】模块 JSON 里的通用键（Permission:Create 等）也会进入
-            // SettingUiResource 链——当前 SettingUi 链只被用来查分组名，这些键处于惰性状态；
-            // 与框架域（同样整文件挂链）行为一致。若未来 SettingUi 链开始消费通用键，需换专用最小 JSON。
+            // SettingUi 通过 SettingUiResource 解析 Group1 显示名；设置项名称和说明使用模块资源。
             options.Resources
                 .Get<EasyAbp.Abp.SettingUi.Localization.SettingUiResource>()
                 .AddVirtualJson("/Localization/BizTemplate");

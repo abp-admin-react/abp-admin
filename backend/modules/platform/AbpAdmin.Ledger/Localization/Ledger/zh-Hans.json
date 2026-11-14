@@ -23,8 +23,6 @@
     "Finance": "财务",
     "Setting:Finance.Ledger.Enabled": "启用 Ledger",
     "Setting:Finance.Ledger.Enabled.Description": "总开关；关闭后拒绝业务过账",
-    "Setting:Finance.Prepayment.FreezeWrites": "冻结 Prepayment 写入",
-    "Setting:Finance.Prepayment.FreezeWrites.Description": "为 true 时禁止 Prepayment 新写",
     "Setting:Finance.Wallet.UseLedgerProjection": "钱包以 Ledger 投影为准",
     "Setting:Finance.Wallet.UseLedgerProjection.Description": "打开后余额读路径切到 Ledger 投影",
     "Finance:Adjust:SelfApproveNotAllowed": "没有审批自己提交的调账单的权限",
@@ -52,7 +50,6 @@
     "Finance:InsufficientBalance": "科目 {AccountCode} 余额不足",
     "Finance:VoucherNotFound": "凭证不存在",
     "Finance:VoucherNotReversible": "红冲凭证不能再红冲",
-    "Finance:Prepayment:WritesFrozen": "预付款（Prepayment）已冻结写入，请改用账本",
     "Finance:Adjust:ReopenDenied": "只有制单人可以重新编辑",
     "Finance:Adjust:RejectReasonRequired": "驳回时必须填写原因"
   }

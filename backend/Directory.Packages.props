@@ -35,8 +35,6 @@
     <EasyAbpTencentCloudVersion>1.27.0</EasyAbpTencentCloudVersion>
     <EasyAbpBlobStoringTencentCloudVersion>1.20.0</EasyAbpBlobStoringTencentCloudVersion>
     <EasyAbpVerificationCodeVersion>1.18.0</EasyAbpVerificationCodeVersion>
-    <EasyAbpPaymentServiceVersion>2.21.0</EasyAbpPaymentServiceVersion>
-    <EasyAbpWeChatVersion>3.11.0</EasyAbpWeChatVersion>
     <MiniExcelVersion>1.45.0</MiniExcelVersion>
     <IP2RegionNetVersion>3.0.2</IP2RegionNetVersion>
     <ClosedXMLVersion>0.105.0</ClosedXMLVersion>
@@ -274,29 +272,9 @@
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.MicrosoftAccount" Version="$(MicrosoftVersion)" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.Google" Version="$(MicrosoftVersion)" />
 
-    <!-- T4.7 EasyAbp.PaymentService 2.21.0：核心 + 预存款 + 微信支付。明确不引 .Web MVC。 -->
-    <PackageVersion Include="EasyAbp.PaymentService.Domain.Shared" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.Domain" Version="$(EasyAbpPaymentServiceVersion)" />
     <!-- 链上（M5）：HD 派生 + EIP-155 签名 + KeyStore；JSON-RPC 走自写 HttpClient 网关（见 Chain/） -->
     <PackageVersion Include="Nethereum.HdWallet" Version="4.29.0" />
     <PackageVersion Include="Nethereum.Signer" Version="4.29.0" />
-    <PackageVersion Include="EasyAbp.PaymentService.Application.Contracts" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.Application" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.EntityFrameworkCore" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.HttpApi" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.Domain.Shared" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.Domain" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.Application.Contracts" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.Application" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.EntityFrameworkCore" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.Prepayment.HttpApi" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.Domain.Shared" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.Domain" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.Application.Contracts" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.Application" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.EntityFrameworkCore" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.PaymentService.WeChatPay.HttpApi" Version="$(EasyAbpPaymentServiceVersion)" />
-    <PackageVersion Include="EasyAbp.Abp.WeChat.Pay" Version="$(EasyAbpWeChatVersion)" />
 
     <!-- ===== 传递依赖钉版（CentralPackageTransitivePinningEnabled=true，
          以下条目直接抬升传递解析结果） ===== -->

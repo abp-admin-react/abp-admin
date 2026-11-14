@@ -302,27 +302,6 @@ public static class AbpAdminDomainErrorCodes
         public const string ContentMismatch = "AbpAdmin:Files:ContentMismatch";
     }
 
-    public static class Payments
-    {
-        public const string RefundAmountInvalid = "AbpAdmin:PaymentRefundAmountInvalid";
-
-        /// <summary>该支付单已有一个退款操作正在处理（分布式锁占用中）。</summary>
-        public const string RefundInProgress = "AbpAdmin:PaymentRefundInProgress";
-
-        /// <summary>
-        /// 退款被守卫拒绝（IPaymentRefundGuard 的某个实现拒绝，如收款模块按 ItemType 前缀
-        /// 拒绝自己的支付行——渠道退了钱、收款单和订单仍显示已支付）。WithData 记录拒绝的
-        /// 实现名（Guard）与理由（Reason）。
-        /// </summary>
-        public const string RefundRefusedByGuard = "AbpAdmin:PaymentRefundRefusedByGuard";
-
-        /// <summary>流水列表缺 AccountId。公开目录 Validation → 400（避免包空 Id GetAsync → 500）。</summary>
-        public const string PrepaymentAccountIdRequired = "AbpAdmin:PrepaymentAccountIdRequired";
-
-        /// <summary>流水列表 AccountId 不存在。公开目录 NotFound → 404（避免包 EntityNotFound → 500）。</summary>
-        public const string PrepaymentAccountNotFound = "AbpAdmin:PrepaymentAccountNotFound";
-    }
-
     /// <summary>
     /// 文本模板管理错误码。
     /// </summary>

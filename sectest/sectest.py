@@ -619,19 +619,6 @@ def b02_upload_sibling_route():
     return reproduced, f"with-stream MZ-jpg → {r.status}/{error_code(r)}（须 400/ContentMismatch）"
 
 
-def b03_prepayment_change_balance():
-    tok = Fx.per["tenantB_admin"]
-    # 修复后期望：权限钉 Host ⇒ 租户主体 403/302（授权门拒绝）。
-    # 400/404=授权放行进到业务校验（线索复现/回归失守）。
-    guid = str(uuid.uuid4())
-    # 字段名 changedBalance（错的键会在模型校验层 400，先于授权，探测无效）
-    r = req(HOST, "POST",
-            f"/api/payment-service/prepayment/account/{guid}/change/balance",
-            token=tok, json_body={"changedBalance": 1.0})
-    passed_authz = r.status not in (401, 403, 302)
-    return passed_authz, f"tenantB-admin change/balance(随机账户) → {r.status} {r.text()[:80]}（须 403/302：钱面权限已钉 Host）"
-
-
 def b04_impersonation_cross_tenant():
     # 直连 host：nginx 丢弃 __tenant 头，跨租户转向向量只存在于直连/其他边界。
     # 修复后期望：边界以令牌租户声明为基准 ⇒ A→B 必须 non-200（invalid_grant）。
@@ -693,7 +680,7 @@ A_TESTS = [a01_health_anonymous, a02_user_claims_role_rejected, a03_role_claims_
 # a12 会打满 LoginByIp 窗口（15min），必须全局最后执行
 A_TESTS_LAST = [a12_token_bruteforce_ratelimited]
 
-B_TESTS = [b01_impersonate_locked_account, b02_upload_sibling_route, b03_prepayment_change_balance,
+B_TESTS = [b01_impersonate_locked_account, b02_upload_sibling_route,
            b04_impersonation_cross_tenant, b05_finreconcile_sliced_read, b06_findemoevent_sod,
            b07_notification_cross_tenant, b08_default_admin_and_ropc]
 

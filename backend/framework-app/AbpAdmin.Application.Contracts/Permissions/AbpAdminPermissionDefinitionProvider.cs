@@ -172,13 +172,6 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
         impersonation.AddChild(AbpAdminPermissions.Impersonation.Tenant, L("Permission:Impersonation.Tenant"), MultiTenancySides.Host);
         impersonation.AddChild(AbpAdminPermissions.Impersonation.User, L("Permission:Impersonation.User"));
 
-        var payments = group.AddPermission(
-            AbpAdminPermissions.Payments.Default,
-            L("Permission:Payments"));
-        payments.AddChild(AbpAdminPermissions.Payments.Manage, L("Permission:Payments.Manage"));
-        payments.AddChild(AbpAdminPermissions.Payments.Refund, L("Permission:Payments.Refund"));
-        payments.AddChild(AbpAdminPermissions.Payments.Prepayment, L("Permission:Payments.Prepayment"));
-
         var menus = group.AddPermission(
             AbpAdminPermissions.Menus.Default,
             L("Permission:Menus"));

@@ -14,7 +14,8 @@ public class PublicErrorDefinitionRegistryTests
     private static readonly Type ClientErrorResourceType = typeof(ClientErrorResource);
 
     /// <summary>
-    /// 验证：Registry 构造时注册基础定义�?    /// 行为：初始包�?8 个基础错误定义�?    /// </summary>
+    /// 验证 Registry 构造时注册当前的基础错误定义。
+    /// </summary>
     [Fact]
     public void Constructor_Should_Register_Base_Definitions()
     {
@@ -27,8 +28,6 @@ public class PublicErrorDefinitionRegistryTests
         codes.ShouldContain(AbpAdminDomainErrorCodes.Imaging.ImageProcessingBusy);
         codes.ShouldContain(AbpAdminDomainErrorCodes.RateLimiting.OperationRateLimitExceeded);
         codes.ShouldContain(AbpAdminDomainErrorCodes.Files.ContentMismatch);
-        codes.ShouldContain(AbpAdminDomainErrorCodes.Payments.PrepaymentAccountIdRequired);
-        codes.ShouldContain(AbpAdminDomainErrorCodes.Payments.PrepaymentAccountNotFound);
         codes.ShouldContain("AbpAdmin:Export:SyncThresholdExceeded");
     }
 

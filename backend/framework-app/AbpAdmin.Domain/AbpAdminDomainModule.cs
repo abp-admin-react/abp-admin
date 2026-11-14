@@ -34,9 +34,6 @@ using EasyAbp.Abp.SettingUi;
 using EasyAbp.NotificationService;
 using EasyAbp.NotificationService.Provider.Mailing;
 using EasyAbp.NotificationService.Provider.Sms;
-using EasyAbp.PaymentService;
-using EasyAbp.PaymentService.Prepayment;
-using EasyAbp.PaymentService.WeChatPay;
 using Volo.Abp.Imaging;
 using Volo.Abp.MailKit;
 using Volo.Abp.TextTemplating;
@@ -73,10 +70,7 @@ namespace AbpAdmin;
     typeof(NotificationServiceProviderSmsModule),
     typeof(AbpMailKitModule),
     typeof(AbpTencentCloudSmsModule),
-    typeof(AbpAliyunSmsModule),
-    typeof(PaymentServiceDomainModule),
-    typeof(PaymentServicePrepaymentDomainModule),
-    typeof(PaymentServiceWeChatPayDomainModule))]
+    typeof(AbpAliyunSmsModule))]
 public class AbpAdminDomainModule : AbpModule
 {
     public override void PreConfigureServices(ServiceConfigurationContext context)
@@ -103,7 +97,6 @@ public class AbpAdminDomainModule : AbpModule
         services.ConfigureMultiTenancyAndCaching(configuration);   // 多租户/版本缓存/租户连接串清单
         services.ConfigureFileManagement(configuration);           // 文件容器与上传限额
         services.ConfigureBlobStoring(configuration);               // Blob 四提供商 switch
-        services.ConfigurePayments();                                // Free/Prepayment/WeChatPay
         services.ConfigureDomainServiceReplacements();              // DbLanguageProvider/数据范围缓存
         services.ConfigureTextTemplatesAndGdpr(configuration);      // 模板 contributor/GDPR/CookieConsent
         services.ConfigureImaging(configuration);                   // SkiaSharp 压缩/缩放

@@ -25,7 +25,6 @@
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />
     <PackageReference Include="Volo.Abp.SettingManagement.Domain" />
     <PackageReference Include="EasyAbp.Abp.SettingUi.Domain" />
-    <PackageReference Include="EasyAbp.PaymentService.Prepayment.Domain" />
   </ItemGroup>
 
   <ItemGroup>

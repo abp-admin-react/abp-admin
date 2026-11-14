@@ -18,9 +18,6 @@ using Volo.Abp.Studio;
 using EasyAbp.Abp.DataDictionary.EntityFrameworkCore;
 using EasyAbp.FileManagement.EntityFrameworkCore;
 using EasyAbp.NotificationService.EntityFrameworkCore;
-using EasyAbp.PaymentService.EntityFrameworkCore;
-using EasyAbp.PaymentService.Prepayment.EntityFrameworkCore;
-using EasyAbp.PaymentService.WeChatPay.EntityFrameworkCore;
 
 namespace AbpAdmin.EntityFrameworkCore;
 
@@ -38,10 +35,7 @@ namespace AbpAdmin.EntityFrameworkCore;
     typeof(BlobStoringDatabaseEntityFrameworkCoreModule),
     typeof(FileManagementEntityFrameworkCoreModule),
     typeof(AbpDataDictionaryEntityFrameworkCoreModule),
-    typeof(NotificationServiceEntityFrameworkCoreModule),
-    typeof(PaymentServiceEntityFrameworkCoreModule),
-    typeof(PaymentServicePrepaymentEntityFrameworkCoreModule),
-    typeof(PaymentServiceWeChatPayEntityFrameworkCoreModule)
+    typeof(NotificationServiceEntityFrameworkCoreModule)
     )]
 public class AbpAdminEntityFrameworkCoreModule : AbpModule
 {

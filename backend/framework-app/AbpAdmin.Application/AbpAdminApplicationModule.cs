@@ -20,9 +20,6 @@ using EasyAbp.Abp.DataDictionary;
 using EasyAbp.FileManagement;
 using EasyAbp.Abp.SettingUi;
 using EasyAbp.NotificationService;
-using EasyAbp.PaymentService;
-using EasyAbp.PaymentService.Prepayment;
-using EasyAbp.PaymentService.WeChatPay;
 using HttpAgent;
 using HttpAgent.Extensions;
 using Microsoft.Extensions.Configuration;
@@ -48,10 +45,7 @@ namespace AbpAdmin;
     typeof(AbpBackgroundJobsModule),
     typeof(FileManagementApplicationModule),
     typeof(AbpSettingUiApplicationModule),
-    typeof(NotificationServiceApplicationModule),
-    typeof(PaymentServiceApplicationModule),
-    typeof(PaymentServicePrepaymentApplicationModule),
-    typeof(PaymentServiceWeChatPayApplicationModule)
+    typeof(NotificationServiceApplicationModule)
     )]
 public class AbpAdminApplicationModule : AbpModule
 {

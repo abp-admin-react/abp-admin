@@ -186,14 +186,6 @@ public static class AbpAdminPermissions
         public const string User = Default + ".User";
     }
 
-    public static class Payments
-    {
-        public const string Default = GroupName + ".Payments";
-        public const string Manage = Default + ".Manage";
-        public const string Refund = Default + ".Refund";
-        public const string Prepayment = Default + ".Prepayment";
-    }
-
     /// <summary>菜单管理（动态菜单）。租户管理员也可维护本租户菜单树，非 Host-only。</summary>
     public static class Menus
     {

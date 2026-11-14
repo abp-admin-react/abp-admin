@@ -1,7 +1,7 @@
 namespace AbpAdmin.Settings;
 
 /// <summary>
-/// AbpAdmin 自定义设置项名称。按业务域分组为嵌套静态类（System/Account/Audit/Saas/Sms/Payment），
+/// AbpAdmin 自定义设置项名称。按业务域分组为嵌套静态类（System/Account/Audit/Saas/Sms），
 /// 与按域拆分的各 SettingDefinitionProvider 一一对应。
 /// 使用嵌套类形式访问（如 AbpAdminSettings.Sms.Provider）。
 /// </summary>
@@ -157,19 +157,5 @@ public static class AbpAdminSettings
         /// 模板参数名约定为 code（腾讯模板按位置取第一个参数）。
         /// </summary>
         public const string VerificationCodeTemplateCode = Prefix + ".Sms.VerificationCode.TemplateCode";
-    }
-
-    /// <summary>支付域（Group1 = Payment）。</summary>
-    public static class Payment
-    {
-        public const string WeChatPayMchId = Prefix + ".Payment.WeChatPay.MchId";
-
-        public const string WeChatPayApiKey = Prefix + ".Payment.WeChatPay.ApiKey";
-
-        public const string WeChatPayCertificate = Prefix + ".Payment.WeChatPay.Certificate";
-
-        public const string WeChatPayCertificateSecret = Prefix + ".Payment.WeChatPay.CertificateSecret";
-
-        public const string WeChatPayNotifyUrl = Prefix + ".Payment.WeChatPay.NotifyUrl";
     }
 }

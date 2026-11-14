@@ -85,7 +85,4 @@ public static class FinanceErrorCodes
 
     /// <summary>红冲凭证本身不可再红冲。HTTP 400。</summary>
     public const string VoucherNotReversible = Namespace + ":VoucherNotReversible";
-
-    /// <summary>Prepayment 已冻结新写入。HTTP 403。</summary>
-    public const string PrepaymentWritesFrozen = Namespace + ":Prepayment:WritesFrozen";
 }

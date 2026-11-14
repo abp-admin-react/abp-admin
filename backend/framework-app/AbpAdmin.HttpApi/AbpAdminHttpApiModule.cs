@@ -14,9 +14,6 @@ using Volo.Abp.TenantManagement;
 using EasyAbp.FileManagement;
 using EasyAbp.Abp.SettingUi;
 using EasyAbp.NotificationService;
-using EasyAbp.PaymentService;
-using EasyAbp.PaymentService.Prepayment;
-using EasyAbp.PaymentService.WeChatPay;
 
 namespace AbpAdmin;
 
@@ -30,10 +27,7 @@ namespace AbpAdmin;
     typeof(AbpFeatureManagementHttpApiModule),
     typeof(FileManagementHttpApiModule),
     typeof(AbpSettingUiHttpApiModule),
-    typeof(NotificationServiceHttpApiModule),
-    typeof(PaymentServiceHttpApiModule),
-    typeof(PaymentServicePrepaymentHttpApiModule),
-    typeof(PaymentServiceWeChatPayHttpApiModule)
+    typeof(NotificationServiceHttpApiModule)
     )]
 public class AbpAdminHttpApiModule : AbpModule
 {

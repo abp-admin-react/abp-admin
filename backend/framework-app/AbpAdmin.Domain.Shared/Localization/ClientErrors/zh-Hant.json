@@ -10,8 +10,6 @@
     "OperationFailed": "操作失敗，請稍後重試。",
     "Unexpected": "系統繁忙，請稍後重試。",
     "FileContentMismatch": "上傳被拒絕：檔案內容與其副檔名不符，或包含不允許的指令碼內容。",
-    "PrepaymentAccountIdRequired": "查詢預存款流水必須指定帳戶 Id（AccountId）。",
-    "PrepaymentAccountNotFound": "預存款帳戶不存在。",
     "SyncExportThresholdExceeded": "結果集超過同步匯出上限，請使用非同步匯出。",
     "CannotCarryRole": "不允許寫入權威類型（角色）的聲明。",
     "RoleDataScopeEscalation": "該授予會越出你自身的權限範圍。"

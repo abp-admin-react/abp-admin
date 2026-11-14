@@ -24,6 +24,5 @@ public static class AbpAdminSettingUiConsts
         public const string Saas = "Saas";
         public const string Audit = "Audit";
         public const string Sms = "Sms";
-        public const string Payment = "Payment";
     }
 }
