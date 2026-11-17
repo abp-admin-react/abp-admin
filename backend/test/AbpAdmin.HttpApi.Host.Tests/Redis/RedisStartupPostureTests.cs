@@ -144,18 +144,10 @@ public class RedisStartupPostureTests
             .Value.XmlRepository;
         repository.ShouldNotBeNull();
 
-        // SharedRedisConnection 是宿主私有嵌套类型，按名反射解析一次：MS DI 对常量单例
-        // 只有解析过才接管释放（生产路径由启动探针解析锁提供程序时顺带接管），随后
-        // DisposeAsync 才会真的释放连接、落下闩锁
-        var connectionType = typeof(AbpAdminHttpApiHostModule).Assembly
-            .GetTypes().First(t => t.Name == "SharedRedisConnection");
+        // Factory registration makes the container own this shared connection after resolution.
+        var connectionType = typeof(AbpAdmin.Modules.SharedRedisConnection);
         var connection = provider.GetRequiredService(connectionType);
         await provider.DisposeAsync();
-
-        // 容器释放路径以反射直达 Dispose 收尾：生产宿主走 Autofac（RegisterInstance 的释放
-        // 语义与 MS DI 的按解析捕获不同），本测试钉的是连接自身的关停闩锁语义，不是某个
-        // 容器的释放策略——MS DI 手工 Build 的 provider 不释放未解析工厂的常量单例
-        connectionType.GetMethod("Dispose")!.Invoke(connection, null); // 闩锁落下
 
         // 没有闩锁的旧行为：_multiplexer 为空 + 无冷却记录 → 重新 Connect（哪怕连不上也要
         // 付一次拨号；连得上就是泄漏）。闩锁后必须显式 ObjectDisposedException
