@@ -14,6 +14,7 @@ import React, { useEffect } from 'react';
 dayjs.extend(relativeTime);
 
 import { getApplicationConfiguration } from '@/abp/config';
+import type { ModuleAvailability } from '@/abp/moduleManagement';
 import { getCurrentAccountStatus } from '@/abp/identity';
 import { getMyAvatarInfo } from '@/abp/imaging';
 import { toMenuIcon } from '@/abp/menuIcons';
@@ -35,6 +36,7 @@ import {
   VersionDropdown,
 } from '@/components';
 import { queryClient } from '@/queryClient';
+import { ModuleAvailabilityContext } from '@/hooks/useModuleAvailability';
 import { setNotificationInstance } from '@/requestErrorConfig';
 import { isSafeMenuPath } from '@/utils/redirect';
 import defaultSettings from '../config/defaultSettings';
@@ -47,10 +49,10 @@ const publicPaths = [loginPath, '/user/callback', '/tenant-not-found', '/Error']
 /** 需要登录但不需要检查密码过期的路径 */
 const skipPasswordCheckPaths = [forceChangePasswordPath];
 
-/** 沿可见菜单树拼接翻译键，缺少词条时显示后端标题。
- * 目录使用独立键，避免 ProLayout 按页面 URL 前缀误展开旧分组。 */
+/** 内置翻译随模板标识，管理员标题按原值。目录使用独立键以避免 URL 前缀误展开。 */
 function toMenuData(
   items: MyMenuItemDto[],
+  moduleAvailability?: ModuleAvailability,
   parentLocaleKey = 'menu',
   parentPosition = '',
 ): MenuDataItem[] {
@@ -63,21 +65,33 @@ function toMenuData(
     )
     .map((item, index) => {
       const position = `${parentPosition}.${index}`;
-      const localeKey = item.name
+      const legacyLocaleKey = item.name
         ? `${parentLocaleKey}.${item.name}`
         : `${parentLocaleKey}.x${index}`;
+      const chainHistory =
+        item.path === '/web3/operations' &&
+        moduleAvailability?.states.Chain === false &&
+        !item.isCustomTitle;
+      const locale = chainHistory
+        ? 'menu.navigation.chain-history'
+        : item.isCustomTitle
+        ? false
+        : item.templateKey
+          ? `menu.navigation.${item.templateKey}`
+          : legacyLocaleKey;
       const children = item.children?.length
-        ? toMenuData(item.children, localeKey, position)
+        ? toMenuData(item.children, moduleAvailability, legacyLocaleKey, position)
         : undefined;
       const path = children?.length ? undefined : (item.path ?? undefined);
       const catalogKey = item.path ? encodeURIComponent(item.path) : position;
       return {
         path,
         key: path ?? `catalog-${catalogKey}`,
-        name: item.title,
-        locale: localeKey,
+        name: chainHistory ? '链上历史与收尾' : item.title,
+        locale,
         icon: toMenuIcon(item.icon),
         children,
+        runtimeMenu: true,
       };
     });
 }
@@ -108,6 +122,7 @@ export type AppInitialState = {
   signalrEnabled?: boolean;
   /** 字典标签色白名单（T3.4，来自 application-configuration 的 extraProperties） */
   dataDictionaryTagTypes?: string[];
+  moduleAvailability?: ModuleAvailability;
 };
 
 export async function getInitialState(): Promise<AppInitialState> {
@@ -203,6 +218,7 @@ export async function getInitialState(): Promise<AppInitialState> {
     signalrEnabled: lastConfig?.extraProperties?.signalr?.enabled !== false,
     // T3.4：字典标签色白名单（后端 DataDictionaryTagTypes.All），字典编辑下拉的唯一来源
     dataDictionaryTagTypes: lastConfig?.extraProperties?.dataDictionaryTagTypes,
+    moduleAvailability: lastConfig?.extraProperties?.modules,
     settings: defaultSettings as Partial<LayoutSettings>,
     settingDrawerOpen: false,
   };
@@ -213,19 +229,21 @@ export const layout: RunTimeLayoutConfig = ({
   setInitialState,
 }) => {
   return {
-    // 服务端按 ABP 权限下发菜单。尚未获得菜单树时，ProLayout 使用静态路由。
-    // 运行时 menu 覆盖默认配置，需显式保留 locale 才会读取 menu.* 词条。
+    // 运行时菜单统一使用服务端的权限、套餐和模块状态结果。
     menu: {
       locale: true,
       params: {
         user: initialState?.currentUser?.userid ?? '',
         tenant: initialState?.currentTenant?.id ?? 'host',
+        moduleVersion: initialState?.moduleAvailability?.version,
       },
       request: async () => {
         const res = await getMyMenu();
-        return toMenuData(res.items);
+        return toMenuData(res.items, initialState?.moduleAvailability);
       },
     },
+    menuDataRender: (items) =>
+      items.filter((item) => item.runtimeMenu || item.path === '/welcome'),
     // 目录无路由，面包屑只剩当前页时仍用它显示页头标题。
     breadcrumbProps: { minLength: 1 },
     menuItemRender: (item, dom) => {
@@ -293,9 +311,32 @@ export const layout: RunTimeLayoutConfig = ({
           {/* T2.7：模拟登录状态下顶部固定不可关闭的警告条 */}
           <ImpersonationBanner />
           <IdleSessionWatcher />
+          <ModuleAvailabilityRefresh
+            userId={initialState?.currentUser?.userid}
+            version={initialState?.moduleAvailability?.version}
+            refresh={async () => {
+              const configuration = await getApplicationConfiguration();
+              const next = configuration.extraProperties?.modules;
+              if (
+                !next ||
+                configuration.currentUser?.id !== initialState?.currentUser?.userid ||
+                next.version === initialState?.moduleAvailability?.version
+              ) return;
+              setInitialState((current) =>
+                current?.currentUser?.userid === configuration.currentUser?.id &&
+                next.version > (current?.moduleAvailability?.version ?? -1)
+                  ? { ...current, moduleAvailability: next }
+                  : current,
+              );
+              void queryClient.invalidateQueries({ queryKey: ['workbench'] });
+              void queryClient.invalidateQueries({ queryKey: ['module-management'] });
+            }}
+          />
           {/* T3.2：登录后建立 SignalR 连接（T3.5 的 ReceiveNotification 等处理器已挂载） */}
           <RealTimeConnection />
-          {children}
+          <ModuleAvailabilityContext.Provider value={initialState?.moduleAvailability}>
+            {children}
+          </ModuleAvailabilityContext.Provider>
           <SettingDrawer
             disableUrlParams
             enableDarkTheme
@@ -320,6 +361,26 @@ export const layout: RunTimeLayoutConfig = ({
     ...initialState?.settings,
   };
 };
+
+function ModuleAvailabilityRefresh({
+  userId,
+  version,
+  refresh,
+}: {
+  userId?: string;
+  version?: number;
+  refresh: () => Promise<void>;
+}) {
+  useEffect(() => {
+    if (!userId || version === undefined) return;
+    const onFocus = () => {
+      void refresh().catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [userId, version, refresh]);
+  return null;
+}
 
 /**
  * 全局请求配置（Umi request = axios）。

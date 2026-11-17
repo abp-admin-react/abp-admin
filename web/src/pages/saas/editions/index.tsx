@@ -8,7 +8,7 @@ import {
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { Alert, App, Button } from 'antd';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   createEdition,
   deleteEdition,
@@ -34,36 +34,40 @@ const EditionsPage: React.FC = () => {
       title: '操作',
       valueType: 'option',
       render: (_, record) => [
-        <ModalForm
-          key="edit"
-          title="编辑版本"
-          trigger={<a>编辑</a>}
-          initialValues={record}
-          onFinish={async (values) => {
-            await updateEdition(record.id, {
-              displayName: values.displayName,
-            });
-            message.success('已更新');
-            actionRef.current?.reload();
-            return true;
-          }}
-        >
-          <ProFormText
-            name="displayName"
-            label="名称"
-            rules={[{ required: true }]}
-          />
-        </ModalForm>,
+        access.canUpdateEditions ? (
+          <ModalForm
+            key="edit"
+            title="编辑版本"
+            trigger={<a>编辑</a>}
+            initialValues={record}
+            onFinish={async (values) => {
+              await updateEdition(record.id, {
+                displayName: values.displayName,
+              });
+              message.success('已更新');
+              actionRef.current?.reload();
+              return true;
+            }}
+          >
+            <ProFormText
+              name="displayName"
+              label="名称"
+              rules={[{ required: true }]}
+            />
+          </ModalForm>
+        ) : null,
         access.canManageEditionFeatures ? (
           <a key="features" onClick={() => setFeatureTarget(record)}>
             功能
           </a>
         ) : null,
-        <DeleteEditionForm
-          key="delete"
-          record={record}
-          onSuccess={() => actionRef.current?.reload()}
-        />,
+        access.canDeleteEditions ? (
+          <DeleteEditionForm
+            key="delete"
+            record={record}
+            onSuccess={() => actionRef.current?.reload()}
+          />
+        ) : null,
       ],
     },
   ];
@@ -83,25 +87,29 @@ const EditionsPage: React.FC = () => {
             success: true,
           };
         }}
-        toolBarRender={() => [
-          <ModalForm
-            key="create"
-            title="新建版本"
-            trigger={<Button type="primary">新建</Button>}
-            onFinish={async (values) => {
-              await createEdition({ displayName: values.displayName });
-              message.success('已创建');
-              actionRef.current?.reload();
-              return true;
-            }}
-          >
-            <ProFormText
-              name="displayName"
-              label="名称"
-              rules={[{ required: true }]}
-            />
-          </ModalForm>,
-        ]}
+        toolBarRender={
+          access.canCreateEditions
+            ? () => [
+                <ModalForm
+                  key="create"
+                  title="新建版本"
+                  trigger={<Button type="primary">新建</Button>}
+                  onFinish={async (values) => {
+                    await createEdition({ displayName: values.displayName });
+                    message.success('已创建');
+                    actionRef.current?.reload();
+                    return true;
+                  }}
+                >
+                  <ProFormText
+                    name="displayName"
+                    label="名称"
+                    rules={[{ required: true }]}
+                  />
+                </ModalForm>,
+              ]
+            : undefined
+        }
       />
       <FeatureModal
         open={!!featureTarget}
@@ -120,31 +128,37 @@ const DeleteEditionForm: React.FC<{
   onSuccess: () => void;
 }> = ({ record, onSuccess }) => {
   const { message } = App.useApp();
-  const [tenantCount, setTenantCount] = useState<number>(0);
+  const [open, setOpen] = useState(false);
+  const [tenantCount, setTenantCount] = useState<number>();
   const [editions, setEditions] = useState<EditionItem[]>([]);
-
-  useEffect(() => {
-    getAllEditions()
-      .then((result) =>
-        setEditions(
-          (result.items || []).filter((item) => item.id !== record.id),
-        ),
-      )
-      .catch(() => undefined);
-  }, [record.id]);
 
   return (
     <ModalForm
       title={`删除版本 - ${record.displayName}`}
       trigger={<a>删除</a>}
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setTenantCount(undefined);
+      }}
       modalProps={{ destroyOnHidden: true }}
-      submitter={{ searchConfig: { submitText: '确认删除' } }}
+      submitter={{
+        searchConfig: { submitText: '确认删除' },
+        submitButtonProps: { disabled: tenantCount === undefined },
+      }}
       request={async () => {
-        const count = await getEditionTenantCount(record.id);
+        const [count, result] = await Promise.all([
+          getEditionTenantCount(record.id),
+          getAllEditions(),
+        ]);
         setTenantCount(count);
+        setEditions(
+          (result.items ?? []).filter((item) => item.id !== record.id),
+        );
         return { moveTenantsToEditionId: undefined };
       }}
       onFinish={async (values) => {
+        if (tenantCount === undefined) return false;
         await deleteEdition(
           record.id,
           values.moveTenantsToEditionId || undefined,
@@ -159,9 +173,11 @@ const DeleteEditionForm: React.FC<{
         showIcon
         style={{ marginBottom: 16 }}
         title={
-          tenantCount > 0
-            ? `该版本下有 ${tenantCount} 个租户，删除前请确认它们的去向。`
-            : '该版本下没有租户。'
+          tenantCount === undefined
+            ? '等待加载该版本的租户和可迁移版本。'
+            : tenantCount > 0
+              ? `该版本下有 ${tenantCount} 个租户，删除前请确认它们的去向。`
+              : '该版本下没有租户。'
         }
       />
       <ProFormSelect

@@ -55,6 +55,7 @@ const TokenManagement: React.FC = () => {
   >([]);
 
   React.useEffect(() => {
+    if (!access.canManageOpenIddictApplications) return;
     getOpenIddictApplications({ current: 1, pageSize: 100 })
       .then((res) =>
         setApplications(
@@ -65,7 +66,7 @@ const TokenManagement: React.FC = () => {
         ),
       )
       .catch(() => undefined);
-  }, []);
+  }, [access.canManageOpenIddictApplications]);
 
   const tokenColumns: ProColumns<OpenIddictTokenDto>[] = [
     { title: '应用', dataIndex: 'applicationClientId', ellipsis: true },
@@ -169,18 +170,18 @@ const TokenManagement: React.FC = () => {
       layout="inline"
       onFinish={async (values) => {
         setFilter(values as typeof filter);
-        tokenTableRef.current?.reload();
-        authTableRef.current?.reload();
       }}
     >
       <ProFormText name="subject" label="用户 Id" placeholder="subject" />
-      <ProFormSelect
-        name="applicationId"
-        label="应用"
-        placeholder="全部"
-        options={applications}
-        fieldProps={{ showSearch: true, optionFilterProp: 'label' }}
-      />
+      {access.canManageOpenIddictApplications && (
+        <ProFormSelect
+          name="applicationId"
+          label="应用"
+          placeholder="全部"
+          options={applications}
+          fieldProps={{ showSearch: true, optionFilterProp: 'label' }}
+        />
+      )}
     </QueryFilter>
   );
 
@@ -248,6 +249,7 @@ const TokenManagement: React.FC = () => {
           rules={[{ required: true, message: '请输入用户 Id' }]}
         />
       </ModalForm>
+      {sharedFilter}
       <Tabs
         tabBarExtraContent={tabExtra}
         items={[
@@ -256,18 +258,15 @@ const TokenManagement: React.FC = () => {
             label: '令牌',
             children: (
               <>
-                {sharedFilter}
                 <AutoHeightProTable<OpenIddictTokenDto>
                   rowKey="id"
                   actionRef={tokenTableRef}
                   columns={tokenColumns}
                   search={false}
+                  params={filter}
                   pagination={{ defaultPageSize: 10 }}
                   request={async (params) => {
-                    const res = await getOpenIddictTokens({
-                      ...params,
-                      ...filter,
-                    });
+                    const res = await getOpenIddictTokens(params);
                     return {
                       data: res.items,
                       total: res.totalCount,
@@ -283,18 +282,15 @@ const TokenManagement: React.FC = () => {
             label: '授权',
             children: (
               <>
-                {sharedFilter}
                 <AutoHeightProTable<OpenIddictAuthorizationDto>
                   rowKey="id"
                   actionRef={authTableRef}
                   columns={authColumns}
                   search={false}
+                  params={filter}
                   pagination={{ defaultPageSize: 10 }}
                   request={async (params) => {
-                    const res = await getOpenIddictAuthorizations({
-                      ...params,
-                      ...filter,
-                    });
+                    const res = await getOpenIddictAuthorizations(params);
                     return {
                       data: res.items,
                       total: res.totalCount,

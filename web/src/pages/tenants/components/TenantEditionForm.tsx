@@ -1,31 +1,23 @@
 import { ModalForm, ProFormSelect } from '@ant-design/pro-components';
 import { App } from 'antd';
-import React, { useEffect, useState } from 'react';
-import { getAllEditions, setTenantEdition } from '@/abp/proModules';
+import type React from 'react';
+import { setTenantEdition } from '@/abp/proModules';
 import type { TenantDto } from '@/abp/types';
 import { TENANT_PROP } from '../constants';
 
 type TenantEditionFormProps = {
   record: TenantDto;
+  editions: { id: string; displayName: string }[];
   onSuccess: () => void;
 };
 
 /** T2.8：租户的版本分配表单，从首页操作列抽离。 */
 const TenantEditionForm: React.FC<TenantEditionFormProps> = ({
   record,
+  editions,
   onSuccess,
 }) => {
   const { message } = App.useApp();
-  const [editions, setEditions] = useState<
-    { id: string; displayName: string }[]
-  >([]);
-
-  useEffect(() => {
-    getAllEditions()
-      .then((result) => setEditions(result.items || []))
-      .catch(() => undefined);
-  }, []);
-
   return (
     <ModalForm
       title={`版本 - ${record.name}`}

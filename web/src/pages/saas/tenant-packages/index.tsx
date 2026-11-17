@@ -8,7 +8,7 @@ import {
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm, Tree } from 'antd';
+import { Alert, App, Button, Popconfirm, Tree } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import React, { useRef, useState } from 'react';
 import { toMenuIcon as iconOf } from '@/abp/menuIcons';
@@ -46,25 +46,37 @@ const TenantPackagePage: React.FC = () => {
   const [menuTree, setMenuTree] = useState<DataNode[]>([]);
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [menuLoading, setMenuLoading] = useState(false);
+  const [menuReady, setMenuReady] = useState(false);
+  const menuRequest = useRef(0);
 
   const openMenuModal = async (row: TenantPackageDto) => {
+    const request = ++menuRequest.current;
     setMenuTarget(row);
     setMenuLoading(true);
+    setMenuReady(false);
+    setMenuTree([]);
+    setCheckedKeys([]);
     try {
       const selection = await getPackageMenuSelection(row.id);
+      if (request !== menuRequest.current) return;
       setMenuTree(toTreeData(selection.tree));
       setCheckedKeys(selection.checkedMenuIds);
+      setMenuReady(true);
+    } catch {
+      // 未加载到当前套餐的菜单，不能提交空树覆盖原配置。
     } finally {
-      setMenuLoading(false);
+      if (request === menuRequest.current) setMenuLoading(false);
     }
   };
 
   const saveMenus = async () => {
-    if (!menuTarget) return;
+    if (!menuTarget || !menuReady || !access.canUpdateTenantPackages)
+      return false;
     await updatePackageMenuSelection(menuTarget.id, checkedKeys);
     message.success('套餐菜单已保存');
     setMenuTarget(undefined);
     actionRef.current?.reload();
+    return true;
   };
 
   const columns: ProColumns<TenantPackageDto>[] = [
@@ -85,11 +97,9 @@ const TenantPackagePage: React.FC = () => {
               编辑
             </a>
           ) : null,
-          access.canUpdateTenantPackages ? (
-            <a key="menus" onClick={() => openMenuModal(record)}>
-              菜单配置
-            </a>
-          ) : null,
+          <a key="menus" onClick={() => void openMenuModal(record)}>
+            {access.canUpdateTenantPackages ? '菜单配置' : '查看菜单'}
+          </a>,
           access.canDeleteTenantPackages ? (
             <Popconfirm
               key="delete"
@@ -185,38 +195,65 @@ const TenantPackagePage: React.FC = () => {
       </ModalForm>
 
       <ModalForm
-        title={`菜单配置 - ${menuTarget?.name ?? ''}`}
+        title={`${access.canUpdateTenantPackages ? '菜单配置' : '查看菜单'} - ${menuTarget?.name ?? ''}`}
         width={560}
         open={!!menuTarget}
         key={menuTarget?.id}
         loading={menuLoading}
         modalProps={{
           destroyOnHidden: true,
-          onCancel: () => setMenuTarget(undefined),
+          onCancel: () => {
+            menuRequest.current++;
+            setMenuTarget(undefined);
+          },
         }}
         onFinish={saveMenus}
-        submitter={{ searchConfig: { submitText: '保存' } }}
+        submitter={
+          access.canUpdateTenantPackages
+            ? {
+                searchConfig: { submitText: '保存' },
+                submitButtonProps: { disabled: !menuReady },
+              }
+            : false
+        }
       >
         <div style={{ marginBottom: 8, color: 'rgba(0,0,0,0.45)' }}>
           勾选的菜单（含其上级目录）会在应用套餐时拷贝给租户；未勾选的整棵分支不下发。
         </div>
-        <Tree
-          checkable
-          showIcon
-          treeData={menuTree}
-          checkedKeys={checkedKeys}
-          onCheck={(keys, info) => {
-            // 保存"全选 + 半选"节点 id：半选的父目录也要入库，应用套餐时才能挂上祖先链
-            const all = [
-              ...(keys as React.Key[]),
-              ...((info.halfCheckedKeys ?? []) as React.Key[]),
-            ].map(String);
-            setCheckedKeys(all);
-          }}
-          defaultExpandAll
-          selectable={false}
-          style={{ maxHeight: 420, overflow: 'auto' }}
-        />
+        {!menuReady && !menuLoading && (
+          <Alert
+            title="加载菜单失败"
+            type="error"
+            showIcon
+            action={
+              menuTarget && (
+                <Button onClick={() => void openMenuModal(menuTarget)}>
+                  重试
+                </Button>
+              )
+            }
+          />
+        )}
+        {menuReady && (
+          <Tree
+            checkable
+            disabled={!access.canUpdateTenantPackages}
+            showIcon
+            treeData={menuTree}
+            checkedKeys={checkedKeys}
+            onCheck={(keys, info) => {
+              // 保存"全选 + 半选"节点 id：半选的父目录也要入库，应用套餐时才能挂上祖先链
+              const all = [
+                ...(keys as React.Key[]),
+                ...((info.halfCheckedKeys ?? []) as React.Key[]),
+              ].map(String);
+              setCheckedKeys(all);
+            }}
+            defaultExpandAll
+            selectable={false}
+            style={{ maxHeight: 420, overflow: 'auto' }}
+          />
+        )}
       </ModalForm>
     </PageContainer>
   );

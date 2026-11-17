@@ -1,32 +1,27 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as languageService from '@/services/abpadmin/language';
+import * as languageService from '@/abp/localizationAdmin';
 
 // T2.2 验收：覆盖「列表渲染与无权限时按钮隐藏」。
 // 权限可变的 mock：默认有管理权限，单个用例可覆盖
 let mockAccess: Record<string, boolean> = {
   canManageLanguages: true,
+  canCreateLanguages: true,
   canChangeDefaultLanguage: true,
 };
 
 vi.mock('@umijs/max', () => ({
   useAccess: () => mockAccess,
+  useLocation: () => ({ pathname: '/administration/localization/languages', search: '' }),
 }));
 
-// Mock 生成的服务层（生成代码不可手改，mock 模块边界）
-vi.mock('@/services/abpadmin/language', async () => {
-  const actual = await vi.importActual<
-    typeof import('@/services/abpadmin/language')
-  >('@/services/abpadmin/language');
-  return {
-    ...actual,
-    getApiAppLanguage: vi.fn(),
-    postApiAppLanguage: vi.fn(),
-    putApiAppLanguageId: vi.fn(),
-    deleteApiAppLanguageId: vi.fn(),
-    postApiAppLanguageIdSetAsDefault: vi.fn(),
-  };
-});
+vi.mock('@/abp/localizationAdmin', () => ({
+  getLanguages: vi.fn(),
+  createLanguage: vi.fn(),
+  updateLanguage: vi.fn(),
+  deleteLanguage: vi.fn(),
+  setDefaultLanguage: vi.fn(),
+}));
 
 // Mock ProComponents：保留语义化 testid，便于断言
 vi.mock('@ant-design/pro-components', () => ({
@@ -84,8 +79,8 @@ const mockLanguages = {
 describe('LanguagesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAccess = { canManageLanguages: true, canChangeDefaultLanguage: true };
-    vi.mocked(languageService.getApiAppLanguage).mockResolvedValue(
+    mockAccess = { canManageLanguages: true, canCreateLanguages: true, canChangeDefaultLanguage: true };
+    vi.mocked(languageService.getLanguages).mockResolvedValue(
       mockLanguages as never,
     );
   });
@@ -95,7 +90,7 @@ describe('LanguagesPage', () => {
     render(<Page />);
 
     await waitFor(() => {
-      expect(languageService.getApiAppLanguage).toHaveBeenCalled();
+      expect(languageService.getLanguages).toHaveBeenCalled();
     });
   });
 
@@ -121,8 +116,8 @@ describe('LanguagesPage', () => {
     expect(await screen.findByText('新增语言')).toBeTruthy();
   });
 
-  it('无管理权限时「新增语言」按钮隐藏', async () => {
-    mockAccess = { canManageLanguages: false, canChangeDefaultLanguage: false };
+  it('只有列表权限时隐藏「新增语言」', async () => {
+    mockAccess = { canManageLanguages: true };
     const { default: Page } = await import('./index');
     render(<Page />);
 

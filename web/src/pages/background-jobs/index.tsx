@@ -1,4 +1,5 @@
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
+import { useAccess } from '@umijs/max';
 import { App, Popconfirm, Tag } from 'antd';
 import React, { useRef } from 'react';
 import {
@@ -18,6 +19,7 @@ const toBool = (v: unknown): boolean | undefined =>
       : undefined;
 
 const BackgroundJobsPage: React.FC = () => {
+  const access = useAccess();
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(undefined);
 
@@ -65,8 +67,9 @@ const BackgroundJobsPage: React.FC = () => {
           {
             title: '操作',
             valueType: 'option',
+            hideInTable: !access.canRetryBackgroundJobs && !access.canAbandonBackgroundJobs && !access.canDeleteBackgroundJobs,
             render: (_, record) => [
-              record.isAbandoned ? (
+              record.isAbandoned && access.canRetryBackgroundJobs ? (
                 <a
                   key="retry"
                   onClick={async () => {
@@ -77,7 +80,7 @@ const BackgroundJobsPage: React.FC = () => {
                 >
                   重试
                 </a>
-              ) : (
+              ) : !record.isAbandoned && access.canAbandonBackgroundJobs ? (
                 <a
                   key="abandon"
                   onClick={async () => {
@@ -88,8 +91,8 @@ const BackgroundJobsPage: React.FC = () => {
                 >
                   放弃
                 </a>
-              ),
-              <Popconfirm
+              ) : null,
+              access.canDeleteBackgroundJobs && <Popconfirm
                 key="delete"
                 title="确认删除该作业？"
                 onConfirm={async () => {

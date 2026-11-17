@@ -1,3 +1,4 @@
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import {
   type ActionType,
   ModalForm,
@@ -33,25 +34,30 @@ type CreateTenantFormInput = CreateTenantInput & { packageId?: string };
 const CONNECTION_STRING_MANAGEMENT_SETTING =
   'AbpAdmin.Saas.EnableTenantBasedConnectionStringManagement';
 
-const CreateTenantModal: React.FC<{ onSuccess: () => void }> = ({
-  onSuccess,
-}) => {
+const CreateTenantModal: React.FC<{
+  onSuccess: () => void;
+  canApplyPackage: boolean;
+}> = ({ onSuccess, canApplyPackage }) => {
   const { message } = App.useApp();
-  const { options } = useTenantPackageOptions();
+  const [open, setOpen] = useState(false);
+  const { options, loading } = useTenantPackageOptions(open && canApplyPackage);
 
   return (
     <ModalForm<CreateTenantFormInput>
       title="新建租户"
       trigger={<Button type="primary">新建租户</Button>}
+      open={open}
+      onOpenChange={setOpen}
       // R3 测试 D7：弹窗默认保留上次提交值，连续新建时表单残留旧租户数据；
       // destroyOnHidden 关闭即卸载，重开回到空表单（与 menus/OU 弹窗语义一致）
       modalProps={{ destroyOnHidden: true }}
       onFinish={async (values) => {
-        const tenant = await createTenant(values);
-        if (values.packageId) {
+        const { packageId, ...input } = values;
+        const tenant = await createTenant(input);
+        if (canApplyPackage && packageId) {
           // 按套餐初始化租户菜单树；失败不影响租户创建结果
           try {
-            await applyTenantPackage(tenant.id, values.packageId);
+            await applyTenantPackage(tenant.id, packageId);
           } catch {
             message.warning('租户已创建，但套餐应用失败，可稍后在租户列表重试');
           }
@@ -79,18 +85,22 @@ const CreateTenantModal: React.FC<{ onSuccess: () => void }> = ({
         label="管理员密码"
         rules={[{ required: true, message: '请输入管理员密码' }]}
       />
-      <ProFormSelect
-        name="packageId"
-        label="租户套餐（可选）"
-        placeholder="不选则下发全量菜单"
-        options={options}
-        fieldProps={{ showSearch: true, optionFilterProp: 'label' }}
-      />
+      {canApplyPackage && (
+        <ProFormSelect
+          name="packageId"
+          label="租户套餐（可选）"
+          placeholder="不选则下发全量菜单"
+          options={options}
+          fieldProps={{ showSearch: true, optionFilterProp: 'label', loading }}
+        />
+      )}
     </ModalForm>
   );
 };
 
-const TenantsPage: React.FC = () => {
+const TenantsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
+  configurationEntry,
+}) => {
   const actionRef = useRef<ActionType>(undefined);
   const access = useAccess();
   const { message } = App.useApp();
@@ -105,20 +115,26 @@ const TenantsPage: React.FC = () => {
   const reload = () => actionRef.current?.reload();
 
   // 版本列的 Id→名称映射（lookup 需要 AbpAdmin.Editions 权限，无权限时回退显示原始 Id）
-  const [editionNames, setEditionNames] = useState<Record<string, string>>(
-    {},
-  );
+  const [editions, setEditions] = useState<
+    { id: string; displayName: string }[]
+  >([]);
   React.useEffect(() => {
+    if (!access.canManageEditions) return;
+    let active = true;
     getAllEditions()
-      .then((res) =>
-        setEditionNames(
-          Object.fromEntries(
-            (res.items ?? []).map((e) => [e.id, e.displayName]),
-          ),
-        ),
-      )
-      .catch(() => setEditionNames({}));
-  }, []);
+      .then((res) => {
+        if (active) setEditions(res.items ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [access.canManageEditions]);
+  const editionNames = new Map(
+    editions.map((edition) => [edition.id, edition.displayName]),
+  );
+  const canApplyPackage =
+    access.canUpdateTenants && access.canManageTenantPackages;
 
   // 设置项为 false 时整个连接字符串入口不渲染（默认 true）
   const connectionStringEnabled =
@@ -153,7 +169,7 @@ const TenantsPage: React.FC = () => {
       render: (_, record) => {
         const editionId = record.extraProperties?.[TENANT_PROP.EditionId];
         if (!editionId) return '-';
-        return editionNames[String(editionId)] ?? String(editionId);
+        return editionNames.get(String(editionId)) ?? String(editionId);
       },
     },
     {
@@ -175,16 +191,23 @@ const TenantsPage: React.FC = () => {
       valueType: 'option',
       width: 360,
       render: (_, record) => [
-        <EditTenantModal key="edit" record={record} onSuccess={reload} />,
-        access.canManageEditions ? (
-          <TenantEditionForm key="edition" record={record} onSuccess={reload} />
+        access.canUpdateTenants ? (
+          <EditTenantModal key="edit" record={record} onSuccess={reload} />
+        ) : null,
+        access.canUpdateEditions ? (
+          <TenantEditionForm
+            key="edition"
+            record={record}
+            editions={editions}
+            onSuccess={reload}
+          />
         ) : null,
         access.canManageTenantFeatures ? (
           <a key="features" onClick={() => setFeatureTarget(record)}>
             功能
           </a>
         ) : null,
-        access.canManageTenantPackages ? (
+        canApplyPackage ? (
           <ApplyPackageModal
             key="apply-package"
             record={record}
@@ -194,30 +217,32 @@ const TenantsPage: React.FC = () => {
         access.canImpersonateTenants ? (
           <ImpersonateAction key="impersonate" record={record} />
         ) : null,
-        connectionStringEnabled ? (
+        access.canManageTenantConnectionStrings && connectionStringEnabled ? (
           <ConnectionStringDrawer
             key="cs"
             tenantId={record.id}
             tenantName={record.name}
           />
         ) : null,
-        <Popconfirm
-          key="delete"
-          title="确认删除该租户？"
-          onConfirm={async () => {
-            await deleteTenant(record.id);
-            message.success('已删除');
-            reload();
-          }}
-        >
-          <a>删除</a>
-        </Popconfirm>,
+        access.canDeleteTenants ? (
+          <Popconfirm
+            key="delete"
+            title="确认删除该租户？"
+            onConfirm={async () => {
+              await deleteTenant(record.id);
+              message.success('已删除');
+              reload();
+            }}
+          >
+            <a>删除</a>
+          </Popconfirm>
+        ) : null,
       ],
     },
   ];
 
   return (
-    <PageContainer>
+    <PageContainer title="租户" extra={configurationEntry}>
       <AutoHeightProTable<TenantDto>
         rowKey="id"
         actionRef={actionRef}
@@ -235,9 +260,17 @@ const TenantsPage: React.FC = () => {
             success: true,
           };
         }}
-        toolBarRender={() => [
-          <CreateTenantModal key="create" onSuccess={reload} />,
-        ]}
+        toolBarRender={
+          access.canCreateTenants
+            ? () => [
+                <CreateTenantModal
+                  key="create"
+                  canApplyPackage={canApplyPackage}
+                  onSuccess={reload}
+                />,
+              ]
+            : undefined
+        }
       />
       <FeatureModal
         open={!!featureTarget}
@@ -250,4 +283,12 @@ const TenantsPage: React.FC = () => {
   );
 };
 
-export default TenantsPage;
+export default function Page() {
+  return (
+    <FrameworkConfiguration owner="tenant">
+      {(configurationEntry) => (
+        <TenantsPage configurationEntry={configurationEntry} />
+      )}
+    </FrameworkConfiguration>
+  );
+}

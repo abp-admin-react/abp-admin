@@ -8,11 +8,12 @@ import {
   dedicatedSettingPages,
   orderAndPaymentSettings,
   selectSettingGroup,
+  thirdPartyPaymentChannels,
   type SettingPanelDefinition,
 } from './channelGroups';
 import SettingGroupPanel from './SettingGroupPanel';
 
-function ChannelSettingsContent({
+export function ChannelSettingsContent({
   panels,
   columns,
 }: {
@@ -72,7 +73,7 @@ function ChannelSettingsContent({
   );
 }
 
-function SettingsForm({ path }: { path: string }) {
+export function SettingsForm({ path }: { path: string }) {
   const page = dedicatedSettingPages[path];
   return (
     <ProCard>
@@ -83,6 +84,36 @@ function SettingsForm({ path }: { path: string }) {
       )}
       <ChannelSettingsContent columns={page.columns} panels={page.panels} />
     </ProCard>
+  );
+}
+
+export function PaymentChannelSettings() {
+  const { pathname, search } = useLocation();
+  const query = new URLSearchParams(search);
+  const channels = thirdPartyPaymentChannels;
+  const active =
+    channels.find(
+      ({ key }) => key === (query.get('settingsChannel') ?? query.get('view')),
+    ) ??
+    channels.find(({ channel }) => channel === query.get('channel')) ??
+    channels[0];
+
+  return (
+    <Tabs
+      activeKey={active.key}
+      destroyOnHidden
+      onChange={(view) => {
+        const next = new URLSearchParams(search);
+        next.set('settings', 'channels');
+        next.set('settingsChannel', view);
+        history.push({ pathname, search: `?${next}` });
+      }}
+      items={channels.map(({ key, label, path }) => ({
+        key,
+        label,
+        children: key === active.key ? <SettingsForm path={path} /> : null,
+      }))}
+    />
   );
 }
 
@@ -105,7 +136,7 @@ export default function ChannelSettingsPage() {
       extra={
         page?.recordsPath &&
         access.canViewCollectionPayments && (
-          <Link to={page.recordsPath}>收款与退款</Link>
+          <Link to={page.recordsPath}>第三方收款</Link>
         )
       }
     >

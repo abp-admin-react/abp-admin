@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@umijs/max', () => ({
   useAccess: mocks.useAccess,
+  useLocation: () => ({ pathname: '/collection/withdrawals', search: '' }),
   Link: ({ to, children }: { to: string; children: ReactNode }) => (
     <a href={to}>{children}</a>
   ),
@@ -42,7 +43,10 @@ function show(content: ReactNode = <WithdrawalControls />) {
 describe('提现启停与开账', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.useAccess.mockReturnValue({ canAdminWithdrawals: true });
+    mocks.useAccess.mockReturnValue({
+      canAdminWithdrawals: true,
+      canManageCollectionWallets: true,
+    });
     mocks.getWithdrawStatus.mockResolvedValue({
       enabled: true,
       halt: false,
@@ -152,22 +156,21 @@ describe('提现启停与开账', () => {
   });
 
   it('提现运营页仅显示运行状态、余额和单据操作，并可直达规则', async () => {
-    show(<WithdrawalsPage embedded />);
+    show(<WithdrawalsPage />);
     expect(await screen.findByText('提现已开启')).toBeTruthy();
     expect(await screen.findByText('USDT 100')).toBeTruthy();
     expect(screen.getByText('提现单')).toBeTruthy();
     expect(
       screen.getByRole('link', { name: '提现规则与启停' }),
-    ).toHaveAttribute('href', '/web3/config?view=withdraw');
+    ).toHaveAttribute('href', '/collection/withdrawals?settings=withdraw');
     expect(screen.queryByRole('switch')).toBeNull();
     expect(screen.queryByRole('button', { name: '存量余额开账' })).toBeNull();
     expect(screen.queryByText('费率 0.03')).toBeNull();
-    expect(screen.queryByText('提现审核与打款')).toBeNull();
   });
 
   it('提现钱包查询失败可重试，并保留提现单可查', async () => {
     mocks.getHotWallet.mockRejectedValueOnce(new Error('offline'));
-    show(<WithdrawalsPage embedded />);
+    show(<WithdrawalsPage />);
     expect(await screen.findByText('加载提现钱包余额失败')).toBeTruthy();
     expect(screen.getByText('提现单')).toBeTruthy();
     expect(screen.queryByText(/热钱包未配置/)).toBeNull();

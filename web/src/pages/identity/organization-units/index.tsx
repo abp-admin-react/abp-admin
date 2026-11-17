@@ -6,6 +6,7 @@ import {
   type ProColumns,
   ProFormSelect,
   ProFormText,
+  ProFormTextArea,
   ProFormTreeSelect,
   ProTable,
 } from '@ant-design/pro-components';
@@ -39,6 +40,48 @@ import {
   updateOrganizationUnit,
 } from '@/abp/identityAdmin';
 import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
+import { isNotFound } from '@/requestErrorConfig';
+
+const organizationIdentifierPattern =
+  /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+function parseIdentifierList(value?: string): string[] {
+  const ids = value?.split(/[\s,，]+/).filter(Boolean) ?? [];
+  return [...new Set(ids.map((id) => id.toLowerCase()))];
+}
+
+function IdentifierListField({ name, label }: { name: string; label: string }) {
+  return (
+    <ProFormTextArea
+      name={name}
+      label={label}
+      fieldProps={{
+        rows: 3,
+        autoCapitalize: 'none',
+        autoCorrect: 'off',
+        spellCheck: false,
+      }}
+      formItemProps={{
+        extra: '输入带连字符的完整 ID。多个 ID 可用换行或逗号分隔。',
+        validateTrigger: 'onBlur',
+      }}
+      rules={[
+        { required: true, whitespace: true, message: `请输入${label}` },
+        {
+          validator: async (_: unknown, value?: string) => {
+            const ids = parseIdentifierList(value);
+            if (
+              ids.length === 0 ||
+              ids.some((id) => !organizationIdentifierPattern.test(id))
+            ) {
+              throw new Error(`请输入带连字符的完整${label}`);
+            }
+          },
+        },
+      ]}
+    />
+  );
+}
 
 const OrganizationUnitsPage: React.FC = () => {
   const access = useAccess();
@@ -247,37 +290,45 @@ const OrganizationUnitsPage: React.FC = () => {
                 toolBarRender={() =>
                   access.canManageOrganizationUnitMembers
                     ? [
-                        <ModalForm
+                        <ModalForm<{ userIds?: string[]; userIdsText?: string }>
                           key="add-members"
                           title={`添加成员 - ${selected.displayName}`}
                           trigger={<Button type="primary">添加成员</Button>}
                           modalProps={{ destroyOnHidden: true }}
+                          scrollToFirstError={{ focus: true }}
                           onFinish={async (values) => {
-                            await addOrganizationUnitMembers(
-                              selected.id,
-                              values.userIds || [],
-                            );
+                            const ids = access.canManageUsers
+                              ? values.userIds ?? []
+                              : parseIdentifierList(values.userIdsText);
+                            try {
+                              await addOrganizationUnitMembers(selected.id, ids);
+                            } catch (error) {
+                              if (!isNotFound(error)) throw error;
+                              message.error('找不到指定用户，请核对用户 ID。');
+                              return false;
+                            }
                             message.success('已添加');
                             actionRef.current?.reload();
                             return true;
                           }}
                         >
-                          <ProFormSelect
-                            name="userIds"
-                            label="用户"
-                            mode="multiple"
-                            rules={[{ required: true, message: '请选择用户' }]}
-                            request={async () => {
-                              const result = await getUsers({
-                                current: 1,
-                                pageSize: 100,
-                              });
-                              return (result.items || []).map((item) => ({
-                                label: item.userName,
-                                value: item.id,
-                              }));
-                            }}
-                          />
+                          {access.canManageUsers ? (
+                            <ProFormSelect
+                              name="userIds"
+                              label="用户"
+                              mode="multiple"
+                              rules={[{ required: true, message: '请选择用户' }]}
+                              request={async () => {
+                                const result = await getUsers({ current: 1, pageSize: 100 });
+                                return (result.items || []).map((item) => ({
+                                  label: item.userName,
+                                  value: item.id,
+                                }));
+                              }}
+                            />
+                          ) : (
+                            <IdentifierListField name="userIdsText" label="用户 ID" />
+                          )}
                         </ModalForm>,
                       ]
                     : []
@@ -340,42 +391,46 @@ const OrganizationUnitsPage: React.FC = () => {
                           toolBarRender={() =>
                             access.canManageOrganizationUnitRoles
                               ? [
-                                  <ModalForm
+                                  <ModalForm<{ roleIds?: string[]; roleIdsText?: string }>
                                     key="add-roles"
                                     title={`配置部门统一角色 - ${selected.displayName}`}
                                     trigger={<Button>添加角色</Button>}
                                     modalProps={{ destroyOnHidden: true }}
+                                    scrollToFirstError={{ focus: true }}
                                     onFinish={async (values) => {
-                                      await addOrganizationUnitRoles(
-                                        selected.id,
-                                        values.roleIds || [],
-                                      );
+                                      const ids = access.canManageRoles
+                                        ? values.roleIds ?? []
+                                        : parseIdentifierList(values.roleIdsText);
+                                      try {
+                                        await addOrganizationUnitRoles(selected.id, ids);
+                                      } catch (error) {
+                                        if (!isNotFound(error)) throw error;
+                                        message.error('找不到指定角色，请核对角色 ID。');
+                                        return false;
+                                      }
                                       message.success('已添加');
                                       roleActionRef.current?.reload();
                                       return true;
                                     }}
                                   >
                                     <p>角色将授予本部门所有成员。</p>
-                                    <ProFormSelect
-                                      name="roleIds"
-                                      label="角色"
-                                      mode="multiple"
-                                      rules={[
-                                        {
-                                          required: true,
-                                          message: '请选择角色',
-                                        },
-                                      ]}
-                                      request={async () => {
-                                        const result = await getAllRoles();
-                                        return (result.items || []).map(
-                                          (item) => ({
+                                    {access.canManageRoles ? (
+                                      <ProFormSelect
+                                        name="roleIds"
+                                        label="角色"
+                                        mode="multiple"
+                                        rules={[{ required: true, message: '请选择角色' }]}
+                                        request={async () => {
+                                          const result = await getAllRoles();
+                                          return (result.items || []).map((item) => ({
                                             label: item.name,
                                             value: item.id,
-                                          }),
-                                        );
-                                      }}
-                                    />
+                                          }));
+                                        }}
+                                      />
+                                    ) : (
+                                      <IdentifierListField name="roleIdsText" label="角色 ID" />
+                                    )}
                                   </ModalForm>,
                                 ]
                               : []

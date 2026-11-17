@@ -1,33 +1,32 @@
-import { useAccess } from '@umijs/max';
+import { Navigate, type useAccess, useLocation } from '@umijs/max';
 import NetworkConfigPage from './network';
 import { Web3RuleSection } from './rules';
 import ChainRuntimeSettings from './runtime-settings';
+import ScanProvidersPage from './scan-providers';
 import CollectionWalletsPage from './wallets';
-import { Web3Workspace } from './web3-workspace';
 
-export default function Web3ConfigPage() {
-  const access = useAccess();
+export function getWeb3ConfigurationSections(
+  access: ReturnType<typeof useAccess>,
+) {
   const canConfigureRules = access.canConfigureCollectionNetwork;
-  const canManageWithdrawalRules =
-    access.canManageCollectionWallets && access.canAdminWithdrawals;
-  const sections = [
+  return [
     {
-      key: 'deposit',
-      label: '充值与归集规则',
+      key: 'chain-rules',
+      label: '扫链与归集规则',
       available: canConfigureRules,
       render: () => <Web3RuleSection section="Chain" />,
-    },
-    {
-      key: 'withdraw',
-      label: '提现规则',
-      available: canConfigureRules || canManageWithdrawalRules,
-      render: () => <Web3RuleSection section="Withdraw" />,
     },
     {
       key: 'network',
       label: '链网络',
       available: access.canAdminNetwork && canConfigureRules,
       render: () => <NetworkConfigPage />,
+    },
+    {
+      key: 'providers',
+      label: '第三方扫链',
+      available: access.canAdminNetwork && canConfigureRules,
+      render: () => <ScanProvidersPage />,
     },
     {
       key: 'wallets',
@@ -42,6 +41,13 @@ export default function Web3ConfigPage() {
       render: () => <ChainRuntimeSettings />,
     },
   ].filter((section) => section.available);
+}
 
-  return <Web3Workspace title="Web3 配置" sections={sections} />;
+export default function Web3ConfigPage() {
+  const { search, hash } = useLocation();
+  const query = new URLSearchParams(search);
+  const setting = query.get('settings') ?? query.get('view') ?? 'network';
+  query.delete('view');
+  query.set('settings', setting);
+  return <Navigate to={`/web3/operations?${query}${hash}`} replace />;
 }

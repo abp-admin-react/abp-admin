@@ -1,3 +1,4 @@
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Tag } from 'antd';
 import React, { useRef, useState } from 'react';
@@ -6,8 +7,11 @@ import { useDictionary } from '@/hooks/useDictionary';
 import { toDayEnd } from '@/utils/format';
 import NotificationDetailDrawer from './components/NotificationDetail';
 import SendNotificationForm from './components/SendNotificationForm';
-import type { NotificationListItem } from './service';
-import { getNotifications, retryNotification } from './service';
+import {
+  getNotifications,
+  type NotificationListItem,
+  retryNotification,
+} from '@/abp/notificationManagement';
 
 /** 发送状态标签：null=待发送，true=成功，false=失败。finalSuccess 含重试后的最终结果。 */
 function StatusTag({ success }: { success?: boolean | null }) {
@@ -26,7 +30,9 @@ function StatusTag({ success }: { success?: boolean | null }) {
  * 注意：列表刻意没有"按内容搜索"——正文在 NotificationInfo.ExtraProperties 里，
  * 数据库没有结构化正文列，技术上不支持（不是 bug，见规格 T3.5 第 13 步）。
  */
-const NotificationsPage: React.FC = () => {
+const NotificationsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
+  configurationEntry,
+}) => {
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(undefined);
   const [detailId, setDetailId] = useState<string>();
@@ -35,7 +41,7 @@ const NotificationsPage: React.FC = () => {
   const methodDict = useDictionary('NotificationMethod');
 
   return (
-    <PageContainer>
+    <PageContainer extra={configurationEntry}>
       <AutoHeightProTable<NotificationListItem>
         rowKey="id"
         actionRef={actionRef}
@@ -190,4 +196,12 @@ const NotificationsPage: React.FC = () => {
   );
 };
 
-export default NotificationsPage;
+export default function Page() {
+  return (
+    <FrameworkConfiguration owner="notification">
+      {(configurationEntry) => (
+        <NotificationsPage configurationEntry={configurationEntry} />
+      )}
+    </FrameworkConfiguration>
+  );
+}

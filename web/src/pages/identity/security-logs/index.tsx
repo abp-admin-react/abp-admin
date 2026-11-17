@@ -1,3 +1,4 @@
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import type { ProColumns } from '@ant-design/pro-components';
 import { PageContainer } from '@ant-design/pro-components';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -12,7 +13,7 @@ import {
 } from '@/components/tableColumnFilters';
 import { toDayEnd, toDayStart } from '@/utils/format';
 
-const SecurityLogsPage: React.FC = () => {
+const SecurityLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ configurationEntry }) => {
   // 后端 GetSecurityLogListInput 支持时间/应用/身份/操作/用户/客户端全量筛选。
   // 筛选 UI 全部走官网列头 filterDropdown / filters，值经 request 第三参 filter 交给服务端。
   const columns: ProColumns<SecurityLogDto>[] = [
@@ -36,7 +37,7 @@ const SecurityLogsPage: React.FC = () => {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer title="登录安全日志" extra={configurationEntry}>
       <AutoHeightProTable<SecurityLogDto>
         rowKey="id"
         columns={columns}
@@ -74,4 +75,10 @@ const SecurityLogsPage: React.FC = () => {
   );
 };
 
-export default SecurityLogsPage;
+export default function Page() {
+  return (
+    <FrameworkConfiguration owner="login">
+      {(configurationEntry) => <SecurityLogsPage configurationEntry={configurationEntry} />}
+    </FrameworkConfiguration>
+  );
+}

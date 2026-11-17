@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import dayjs from 'dayjs';
 import { describe, expect, it, vi } from 'vitest';
 import * as operationLogsApi from '@/abp/operationLogs';
@@ -16,9 +16,10 @@ let capturedColumns: any[] | undefined;
 
 // 页面支持 ?correlationId= 跨日志串联入口：mock 可变，供深链用例切换
 let mockSearchParams = new URLSearchParams();
+let auditAccess = false;
 
 vi.mock('@umijs/max', () => ({
-  useAccess: () => ({ canManageOperationLogs: true }),
+  useAccess: () => ({ canManageOperationLogs: true, canManageAuditLogs: auditAccess }),
   useNavigate: () => vi.fn(),
   useSearchParams: () => [mockSearchParams, vi.fn()],
 }));
@@ -53,6 +54,18 @@ describe('OperationLogsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSearchParams = new URLSearchParams();
+    auditAccess = false;
+  });
+
+  it.each([false, true])('关联审计入口遵守目标页记录权限（授权=%s）', async (allowed) => {
+    auditAccess = allowed;
+    vi.mocked(operationLogsApi.getOperationLogs).mockResolvedValue({ items: [], totalCount: 0 });
+    const { default: Page } = await import('./index');
+    render(<Page />);
+    const column = capturedColumns?.find(col => col.dataIndex === 'correlationId');
+    render(column.render(null, { correlationId: 'audit-link-test' }));
+    expect(screen.getByText('audit-link-test')).toBeInTheDocument();
+    expect(!!screen.queryByText('查关联审计日志')).toBe(allowed);
   });
 
   it('挂载即请求列表，SkipCount 按页码换算', async () => {

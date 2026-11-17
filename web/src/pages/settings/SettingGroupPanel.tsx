@@ -52,6 +52,11 @@ const SettingGroupPanel: React.FC<Props> = ({ group, columns = 1, onChanged }) =
     () => groups.flatMap((item) => item.settingInfos || []),
     [groups],
   );
+  const writableNames = settingInfos.flatMap((info) =>
+    canUpdate && info.name && info.properties?.CanWriteInCurrentScope !== false
+      ? [info.name]
+      : [],
+  );
 
   // 每个来源组内按 Group2 分块，跨组表单的提交范围仍以传入字段为准。
   const blocks = useMemo(() => {
@@ -101,7 +106,7 @@ const SettingGroupPanel: React.FC<Props> = ({ group, columns = 1, onChanged }) =
       name: info.name,
       label,
       tooltip,
-      disabled: !canUpdate,
+      disabled: !writableNames.includes(info.name),
     };
     switch (type) {
       case SettingUiComponentTypes.Checkbox:
@@ -140,12 +145,12 @@ const SettingGroupPanel: React.FC<Props> = ({ group, columns = 1, onChanged }) =
   };
 
   const handleFinish = async (values: Record<string, unknown>) => {
+    if (!writableNames.length) return false;
     setSaving(true);
     try {
       const payload: Record<string, string> = {};
-      for (const info of settingInfos) {
-        if (!info.name) continue;
-        payload[info.name] = toSettingString(values[info.name]);
+      for (const name of writableNames) {
+        payload[name] = toSettingString(values[name]);
       }
       await setSettingValues(payload);
       message.success('设置已保存');
@@ -160,10 +165,10 @@ const SettingGroupPanel: React.FC<Props> = ({ group, columns = 1, onChanged }) =
   };
 
   const handleReset = async () => {
+    if (!writableNames.length) return;
     setResetting(true);
     try {
-      const names = settingInfos.map((i) => i.name).filter(Boolean) as string[];
-      await resetSettingValues(names);
+      await resetSettingValues(writableNames);
       message.success('已重置为默认值');
       onChanged?.();
     } catch (e: any) {
@@ -179,7 +184,7 @@ const SettingGroupPanel: React.FC<Props> = ({ group, columns = 1, onChanged }) =
       initialValues={initialValues}
       onFinish={handleFinish}
       submitter={
-        canUpdate
+        writableNames.length
           ? {
               searchConfig: { submitText: '保存' },
               submitButtonProps: { loading: saving },
@@ -202,9 +207,9 @@ const SettingGroupPanel: React.FC<Props> = ({ group, columns = 1, onChanged }) =
             }
           : {
               render: () => (
-                <Tooltip title="缺少修改设置值权限（AbpAdmin.SettingUi.Update），仅可查看">
+                <Tooltip title="仅可查看当前作用范围内的设置">
                   <span style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
-                    当前账号为只读：缺少设置修改权限
+                    {canUpdate ? '当前作用范围内的设置为只读' : '当前账号为只读：缺少设置修改权限'}
                   </span>
                 </Tooltip>
               ),

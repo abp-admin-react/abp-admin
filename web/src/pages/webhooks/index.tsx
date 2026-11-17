@@ -4,7 +4,17 @@ import {
   type ProColumns,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Input, Modal, Popconfirm, Space, Switch, Tabs, Tag } from 'antd';
+import {
+  App,
+  Button,
+  Input,
+  Modal,
+  Popconfirm,
+  Space,
+  Switch,
+  Tabs,
+  Tag,
+} from 'antd';
 import React, { useRef, useState } from 'react';
 import {
   createWebhookSubscription,
@@ -31,7 +41,9 @@ const WebhooksPage: React.FC = () => {
   const recordActionRef = useRef<ActionType>(undefined);
 
   const [subModalOpen, setSubModalOpen] = useState(false);
-  const [editingSub, setEditingSub] = useState<WebhookSubscription | null>(null);
+  const [editingSub, setEditingSub] = useState<WebhookSubscription | null>(
+    null,
+  );
   const [subForm, setSubForm] = useState({
     webhookUri: '',
     secret: '',
@@ -42,7 +54,13 @@ const WebhooksPage: React.FC = () => {
 
   const openCreateSub = () => {
     setEditingSub(null);
-    setSubForm({ webhookUri: '', secret: '', description: '', isActive: true, events: '' });
+    setSubForm({
+      webhookUri: '',
+      secret: '',
+      description: '',
+      isActive: true,
+      events: '',
+    });
     setSubModalOpen(true);
   };
 
@@ -63,7 +81,11 @@ const WebhooksPage: React.FC = () => {
       .split(',')
       .map((e) => e.trim())
       .filter(Boolean);
-    if (!subForm.webhookUri.trim() || events.length === 0 || (!editingSub && !subForm.secret.trim())) {
+    if (
+      !subForm.webhookUri.trim() ||
+      events.length === 0 ||
+      (!editingSub && !subForm.secret.trim())
+    ) {
       message.warning('地址、事件（逗号分隔）为必填；新建时密钥必填');
       return;
     }
@@ -95,7 +117,13 @@ const WebhooksPage: React.FC = () => {
   };
 
   const subscriptionColumns: ProColumns<WebhookSubscription>[] = [
-    { title: '地址', dataIndex: 'webhookUri', ellipsis: true, copyable: true, ...textFilter('地址') },
+    {
+      title: '地址',
+      dataIndex: 'webhookUri',
+      ellipsis: true,
+      copyable: true,
+      ...textFilter('地址'),
+    },
     {
       title: '事件',
       dataIndex: 'events',
@@ -116,7 +144,11 @@ const WebhooksPage: React.FC = () => {
       render: (_, record) => (
         <Space>
           {access.canUpdateWebhookSubscriptions ? (
-            <Button size="small" type="link" onClick={() => openEditSub(record)}>
+            <Button
+              size="small"
+              type="link"
+              onClick={() => openEditSub(record)}
+            >
               编辑
             </Button>
           ) : null}
@@ -141,14 +173,28 @@ const WebhooksPage: React.FC = () => {
   ];
 
   const recordColumns: ProColumns<WebhookSendRecord>[] = [
-    { title: '事件', dataIndex: 'eventName', width: 180, ...textFilter('事件名') },
+    {
+      title: '事件',
+      dataIndex: 'eventName',
+      width: 180,
+      ...textFilter('事件名'),
+    },
     { title: '负载', dataIndex: 'payload', ellipsis: true, copyable: true },
     {
       title: '结果',
       dataIndex: 'succeeded',
       width: 90,
+      filters: [
+        { text: '成功', value: 'true' },
+        { text: '失败', value: 'false' },
+      ],
+      filterMultiple: false,
       render: (_, record) =>
-        record.succeeded ? <Tag color="green">成功</Tag> : <Tag color="red">失败</Tag>,
+        record.succeeded ? (
+          <Tag color="green">成功</Tag>
+        ) : (
+          <Tag color="red">失败</Tag>
+        ),
     },
     {
       title: '状态码',
@@ -157,7 +203,12 @@ const WebhooksPage: React.FC = () => {
       render: (_, record) => record.responseStatusCode ?? '-',
     },
     { title: '尝试', dataIndex: 'attemptCount', width: 70 },
-    { title: '最后尝试', dataIndex: 'lastAttemptTime', width: 160, valueType: 'dateTime' },
+    {
+      title: '最后尝试',
+      dataIndex: 'lastAttemptTime',
+      width: 160,
+      valueType: 'dateTime',
+    },
     {
       title: '操作',
       width: 130,
@@ -201,60 +252,87 @@ const WebhooksPage: React.FC = () => {
     <PageContainer title="事件回调订阅">
       <Tabs
         items={[
-          {
-            key: 'subscriptions',
-            label: '订阅',
-            children: (
-              <AutoHeightProTable<WebhookSubscription>
-                headerTitle="Webhook 订阅"
-                rowKey="id"
-                search={false}
-                options={false}
-                actionRef={subscriptionActionRef}
-                toolBarRender={() => [
-                  access.canCreateWebhookSubscriptions ? (
-                    <Button key="create" type="primary" onClick={openCreateSub}>
-                      新建订阅
-                    </Button>
-                  ) : null,
-                ]}
-                request={async (params, _sorter, filters) => {
-                  const result = await getWebhookSubscriptions({
-                    current: params.current,
-                    pageSize: params.pageSize,
-                    filter: firstFilterValue(filters, 'webhookUri'),
-                  });
-                  return { data: result.items, total: result.totalCount, success: true };
-                }}
-                columns={subscriptionColumns}
-                pagination={{ pageSize: 20 }}
-              />
-            ),
-          },
-          {
-            key: 'records',
-            label: '发送记录',
-            children: (
-              <AutoHeightProTable<WebhookSendRecord>
-                headerTitle="发送记录（交付终态）"
-                rowKey="id"
-                search={false}
-                options={false}
-                actionRef={recordActionRef}
-                request={async (params, _sorter, filters) => {
-                  const result = await getWebhookSendRecords({
-                    current: params.current,
-                    pageSize: params.pageSize,
-                    eventName: firstFilterValue(filters, 'eventName'),
-                    succeeded: firstFilterValue(filters, 'succeeded') === '成功' ? true : undefined,
-                  });
-                  return { data: result.items, total: result.totalCount, success: true };
-                }}
-                columns={recordColumns}
-                pagination={{ pageSize: 20 }}
-              />
-            ),
-          },
+          ...(access.canManageWebhooks
+            ? [
+                {
+                  key: 'subscriptions',
+                  label: '订阅',
+                  children: (
+                    <AutoHeightProTable<WebhookSubscription>
+                      headerTitle="Webhook 订阅"
+                      rowKey="id"
+                      search={false}
+                      options={false}
+                      actionRef={subscriptionActionRef}
+                      toolBarRender={() => [
+                        access.canCreateWebhookSubscriptions ? (
+                          <Button
+                            key="create"
+                            type="primary"
+                            onClick={openCreateSub}
+                          >
+                            新建订阅
+                          </Button>
+                        ) : null,
+                      ]}
+                      request={async (params, _sorter, filters) => {
+                        const result = await getWebhookSubscriptions({
+                          current: params.current,
+                          pageSize: params.pageSize,
+                          filter: firstFilterValue(filters, 'webhookUri'),
+                        });
+                        return {
+                          data: result.items,
+                          total: result.totalCount,
+                          success: true,
+                        };
+                      }}
+                      columns={subscriptionColumns}
+                      pagination={{ pageSize: 20 }}
+                    />
+                  ),
+                },
+              ]
+            : []),
+          ...(access.canManageWebhookSendRecords
+            ? [
+                {
+                  key: 'records',
+                  label: '发送记录',
+                  children: (
+                    <AutoHeightProTable<WebhookSendRecord>
+                      headerTitle="发送记录（交付终态）"
+                      rowKey="id"
+                      search={false}
+                      options={false}
+                      actionRef={recordActionRef}
+                      request={async (params, _sorter, filters) => {
+                        const resultFilter = firstFilterValue(
+                          filters,
+                          'succeeded',
+                        );
+                        const result = await getWebhookSendRecords({
+                          current: params.current,
+                          pageSize: params.pageSize,
+                          eventName: firstFilterValue(filters, 'eventName'),
+                          succeeded:
+                            resultFilter === undefined
+                              ? undefined
+                              : resultFilter === 'true',
+                        });
+                        return {
+                          data: result.items,
+                          total: result.totalCount,
+                          success: true,
+                        };
+                      }}
+                      columns={recordColumns}
+                      pagination={{ pageSize: 20 }}
+                    />
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
 
@@ -270,7 +348,9 @@ const WebhooksPage: React.FC = () => {
             <div style={{ marginBottom: 4 }}>Webhook 地址</div>
             <Input
               value={subForm.webhookUri}
-              onChange={(e) => setSubForm((f) => ({ ...f, webhookUri: e.target.value }))}
+              onChange={(e) =>
+                setSubForm((f) => ({ ...f, webhookUri: e.target.value }))
+              }
               placeholder="https://receiver.example.com/hook"
             />
           </div>
@@ -280,7 +360,9 @@ const WebhooksPage: React.FC = () => {
             </div>
             <Input.Password
               value={subForm.secret}
-              onChange={(e) => setSubForm((f) => ({ ...f, secret: e.target.value }))}
+              onChange={(e) =>
+                setSubForm((f) => ({ ...f, secret: e.target.value }))
+              }
               placeholder="至少 16 位随机字符串"
             />
           </div>
@@ -288,7 +370,9 @@ const WebhooksPage: React.FC = () => {
             <div style={{ marginBottom: 4 }}>订阅事件（逗号分隔）</div>
             <Input
               value={subForm.events}
-              onChange={(e) => setSubForm((f) => ({ ...f, events: e.target.value }))}
+              onChange={(e) =>
+                setSubForm((f) => ({ ...f, events: e.target.value }))
+              }
               placeholder="identity.user.created, identity.user.updated"
             />
           </div>
@@ -296,14 +380,18 @@ const WebhooksPage: React.FC = () => {
             <div style={{ marginBottom: 4 }}>描述</div>
             <Input
               value={subForm.description}
-              onChange={(e) => setSubForm((f) => ({ ...f, description: e.target.value }))}
+              onChange={(e) =>
+                setSubForm((f) => ({ ...f, description: e.target.value }))
+              }
             />
           </div>
           <div>
             <span style={{ marginRight: 8 }}>启用</span>
             <Switch
               checked={subForm.isActive}
-              onChange={(checked) => setSubForm((f) => ({ ...f, isActive: checked }))}
+              onChange={(checked) =>
+                setSubForm((f) => ({ ...f, isActive: checked }))
+              }
             />
           </div>
         </Space>

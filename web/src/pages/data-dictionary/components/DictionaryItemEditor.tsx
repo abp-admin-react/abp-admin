@@ -1,6 +1,6 @@
 import { EditableProTable, type ProColumns } from '@ant-design/pro-components';
 import { useQuery } from '@tanstack/react-query';
-import { useModel } from '@umijs/max';
+import { useAccess, useModel } from '@umijs/max';
 import { Alert, App, Button, Tag } from 'antd';
 import type React from 'react';
 import { useEffect, useState } from 'react';
@@ -41,6 +41,7 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
   onSaved,
 }) => {
   const { message } = App.useApp();
+  const { canUpdateDataDictionary } = useAccess();
   // 标签色白名单的唯一来源是后端 DataDictionaryTagTypes（经 application-configuration
   // 的 extraProperties.dataDictionaryTagTypes 下发，见 DataDictionaryTagTypesContributor），
   // 前端不再硬编码副本
@@ -70,7 +71,7 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
         _key: it.code ?? '',
         code: it.code ?? '',
         displayText: it.displayText,
-        description: it.description,
+        description: it.description ?? undefined,
         tagType: it.tagType ?? undefined,
         isStatic: it.isStatic,
       })),
@@ -78,8 +79,14 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
   }, [viewQuery.data]);
 
   const isStaticDict = !!dictionary.isStatic;
+  const canSave =
+    canUpdateDataDictionary &&
+    !!viewQuery.data &&
+    !viewQuery.isFetching &&
+    editableKeys.length === 0;
 
   const save = async () => {
+    if (!canSave || saving) return;
     if (items.some((it) => !it.code || !it.displayText)) {
       message.error('编码与显示名不能为空');
       return;
@@ -170,16 +177,30 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
           <Tag>可编辑</Tag>
         ),
     },
-    {
-      title: '操作',
-      valueType: 'option',
-      width: 130,
-    },
+    ...(canUpdateDataDictionary
+      ? [
+          {
+            title: '操作',
+            valueType: 'option' as const,
+            width: 130,
+          },
+        ]
+      : []),
   ];
 
   return (
     <>
-      {!isStaticDict && (
+      {(viewQuery.isError || (viewQuery.isSuccess && !viewQuery.data)) && (
+        <Alert
+          type="error"
+          showIcon
+          title={viewQuery.isError ? '字典项加载失败' : '字典已不存在'}
+          action={
+            <Button onClick={() => void viewQuery.refetch()}>重试</Button>
+          }
+        />
+      )}
+      {canUpdateDataDictionary && !isStaticDict && (
         <Alert
           type="info"
           showIcon
@@ -187,7 +208,7 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
           title="保存是对全部字典项的一次性全量提交：列表里没有的项会被删除。本页面不支持并发编辑，后保存的会覆盖先保存的。"
         />
       )}
-      {isStaticDict && (
+      {canUpdateDataDictionary && isStaticDict && (
         <Alert
           type="warning"
           showIcon
@@ -203,7 +224,7 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
         pagination={false}
         // 静态字典不允许新增项（与服务端结构锁一致），直接关掉行创建器
         recordCreatorProps={
-          isStaticDict
+          !canUpdateDataDictionary || !viewQuery.data || isStaticDict
             ? false
             : {
                 record: () => ({
@@ -215,26 +236,33 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
                 creatorButtonText: '新增字典项',
               }
         }
-        editable={{
-          type: 'multiple',
-          editableKeys,
-          onChange: setEditableKeys,
-          // 静态项不允许删除，删除按钮置灰的原因见 T3.4 第 5 步 IsStatic 语义
-          actionRender: (row, _config, defaultDom) =>
-            row.isStatic
-              ? [defaultDom.save, defaultDom.cancel]
-              : [defaultDom.save, defaultDom.delete, defaultDom.cancel],
-        }}
+        editable={
+          canUpdateDataDictionary && viewQuery.data
+            ? {
+                type: 'multiple',
+                editableKeys,
+                onChange: setEditableKeys,
+                // 静态项不允许删除，删除按钮置灰的原因见 T3.4 第 5 步 IsStatic 语义
+                actionRender: (row, _config, defaultDom) =>
+                  row.isStatic
+                    ? [defaultDom.save, defaultDom.cancel]
+                    : [defaultDom.save, defaultDom.delete, defaultDom.cancel],
+              }
+            : undefined
+        }
         columns={columns}
       />
-      <Button
-        type="primary"
-        onClick={save}
-        loading={saving}
-        style={{ marginTop: 16 }}
-      >
-        保存全部字典项
-      </Button>
+      {canUpdateDataDictionary && (
+        <Button
+          type="primary"
+          onClick={save}
+          loading={saving}
+          disabled={!canSave}
+          style={{ marginTop: 16 }}
+        >
+          保存全部字典项
+        </Button>
+      )}
     </>
   );
 };

@@ -1,6 +1,6 @@
 import { useIntl } from '@umijs/max';
 import { App } from 'antd';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   deleteFile,
   getDownloadInfo,
@@ -16,11 +16,16 @@ export type FileRow = API.FileInfoDto & { thumbnailUrl?: string };
  * 文件操作集合（下载/预览/重命名/删除/移动/上传预校验）与对应的 message 提示。
  * 组件只管装配，文案与交互语义集中在这里，便于统一走 intl。
  */
-export function useFileActions() {
+export function useFileActions(canDownload: boolean) {
   const { message } = App.useApp();
   const intl = useIntl();
   // 原图预览（点击缩略图打开；先用缩略图秒开，拿到下载凭证后替换成原图）
   const [previewSrc, setPreviewSrc] = useState<string | undefined>();
+  const previewRequest = useRef(0);
+  const closePreview = () => {
+    previewRequest.current++;
+    setPreviewSrc(undefined);
+  };
 
   // 两步下载：先拿 downloadUrl（EasyAbp 5.x 已把 token 拼进 URL），再开新窗口下载
   const handleDownload = useCallback(
@@ -47,19 +52,24 @@ export function useFileActions() {
   );
 
   // 点击缩略图：先以缩略图打开预览弹窗，同时取原图下载凭证，拿到后切换成原图
-  const handlePreview = useCallback(async (record: FileRow) => {
-    if (!record.id || !record.thumbnailUrl) return;
-    setPreviewSrc(record.thumbnailUrl);
-    try {
-      const info = await getDownloadInfo(record.id);
-      // EasyAbp 5.x 的 downloadUrl 自带 ?token=，不能再拼一次（重复参数会绑定成数组导致校验失败）
-      if (info.downloadUrl) {
-        setPreviewSrc(info.downloadUrl);
+  const handlePreview = useCallback(
+    async (record: FileRow) => {
+      if (!record.id || !record.thumbnailUrl) return;
+      const request = ++previewRequest.current;
+      setPreviewSrc(record.thumbnailUrl);
+      if (!canDownload) return;
+      try {
+        const info = await getDownloadInfo(record.id);
+        // EasyAbp 5.x 的 downloadUrl 自带 ?token=，不能再拼一次（重复参数会绑定成数组导致校验失败）
+        if (request === previewRequest.current && info.downloadUrl) {
+          setPreviewSrc(info.downloadUrl);
+        }
+      } catch {
+        // 拿不到原图凭证时保留缩略图预览
       }
-    } catch {
-      // 拿不到原图凭证时保留缩略图预览
-    }
-  }, []);
+    },
+    [canDownload],
+  );
 
   const handleRename = useCallback(
     async (record: API.FileInfoDto, fileName: string) => {
@@ -135,7 +145,7 @@ export function useFileActions() {
 
   return {
     previewSrc,
-    setPreviewSrc,
+    closePreview,
     handleDownload,
     handlePreview,
     handleRename,

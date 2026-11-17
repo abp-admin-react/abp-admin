@@ -1,8 +1,12 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as service from './service';
+
+let jobAccess: Record<string, boolean> = {};
+let jobColumns: any[] = [];
+vi.mock('@umijs/max', () => ({ useAccess: () => jobAccess }));
 
 // Mock 服务层：页面不直接依赖生成客户端，mock 这一层即可
 vi.mock('./service', async () => {
@@ -27,6 +31,7 @@ vi.mock('@ant-design/pro-components', () => ({
     <div data-testid="page-container">{children}</div>
   ),
   ProTable: ({ columns, toolBarRender, request, params }: any) => {
+    jobColumns = columns;
     request?.({ current: 1, pageSize: 10, ...params }, {}, {});
     return (
       <div data-testid="pro-table">
@@ -80,6 +85,10 @@ function renderPage(node: React.ReactElement) {
 describe('ScheduledJobsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    jobAccess = {
+      canCreateScheduledJobs: true, canUpdateScheduledJobs: true,
+      canDeleteScheduledJobs: true, canTriggerScheduledJobs: true,
+    };
     vi.mocked(service.getScheduledJobs).mockResolvedValue(mockJobs as never);
     vi.mocked(service.getJobTypes).mockResolvedValue({
       items: [
@@ -143,5 +152,46 @@ describe('ScheduledJobsPage', () => {
     expect(
       await screen.findByText('加载作业类型失败，请刷新页面重试'),
     ).toBeInTheDocument();
+  });
+
+  it('只读操作员可看列表和执行历史，不能修改、启停或触发任务', async () => {
+    jobAccess = {};
+    const { default: Page } = await import('./index');
+    renderPage(<Page />);
+    await waitFor(() => expect(service.getScheduledJobs).toHaveBeenCalled());
+    renderPage(<>{jobColumns.find(col => col.dataIndex === 'isEnabled').render(null, mockJobs.items[0])}
+      {jobColumns.find(col => col.valueType === 'option').render(null, mockJobs.items[0])}</>);
+    expect(screen.getByRole('switch')).toBeDisabled();
+    expect(screen.getByText('历史')).toBeInTheDocument();
+    for (const label of ['新建作业', '编辑', '删除', '立即触发']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('switch'));
+    expect(service.setJobEnabled).not.toHaveBeenCalled();
+    expect(service.getJobTypes).not.toHaveBeenCalled();
+  });
+
+  it('仅触发授权保留立即触发，不能连带编辑或新建', async () => {
+    jobAccess = { canTriggerScheduledJobs: true };
+    const { default: Page } = await import('./index');
+    renderPage(<Page />);
+    await waitFor(() => expect(service.getScheduledJobs).toHaveBeenCalled());
+    renderPage(<div>{jobColumns.find(col => col.valueType === 'option').render(null, mockJobs.items[0])}</div>);
+    expect(screen.getByText('立即触发')).toBeInTheDocument();
+    expect(screen.getByText('历史')).toBeInTheDocument();
+    expect(screen.queryByText('编辑')).not.toBeInTheDocument();
+    expect(screen.queryByText('新建作业')).not.toBeInTheDocument();
+    expect(service.getJobTypes).not.toHaveBeenCalled();
+  });
+
+  it('停用任务保留历史与获准的编辑操作，不显示会被后端拒绝的立即触发', async () => {
+    const { default: Page } = await import('./index');
+    renderPage(<Page />);
+    await waitFor(() => expect(service.getScheduledJobs).toHaveBeenCalled());
+    renderPage(<div>{jobColumns.find(col => col.valueType === 'option').render(null, { ...mockJobs.items[0], isEnabled: false })}</div>);
+    expect(screen.getByText('历史')).toBeInTheDocument();
+    expect(screen.getByText('编辑')).toBeInTheDocument();
+    expect(screen.queryByText('立即触发')).not.toBeInTheDocument();
+    expect(service.triggerJob).not.toHaveBeenCalled();
   });
 });

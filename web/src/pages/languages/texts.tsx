@@ -14,17 +14,19 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
-import { getApiAppLanguage } from '@/services/abpadmin/language';
 import {
-  getApiAppLanguageText,
-  getApiAppLanguageTextResourceNames,
-  postApiAppLanguageTextRestoreToDefault,
-  putApiAppLanguageText,
-} from '@/services/abpadmin/languageText';
+  type EnabledLanguage,
+  getEnabledLanguages,
+  getLanguageTexts,
+  getLanguageTextResourceNames,
+  type LanguageText,
+  restoreLanguageText,
+  updateLanguageText,
+} from '@/abp/localizationAdmin';
 
 const LanguageTextsPage: React.FC = () => {
   const [resourceNames, setResourceNames] = useState<string[]>([]);
-  const [languages, setLanguages] = useState<API.LanguageDto[]>([]);
+  const [languages, setLanguages] = useState<EnabledLanguage[]>([]);
   const [baseCulture, setBaseCulture] = useState<string | undefined>(undefined);
   // 目标文化：Pro 同款由页面默认选中（第二个启用语言，否则第一个），不放进搜索表单
   const [targetCulture, setTargetCulture] = useState<string | undefined>(
@@ -42,20 +44,19 @@ const LanguageTextsPage: React.FC = () => {
     if (targetCulture) {
       tableRef.current?.reload();
     }
-  }, [targetCulture]);
+  }, [targetCulture, baseCulture, onlyEmpty]);
 
   useEffect(() => {
     // 加载资源名称列表；失败要可见——静默吞掉会让"资源"下拉为空且列表无从过滤
-    getApiAppLanguageTextResourceNames()
+    getLanguageTextResourceNames()
       .then((res) => {
         setResourceNames(res.items || []);
       })
       .catch(() => message.error('加载资源列表失败，请刷新重试'));
     // 加载语言列表；基准/目标文化默认取启用语言（Pro 同款：基准=第一个，目标=第二个，否则第一个）。
     // 失败或无启用语言时 targetCulture 保持 undefined，列表守卫回空页——必须提示，否则空表像"无数据"
-    getApiAppLanguage()
-      .then((res) => {
-        const enabled = res.items?.filter((x) => x.isEnabled) || [];
+    getEnabledLanguages()
+      .then((enabled) => {
         setLanguages(enabled);
         setBaseCulture((current) => current ?? enabled[0]?.cultureName);
         setTargetCulture(
@@ -71,10 +72,10 @@ const LanguageTextsPage: React.FC = () => {
 
   // 覆盖保存：写入当前上下文（host 或本租户）的覆盖行，空值=显式标记未翻译。
   // 成功后 reload 当页：生效值与 isOverridden 都以下一次列表查询的最新口径为准。
-  const handleSave = async (record: API.LanguageTextDto) => {
+  const handleSave = async (record: LanguageText) => {
     if (!record.resourceName || !record.cultureName || !record.name) return;
     try {
-      await putApiAppLanguageText({
+      await updateLanguageText({
         resourceName: record.resourceName,
         cultureName: record.cultureName,
         name: record.name,
@@ -91,10 +92,10 @@ const LanguageTextsPage: React.FC = () => {
   // 恢复默认：后端只删当前上下文那一层覆盖行（per-context 语义）。
   // 与列表 isOverridden（当前层口径）同口径——按钮仅在 true 时可点，点击必然删除覆盖行；
   // 但若覆盖值恰好等于下层提供值，显示值可能不变（存储变化 ≠ 显示变化）。
-  const handleRestore = async (record: API.LanguageTextDto) => {
+  const handleRestore = async (record: LanguageText) => {
     if (!record.resourceName || !record.cultureName || !record.name) return;
     try {
-      await postApiAppLanguageTextRestoreToDefault({
+      await restoreLanguageText({
         resourceName: record.resourceName,
         cultureName: record.cultureName,
         name: record.name,
@@ -106,7 +107,7 @@ const LanguageTextsPage: React.FC = () => {
     }
   };
 
-  const isEditing = (record: API.LanguageTextDto) =>
+  const isEditing = (record: LanguageText) =>
     editingKey ===
     `${record.resourceName}-${record.cultureName}-${record.name}`;
 
@@ -135,7 +136,7 @@ const LanguageTextsPage: React.FC = () => {
 
   return (
     <PageContainer>
-      <AutoHeightProTable
+      <AutoHeightProTable<LanguageText>
         actionRef={tableRef}
         rowKey={(record) =>
           `${record.resourceName}-${record.cultureName}-${record.name}`
@@ -265,22 +266,9 @@ const LanguageTextsPage: React.FC = () => {
         toolbar={{
           filter: (
             <Space>
-              {/* 基准/目标语言都是工具栏状态（不在搜索表单里，「重 置」不触及）。
-                  目标语言的 reload 由 useEffect([targetCulture]) 统一触发——
-                  onChange 里再调一次会与 effect 叠成重复控制路径（reload 有防抖，
-                  实际只发一单请求，但双路径是没必要的复杂度） */}
-              {renderCultureSelect('基准语言', baseCulture, (value) => {
-                setBaseCulture(value);
-                tableRef.current?.reload();
-              })}
+              {renderCultureSelect('基准语言', baseCulture, setBaseCulture)}
               {renderCultureSelect('目标语言', targetCulture, setTargetCulture)}
-              <Switch
-                checked={onlyEmpty}
-                onChange={(checked) => {
-                  setOnlyEmpty(checked);
-                  tableRef.current?.reload();
-                }}
-              />
+              <Switch checked={onlyEmpty} onChange={setOnlyEmpty} />
               <span>只显示空值</span>
             </Space>
           ),
@@ -292,14 +280,14 @@ const LanguageTextsPage: React.FC = () => {
           if (!targetCulture) {
             return { data: [], total: 0, success: true };
           }
-          const result = await getApiAppLanguageText({
-            ResourceName: firstFilterValue(filter, 'resourceName'),
-            CultureName: targetCulture,
-            BaseCultureName: baseCulture,
-            Filter: firstFilterValue(filter, 'name'),
-            OnlyEmpty: onlyEmpty,
-            SkipCount: ((params.current ?? 1) - 1) * (params.pageSize ?? 10),
-            MaxResultCount: params.pageSize ?? 10,
+          const result = await getLanguageTexts({
+            resourceName: firstFilterValue(filter, 'resourceName'),
+            cultureName: targetCulture,
+            baseCultureName: baseCulture,
+            filter: firstFilterValue(filter, 'name'),
+            onlyEmpty,
+            skipCount: ((params.current ?? 1) - 1) * (params.pageSize ?? 10),
+            maxResultCount: params.pageSize ?? 10,
           });
           return {
             data: result.items,

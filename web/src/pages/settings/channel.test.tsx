@@ -196,6 +196,25 @@ describe('渠道配置页', () => {
     expect(mocks.setSettingValues).not.toHaveBeenCalled();
   });
 
+  it('当前作用域只读字段不会进入保存与重置请求', async () => {
+    const fields = [
+      { name: financeKeys[0], value: 'true', properties: { CanWriteInCurrentScope: false } },
+      { name: financeKeys[1], value: 'false', properties: { CanWriteInCurrentScope: true } },
+    ];
+    mocks.getSettingGroups.mockResolvedValue([{ groupName: 'Finance', settingInfos: fields }]);
+    mocks.useLocation.mockReturnValue({ pathname: '/finance/settings' });
+    render(page());
+    expect(await screen.findByLabelText(financeKeys[0])).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }));
+    await waitFor(() =>
+      expect(mocks.setSettingValues).toHaveBeenCalledWith({ [financeKeys[1]]: 'false' }),
+    );
+    await screen.findByLabelText(financeKeys[1]);
+    fireEvent.click(screen.getByRole('button', { name: '重置为默认值' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^重\s*置$/ }));
+    await waitFor(() => expect(mocks.resetSettingValues).toHaveBeenCalledWith([financeKeys[1]]));
+  });
+
   it.each(['/collection/order-settings', '/finance/settings'])(
     '租户有通用设置权限时，%s 仍只向宿主开放',
     (pathname) => {

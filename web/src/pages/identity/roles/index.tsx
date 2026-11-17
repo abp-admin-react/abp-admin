@@ -20,6 +20,7 @@ import {
 import { sorterToAbpSorting } from '@/abp/sorting';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import ClaimModal from '@/components/ClaimModal';
+import DataScopeModal from '@/components/DataScopeModal';
 import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import PermissionModal from '@/components/PermissionModal';
 import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
@@ -108,6 +109,7 @@ const RolesPage: React.FC = () => {
   const [permissionTarget, setPermissionTarget] = useState<IdentityRoleDto>();
   const [claimTarget, setClaimTarget] = useState<IdentityRoleDto>();
   const [usersTarget, setUsersTarget] = useState<IdentityRoleDto>();
+  const [dataScopeTarget, setDataScopeTarget] = useState<IdentityRoleDto>();
   const access = useAccess();
 
   const columns: ProColumns<IdentityRoleDto>[] = [
@@ -141,6 +143,13 @@ const RolesPage: React.FC = () => {
             key: 'claims',
             label: '声明（高级）',
             onClick: () => setClaimTarget(record),
+          });
+        }
+        if (access.canManageRoleDataScopes) {
+          items.push({
+            key: 'data-scope',
+            label: '业务数据范围',
+            onClick: () => setDataScopeTarget(record),
           });
         }
         if (!record.isStatic && access.canDeleteRoles) {
@@ -232,6 +241,12 @@ const RolesPage: React.FC = () => {
       <RoleUsersDrawer
         role={usersTarget}
         onClose={() => setUsersTarget(undefined)}
+      />
+      <DataScopeModal
+        open={!!dataScopeTarget && access.canManageRoleDataScopes}
+        title={`业务数据范围 - ${dataScopeTarget?.name || ''}`}
+        roleName={dataScopeTarget?.name}
+        onClose={() => setDataScopeTarget(undefined)}
       />
     </PageContainer>
   );

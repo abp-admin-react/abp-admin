@@ -59,6 +59,7 @@ import {
   FinanceStateView,
   useFinanceLoad,
 } from '@/components/FinanceState';
+import { useModuleEnabled } from '@/hooks/useModuleAvailability';
 import { isValidRecordId } from '@/pages/collection/record-focus';
 import { isNotFound } from '@/requestErrorConfig';
 import { formatForDisplay } from '@/utils/time';
@@ -71,11 +72,13 @@ import {
   withdrawalRecordUrl,
 } from './navigation';
 
-type TabKey = 'vouchers' | 'drafts' | 'pending';
+type AdjustTab = 'drafts' | 'pending' | 'posted';
+type TabKey = 'vouchers' | AdjustTab;
 
 const VouchersPage: React.FC = () => {
   const { message } = App.useApp();
   const access = useAccess();
+  const acceptsNewWork = useModuleEnabled('Finance');
   const { initialState } = useModel('@@initialState');
   const currentUser = initialState?.currentUser as
     | { id?: string; userid?: string; userName?: string; name?: string }
@@ -86,6 +89,7 @@ const VouchersPage: React.FC = () => {
   const voucherRef = useRef<ActionType>(undefined);
   const draftRef = useRef<ActionType>(undefined);
   const pendingRef = useRef<ActionType>(undefined);
+  const postedRef = useRef<ActionType>(undefined);
   const adjustFormRef = useRef<ProFormInstance>(undefined);
   const [pendingFieldErrors, setPendingFieldErrors] = useState<string[]>([]);
 
@@ -119,9 +123,11 @@ const VouchersPage: React.FC = () => {
   const [adjustDetail, setAdjustDetail] = useState<FinManualAdjustDto>();
   const [rejecting, setRejecting] = useState<FinManualAdjustDto>();
   const load = useFinanceLoad();
+  const canViewVouchers = !!access.canViewFinanceVouchers;
   const canCreate = !!access.canCreateFinanceAdjust;
   const canApprove = !!access.canApproveFinanceAdjust;
-  const canSubmit = !!access.canSubmitFinanceAdjust;
+  const canSubmit = acceptsNewWork && !!access.canSubmitFinanceAdjust;
+  const canViewDrafts = canCreate || !!access.canSubmitFinanceAdjust;
   const canReject = !!access.canRejectFinanceAdjust;
   const canApproveOwn = !!access.canApproveOwnFinanceAdjust;
   const canReverse = !!access.canReverseFinanceAdjust;
@@ -136,6 +142,7 @@ const VouchersPage: React.FC = () => {
   const reloadAdjusts = () => {
     draftRef.current?.reload();
     pendingRef.current?.reload();
+    postedRef.current?.reload();
     voucherRef.current?.reload();
   };
 
@@ -191,14 +198,14 @@ const VouchersPage: React.FC = () => {
     recordType === 'deposit' ? canViewDeposit : canViewWithdrawal;
   useEffect(() => {
     setDetail(undefined);
-    if (deepVoucherId || recordType) setTab('vouchers');
-    if (deepVoucherId) {
-      void openVoucher(deepVoucherId);
+    if (canViewVouchers) {
+      if (deepVoucherId || recordType) setTab('vouchers');
+      if (deepVoucherId) void openVoucher(deepVoucherId);
     }
     return () => {
       voucherRequest.current++;
     };
-  }, [deepVoucherId, recordType, focusedRecordId, openVoucher]);
+  }, [canViewVouchers, deepVoucherId, recordType, focusedRecordId, openVoucher]);
 
   const statusTag = (s: AdjustStatus) => {
     const cfg = ADJUST_STATUS_LABEL[s];
@@ -206,7 +213,7 @@ const VouchersPage: React.FC = () => {
   };
 
   const adjustColumns = (
-    mode: 'drafts' | 'pending',
+    mode: AdjustTab,
   ): ProColumns<FinManualAdjustDto>[] => [
     { title: '单号', dataIndex: 'adjustNo', width: 120 },
     { title: '摘要', dataIndex: 'summary', ellipsis: true },
@@ -223,7 +230,13 @@ const VouchersPage: React.FC = () => {
       width: 90,
       render: (_: unknown, r: FinManualAdjustDto) => statusTag(r.status),
     },
-    { title: '申请人', dataIndex: 'applicantName', width: 100 },
+    {
+      title: '申请人',
+      dataIndex: 'applicantName',
+      width: 140,
+      ellipsis: true,
+      render: (_, row) => row.applicantName || row.applicantId,
+    },
     ...(mode === 'drafts'
       ? [
           {
@@ -257,8 +270,8 @@ const VouchersPage: React.FC = () => {
           </a>,
         ];
         const isApplicant = r.applicantId === meId;
-        if (mode === 'drafts' && canCreate && isApplicant) {
-          if (r.status === 'Draft') {
+        if (mode === 'drafts' && isApplicant) {
+          if (r.status === 'Draft' && canCreate) {
             acts.push(
               <a key="edit" onClick={() => setEditingAdjust(r)}>
                 编辑
@@ -278,41 +291,42 @@ const VouchersPage: React.FC = () => {
               >
                 <a>删除</a>
               </Popconfirm>,
-              ...(canSubmit
-                ? [
-                    <Popconfirm
-                      key="submit"
-                      title="提交后进入待审批，不可再改，确认？"
-                      onConfirm={async () => {
-                        try {
-                          await submitAdjust(r.id);
-                          message.success('已提交审批');
-                          reloadAdjusts();
-                        } catch (e) {
-                          onActionError(e);
-                          const bad = financeErrorFields(e);
-                          if (bad.length && canCreate) {
-                            setEditingAdjust(r);
-                            setPendingFieldErrors(bad);
-                          }
-                        }
-                      }}
-                    >
-                      <a>提交</a>
-                    </Popconfirm>,
-                  ]
-                : []),
+            );
+          }
+          if (r.status === 'Draft' && canSubmit) {
+            acts.push(
+              <Popconfirm
+                key="submit"
+                title="提交后进入待审批，不可再改，确认？"
+                onConfirm={async () => {
+                  try {
+                    await submitAdjust(r.id);
+                    message.success('已提交审批');
+                    reloadAdjusts();
+                  } catch (e) {
+                    onActionError(e);
+                    const bad = financeErrorFields(e);
+                    if (bad.length && canCreate) {
+                      setEditingAdjust(r);
+                      setPendingFieldErrors(bad);
+                    }
+                  }
+                }}
+              >
+                <a>提交</a>
+              </Popconfirm>,
             );
           }
           // 驳回单据先回到草稿才能编辑。
-          if (r.status === 'Rejected') {
+          if (r.status === 'Rejected' && canCreate && acceptsNewWork) {
             acts.push(
               <Popconfirm
                 key="reopen"
                 title="单据将回到草稿，可修改后再提交。驳回意见会保留。"
                 onConfirm={async () => {
                   try {
-                    await reopenAdjust(r.id, { id: meId, canCreate });
+                    const draft = await reopenAdjust(r.id, { id: meId, canCreate });
+                    setEditingAdjust(draft);
                     message.success('已回到草稿');
                     reloadAdjusts();
                   } catch (e) {
@@ -329,6 +343,7 @@ const VouchersPage: React.FC = () => {
         if (
           mode === 'pending' &&
           (canApprove || canReject) &&
+          meId &&
           r.status === 'Pending'
         ) {
           if (r.applicantId === meId && !canApproveOwn) {
@@ -384,7 +399,7 @@ const VouchersPage: React.FC = () => {
           );
         }
         const voucherId = r.voucherId;
-        if (voucherId) {
+        if (voucherId && canViewVouchers) {
           acts.push(
             <a key="voucher" onClick={() => openVoucher(voucherId)}>
               查看会计凭证
@@ -396,9 +411,28 @@ const VouchersPage: React.FC = () => {
     },
   ];
 
+  const adjustmentTabs = [
+    {
+      key: 'drafts', ref: draftRef, allowed: canViewDrafts,
+      label: '账簿调账草稿', status: 'Draft,Rejected', empty: '没有草稿或被驳回的账簿调账',
+    },
+    {
+      key: 'pending', ref: pendingRef, allowed: canApprove || canReject,
+      label: '账簿调账待审批', status: 'Pending', empty: '暂无待审批的账簿调账',
+    },
+    {
+      key: 'posted', ref: postedRef, allowed: canReverse,
+      label: '已过账调账', status: 'Posted,Reversed', empty: '暂无已过账调账',
+    },
+  ] as const;
+  const availableTabs = [
+    ...(canViewVouchers ? ['vouchers'] : []),
+    ...adjustmentTabs.filter(({ allowed }) => allowed).map(({ key }) => key),
+  ];
+
   return (
     <PageContainer
-      {...financeHelpHeader('A3', '会计凭证')}
+      {...financeHelpHeader('A3', canViewVouchers ? '会计凭证' : '账簿调账')}
       extra={
         <Space wrap>
           {access.canViewFinanceVouchers && (
@@ -407,7 +441,7 @@ const VouchersPage: React.FC = () => {
           {access.canViewFinanceBizDocs && (
             <Link to="/finance/biz-docs">凭证来源查询</Link>
           )}
-          {load.ok && canCreate && (
+          {load.ok && canCreate && acceptsNewWork && (
             <Button type="primary" onClick={() => setCreateOpen(true)}>
               新建账簿调账
             </Button>
@@ -415,6 +449,15 @@ const VouchersPage: React.FC = () => {
         </Space>
       }
     >
+      {!acceptsNewWork && (
+        <Alert
+          title="财务工作区已停止受理新调账"
+          description="可以继续查看凭证并完成已提交的审批或纠正。"
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+        />
+      )}
       <FinanceStateView
         state={load.state}
         errorText={load.errorText}
@@ -423,11 +466,7 @@ const VouchersPage: React.FC = () => {
         <ProCard
           key={load.nonce}
           tabs={{
-            activeKey:
-              (tab === 'drafts' && !canCreate) ||
-              (tab === 'pending' && !(canApprove || canReject))
-                ? 'vouchers'
-                : tab,
+            activeKey: availableTabs.includes(tab) ? tab : availableTabs[0],
             onChange: (k) => setTab(k as TabKey),
             items: [
               {
@@ -592,9 +631,10 @@ const VouchersPage: React.FC = () => {
                               </a>,
                             ];
                             if (
-                              access.canReverseFinanceAdjust &&
+                              access.canReverseFinanceVouchers &&
                               r.status === 'Posted' &&
-                              r.bizType === 'manual-adjust'
+                              r.bizType === 'manual-adjust' &&
+                              !r.reversalOf
                             ) {
                               acts.push(
                                 <Popconfirm
@@ -622,20 +662,18 @@ const VouchersPage: React.FC = () => {
                   </>
                 ),
               },
-              {
-                key: 'drafts',
-                label: '账簿调账草稿',
+              ...adjustmentTabs.map(({ key, ref, label, status, empty }) => ({
+                key,
+                label,
                 children: (
                   <AutoHeightProTable<FinManualAdjustDto>
                     rowKey="id"
-                    actionRef={draftRef}
+                    actionRef={ref}
                     search={false}
                     locale={{
-                      emptyText: (
-                        <FinanceEmpty text="没有草稿或被驳回的账簿调账" />
-                      ),
+                      emptyText: <FinanceEmpty text={empty} />,
                     }}
-                    params={{ tab: 'drafts' }}
+                    params={{ tab: key }}
                     request={async (params) => {
                       const maxResultCount = params.pageSize ?? 20;
                       const skipCount =
@@ -644,7 +682,7 @@ const VouchersPage: React.FC = () => {
                         getAdjusts({
                           skipCount,
                           maxResultCount,
-                          status: 'Draft,Rejected',
+                          status,
                         }),
                       );
                       if (!result)
@@ -655,52 +693,11 @@ const VouchersPage: React.FC = () => {
                         success: true,
                       };
                     }}
-                    columns={adjustColumns('drafts')}
+                    columns={adjustColumns(key)}
                   />
                 ),
-              },
-              {
-                key: 'pending',
-                label: '账簿调账待审批',
-                children: (
-                  <AutoHeightProTable<FinManualAdjustDto>
-                    rowKey="id"
-                    actionRef={pendingRef}
-                    search={false}
-                    locale={{
-                      emptyText: <FinanceEmpty text="暂无待审批的账簿调账" />,
-                    }}
-                    params={{ tab: 'pending' }}
-                    request={async (params) => {
-                      const maxResultCount = params.pageSize ?? 20;
-                      const skipCount =
-                        ((params.current ?? 1) - 1) * maxResultCount;
-                      const result = await load.guard(() =>
-                        getAdjusts({
-                          skipCount,
-                          maxResultCount,
-                          status: 'Pending',
-                        }),
-                      );
-                      if (!result)
-                        return { data: [], total: 0, success: false };
-                      return {
-                        data: result.items,
-                        total: result.totalCount,
-                        success: true,
-                      };
-                    }}
-                    columns={adjustColumns('pending')}
-                  />
-                ),
-              },
-            ].filter((it) =>
-              it.key === 'drafts'
-                ? canCreate
-                : it.key === 'pending'
-                  ? canApprove || canReject
-                  : true,
-            ),
+              })),
+            ].filter(({ key }) => availableTabs.includes(key)),
           }}
         />
       </FinanceStateView>
@@ -711,7 +708,7 @@ const VouchersPage: React.FC = () => {
             ? `编辑账簿调账 ${editingAdjust.adjustNo}`
             : '新建账簿调账（草稿）'
         }
-        open={createOpen || !!editingAdjust}
+        open={(acceptsNewWork && createOpen) || !!editingAdjust}
         onOpenChange={(open) => {
           if (!open) {
             setCreateOpen(false);
@@ -729,7 +726,8 @@ const VouchersPage: React.FC = () => {
                   editingAdjust.lines?.[0]?.accountCode || '1002',
                 // 保留原借方归属，归属类型转为下拉选项使用的名称。
                 debitOwnerType: finOwnerTypeName(editingAdjust.debitOwnerType),
-                debitOwnerId: editingAdjust.debitOwnerId || 'default',
+                debitOwnerId: editingAdjust.debitOwnerId ?? 'default',
+                creditAccountCode: editingAdjust.lines?.[1]?.accountCode,
                 reason: editingAdjust.summary,
               }
             : {
@@ -742,16 +740,19 @@ const VouchersPage: React.FC = () => {
               }
         }
         onFinish={async (values) => {
+          if (!editingAdjust && !acceptsNewWork) return false;
           try {
             const payload = {
               amount: Number(values.amount),
               currency: values.currency || 'CNY',
               debitAccountCode: String(values.debitAccountCode || '').trim(),
               debitOwnerType: values.debitOwnerType || 'Channel',
-              debitOwnerId: values.debitOwnerId || 'default',
+              debitOwnerId: values.debitOwnerId ?? '',
               creditAccountCode: values.creditAccountCode
                 ? String(values.creditAccountCode).trim()
                 : undefined,
+              creditOwnerType: editingAdjust?.creditOwnerType,
+              creditOwnerId: editingAdjust?.creditOwnerId,
               reason: values.reason || '',
             };
             if (!payload.debitAccountCode || !(payload.amount > 0)) {
@@ -809,7 +810,7 @@ const VouchersPage: React.FC = () => {
         <ProFormText
           name="debitOwnerId"
           label="借方 OwnerId"
-          rules={[{ required: true }]}
+          fieldProps={{ autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false }}
         />
         <ProFormText
           name="creditAccountCode"
@@ -885,10 +886,10 @@ const VouchersPage: React.FC = () => {
                 {adjustDetail.amount.toFixed(2)} {adjustDetail.currency}
               </Descriptions.Item>
               <Descriptions.Item label="申请人">
-                {adjustDetail.applicantName}
+                {adjustDetail.applicantName || adjustDetail.applicantId}
               </Descriptions.Item>
               <Descriptions.Item label="审批人">
-                {adjustDetail.auditorName || '-'}
+                {adjustDetail.auditorName || adjustDetail.auditorId || '-'}
               </Descriptions.Item>
               {/* rejectReason 一直保留：重新编辑、再提交后仍展示 */}
               {adjustDetail.rejectReason ? (
@@ -916,18 +917,20 @@ const VouchersPage: React.FC = () => {
             />
             {adjustDetail.status === 'Rejected' &&
               adjustDetail.applicantId === meId &&
+              acceptsNewWork &&
               canCreate && (
                 <Space style={{ marginTop: 16 }}>
                   <Button
                     type="primary"
                     onClick={async () => {
                       try {
-                        await reopenAdjust(adjustDetail.id, {
+                        const draft = await reopenAdjust(adjustDetail.id, {
                           id: meId,
                           canCreate,
                         });
                         message.success('已回到草稿');
                         setAdjustDetail(undefined);
+                        setEditingAdjust(draft);
                         reloadAdjusts();
                       } catch (e) {
                         onActionError(e);

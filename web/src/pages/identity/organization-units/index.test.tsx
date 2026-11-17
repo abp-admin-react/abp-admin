@@ -11,6 +11,8 @@ import OrganizationUnitsPage from './index';
 
 const mocks = vi.hoisted(() => ({
   useAccess: vi.fn(),
+  getAllRoles: vi.fn(),
+  getUsers: vi.fn(),
   getOrganizationUnits: vi.fn(),
   getOrganizationUnitMembers: vi.fn(),
   getOrganizationUnitRoles: vi.fn(),
@@ -26,7 +28,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@umijs/max', () => ({ useAccess: mocks.useAccess }));
 vi.mock('@/abp/identityAdmin', () => mocks);
-vi.mock('@/abp/identity', () => ({ getAllRoles: vi.fn(), getUsers: vi.fn() }));
+vi.mock('@/abp/identity', () => ({
+  getAllRoles: mocks.getAllRoles,
+  getUsers: mocks.getUsers,
+}));
 
 const permissions = {
   canCreateOrganizationUnits: true,
@@ -40,6 +45,9 @@ const units = [
   { id: 'root-1', parentId: null, displayName: '研发部', code: '00001' },
   { id: 'root-2', parentId: null, displayName: '财务部', code: '00002' },
 ];
+
+const knownId = '6d07b1ca-a17f-4936-89ac-b4edaffcea4c';
+const secondId = 'fc0e1663-e36b-479a-8d13-e6725b283a2c';
 
 function renderPage() {
   return render(
@@ -72,6 +80,8 @@ describe('部门维护', () => {
       items: [{ id: 'role-1', name: '业务查看' }],
     });
     mocks.createOrganizationUnit.mockResolvedValue({ id: 'new-department' });
+    mocks.getUsers.mockResolvedValue({ items: [{ id: knownId, userName: '照常选择用户' }] });
+    mocks.getAllRoles.mockResolvedValue({ items: [{ id: knownId, name: '照常选择角色' }] });
   });
 
   it.each([
@@ -168,5 +178,58 @@ describe('部门维护', () => {
     await waitFor(() =>
       expect(mocks.deleteOrganizationUnit).toHaveBeenCalledWith('root-1'),
     );
+  });
+
+  it.each([
+    ['添加成员', '用户 ID', 'canManageOrganizationUnitMembers', 'addOrganizationUnitMembers'],
+    ['添加角色', '角色 ID', 'canManageOrganizationUnitRoles', 'addOrganizationUnitRoles'],
+  ] as const)('仅有部门权限时用明确 ID %s，不调用全局目录', async (button, label, permission, endpoint) => {
+    mocks.useAccess.mockReturnValue({ canManageOrganizationUnits: true, [permission]: true });
+    renderPage();
+    await selectDepartment();
+    if (button === '添加角色') fireEvent.click(screen.getByText('统一角色（可选）'));
+    fireEvent.click(await screen.findByRole('button', { name: button }));
+    const dialog = await screen.findByRole('dialog');
+    const field = within(dialog).getByLabelText(label);
+    const form = dialog.querySelector('form')!;
+
+    fireEvent.change(field, { target: { value: 'not-a-guid' } });
+    expect(within(dialog).queryByText(`请输入带连字符的完整${label}`)).toBeNull();
+    fireEvent.submit(form);
+    expect(await within(dialog).findByText(`请输入带连字符的完整${label}`)).toBeTruthy();
+    expect(mocks[endpoint]).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: `${knownId.toUpperCase()}，\n${secondId}\n${knownId}` } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(mocks[endpoint]).toHaveBeenCalledExactlyOnceWith('root-1', [knownId, secondId]));
+    expect(mocks.getUsers).not.toHaveBeenCalled();
+    expect(mocks.getAllRoles).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['添加成员', '用户', 'canManageUsers', 'getUsers'],
+    ['添加角色', '角色', 'canManageRoles', 'getAllRoles'],
+  ] as const)('同时持有目录读取权限时仍可用原选择器%s', async (button, label, permission, endpoint) => {
+    mocks.useAccess.mockReturnValue({ ...permissions, [permission]: true });
+    renderPage();
+    await selectDepartment();
+    if (button === '添加角色') fireEvent.click(screen.getByText('统一角色（可选）'));
+    fireEvent.click(await screen.findByRole('button', { name: button }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('combobox', { name: label })).toBeTruthy();
+    await waitFor(() => expect(mocks[endpoint]).toHaveBeenCalled());
+  });
+
+  it('提交不存在的用户 ID 时保留弹窗并提示核对', async () => {
+    mocks.useAccess.mockReturnValue({ canManageOrganizationUnitMembers: true });
+    mocks.addOrganizationUnitMembers.mockRejectedValueOnce({ response: { status: 404 } });
+    renderPage();
+    await selectDepartment();
+    fireEvent.click(screen.getByRole('button', { name: '添加成员' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('用户 ID'), { target: { value: knownId } });
+    fireEvent.submit(dialog.querySelector('form')!);
+    expect(await screen.findByText('找不到指定用户，请核对用户 ID。')).toBeTruthy();
+    expect(within(dialog).getByLabelText('用户 ID')).toHaveValue(knownId);
   });
 });

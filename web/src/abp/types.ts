@@ -1,3 +1,5 @@
+import type { ModuleAvailability } from './moduleManagement';
+
 export type AbpCurrentUser = {
   isAuthenticated?: boolean;
   id?: string | null;
@@ -35,6 +37,7 @@ export type AbpApplicationConfiguration = {
     supportsMultipleTimezone?: boolean;
   };
   localization?: {
+    languages?: { cultureName: string; displayName: string }[];
     currentCulture?: {
       cultureName?: string;
       displayName?: string;
@@ -55,6 +58,7 @@ export type AbpApplicationConfiguration = {
     };
     /** 字典标签色白名单（T3.4，DataDictionaryTagTypes.All），唯一来源是后端 */
     dataDictionaryTagTypes?: string[];
+    modules?: ModuleAvailability;
   };
 };
 

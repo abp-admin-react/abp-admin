@@ -1,13 +1,8 @@
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Web3ConfigPage from './config';
+import { getWeb3ConfigurationSections } from './config';
+import { Web3RuleSection } from './rules';
 
 const mocks = vi.hoisted(() => ({
   useAccess: vi.fn(),
@@ -42,6 +37,7 @@ vi.mock('@/requestErrorConfig', () => ({
 }));
 
 const scanInterval = 'Collection.Chain.ScanIntervalSeconds';
+const confirmationSetting = 'Collection.Chain.Confirmations';
 const walletWatchInterval = 'Collection.Chain.HotWalletWatchIntervalSeconds';
 const minWithdrawAmount = 'Collection.Withdraw.MinAmount';
 const alipayLimit = 'Collection.MaxAmount.AlipayPrecreate.Cny';
@@ -59,21 +55,18 @@ const setting = (name: string, section: string): API.SettingInfo => ({
   properties: { Group2: section },
 });
 
-function renderConfig(search = '') {
-  mocks.useLocation.mockReturnValue({ pathname: '/web3/config', search });
-  const page = () => (
+function renderRules(section: 'Chain' | 'Withdraw' = 'Chain') {
+  const page = (
+    next: 'Chain' | 'Withdraw',
+    scope: 'deposit' | 'operations' = 'operations',
+  ) => (
     <App>
-      <Web3ConfigPage />
+      <Web3RuleSection key={`${next}:${scope}`} section={next} scope={scope} />
     </App>
   );
-  const view = render(page());
-  return (label: string, key: string) => {
-    fireEvent.click(screen.getByRole('tab', { name: label }));
-    const route = { pathname: '/web3/config', search: `?view=${key}` };
-    expect(mocks.push).toHaveBeenLastCalledWith(route);
-    mocks.useLocation.mockReturnValue(route);
-    view.rerender(page());
-  };
+  const view = render(page(section));
+  return (next: 'Chain' | 'Withdraw', scope?: 'deposit' | 'operations') =>
+    view.rerender(page(next, scope));
 }
 
 describe('Web3 配置', () => {
@@ -98,6 +91,7 @@ describe('Web3 配置', () => {
         groupName: 'Web3',
         settingInfos: [
           setting(scanInterval, 'Chain'),
+          setting(confirmationSetting, 'Chain'),
           setting(walletWatchInterval, 'Chain'),
           setting(minWithdrawAmount, 'Withdraw'),
           ...operationalSettings.map(([name, section]) =>
@@ -115,19 +109,12 @@ describe('Web3 配置', () => {
   });
 
   it('充值与提现分别显示对应参数，只有指定 API 写运行开关', async () => {
-    const select = renderConfig();
-    expect(screen.getByTitle('Web3 配置')).toBeTruthy();
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '充值与归集规则',
-      '提现规则',
-      '链网络',
-      '链上钱包',
-      '运行设置',
-    ]);
+    const select = renderRules();
     expect(await screen.findByLabelText(scanInterval)).toBeTruthy();
     expect(screen.getByText('充值检测')).toBeTruthy();
     expect(screen.queryByLabelText(alipayLimit)).toBeNull();
     expect(screen.queryByLabelText(walletWatchInterval)).toBeNull();
+    expect(screen.queryByLabelText(confirmationSetting)).toBeNull();
     expect(
       await screen.findByRole('switch', { name: '自动检测充值' }),
     ).toBeChecked();
@@ -137,15 +124,14 @@ describe('Web3 配置', () => {
         sweepEnabled: true,
       }),
     );
-    select('提现规则', 'withdraw');
-    const panel = screen.getByRole('tabpanel');
-    expect(await within(panel).findByLabelText(minWithdrawAmount)).toBeTruthy();
-    expect(within(panel).getByLabelText(walletWatchInterval)).toBeTruthy();
-    expect(within(panel).getByText('费用与限额')).toBeTruthy();
-    expect(within(panel).getByText('提现启停与开账')).toBeTruthy();
-    expect(within(panel).queryByLabelText(scanInterval)).toBeNull();
+    select('Withdraw');
+    expect(await screen.findByLabelText(minWithdrawAmount)).toBeTruthy();
+    expect(screen.getByLabelText(walletWatchInterval)).toBeTruthy();
+    expect(screen.getByText('费用与限额')).toBeTruthy();
+    expect(screen.getByText('提现启停与开账')).toBeTruthy();
+    expect(screen.queryByLabelText(scanInterval)).toBeNull();
     fireEvent.click(
-      await within(panel).findByRole('switch', { name: '提现钱包监控' }),
+      await screen.findByRole('switch', { name: '提现钱包监控' }),
     );
     await waitFor(() =>
       expect(mocks.setChainSwitches).toHaveBeenCalledWith({
@@ -166,22 +152,18 @@ describe('Web3 配置', () => {
       canManageSettings: true,
       canUpdateSettings: true,
     });
-    const select = renderConfig('?view=wallets');
-    expect(screen.getByRole('tab', { name: '充值与归集规则' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    expect(screen.queryByRole('tab', { name: '链上钱包' })).toBeNull();
-    expect(screen.queryByRole('tab', { name: '链网络' })).toBeNull();
+    const select = renderRules();
+    expect(
+      getWeb3ConfigurationSections(mocks.useAccess()).map(({ key }) => key),
+    ).toEqual(['chain-rules']);
     fireEvent.change(await screen.findByLabelText(scanInterval), {
       target: { value: '15' },
     });
-    select('提现规则', 'withdraw');
-    const withdrawPanel = within(screen.getByRole('tabpanel'));
-    fireEvent.change(await withdrawPanel.findByLabelText(minWithdrawAmount), {
+    select('Withdraw');
+    fireEvent.change(await screen.findByLabelText(minWithdrawAmount), {
       target: { value: '20' },
     });
-    fireEvent.click(withdrawPanel.getByRole('button', { name: /^保\s*存$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^保\s*存$/ }));
     await waitFor(() =>
       expect(mocks.setSettingValues).toHaveBeenCalledWith({
         [minWithdrawAmount]: '20',
@@ -189,7 +171,7 @@ describe('Web3 配置', () => {
       }),
     );
     fireEvent.click(
-      await withdrawPanel.findByRole('button', { name: '重置为默认值' }),
+      await screen.findByRole('button', { name: '重置为默认值' }),
     );
     fireEvent.click(await screen.findByRole('button', { name: /^重\s*置$/ }));
     await waitFor(() =>
@@ -198,10 +180,9 @@ describe('Web3 配置', () => {
       ),
     );
     expect(mocks.resetSettingValues.mock.calls[0][0]).toHaveLength(2);
-    select('充值与归集规则', 'deposit');
-    expect(
-      await within(screen.getByRole('tabpanel')).findByLabelText(scanInterval),
-    ).toHaveValue('1');
+    select('Chain', 'deposit');
+    expect(await screen.findByLabelText(confirmationSetting)).toHaveValue('1');
+    expect(screen.queryByLabelText(scanInterval)).toBeNull();
     expect(mocks.getNetworkStatus).not.toHaveBeenCalled();
     expect(screen.queryByRole('switch')).toBeNull();
     expect(screen.queryByText('提现启停与开账')).toBeNull();
@@ -212,11 +193,7 @@ describe('Web3 配置', () => {
       canConfigureCollectionNetwork: true,
       canAdminNetwork: true,
     });
-    renderConfig('?view=withdraw');
-    expect(screen.getByRole('tab', { name: '提现规则' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    renderRules('Withdraw');
     expect(
       await screen.findByRole('switch', { name: '提现钱包监控' }),
     ).toBeTruthy();
@@ -224,29 +201,25 @@ describe('Web3 配置', () => {
     expect(mocks.getSettingGroups).not.toHaveBeenCalled();
   });
 
-  it('提现专员只看到提现规则与链上钱包，直接打开未授权栏目时落到提现规则', () => {
+  it('提现专员在提现页和钱包区域分别看到各自的配置', () => {
     mocks.useAccess.mockReturnValue({
       canAdminWithdrawals: true,
       canManageCollectionWallets: true,
     });
-    const select = renderConfig('?view=network');
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
-      '提现规则',
-      '链上钱包',
-    ]);
+    renderRules('Withdraw');
+    expect(
+      getWeb3ConfigurationSections(mocks.useAccess()).map(({ key }) => key),
+    ).toEqual(['wallets']);
     expect(screen.getByText('提现启停与开账')).toBeTruthy();
     expect(screen.queryByText('网络配置内容')).toBeNull();
-    select('链上钱包', 'wallets');
-    expect(screen.getByText('钱包配置内容')).toBeTruthy();
-    expect(screen.queryByText('提现启停与开账')).toBeNull();
     expect(mocks.getSettingGroups).not.toHaveBeenCalled();
     expect(mocks.getNetworkStatus).not.toHaveBeenCalled();
   });
 
   it('没有宿主规则权限时，不请求任何配置', () => {
     mocks.useAccess.mockReturnValue({ canManageSettings: true });
-    renderConfig();
-    expect(screen.getByText('当前账号没有可访问的栏目')).toBeTruthy();
+    renderRules();
+    expect(screen.getByText('暂无规则管理权限')).toBeTruthy();
     expect(mocks.getSettingGroups).not.toHaveBeenCalled();
     expect(mocks.getNetworkStatus).not.toHaveBeenCalled();
   });

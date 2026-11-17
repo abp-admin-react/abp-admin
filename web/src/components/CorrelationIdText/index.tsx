@@ -8,7 +8,7 @@ import React from 'react';
  */
 const CorrelationIdText: React.FC<{
   value?: string | null;
-  linkTo: string;
+  linkTo?: string;
   linkText: string;
 }> = ({ value, linkTo, linkText }) => {
   const navigate = useNavigate();
@@ -22,13 +22,13 @@ const CorrelationIdText: React.FC<{
       <Typography.Text copyable style={{ marginRight: 8 }}>
         {value}
       </Typography.Text>
-      <a
+      {linkTo && <a
         onClick={() =>
           navigate(`${linkTo}?correlationId=${encodeURIComponent(value)}`)
         }
       >
         {linkText}
-      </a>
+      </a>}
     </span>
   );
 };

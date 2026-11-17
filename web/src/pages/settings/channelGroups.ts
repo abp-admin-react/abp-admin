@@ -69,7 +69,8 @@ export const dedicatedSettingPages: Record<string, SettingPageDefinition> = {
   },
   '/collection/settings': {
     title: '余额支付设置',
-    description: '用户使用站内 USDT 或 USDC 余额支付订单时，按这里的费率和结算规则计算。',
+    description:
+      '用户使用站内 USDT 或 USDC 余额支付订单时，按这里的费率和结算规则计算。',
     columns: 2,
     panels: [
       {
@@ -104,12 +105,31 @@ export const dedicatedSettingPages: Record<string, SettingPageDefinition> = {
   },
 };
 
+export const thirdPartyPaymentChannels = [
+  {
+    key: 'alipay',
+    label: '支付宝',
+    path: '/alipay/settings',
+    channel: 'AlipayPrecreate',
+  },
+  {
+    key: 'wechat',
+    label: '微信支付',
+    path: '/wechat/settings',
+    channel: 'WechatNative',
+  },
+  {
+    key: 'stripe',
+    label: 'Stripe',
+    path: '/stripe/settings',
+    channel: 'StripeCheckout',
+  },
+] as const;
+
 export const orderAndPaymentSettings = [
   { key: 'order', label: '订单与报价', path: '/collection/order-settings' },
   { key: 'balance', label: '余额支付', path: '/collection/settings' },
-  { key: 'alipay', label: '支付宝', path: '/alipay/settings' },
-  { key: 'wechat', label: '微信支付', path: '/wechat/settings' },
-  { key: 'stripe', label: 'Stripe', path: '/stripe/settings' },
+  ...thirdPartyPaymentChannels,
 ] as const;
 
 export const dedicatedSettingGroupNames = new Set([
@@ -121,6 +141,26 @@ export const dedicatedSettingGroupNames = new Set([
 
 // 租户菜单来自各自的套餐快照。保留原有通用配置入口，宿主使用专用设置页。
 export const tenantGeneralSettingGroupNames = new Set(['Ordering', 'Finance']);
+
+const dedicatedPanels = Object.values(dedicatedSettingPages).flatMap(
+  ({ panels }) => panels,
+);
+
+export function getUnclaimedChannelSettings(group: API.SettingGroup) {
+  const name = group.groupName ?? '';
+  if (!dedicatedSettingGroupNames.has(name)) return group;
+  if (name === 'Web3') return undefined;
+  const panels = dedicatedPanels.filter((panel) => panel.groupName === name);
+  const settingInfos = group.settingInfos?.filter(
+    ({ name }) =>
+      name &&
+      !panels.some(
+        (panel) =>
+          !panel.settingNames || panel.settingNames.includes(name),
+      ),
+  );
+  return settingInfos?.length ? { ...group, settingInfos } : undefined;
+}
 
 /** 保留服务端字段名和元数据，按页面白名单收窄表单提交、重置范围。 */
 export function selectSettingGroup(

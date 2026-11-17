@@ -14,9 +14,10 @@ export type TenantPackageOption = {
  * 走 react-query 缓存（同一 queryKey 只发一次请求），替代两处逐字重复的
  * getTenantPackages({current:1,pageSize:100}) + map 拼装。
  */
-export function useTenantPackageOptions() {
+export function useTenantPackageOptions(enabled = true) {
   const query = useQuery({
     queryKey: ['tenant-package-options', PACKAGE_SELECT_MAX],
+    enabled,
     queryFn: async (): Promise<TenantPackageOption[]> => {
       const res = await getTenantPackages({
         current: 1,

@@ -1,16 +1,15 @@
-import { financeHelpHeader } from '@/components/FinanceHelp';
-import { type ActionType, PageContainer } from '@ant-design/pro-components';
+import type { ActionType } from '@ant-design/pro-components';
 import { Alert, Tag } from 'antd';
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
 import { type FinPostingRuleDto, getPostingRules } from '@/abp/finance';
 
-const RulesPage: React.FC = () => {
+export function FinancePostingRules() {
   const actionRef = useRef<ActionType>(undefined);
   const load = useFinanceLoad();
   return (
-    <PageContainer {...financeHelpHeader('A2b', '自动记账规则')}>
+    <>
       <Alert
         type="info"
         showIcon
@@ -65,8 +64,6 @@ const RulesPage: React.FC = () => {
         ]}
       />
       </FinanceStateView>
-    </PageContainer>
+    </>
   );
-};
-
-export default RulesPage;
+}

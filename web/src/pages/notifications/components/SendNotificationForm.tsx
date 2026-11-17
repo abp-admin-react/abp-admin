@@ -8,6 +8,7 @@ import {
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { useQuery } from '@tanstack/react-query';
+import { useAccess } from '@umijs/max';
 import { App, Modal, Progress } from 'antd';
 import React, { useState } from 'react';
 import { getRoles, getUsers } from '@/abp/identity';
@@ -19,7 +20,7 @@ import {
   broadcastNotification,
   getBroadcast,
   sendNotificationToUsers,
-} from '../service';
+} from '@/abp/notificationManagement';
 
 interface Props {
   open: boolean;
@@ -29,6 +30,7 @@ interface Props {
 
 /** 广播进度轮询间隔（终态 Completed/Failed 时停止）。 */
 const BROADCAST_POLL_INTERVAL_MS = 2000;
+const idPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 /** 渠道标识，与后端 NotificationMethodConsts / 字典 NotificationMethod 的值对齐。 */
 const NOTIFICATION_METHOD = {
@@ -47,6 +49,7 @@ const SendNotificationForm: React.FC<Props> = ({
   onSent,
 }) => {
   const { message } = App.useApp();
+  const access = useAccess();
   const methodDict = useDictionary('NotificationMethod');
   const [batchId, setBatchId] = useState<string>();
 
@@ -89,9 +92,15 @@ const SendNotificationForm: React.FC<Props> = ({
           const smsProperties = buildSmsProperties(values);
 
           if (values.mode === 'broadcast') {
+            const targetId =
+              values.targetType === 'Role'
+                ? values.roleId
+                : values.targetType === 'OrganizationUnit'
+                  ? values.organizationUnitId
+                  : undefined;
             const input: BroadcastInput = {
               targetType: values.targetType,
-              targetId: values.targetId || undefined,
+              targetId,
               notificationMethods: methods,
               title: values.title,
               body: values.body,
@@ -148,9 +157,9 @@ const SendNotificationForm: React.FC<Props> = ({
                 <ProFormDependency name={['targetType']}>
                   {({ targetType }) => {
                     if (targetType === 'Role') {
-                      return (
+                      return access.canManageRoles ? (
                         <ProFormSelect
-                          name="targetId"
+                          name="roleId"
                           label="目标角色"
                           showSearch
                           rules={[{ required: true, message: '请选择角色' }]}
@@ -165,12 +174,24 @@ const SendNotificationForm: React.FC<Props> = ({
                             }));
                           }}
                         />
+                      ) : (
+                        <ProFormText
+                          name="roleId"
+                          label="目标角色 ID"
+                          rules={[
+                            { required: true, message: '请输入目标角色 ID' },
+                            {
+                              pattern: idPattern,
+                              message: '请输入带连字符的完整 ID',
+                            },
+                          ]}
+                        />
                       );
                     }
                     if (targetType === 'OrganizationUnit') {
-                      return (
+                      return access.canManageOrganizationUnits ? (
                         <ProFormSelect
-                          name="targetId"
+                          name="organizationUnitId"
                           label="目标组织单元"
                           showSearch
                           rules={[
@@ -184,13 +205,28 @@ const SendNotificationForm: React.FC<Props> = ({
                             }));
                           }}
                         />
+                      ) : (
+                        <ProFormText
+                          name="organizationUnitId"
+                          label="目标组织单元 ID"
+                          rules={[
+                            {
+                              required: true,
+                              message: '请输入目标组织单元 ID',
+                            },
+                            {
+                              pattern: idPattern,
+                              message: '请输入带连字符的完整 ID',
+                            },
+                          ]}
+                        />
                       );
                     }
                     return null;
                   }}
                 </ProFormDependency>
               </>
-            ) : (
+            ) : access.canManageUsers ? (
               <ProFormSelect
                 name="userIds"
                 label="接收用户"
@@ -207,6 +243,29 @@ const SendNotificationForm: React.FC<Props> = ({
                     value: u.id,
                   }));
                 }}
+              />
+            ) : (
+              <ProFormSelect
+                name="userIds"
+                label="接收用户 ID"
+                mode="tags"
+                extra="输入完整用户 ID，按回车确认。可粘贴用逗号分隔的 ID。"
+                fieldProps={{ tokenSeparators: [','] }}
+                rules={[
+                  {
+                    type: 'array',
+                    min: 1,
+                    required: true,
+                    message: '请输入接收用户 ID',
+                  },
+                  {
+                    type: 'array',
+                    defaultField: {
+                      pattern: idPattern,
+                      message: '请输入带连字符的完整用户 ID',
+                    },
+                  },
+                ]}
               />
             )
           }

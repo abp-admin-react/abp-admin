@@ -16,7 +16,6 @@ import * as captchaImage from "./captchaImage";
 import * as claimType from "./claimType";
 import * as cookieConsent from "./cookieConsent";
 import * as dataDictionary from "./dataDictionary";
-import * as dataDictionaryView from "./dataDictionaryView";
 import * as dynamicClaims from "./dynamicClaims";
 import * as edition from "./edition";
 import * as emailSettings from "./emailSettings";
@@ -29,13 +28,10 @@ import * as gdprDownload from "./gdprDownload";
 import * as gdprRequest from "./gdprRequest";
 import * as identityClaim from "./identityClaim";
 import * as identityUserDelegation from "./identityUserDelegation";
-import * as language from "./language";
-import * as languageText from "./languageText";
 import * as login from "./login";
 import * as myNotification from "./myNotification";
 import * as notification from "./notification";
 import * as notificationInfo from "./notificationInfo";
-import * as notificationManagement from "./notificationManagement";
 import * as openIddictApplication from "./openIddictApplication";
 import * as openIddictScope from "./openIddictScope";
 import * as openIddictTokenAdmin from "./openIddictTokenAdmin";
@@ -48,10 +44,8 @@ import * as role from "./role";
 import * as roleDataScope from "./roleDataScope";
 import * as scheduledJob from "./scheduledJob";
 import * as securityLog from "./securityLog";
-import * as settingUi from "./settingUi";
 import * as tenant from "./tenant";
 import * as tenantPackage from "./tenantPackage";
-import * as textTemplate from "./textTemplate";
 import * as timeZoneSettings from "./timeZoneSettings";
 import * as user from "./user";
 import * as userExport from "./userExport";
@@ -72,7 +66,6 @@ export default {
   claimType,
   cookieConsent,
   dataDictionary,
-  dataDictionaryView,
   dynamicClaims,
   edition,
   emailSettings,
@@ -85,13 +78,10 @@ export default {
   gdprRequest,
   identityClaim,
   identityUserDelegation,
-  language,
-  languageText,
   login,
   myNotification,
   notification,
   notificationInfo,
-  notificationManagement,
   openIddictApplication,
   openIddictScope,
   openIddictTokenAdmin,
@@ -104,10 +94,8 @@ export default {
   roleDataScope,
   scheduledJob,
   securityLog,
-  settingUi,
   tenant,
   tenantPackage,
-  textTemplate,
   timeZoneSettings,
   user,
   userExport,

@@ -4,6 +4,14 @@ import { App as AntdApp } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as service from './service';
 
+const allAccess = {
+  canViewDataDictionary: true,
+  canCreateDataDictionary: true,
+  canUpdateDataDictionary: true,
+  canDeleteDataDictionary: true,
+};
+let mockAccess: Partial<typeof allAccess> = allAccess;
+
 // Mock 服务层：页面不直接依赖生成客户端，mock 这一层即可
 vi.mock('./service', async () => {
   const actual = await vi.importActual<typeof import('./service')>('./service');
@@ -18,12 +26,7 @@ vi.mock('./service', async () => {
 });
 
 vi.mock('@umijs/max', () => ({
-  useAccess: () => ({
-    canViewDataDictionary: true,
-    canCreateDataDictionary: true,
-    canUpdateDataDictionary: true,
-    canDeleteDataDictionary: true,
-  }),
+  useAccess: () => mockAccess,
   // 字典标签色白名单来自 initialState（application-configuration 下发，见组件内注释）
   useModel: () => ({
     initialState: {
@@ -142,6 +145,7 @@ const renderPage = async () => {
 describe('DataDictionaryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAccess = allAccess;
     vi.mocked(service.getDataDictionaries).mockResolvedValue({
       items: [genderDict, customDict],
       totalCount: 2,
@@ -274,5 +278,25 @@ describe('DataDictionaryPage', () => {
     await screen.findByTestId('item-row-Male');
 
     expect(screen.getByText(/这是静态字典/)).toBeTruthy();
+  });
+
+  it('只读权限可查看字典项但没有写入入口', async () => {
+    mockAccess = { canViewDataDictionary: true };
+    await renderPage();
+    fireEvent.click(await screen.findByTestId('dict-row-CustomerLevel'));
+    expect(await screen.findByTestId('item-row-VIP')).toBeInTheDocument();
+    expect(screen.queryByText('保存全部字典项')).toBeNull();
+    expect(service.saveDataDictionaryItems).not.toHaveBeenCalled();
+  });
+
+  it('读不到当前数据时禁用整表保存并显示原因', async () => {
+    vi.mocked(service.getDataDictionaryByCode).mockResolvedValueOnce(null);
+    await renderPage();
+    fireEvent.click(await screen.findByTestId('dict-row-CustomerLevel'));
+    expect(await screen.findByText('字典已不存在')).toBeInTheDocument();
+    const save = screen.getByRole('button', { name: '保存全部字典项' });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(service.saveDataDictionaryItems).not.toHaveBeenCalled();
   });
 });

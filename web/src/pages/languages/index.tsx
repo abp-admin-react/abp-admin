@@ -1,3 +1,4 @@
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import { PlusOutlined } from '@ant-design/icons';
 import {
   ModalForm,
@@ -11,12 +12,15 @@ import { Button, message, Popconfirm, Tag } from 'antd';
 import React, { useRef, useState } from 'react';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
-  deleteApiAppLanguageId,
-  getApiAppLanguage,
-  postApiAppLanguage,
-  postApiAppLanguageIdSetAsDefault,
-  putApiAppLanguageId,
-} from '@/services/abpadmin/language';
+  createLanguage,
+  deleteLanguage,
+  getLanguages,
+  type Language,
+  type LanguageData,
+  type LanguageUpdate,
+  setDefaultLanguage,
+  updateLanguage,
+} from '@/abp/localizationAdmin';
 
 // .NET 标准 culture 清单
 const cultureOptions = [
@@ -42,16 +46,18 @@ const cultureOptions = [
   { label: 'हिन्दी', value: 'hi' },
 ];
 
-const LanguagesPage: React.FC = () => {
+const LanguagesPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
+  configurationEntry,
+}) => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [currentRecord, setCurrentRecord] = useState<API.LanguageDto>();
+  const [currentRecord, setCurrentRecord] = useState<Language>();
   const tableRef = useRef<any>(null);
   const access = useAccess();
 
-  const handleCreate = async (values: API.CreateLanguageDto) => {
+  const handleCreate = async (values: LanguageData) => {
     try {
-      await postApiAppLanguage(values);
+      await createLanguage(values);
       message.success('创建成功');
       setCreateModalOpen(false);
       tableRef.current?.reload();
@@ -62,10 +68,10 @@ const LanguagesPage: React.FC = () => {
     }
   };
 
-  const handleUpdate = async (values: API.UpdateLanguageDto) => {
+  const handleUpdate = async (values: LanguageUpdate) => {
     if (!currentRecord?.id) return false;
     try {
-      await putApiAppLanguageId({ id: currentRecord.id }, values);
+      await updateLanguage(currentRecord.id, values);
       message.success('更新成功');
       setEditModalOpen(false);
       setCurrentRecord(undefined);
@@ -79,7 +85,7 @@ const LanguagesPage: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteApiAppLanguageId({ id });
+      await deleteLanguage(id);
       message.success('删除成功');
       tableRef.current?.reload();
     } catch (e: any) {
@@ -89,7 +95,7 @@ const LanguagesPage: React.FC = () => {
 
   const handleSetAsDefault = async (id: string) => {
     try {
-      await postApiAppLanguageIdSetAsDefault({ id });
+      await setDefaultLanguage(id);
       message.success('设置默认语言成功');
       tableRef.current?.reload();
     } catch (e: any) {
@@ -98,7 +104,7 @@ const LanguagesPage: React.FC = () => {
   };
 
   return (
-    <PageContainer>
+    <PageContainer title="语言管理" extra={configurationEntry}>
       <AutoHeightProTable
         actionRef={tableRef}
         rowKey="id"
@@ -127,7 +133,7 @@ const LanguagesPage: React.FC = () => {
             valueType: 'option',
             render: (_, record) =>
               [
-                access.canManageLanguages && (
+                access.canUpdateLanguages && (
                   <a
                     key="edit"
                     onClick={() => {
@@ -150,7 +156,7 @@ const LanguagesPage: React.FC = () => {
                       设为默认
                     </a>
                   ),
-                access.canManageLanguages && !record.isDefault && (
+                access.canDeleteLanguages && !record.isDefault && (
                   <Popconfirm
                     key="delete"
                     title="确定删除此语言？"
@@ -165,7 +171,7 @@ const LanguagesPage: React.FC = () => {
           },
         ]}
         toolbar={{
-          actions: access.canManageLanguages
+          actions: access.canCreateLanguages
             ? [
                 <Button
                   key="create"
@@ -179,7 +185,7 @@ const LanguagesPage: React.FC = () => {
             : [],
         }}
         request={async () => {
-          const result = await getApiAppLanguage();
+          const result = await getLanguages();
           return { data: result.items, success: true };
         }}
         search={false}
@@ -260,4 +266,12 @@ const LanguagesPage: React.FC = () => {
   );
 };
 
-export default LanguagesPage;
+export default function Page() {
+  return (
+    <FrameworkConfiguration owner="timezone">
+      {(configurationEntry) => (
+        <LanguagesPage configurationEntry={configurationEntry} />
+      )}
+    </FrameworkConfiguration>
+  );
+}

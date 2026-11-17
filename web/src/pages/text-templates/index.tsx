@@ -2,27 +2,25 @@ import { type ActionType, PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { Alert, Button, Input, Modal, message, Popconfirm, Select } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
+import {
+  type EnabledLanguage,
+  getEnabledLanguages,
+  getLanguages,
+} from '@/abp/localizationAdmin';
+import {
+  getTextTemplateContent,
+  getTextTemplates,
+  restoreTextTemplate,
+  type TextTemplate,
+  updateTextTemplate,
+} from '@/abp/textTemplates';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
-import { getApiAppLanguage } from '@/services/abpadmin/language';
-import {
-  getApiAppTextTemplate,
-  getApiAppTextTemplateContent,
-  postApiAppTextTemplateRestoreToDefault,
-  putApiAppTextTemplate,
-} from '@/services/abpadmin/textTemplate';
-
-type TextTemplate = API.TextTemplateDto;
-
-interface Language {
-  cultureName?: string;
-  displayName?: string;
-}
 
 const TextTemplatesPage: React.FC = () => {
   const actionRef = useRef<ActionType>(undefined);
   const access = useAccess();
-  const [languages, setLanguages] = useState<Language[]>([]);
+  const [languages, setLanguages] = useState<EnabledLanguage[]>([]);
   const [selectedCulture, setSelectedCulture] = useState<string | undefined>(
     undefined,
   );
@@ -32,41 +30,54 @@ const TextTemplatesPage: React.FC = () => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [loading, setLoading] = useState(false);
+  const contentRequest = useRef(0);
+  const canEdit = (template: TextTemplate | null) =>
+    access.canUpdateTextTemplates &&
+    !!template &&
+    (template.isSandboxed || access.canEditNonSandboxedTemplates);
 
   // 加载语言列表
   useEffect(() => {
-    getApiAppLanguage().then((res) => {
-      setLanguages(res.items || []);
-    });
-  }, []);
+    const load = access.canManageLanguages
+      ? getLanguages().then(({ items }) => items)
+      : getEnabledLanguages();
+    load
+      .then(setLanguages)
+      .catch(() => message.error('语言列表加载失败'));
+  }, [access.canManageLanguages]);
 
   // 打开编辑模态框
   const openEditModal = async (template: TextTemplate, culture?: string) => {
+    const request = ++contentRequest.current;
     setLoading(true);
     try {
-      const data = await getApiAppTextTemplateContent({
-        name: template.name,
-        cultureName: culture,
-      });
+      const data = await getTextTemplateContent(template.name, culture);
+      if (request !== contentRequest.current) return;
       setEditingTemplate({ ...template, ...data });
       setEditContent(data.content || '');
       setSelectedCulture(culture);
       setEditModalVisible(true);
     } catch {
-      message.error('加载模板内容失败');
+      if (request === contentRequest.current) message.error('加载模板内容失败');
     } finally {
-      setLoading(false);
+      if (request === contentRequest.current) setLoading(false);
     }
+  };
+
+  const closeTemplate = () => {
+    contentRequest.current++;
+    setLoading(false);
+    setEditModalVisible(false);
   };
 
   // 保存模板
   const handleSave = async () => {
-    if (!editingTemplate) return;
+    if (!editingTemplate || !canEdit(editingTemplate) || loading) return;
 
     setLoading(true);
     try {
-      await putApiAppTextTemplate({
-        name: editingTemplate.name ?? '',
+      await updateTextTemplate({
+        name: editingTemplate.name,
         content: editContent,
         cultureName: selectedCulture,
       });
@@ -82,13 +93,15 @@ const TextTemplatesPage: React.FC = () => {
 
   // 恢复默认
   const handleRestore = async (template: TextTemplate, culture?: string) => {
+    if (loading || !access.canUpdateTextTemplates) return;
     setLoading(true);
     try {
-      await postApiAppTextTemplateRestoreToDefault({
-        name: template.name ?? '',
+      await restoreTextTemplate({
+        name: template.name,
         cultureName: culture,
       });
       message.success('已恢复默认');
+      setEditModalVisible(false);
       actionRef.current?.reload();
     } catch (error: any) {
       message.error(error?.data?.error?.message || '恢复默认失败');
@@ -151,52 +164,50 @@ const TextTemplatesPage: React.FC = () => {
             width: 200,
             render: (_, record) => [
               <a key="edit" onClick={() => openEditModal(record)}>
-                编辑
+                {canEdit(record) ? '编辑' : '查看'}
               </a>,
-              <Popconfirm
-                key="restore"
-                title="确定要恢复默认内容吗？"
-                description="将删除当前租户对该模板的所有覆盖记录。"
-                onConfirm={() => handleRestore(record)}
-              >
-                <a style={{ color: 'orange' }}>恢复默认</a>
-              </Popconfirm>,
+              access.canUpdateTextTemplates && (
+                <Popconfirm
+                  key="restore"
+                  title="确定要恢复默认内容吗？"
+                  description="将删除当前租户对该模板的所有覆盖记录。"
+                  onConfirm={() => handleRestore(record)}
+                >
+                  <a style={{ color: 'orange' }}>恢复默认</a>
+                </Popconfirm>
+              ),
             ],
           },
         ]}
         request={async (_params, _sorter, filter) => {
-          // 生成的客户端已带类型化参数对象（getApiAppTextTemplateParams），filter 直接透传
-          const items = await getApiAppTextTemplate({
-            filter:
-              firstFilterValue(filter, 'name') ||
+          const items = await getTextTemplates(
+            firstFilterValue(filter, 'name') ||
               firstFilterValue(filter, 'displayName'),
-          });
+          );
           return { data: items, total: items.length, success: true };
         }}
       />
 
       {/* 编辑模态框 */}
       <Modal
-        title={`编辑模板 - ${editingTemplate?.name}`}
+        title={`${canEdit(editingTemplate) ? '编辑模板' : '查看模板'} - ${editingTemplate?.name ?? ''}`}
         open={editModalVisible}
-        onCancel={() => setEditModalVisible(false)}
+        onCancel={closeTemplate}
         width={800}
         footer={[
-          <Button key="cancel" onClick={() => setEditModalVisible(false)}>
-            取消
+          <Button key="cancel" onClick={closeTemplate}>
+            关闭
           </Button>,
-          <Button
-            key="save"
-            type="primary"
-            loading={loading}
-            onClick={handleSave}
-            disabled={
-              editingTemplate?.isSandboxed === false &&
-              !access.canEditNonSandboxedTemplates
-            }
-          >
-            保存
-          </Button>,
+          canEdit(editingTemplate) && (
+            <Button
+              key="save"
+              type="primary"
+              loading={loading}
+              onClick={handleSave}
+            >
+              保存
+            </Button>
+          ),
         ]}
       >
         {/* 非沙箱警告 */}
@@ -212,13 +223,16 @@ const TextTemplatesPage: React.FC = () => {
 
         {/* 文化选择 */}
         <div style={{ marginBottom: 16 }}>
-          <span style={{ marginRight: 8 }}>文化：</span>
+          <label htmlFor="template-culture" style={{ marginRight: 8 }}>
+            文化：
+          </label>
           <Select
+            id="template-culture"
             style={{ width: 200 }}
+            disabled={loading}
             value={selectedCulture || ''}
             onChange={(value) => {
               const culture = value || undefined;
-              setSelectedCulture(culture);
               if (editingTemplate) {
                 openEditModal(editingTemplate, culture);
               }
@@ -229,31 +243,28 @@ const TextTemplatesPage: React.FC = () => {
 
         {/* 内容编辑器（Modal 内无 ProForm 上下文，直接用受控 Input.TextArea） */}
         <Input.TextArea
+          aria-label="模板内容"
           rows={16}
           value={editContent}
           onChange={(e) => setEditContent(e.target.value)}
           style={{ fontFamily: 'monospace' }}
-          readOnly={
-            editingTemplate?.isSandboxed === false &&
-            !access.canEditNonSandboxedTemplates
-          }
+          readOnly={loading || !canEdit(editingTemplate)}
         />
 
         {/* 恢复默认按钮 */}
-        <div style={{ marginTop: 16, textAlign: 'right' }}>
-          <Popconfirm
-            title="确定要恢复默认内容吗？"
-            description={`将删除当前租户对该模板${selectedCulture ? ` (${selectedCulture})` : ''}的覆盖记录。`}
-            onConfirm={() => {
-              if (editingTemplate) {
-                handleRestore(editingTemplate, selectedCulture);
-                setEditModalVisible(false);
-              }
-            }}
-          >
-            <Button danger>恢复默认</Button>
-          </Popconfirm>
-        </div>
+        {access.canUpdateTextTemplates && (
+          <div style={{ marginTop: 16, textAlign: 'right' }}>
+            <Popconfirm
+              title="确定要恢复默认内容吗？"
+              description={`将删除当前租户对该模板${selectedCulture ? ` (${selectedCulture})` : ''}的覆盖记录。`}
+              onConfirm={() => editingTemplate && handleRestore(editingTemplate, selectedCulture)}
+            >
+              <Button danger disabled={loading}>
+                恢复默认
+              </Button>
+            </Popconfirm>
+          </div>
+        )}
       </Modal>
     </PageContainer>
   );

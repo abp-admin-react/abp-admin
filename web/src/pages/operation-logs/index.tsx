@@ -1,5 +1,5 @@
 import { PageContainer, ProDescriptions } from '@ant-design/pro-components';
-import { useSearchParams } from '@umijs/max';
+import { useAccess, useSearchParams } from '@umijs/max';
 import { Drawer, Tag, Typography } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import React, { useState } from 'react';
@@ -26,6 +26,7 @@ const formatExtra = (extra?: string | null) => {
 };
 
 const OperationLogsPage: React.FC = () => {
+  const access = useAccess();
   const [detail, setDetail] = useState<OperationLogDto>();
   // 支持从审计日志详情跳转过来（?correlationId=xxx 串联同一次请求的两类日志）。
   // 只作表单初始值：用户清空筛选后不应被 URL 初始值粘住（审查修复）
@@ -79,7 +80,7 @@ const OperationLogsPage: React.FC = () => {
             render: (_, record) => (
               <CorrelationIdText
                 value={record.correlationId}
-                linkTo="/administration/audit-logs"
+                linkTo={access.canManageAuditLogs ? '/administration/audit-logs' : undefined}
                 linkText="查关联审计日志"
               />
             ),
@@ -214,7 +215,7 @@ const OperationLogsPage: React.FC = () => {
               render: (_, record) => (
                 <CorrelationIdText
                   value={record?.correlationId}
-                  linkTo="/administration/audit-logs"
+                  linkTo={access.canManageAuditLogs ? '/administration/audit-logs' : undefined}
                   linkText="查关联审计日志"
                 />
               ),

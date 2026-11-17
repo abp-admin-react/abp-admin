@@ -1,3 +1,4 @@
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import { DownloadOutlined } from '@ant-design/icons';
 import { PageContainer, ProDescriptions } from '@ant-design/pro-components';
 import { useAccess, useSearchParams } from '@umijs/max';
@@ -46,7 +47,7 @@ const splitExecutionTimeRange = (
 const parseTriBool = (value: unknown): boolean | undefined =>
   value === 'true' ? true : value === 'false' ? false : undefined;
 
-const AuditLogsPage: React.FC = () => {
+const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ configurationEntry }) => {
   const [detail, setDetail] = useState<any>();
   const [historyDrawer, setHistoryDrawer] = useState<{
     open: boolean;
@@ -201,7 +202,7 @@ const AuditLogsPage: React.FC = () => {
   };
 
   return (
-    <PageContainer>
+    <PageContainer title="接口审计日志" extra={configurationEntry}>
       <AutoHeightProTable
         actionRef={tableRef}
         rowKey="id"
@@ -255,7 +256,7 @@ const AuditLogsPage: React.FC = () => {
             render: (_, record) => (
               <CorrelationIdText
                 value={record.correlationId}
-                linkTo="/administration/operation-logs"
+                linkTo={access.canManageOperationLogs ? '/administration/operation-logs' : undefined}
                 linkText="查关联操作日志"
               />
             ),
@@ -386,7 +387,7 @@ const AuditLogsPage: React.FC = () => {
               render: (_, record) => (
                 <CorrelationIdText
                   value={record?.correlationId}
-                  linkTo="/administration/operation-logs"
+                  linkTo={access.canManageOperationLogs ? '/administration/operation-logs' : undefined}
                   linkText="查关联操作日志"
                 />
               ),
@@ -500,4 +501,10 @@ const AuditLogsPage: React.FC = () => {
   );
 };
 
-export default AuditLogsPage;
+export default function Page() {
+  return (
+    <FrameworkConfiguration owner="audit">
+      {(configurationEntry) => <AuditLogsPage configurationEntry={configurationEntry} />}
+    </FrameworkConfiguration>
+  );
+}

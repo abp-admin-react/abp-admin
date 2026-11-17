@@ -21,12 +21,14 @@ const LIFETIME_FIELDS = [
 export type TokenLifetimeDrawerProps = {
   applicationId: string;
   clientId?: string | null;
+  canUpdate: boolean;
 };
 
 /** Token 生命周期覆盖：8 项，单位秒，留空=移除覆盖使用服务器默认 */
 const TokenLifetimeDrawer: React.FC<TokenLifetimeDrawerProps> = ({
   applicationId,
   clientId,
+  canUpdate,
 }) => {
   // DrawerForm 的内容组件同样是 React 组件，可直接用 App.useApp()（静态 message 不消费 App 上下文）
   const { message } = App.useApp();
@@ -36,10 +38,13 @@ const TokenLifetimeDrawer: React.FC<TokenLifetimeDrawerProps> = ({
       title={`Token 生命周期 - ${clientId ?? ''}`}
       trigger={<a>Token 生命周期</a>}
       drawerProps={{ destroyOnHidden: true, size: 520 }}
+      readonly={!canUpdate}
+      submitter={canUpdate ? undefined : false}
       request={async () =>
         await getOpenIddictApplicationTokenLifetime(applicationId)
       }
       onFinish={async (values) => {
+        if (!canUpdate) return false;
         await updateOpenIddictApplicationTokenLifetime(applicationId, values);
         message.success('已保存');
         return true;

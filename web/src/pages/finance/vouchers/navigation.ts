@@ -20,11 +20,11 @@ export function depositVouchersUrl(depositId: string) {
 }
 
 export function depositRecordUrl(depositId: string) {
-  return `/web3/operations?view=deposits&depositId=${encodeURIComponent(depositId)}`;
+  return `/operations/payments?view=deposits&depositId=${encodeURIComponent(depositId)}`;
 }
 
 export function withdrawalRecordUrl(withdrawalId: string) {
-  return `/web3/operations?view=withdrawals&status=all&withdrawalId=${encodeURIComponent(withdrawalId)}`;
+  return `/collection/withdrawals?status=all&withdrawalId=${encodeURIComponent(withdrawalId)}`;
 }
 
 export function voucherEntriesUrl(voucherId: string) {

@@ -1,7 +1,7 @@
 import { FolderOutlined } from '@ant-design/icons';
 import type { ProColumns } from '@ant-design/pro-components';
 import { useIntl } from '@umijs/max';
-import { Popconfirm, Space } from 'antd';
+import { Popconfirm, Space, Typography } from 'antd';
 import React from 'react';
 import { FileType } from '@/services/fileManagement';
 import FileThumbnailCell from './FileThumbnailCell';
@@ -68,6 +68,17 @@ export function useFileColumns(ctx: FileColumnsContext): ProColumns<FileRow>[] {
           <Space>
             <FolderOutlined />
             <a onClick={() => onEnterDirectory(record)}>{record.fileName}</a>
+            {canMove && record.id && (
+              <Typography.Text
+                copyable={{
+                  text: record.id,
+                  tooltips: [
+                    intl.formatMessage({ id: 'pages.files.move.targetDirId' }),
+                    true,
+                  ],
+                }}
+              />
+            )}
           </Space>
         ) : (
           record.fileName

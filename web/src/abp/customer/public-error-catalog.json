@@ -85,6 +85,16 @@
       ]
     },
     {
+      "code": "Client:ModuleDisabled",
+      "kind": "business",
+      "httpStatuses": [
+        409
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
       "code": "Client:NotFound",
       "kind": "notFound",
       "httpStatuses": [

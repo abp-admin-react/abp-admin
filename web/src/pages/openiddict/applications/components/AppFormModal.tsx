@@ -89,7 +89,15 @@ const AppFormModal: React.FC<AppFormModalProps> = ({
   const { message } = App.useApp();
   const formRef = useRef<ProFormInstance>(undefined);
 
-  const scopeSelectOptions = scopeOptions.map((scope) => ({
+  const availableScopes = new Map(
+    scopeOptions.map((scope) => [scope.name, scope]),
+  );
+  for (const name of record?.scopes ?? []) {
+    if (!availableScopes.has(name)) {
+      availableScopes.set(name, { name, displayName: name, isBuiltIn: false });
+    }
+  }
+  const scopeSelectOptions = [...availableScopes.values()].map((scope) => ({
     label: (
       <>
         {scope.name}
@@ -312,7 +320,8 @@ const AppFormModal: React.FC<AppFormModalProps> = ({
                 <ProFormSelect
                   name="scopes"
                   label="允许的 scopes"
-                  mode="multiple"
+                    mode={scopeOptions.length ? 'multiple' : 'tags'}
+                    extra={scopeOptions.length ? undefined : '输入已知的授权范围名称，按回车添加。'}
                   options={scopeSelectOptions}
                   fieldProps={{ showSearch: true, optionFilterProp: 'value' }}
                 />

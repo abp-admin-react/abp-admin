@@ -3,15 +3,17 @@ import {
   PageContainer,
   type ProColumns,
 } from '@ant-design/pro-components';
-import { history, useAccess, useLocation } from '@umijs/max';
+import { history, Link, useAccess, useLocation, useModel } from '@umijs/max';
 import {
   Alert,
   Button,
   Descriptions,
   Drawer,
+  Empty,
   Form,
   Input,
   Popconfirm,
+  Select,
   Space,
   Spin,
   Tabs,
@@ -36,7 +38,19 @@ import {
   requestCollectionRefund,
 } from '@/abp/collectionAdmin';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
+import {
+  ConfigurationLink,
+  ConfigurationPage,
+  useConfigurationLocation,
+} from '@/components/ContextConfiguration';
+import { useModuleEnabled } from '@/hooks/useModuleAvailability';
 import { isNotFound } from '@/requestErrorConfig';
+import DepositsPage from '../collection/deposits';
+import NetworkConfigPage from '../collection/network';
+import { orderRecordUrl } from '../collection/record-links';
+import { Web3RuleSection } from '../collection/rules';
+import { PaymentChannelSettings } from '../settings/channel';
+import { thirdPartyPaymentChannels } from '../settings/channelGroups';
 
 type PaymentSearch = {
   filter?: string;
@@ -47,13 +61,6 @@ type PaymentSearch = {
 const channelLabels = Object.fromEntries(
   COLLECTION_CHANNELS.map(({ value, label }) => [value, label]),
 );
-
-const paymentViews = [
-  { key: 'all', label: '全部渠道', channel: undefined },
-  { key: 'alipay', label: '支付宝', channel: 'AlipayPrecreate' },
-  { key: 'wechat', label: '微信支付', channel: 'WechatNative' },
-  { key: 'stripe', label: 'Stripe', channel: 'StripeCheckout' },
-] as const;
 
 const currencyLabels = Object.fromEntries(
   COLLECTION_CURRENCIES.map(({ value, label }) => [value, label]),
@@ -103,6 +110,7 @@ function PaymentDetails({
   retryInput?: RequestCollectionRefundInput;
 }) {
   const access = useAccess();
+  const { initialState } = useModel('@@initialState');
   const [payment, setPayment] = useState<CollectionPaymentAdminDto>();
   const [error, setError] = useState<string>();
   const [querying, setQuerying] = useState(false);
@@ -160,7 +168,18 @@ function PaymentDetails({
           {
             key: 'businessId',
             label: '业务单 ID',
-            children: payment.businessId,
+            children:
+              payment.businessType === 'Order' &&
+              payment.businessId &&
+              (access.canViewAllOrders ||
+                (access.canViewOwnOrders &&
+                  initialState?.currentUser?.userid === payment.userId)) ? (
+                <Link to={orderRecordUrl(payment.businessId)}>
+                  {payment.businessId}
+                </Link>
+              ) : (
+                payment.businessId
+              ),
           },
           {
             key: 'channel',
@@ -496,24 +515,216 @@ function PaymentRefunds({
 }
 
 export default function PaymentsPage() {
-  const { pathname, search } = useLocation();
+  const access = useAccess();
+  const { setting, link } = useConfigurationLocation();
+  const { pathname, search, hash } = useLocation();
   const query = new URLSearchParams(search);
-  const view =
-    paymentViews.find(({ key }) => key === query.get('view')) ??
-    paymentViews[0];
-  const fixedChannel = view.channel;
+  const requestedView = query.get('view');
+  const depositId = query.get('depositId') || undefined;
+  const depositStatus = query.get('status') || undefined;
+  const depositSweepTaskId = query.get('sweepTaskId') || undefined;
+  const canViewPayments = access.canViewCollectionPayments;
+  const canViewDeposits = access.canViewDepositRecords;
+  const canConfigurePayments = access.canManagePaymentSettings;
+  const canConfigureDeposits = access.canConfigureCollectionNetwork;
+  const activeView =
+    canViewDeposits && (requestedView === 'deposits' || !canViewPayments)
+      ? 'deposits'
+      : canViewPayments
+        ? 'payments'
+        : undefined;
+  const activeSetting =
+    canConfigureDeposits && setting === 'deposit'
+      ? 'deposit'
+      : canConfigurePayments && setting === 'channels'
+        ? 'channels'
+        : !activeView && canConfigurePayments
+          ? 'channels'
+          : !activeView && canConfigureDeposits
+            ? 'deposit'
+            : undefined;
+  const selectedChannel =
+    thirdPartyPaymentChannels.find(
+      ({ channel }) => channel === query.get('channel'),
+    )?.channel ??
+    thirdPartyPaymentChannels.find(({ key }) => key === requestedView)?.channel;
+  const [unresolvedRefunds, setUnresolvedRefunds] = useState<
+    Record<string, RequestCollectionRefundInput>
+  >({});
+  const acceptsDeposits = useModuleEnabled('Chain');
+
+  function updateUnresolvedRefund(
+    id: string,
+    input?: RequestCollectionRefundInput,
+  ) {
+    setUnresolvedRefunds((current) => {
+      if (input) return { ...current, [id]: input };
+      const remaining = { ...current };
+      delete remaining[id];
+      return remaining;
+    });
+  }
+
+  if (activeSetting) {
+    const depositSettings = activeSetting === 'deposit';
+    return (
+      <ConfigurationPage
+        parent="收款管理"
+        title={depositSettings ? '账户充值配置' : '第三方渠道配置'}
+        returnTo={activeView ? link() : undefined}
+      >
+        {canConfigurePayments && canConfigureDeposits && (
+          <nav aria-label="收款配置" style={{ marginBottom: 12 }}>
+            <Space wrap size="middle">
+              {depositSettings ? (
+                <ConfigurationLink to={link('channels')}>
+                  第三方渠道配置
+                </ConfigurationLink>
+              ) : (
+                <ConfigurationLink to={link('deposit')}>
+                  账户充值配置
+                </ConfigurationLink>
+              )}
+            </Space>
+          </nav>
+        )}
+        {depositSettings ? (
+          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+            {access.canAdminNetwork && <NetworkConfigPage mode="deposit" />}
+            {access.canManageSettings && (
+              <Web3RuleSection section="Chain" scope="deposit" />
+            )}
+          </Space>
+        ) : (
+          <PaymentChannelSettings />
+        )}
+      </ConfigurationPage>
+    );
+  }
+
+  const configuration =
+    activeView === 'deposits'
+      ? canConfigureDeposits
+        ? 'deposit'
+        : canConfigurePayments
+          ? 'channels'
+          : undefined
+      : canConfigurePayments
+        ? 'channels'
+        : canConfigureDeposits
+          ? 'deposit'
+          : undefined;
+  return (
+    <PageContainer
+      title="收款管理"
+      extra={
+        configuration && (
+          <ConfigurationLink to={link(configuration)}>
+            收款配置
+          </ConfigurationLink>
+        )
+      }
+    >
+      {activeView ? (
+        <Tabs
+          activeKey={activeView}
+          destroyOnHidden
+          onChange={(view) => {
+            const next = new URLSearchParams(search);
+            next.set('view', view);
+            for (const name of [
+              'channel',
+              'paymentId',
+              'depositId',
+              'sweepTaskId',
+              'status',
+              'settings',
+              'settingsChannel',
+            ]) {
+              next.delete(name);
+            }
+            history.push({ pathname, search: `?${next}`, hash });
+          }}
+          items={[
+            ...(canViewPayments
+              ? [
+                  {
+                    key: 'payments',
+                    label: '第三方收款',
+                    children:
+                      activeView === 'payments' ? (
+                        <PaymentRecords
+                          selectedChannel={selectedChannel}
+                          unresolvedRefunds={unresolvedRefunds}
+                          onUnresolvedRefund={updateUnresolvedRefund}
+                        />
+                      ) : null,
+                  },
+                ]
+              : []),
+            ...(canViewDeposits
+              ? [
+                  {
+                    key: 'deposits',
+                    label: '账户充值',
+                    children:
+                      activeView === 'deposits' ? (
+                        <>
+                          {!acceptsDeposits && (
+                            <Alert
+                              type="warning"
+                              showIcon
+                              title="链上充值已停止受理"
+                              description="可以继续查看已有记录和处理充值尾单。"
+                              style={{ marginBottom: 12 }}
+                            />
+                          )}
+                          <DepositsPage
+                            key={`${depositId ?? ''}:${depositStatus ?? ''}:${depositSweepTaskId ?? ''}`}
+                            embedded
+                            depositId={depositId}
+                            initialStatus={depositStatus}
+                            sweepTaskId={depositSweepTaskId}
+                            rulesHref={link('deposit')}
+                          />
+                        </>
+                      ) : null,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      ) : (
+        <Empty description="暂无可访问的收款视图" />
+      )}
+    </PageContainer>
+  );
+}
+
+function PaymentRecords({
+  selectedChannel,
+  unresolvedRefunds,
+  onUnresolvedRefund,
+}: {
+  selectedChannel?: string;
+  unresolvedRefunds: Record<string, RequestCollectionRefundInput>;
+  onUnresolvedRefund: (
+    id: string,
+    input?: RequestCollectionRefundInput,
+  ) => void;
+}) {
+  const acceptsPayments = useModuleEnabled('Collection');
+  const { pathname, search, hash } = useLocation();
+  const query = new URLSearchParams(search);
   const detailId = query.get('paymentId') || undefined;
   function setDetailId(id?: string) {
     const next = new URLSearchParams(search);
     if (id) next.set('paymentId', id);
     else next.delete('paymentId');
-    const target = next.size ? `${pathname}?${next}` : pathname;
+    const target = { pathname, search: next.size ? `?${next}` : '', hash };
     if (id) history.push(target);
     else history.replace(target);
   }
-  const [unresolvedRefunds, setUnresolvedRefunds] = useState<
-    Record<string, RequestCollectionRefundInput>
-  >({});
   const actionRef = useRef<ActionType | undefined>(undefined);
 
   const columns: ProColumns<CollectionPaymentAdminDto>[] = [
@@ -533,8 +744,7 @@ export default function PaymentsPage() {
     {
       title: '渠道',
       dataIndex: 'channel',
-      hideInTable: !!fixedChannel,
-      search: !fixedChannel,
+      search: false,
       valueType: 'select',
       valueEnum: channelLabels,
       width: 135,
@@ -586,32 +796,51 @@ export default function PaymentsPage() {
   ];
 
   return (
-    <PageContainer title="收款与退款">
-      <Tabs
-        activeKey={view.key}
-        items={paymentViews.map(({ key, label }) => ({ key, label }))}
-        onChange={(key) =>
-          history.push(key === 'all' ? pathname : `${pathname}?view=${key}`)
-        }
-      />
+    <>
+      {!acceptsPayments && (
+        <Alert
+          type="warning"
+          showIcon
+          title="收款已停止受理"
+          description="可以继续查询已有收款及处理符合条件的退款。"
+          style={{ marginBottom: 12 }}
+        />
+      )}
       <AutoHeightProTable<CollectionPaymentAdminDto, PaymentSearch>
-        key={view.key}
         actionRef={actionRef}
         rowKey="id"
         columns={columns}
-        request={async ({
-          current = 1,
-          pageSize = 20,
-          filter,
-          status,
-          channel,
-        }) => {
+        params={{ channel: selectedChannel }}
+        toolBarRender={() => [
+          <Space key="channel">
+            <label htmlFor="third-party-channel">渠道</label>
+            <Select
+              id="third-party-channel"
+              allowClear
+              placeholder="全部外部渠道"
+              value={selectedChannel}
+              style={{ minWidth: 145 }}
+              options={thirdPartyPaymentChannels.map(({ channel, label }) => ({
+                value: channel,
+                label,
+              }))}
+              onChange={(channel) => {
+                const next = new URLSearchParams(search);
+                next.set('view', 'payments');
+                if (channel) next.set('channel', channel);
+                else next.delete('channel');
+                history.push({ pathname, search: `?${next}`, hash });
+              }}
+            />
+          </Space>,
+        ]}
+        request={async ({ current = 1, pageSize = 20, filter, status }) => {
           const { items, totalCount } = await getCollectionPayments({
             skipCount: (current - 1) * pageSize,
             maxResultCount: pageSize,
             filter,
             status,
-            channel: fixedChannel ?? channel,
+            channel: selectedChannel,
           });
           return { data: items, total: totalCount, success: true };
         }}
@@ -629,17 +858,10 @@ export default function PaymentsPage() {
             id={detailId}
             onQueried={() => actionRef.current?.reload()}
             retryInput={unresolvedRefunds[detailId]}
-            onUnresolvedRefund={(input) =>
-              setUnresolvedRefunds((current) => {
-                if (input) return { ...current, [detailId]: input };
-                const remaining = { ...current };
-                delete remaining[detailId];
-                return remaining;
-              })
-            }
+            onUnresolvedRefund={(input) => onUnresolvedRefund(detailId, input)}
           />
         )}
       </Drawer>
-    </PageContainer>
+    </>
   );
 }

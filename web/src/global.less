@@ -93,8 +93,24 @@ ol {
 
 /* ===== 页头密度优化 =====
  * 面包屑末层即页面标题（放大为原 heading-title 样式）。
- * 只藏 title/subtitle 文字，保留 heading-extra（如 A3 新建调账），避免功能按钮被藏。
- * 无 extra 时整行 heading 仍隐藏，避免空白占位。 */
+ * 只藏 title/subtitle 文字，保留 heading-extra（如「订单规则」、收款配置、A3 新建调账）。
+ * 页头宽度 < 768 时 Pro PageHeader 会加 compact，breadcrumb 与 heading 上下叠放；
+ * 标题藏掉后 extra 仍单独占一行，所有带右侧操作的页面顶部都会空出一块。
+ * 用 grid 把 extra 提到与面包屑同一行，不再为右侧操作单独留一行。
+ * 上下仍保留页头常规留白（16px），避免标题贴住顶栏。无 extra 时整行 heading 隐藏。
+ * display/padding/margin 用 !important：Pro PageContainer css-in-js 带 hash 类，普通选择器压不过。 */
+.ant-pro-page-container .ant-pro-page-container-warp-page-header.ant-page-header {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 16px;
+  padding-block: 16px !important;
+}
+.ant-pro-page-container
+  .ant-pro-page-container-warp-page-header.ant-page-header-has-footer {
+  padding-block-end: 0 !important;
+}
+
 .ant-pro-page-container-warp-page-header .ant-page-header-heading-title,
 .ant-pro-page-container-warp-page-header .ant-page-header-heading-sub-title {
   display: none;
@@ -103,6 +119,40 @@ ol {
   .ant-page-header-heading:not(:has(.ant-page-header-heading-extra)) {
   display: none;
 }
+
+.ant-pro-page-container .ant-pro-page-container-warp-page-header .ant-page-header-breadcrumb {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  margin-block: 0 !important;
+  padding-block: 0 !important;
+}
+
+.ant-pro-page-container .ant-pro-page-container-warp-page-header .ant-page-header-heading {
+  grid-column: 2;
+  grid-row: 1;
+  justify-content: flex-end;
+  min-height: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.ant-pro-page-container-warp-page-header
+  .ant-page-header-heading-left:not(:has(.ant-page-header-heading-tags)):not(
+    :has(.ant-page-header-heading-avatar)
+  ):not(:has(.ant-page-header-back)) {
+  display: none;
+}
+
+.ant-pro-page-container-warp-page-header .ant-page-header-heading-extra {
+  margin-block: 0;
+}
+
+.ant-pro-page-container .ant-pro-page-container-warp-page-header .ant-page-header-footer,
+.ant-pro-page-container .ant-pro-page-container-warp-page-header .ant-page-header-content {
+  grid-column: 1 / -1;
+}
+
 /* 末项 = 页面标题（放大为 heading 字号）。只击中末项直接子 span（.ant-breadcrumb-link）：
  * 财务页该 span 内嵌 Space 包文字+问号，问号字号/颜色由 FinanceHelpIcon 内联样式独立决定，
  * 不应被后代 span 选择器连带放大（旧写法曾为此叠一条死补偿规则，已一并移除）。 */

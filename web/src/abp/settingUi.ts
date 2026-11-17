@@ -1,8 +1,4 @@
-import {
-  getApiSettingUi,
-  putApiSettingUiResetSettingValues,
-  putApiSettingUiSetSettingValues,
-} from '@/services/abpadmin/settingUi';
+import { request } from '@umijs/max';
 
 /**
  * EasyAbp.Abp.SettingUi 语义化封装（T1.4）
@@ -74,7 +70,7 @@ export function getSettingOptions(
 
 /** 拉取全部设置分组（一级 Tab） */
 export async function getSettingGroups(): Promise<API.SettingGroup[]> {
-  return getApiSettingUi();
+  return request<API.SettingGroup[]>('/api/setting-ui');
 }
 
 /**
@@ -94,14 +90,20 @@ export async function setSettingValues(
     const key = `Setting_${name.replace(/\./g, '_')}`;
     payload[key] = value;
   }
-  await putApiSettingUiSetSettingValues(payload);
+  await request<void>('/api/setting-ui/set-setting-values', {
+    method: 'PUT',
+    data: payload,
+  });
 }
 
 /** 重置指定设置为默认值（body 是设置名数组） */
 export async function resetSettingValues(
   settingNames: string[],
 ): Promise<void> {
-  await putApiSettingUiResetSettingValues(settingNames);
+  await request<void>('/api/setting-ui/reset-setting-values', {
+    method: 'PUT',
+    data: settingNames,
+  });
 }
 
 /** 把表单值（boolean/number/string）统一转成 string 提交 */

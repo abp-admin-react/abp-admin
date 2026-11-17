@@ -12,6 +12,7 @@ let mockSearchParams = new URLSearchParams();
 
 vi.mock('@umijs/max', () => ({
   useAccess: () => mockAccess,
+  useLocation: () => ({ pathname: '/administration/audit-logs', search: `?${mockSearchParams}` }),
   useNavigate: () => vi.fn(),
   useSearchParams: () => [mockSearchParams, vi.fn()],
 }));

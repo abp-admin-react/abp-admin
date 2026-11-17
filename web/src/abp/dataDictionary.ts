@@ -1,27 +1,31 @@
 import { request } from '@umijs/max';
-import {
-  getApiAppDataDictionaryViewCode,
-  putApiAppDataDictionaryViewDictionaryCodeItems,
-} from '@/services/abpadmin/dataDictionaryView';
+import { isNotFound } from '@/requestErrorConfig';
 
 /**
- * 数据字典 API 包装（T3.4）。
- * 页面只调这里的包装函数，不直接调生成的客户端（参数适配在这层做）。
- *
- * 端点收口说明：EasyAbp 模块端点（/api/data-dictionary/*，UpdateAsync 全量替换、
- * 无静态结构锁）已随模块 HttpApi 依赖下线，字典的列表/创建/删除改走自建
- * /api/app/data-dictionary-view/*；列表/创建/删除暂为手写 request——
- * openapi 生成器已冻结不再重生成（见 web/AGENTS.md 约定），该域改动时按约定
- * 手写镜像收口进 src/abp（ getDataDictionaryByCode / saveDataDictionaryItems 已是生成函数形态）。
+ * 数据字典 API。用自建视图保留字典项的静态结构和展示元数据。
  */
+const path = '/api/app/data-dictionary-view';
 
 /** 字典列表项（管理页左列；不含 Items）。 */
 export type DataDictionaryListItem = {
   id: string;
   code: string;
   displayText: string;
-  description?: string | null;
+  description: string | null;
   isStatic: boolean;
+};
+
+type DataDictionaryView = Pick<DataDictionaryListItem, 'code' | 'displayText' | 'description' | 'isStatic'> & {
+  items: DataDictionaryItemView[];
+};
+
+export type DataDictionaryItemView = {
+  code: string;
+  displayText: string;
+  description: string | null;
+  isStatic: boolean;
+  tagType: string | null;
+  order: number;
 };
 
 /** 原子保存字典项的条目形状（display 与 meta 一起提交）；null 与 undefined 等价"无"。 */
@@ -34,8 +38,14 @@ export type DataDictionaryItemSaveInput = {
 
 /** 字典合并视图（带 isStatic/tagType/order）。前端所有字典消费统一走这个自建端点，
  * 不直连模块端点（模块 DTO 没有 isStatic/tagType，且读取也要模块权限）。 */
-export async function getDataDictionaryByCode(code: string) {
-  return getApiAppDataDictionaryViewCode({ code });
+export async function getDataDictionaryByCode(code: string): Promise<DataDictionaryView | null> {
+  try {
+    // ASP.NET Core 将空响应处理成 204，React Query 需要明确的 null。
+    return (await request<DataDictionaryView | null>(`${path}/${encodeURIComponent(code)}`)) ?? null;
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
 }
 
 /**
@@ -52,9 +62,9 @@ export async function getDataDictionaries(params: {
   const result = await request<{
     totalCount: number;
     items: DataDictionaryListItem[];
-  }>('/api/app/data-dictionary-view', {
+  }>(path, {
     method: 'GET',
-    params: { skipCount, maxResultCount },
+    params: { SkipCount: skipCount, MaxResultCount: maxResultCount },
   });
   return { items: result.items ?? [], totalCount: result.totalCount ?? 0 };
 }
@@ -68,7 +78,7 @@ export async function createDataDictionary(input: {
   displayText: string;
   description?: string | null;
 }) {
-  return request('/api/app/data-dictionary-view', {
+  return request<DataDictionaryView>(path, {
     method: 'POST',
     data: input,
   });
@@ -79,7 +89,7 @@ export async function createDataDictionary(input: {
  * code 拼进路径段，先 encodeURIComponent——编码合法字符集比 URL 路径段安全集宽。
  */
 export async function deleteDataDictionary(code: string) {
-  return request(`/api/app/data-dictionary-view/${encodeURIComponent(code)}`, {
+  return request<void>(`${path}/${encodeURIComponent(code)}`, {
     method: 'DELETE',
   });
 }
@@ -98,18 +108,8 @@ export async function saveDataDictionaryItems(
     items: DataDictionaryItemSaveInput[];
   },
 ) {
-  // null 归一为 undefined：生成类型把可空字段声明为 `?: string`，null 直接传会过不了 tsc
-  return putApiAppDataDictionaryViewDictionaryCodeItems(
-    { dictionaryCode },
-    {
-      displayText: input.displayText,
-      description: input.description ?? undefined,
-      items: input.items.map((it) => ({
-        code: it.code,
-        displayText: it.displayText,
-        description: it.description ?? undefined,
-        tagType: it.tagType ?? undefined,
-      })),
-    },
-  );
+  return request<DataDictionaryView>(`${path}/${encodeURIComponent(dictionaryCode)}/items`, {
+    method: 'PUT',
+    data: input,
+  });
 }

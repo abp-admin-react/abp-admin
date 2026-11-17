@@ -1,15 +1,14 @@
-import { PageContainer, ProCard } from '@ant-design/pro-components';
-import { Alert, Descriptions, Spin, Tag } from 'antd';
-import React, { useEffect, useState } from 'react';
+import { ProCard } from '@ant-design/pro-components';
+import { Descriptions, Spin, Tag } from 'antd';
+import { useEffect, useState } from 'react';
 import { type FinPeriodDto, getCurrentPeriod } from '@/abp/finance';
-import { financeHelpHeader } from '@/components/FinanceHelp';
 import {
   FinanceEmpty,
   FinanceStateView,
   useFinanceLoad,
 } from '@/components/FinanceState';
 
-const PeriodPage: React.FC = () => {
+export function FinancePeriod() {
   const [data, setData] = useState<FinPeriodDto>();
   const [loading, setLoading] = useState(true);
 
@@ -24,13 +23,7 @@ const PeriodPage: React.FC = () => {
   }, [load.nonce]);
 
   return (
-    <PageContainer {...financeHelpHeader('A4', '会计期间')}>
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginBottom: 16 }}
-        message="本阶段仅展示当前 Open 期间与过账失败原因；关账/反结账二期不做。"
-      />
+    <>
       <FinanceStateView
         state={load.state}
         errorText={load.errorText}
@@ -64,8 +57,6 @@ const PeriodPage: React.FC = () => {
           )}
         </Spin>
       </FinanceStateView>
-    </PageContainer>
+    </>
   );
-};
-
-export default PeriodPage;
+}

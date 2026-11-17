@@ -23,17 +23,32 @@ const ApplicationsPage: React.FC = () => {
   const [scopeOptions, setScopeOptions] = useState<OpenIddictScopeLookupDto[]>(
     [],
   );
+  const canManagePermissions = access.canManageOpenIddictApplicationPermissions;
+  const canCreateApplication =
+    access.canCreateOpenIddictApplication && canManagePermissions;
+  const canEditApplication =
+    access.canUpdateOpenIddictApplication && canManagePermissions;
 
   useEffect(() => {
+    if (
+      !access.canManageOpenIddictScopes ||
+      (!canCreateApplication && !canEditApplication)
+    )
+      return;
     getOpenIddictScopeAll()
       .then((result) => setScopeOptions(result.items ?? []))
       .catch(() => message.warning('scope 列表加载失败'));
-  }, []);
+  }, [
+    access.canManageOpenIddictScopes,
+    canCreateApplication,
+    canEditApplication,
+    message,
+  ]);
 
   const renderActions = (record: OpenIddictApplicationDto) => {
     const actions: React.ReactNode[] = [];
 
-    if (access.canUpdateOpenIddictApplication) {
+    if (canEditApplication) {
       actions.push(
         <AppFormModal
           key="edit"
@@ -69,13 +84,16 @@ const ApplicationsPage: React.FC = () => {
         key="lifetime"
         applicationId={record.id}
         clientId={record.clientId}
+        canUpdate={access.canUpdateOpenIddictApplication}
       />,
-      <a
-        key="perms"
-        onClick={() => setPermissionKey(record.clientId ?? undefined)}
-      >
-        权限
-      </a>,
+      canManagePermissions && record.clientId ? (
+        <a
+          key="perms"
+          onClick={() => setPermissionKey(record.clientId ?? undefined)}
+        >
+          权限
+        </a>
+      ) : null,
     );
 
     if (access.canDeleteOpenIddictApplication) {
@@ -122,7 +140,7 @@ const ApplicationsPage: React.FC = () => {
           };
         }}
         toolBarRender={() =>
-          access.canCreateOpenIddictApplication
+          canCreateApplication
             ? [
                 <AppFormModal
                   key="create"

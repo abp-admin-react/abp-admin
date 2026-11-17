@@ -1,4 +1,5 @@
 import { type ActionType, PageContainer } from '@ant-design/pro-components';
+import { useAccess } from '@umijs/max';
 import { App, Button, Popconfirm, Switch, Tag } from 'antd';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
@@ -22,6 +23,7 @@ import {
  * 数据源是 AppScheduledJobs 表 + Quartz trigger 状态，没有队列/重试语义。
  */
 const ScheduledJobsPage: React.FC = () => {
+  const access = useAccess();
   const { message } = App.useApp();
   const actionRef = useRef<ActionType>(undefined);
   const [historyJob, setHistoryJob] = useState<ScheduledJob>();
@@ -44,8 +46,8 @@ const ScheduledJobsPage: React.FC = () => {
   }, [message]);
 
   useEffect(() => {
-    loadJobTypes();
-  }, [loadJobTypes]);
+    if (access.canCreateScheduledJobs || access.canUpdateScheduledJobs) loadJobTypes();
+  }, [loadJobTypes, access.canCreateScheduledJobs, access.canUpdateScheduledJobs]);
 
   return (
     <PageContainer>
@@ -67,6 +69,7 @@ const ScheduledJobsPage: React.FC = () => {
             render: (_, record) => (
               <Switch
                 checked={record.isEnabled}
+                disabled={!access.canUpdateScheduledJobs}
                 onChange={async (checked) => {
                   await setJobEnabled(record.id, checked);
                   message.success(checked ? '已启用' : '已停用');
@@ -109,7 +112,7 @@ const ScheduledJobsPage: React.FC = () => {
             title: '操作',
             valueType: 'option',
             render: (_, record) => [
-              <ScheduledJobForm
+              access.canUpdateScheduledJobs && <ScheduledJobForm
                 key="edit"
                 title="编辑定时作业"
                 trigger={<a>编辑</a>}
@@ -135,7 +138,7 @@ const ScheduledJobsPage: React.FC = () => {
                   return true;
                 }}
               />,
-              <Popconfirm
+              access.canTriggerScheduledJobs && record.isEnabled && <Popconfirm
                 key="trigger"
                 title="确认立即触发一次？"
                 description="不影响原有 cron 计划"
@@ -161,7 +164,7 @@ const ScheduledJobsPage: React.FC = () => {
               >
                 历史
               </a>,
-              <Popconfirm
+              access.canDeleteScheduledJobs && <Popconfirm
                 key="delete"
                 title="确认删除该作业？"
                 onConfirm={async () => {
@@ -189,7 +192,7 @@ const ScheduledJobsPage: React.FC = () => {
           };
         }}
         toolBarRender={() => [
-          <ScheduledJobForm
+          access.canCreateScheduledJobs && <ScheduledJobForm
             key="create"
             title="新建定时作业"
             trigger={<Button type="primary">新建作业</Button>}

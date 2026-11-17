@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as imaging from '@/abp/imaging';
 import * as fileManagement from '@/services/fileManagement';
@@ -145,6 +145,7 @@ vi.mock('antd/es/app', () => ({
 
 import FileThumbnailCell from './FileThumbnailCell';
 import FilesPage from './index';
+import { useFileActions } from './useFileActions';
 
 const allPermissions = {
   canCreateFile: true,
@@ -153,6 +154,16 @@ const allPermissions = {
   canMoveFile: true,
   canGetFileDownloadInfo: true,
 };
+
+it('文件查看角色预览缩略图无需请求下载凭证', async () => {
+  const { result } = renderHook(() => useFileActions(false));
+  await act(() => result.current.handlePreview({
+    id: 'file-id',
+    thumbnailUrl: '/thumbnail',
+  }));
+  expect(result.current.previewSrc).toBe('/thumbnail');
+  expect(fileManagement.getDownloadInfo).not.toHaveBeenCalled();
+});
 
 describe('FilesPage', () => {
   beforeEach(() => {

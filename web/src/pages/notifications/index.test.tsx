@@ -4,11 +4,16 @@ import { App as AntdApp } from 'antd';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import NotificationDetailDrawer from './components/NotificationDetail';
-import * as service from './service';
+import * as service from '@/abp/notificationManagement';
+
+vi.mock('@umijs/max', () => ({
+  useAccess: () => ({ canManageNotifications: true }),
+  useLocation: () => ({ pathname: '/system/notifications', search: '' }),
+}));
 
 // Mock 服务层：页面不直接依赖生成客户端，mock 这一层即可
-vi.mock('./service', async () => {
-  const actual = await vi.importActual<typeof import('./service')>('./service');
+vi.mock('@/abp/notificationManagement', async () => {
+  const actual = await vi.importActual<typeof import('@/abp/notificationManagement')>('@/abp/notificationManagement');
   return {
     ...actual,
     getNotifications: vi.fn(),

@@ -14,6 +14,7 @@ import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
   createDirectory,
   FILE_CONTAINER_NAME,
+  FileType,
   getFileConfiguration,
   uploadFile,
 } from '@/services/fileManagement';
@@ -44,28 +45,29 @@ const FilesPage: React.FC = () => {
   const [config, setConfig] = useState<API.PublicFileContainerConfiguration>();
   // 移动目标
   const [moveTarget, setMoveTarget] = useState<API.FileInfoDto>();
+  const [treeVersion, setTreeVersion] = useState(0);
+  const canCreate = !!access.canCreateFile;
+  // 分享与原图下载同权，缩略图沿用列表读取权限。
+  const canDownload = !!access.canGetFileDownloadInfo;
 
   const {
     previewSrc,
-    setPreviewSrc,
+    closePreview,
     handleDownload,
     handlePreview,
     handleRename,
     handleDelete,
     handleMove,
     buildBeforeUpload,
-  } = useFileActions();
-
-  const canCreate = !!access.canCreateFile;
-  // 分享 = 把下载权外包给匿名 token，入口与下载同权限（后端同样要求 GetDownloadInfo）
-  const canDownload = !!access.canGetFileDownloadInfo;
+  } = useFileActions(canDownload);
 
   // 加载容器配置（上传预校验用）
   useEffect(() => {
+    if (!canCreate) return;
     getFileConfiguration()
       .then(setConfig)
       .catch(() => undefined);
-  }, []);
+  }, [canCreate]);
 
   const reload = useCallback(() => {
     actionRef.current?.reload();
@@ -78,8 +80,14 @@ const FilesPage: React.FC = () => {
     canDelete: !!access.canDeleteFile,
     onDownload: handleDownload,
     onPreview: handlePreview,
-    onRename: handleRename,
-    onDelete: handleDelete,
+    onRename: async (record, name) => {
+      await handleRename(record, name);
+      if (record.fileType === FileType.Directory) setTreeVersion((v) => v + 1);
+    },
+    onDelete: async (record) => {
+      await handleDelete(record);
+      if (record.fileType === FileType.Directory) setTreeVersion((v) => v + 1);
+    },
     onMove: setMoveTarget,
     onReload: reload,
     onEnterDirectory: (record) => {
@@ -98,6 +106,7 @@ const FilesPage: React.FC = () => {
           headerBordered
         >
           <DirectoryTreePanel
+            key={treeVersion}
             currentDirId={currentDirId}
             onSelect={(dirId, dirName) => {
               setCurrentDirId(dirId);
@@ -167,6 +176,7 @@ const FilesPage: React.FC = () => {
                         return false;
                       }
                       await createDirectory(dirName, currentDirId);
+                      setTreeVersion((v) => v + 1);
                       message.success(
                         intl.formatMessage({
                           id: 'pages.files.toolbar.directoryCreated',
@@ -231,7 +241,11 @@ const FilesPage: React.FC = () => {
       <MoveModal
         target={moveTarget}
         onClose={() => setMoveTarget(undefined)}
-        onMove={handleMove}
+        onMove={async (record, parentId, fileName) => {
+          await handleMove(record, parentId, fileName);
+          if (record.fileType === FileType.Directory)
+            setTreeVersion((v) => v + 1);
+        }}
         onMoved={reload}
       />
 
@@ -242,7 +256,7 @@ const FilesPage: React.FC = () => {
           open: previewSrc !== undefined,
           src: previewSrc,
           onOpenChange: (open) => {
-            if (!open) setPreviewSrc(undefined);
+            if (!open) closePreview();
           },
         }}
       />

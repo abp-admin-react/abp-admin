@@ -1,14 +1,12 @@
-import { financeHelpHeader } from '@/components/FinanceHelp';
 import {
   type ActionType,
   ModalForm,
-  PageContainer,
   type ProFormInstance,
   ProFormSelect,
   ProFormText,
 } from '@ant-design/pro-components';
 import { App, Button, Popconfirm, Switch, Tag, Tooltip } from 'antd';
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAccess } from '@umijs/max';
 import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
@@ -39,7 +37,7 @@ const SIDE_OPTIONS = [
   { value: 'Credit', label: '贷' },
 ];
 
-const AccountsPage: React.FC = () => {
+export function FinanceAccounts() {
   const { message } = App.useApp();
   const access = useAccess();
   // 写按钮只看 Finance.Account.Manage；GET 列表 Ledger.View 也能看。后端写接口同样要 Manage。
@@ -61,10 +59,7 @@ const AccountsPage: React.FC = () => {
   };
 
   return (
-    <PageContainer
-      {...financeHelpHeader('A2', '会计科目')}
-    >
-      <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
+    <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
         <AutoHeightProTable<FinAccountDto>
           key={load.nonce}
           rowKey="id"
@@ -238,8 +233,5 @@ const AccountsPage: React.FC = () => {
           />
         </ModalForm>
       </FinanceStateView>
-    </PageContainer>
   );
-};
-
-export default AccountsPage;
+}

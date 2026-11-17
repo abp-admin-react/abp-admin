@@ -46,6 +46,7 @@ describe('public-error-catalog', () => {
       'Client:AuthenticationRequired',
       'Client:Conflict',
       'Client:Forbidden',
+      'Client:ModuleDisabled',
       'Client:NotFound',
       'Client:OperationFailed',
       'Client:RateLimited',

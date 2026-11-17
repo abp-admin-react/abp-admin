@@ -12,9 +12,11 @@ import SettingGroupPanel from '../settings/SettingGroupPanel';
 import WithdrawalControls from './withdrawal-controls';
 
 type RuleSection = 'Chain' | 'Withdraw';
+type ChainRuleScope = 'operations' | 'deposit';
 type SwitchKey = keyof Parameters<typeof setChainSwitches>[0];
 
 const walletWatchInterval = 'Collection.Chain.HotWalletWatchIntervalSeconds';
+const depositConfirmationSetting = 'Collection.Chain.Confirmations';
 const operationalSettings = new Set([
   'Collection.Chain.ScanEnabled',
   'Collection.Chain.SweepEnabled',
@@ -60,7 +62,13 @@ const chainSwitches: Record<RuleSection, { key: SwitchKey; label: string }[]> =
     Withdraw: [{ key: 'hotWalletWatchEnabled', label: '提现钱包监控' }],
   };
 
-function Web3RuleForm({ section }: { section: RuleSection }) {
+function Web3RuleForm({
+  section,
+  scope,
+}: {
+  section: RuleSection;
+  scope: ChainRuleScope;
+}) {
   const [group, setGroup] = useState<API.SettingGroup>();
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -81,6 +89,11 @@ function Web3RuleForm({ section }: { section: RuleSection }) {
               ? 'Withdraw'
               : getSettingGroup2(info);
           if (infoSection !== section) return [];
+          if (
+            section === 'Chain' &&
+            (info.name === depositConfirmationSetting) !== (scope === 'deposit')
+          )
+            return [];
 
           return [
             {
@@ -105,7 +118,7 @@ function Web3RuleForm({ section }: { section: RuleSection }) {
     return () => {
       active = false;
     };
-  }, [section, revision]);
+  }, [section, scope, revision]);
 
   const reload = () => setRevision((value) => value + 1);
   if (loading) return <Spin aria-label="加载规则" />;
@@ -198,7 +211,13 @@ function ChainSwitches({ section }: { section: RuleSection }) {
   );
 }
 
-export function Web3RuleSection({ section }: { section: RuleSection }) {
+export function Web3RuleSection({
+  section,
+  scope = 'operations',
+}: {
+  section: RuleSection;
+  scope?: ChainRuleScope;
+}) {
   const access = useAccess();
   const canConfigure = access.canConfigureCollectionNetwork;
   const canAdminWithdrawals =
@@ -212,11 +231,11 @@ export function Web3RuleSection({ section }: { section: RuleSection }) {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       {canAdminWithdrawals && <WithdrawalControls />}
-      {canConfigure && access.canAdminNetwork && (
+      {canConfigure && access.canAdminNetwork && scope === 'operations' && (
         <ChainSwitches section={section} />
       )}
       {canConfigure && access.canManageSettings && (
-        <Web3RuleForm section={section} />
+        <Web3RuleForm section={section} scope={scope} />
       )}
     </Space>
   );

@@ -1,10 +1,11 @@
 import { PageContainer } from '@ant-design/pro-components';
-import { Link, useAccess } from '@umijs/max';
+import { Link, useAccess, useLocation } from '@umijs/max';
 import {
   Alert,
   App,
   Button,
   Card,
+  Empty,
   Input,
   Modal,
   Popconfirm,
@@ -35,20 +36,88 @@ import {
   type WithdrawStatusDto,
 } from '@/abp/withdrawal';
 import { withdrawalVouchersUrl } from '@/pages/finance/vouchers/navigation';
+import {
+  ConfigurationLink,
+  ConfigurationPage,
+  useConfigurationLocation,
+} from '@/components/ContextConfiguration';
+import { useModuleEnabled } from '@/hooks/useModuleAvailability';
 import { isValidRecordId, RecordFocus } from './record-focus';
+import {
+  memberFundsUrl,
+  withdrawalFundsUrl,
+  withdrawalRecordUrl,
+} from './record-links';
+import { Web3RuleSection } from './rules';
 
 const { Text } = Typography;
 
+export default function WithdrawalsPage() {
+  const access = useAccess();
+  const { search } = useLocation();
+  const { setting, link } = useConfigurationLocation();
+  const canView = access.canAdminWithdrawals;
+  const canConfigure =
+    access.canConfigureCollectionNetwork ||
+    (access.canManageCollectionWallets && access.canAdminWithdrawals);
+  const acceptingRequests = useModuleEnabled('Chain');
+  if (canConfigure && (setting === 'withdraw' || !canView)) {
+    return (
+      <ConfigurationPage
+        parent="提现审核与打款"
+        title="提现规则与启停"
+        returnTo={canView ? link() : undefined}
+      >
+        <Web3RuleSection section="Withdraw" />
+      </ConfigurationPage>
+    );
+  }
+  const query = new URLSearchParams(search);
+  const initialStatus = query.get('status') || undefined;
+  const withdrawalId = query.get('withdrawalId') || undefined;
+  return (
+    <PageContainer
+      title="提现审核与打款"
+      extra={
+        canConfigure && (
+          <ConfigurationLink to={link('withdraw')}>
+            提现规则与启停
+          </ConfigurationLink>
+        )
+      }
+    >
+      {canView ? (
+        <>
+          {!acceptingRequests && (
+            <Alert
+              type="warning"
+              showIcon
+              title="暂停受理新提现"
+              description="可以继续查看已有记录和处理提现尾单。"
+              style={{ marginBottom: 12 }}
+            />
+          )}
+          <WithdrawalRecords
+            key={`${initialStatus ?? ''}:${withdrawalId ?? ''}`}
+            initialStatus={initialStatus}
+            withdrawalId={withdrawalId}
+          />
+        </>
+      ) : (
+        <Empty description="暂无提现查看权限" />
+      )}
+    </PageContainer>
+  );
+}
+
 /** 列表默认显示待审提现单，单据详情跟踪打款与回执结果。 */
-export default function WithdrawalsPage({
-  embedded = false,
+function WithdrawalRecords({
   initialStatus,
   withdrawalId,
 }: {
-  embedded?: boolean;
   initialStatus?: string;
   withdrawalId?: string;
-} = {}) {
+}) {
   const access = useAccess();
   const { message, modal } = App.useApp();
   const [data, setData] = useState<WithdrawOrderDto[]>([]);
@@ -250,6 +319,23 @@ export default function WithdrawalsPage({
     return <Tag color={config.color}>{config.text}</Tag>;
   };
   const columns = [
+    ...(!focused
+      ? [
+          {
+            title: '提现单号',
+            dataIndex: 'id',
+            width: 125,
+            render: (id: string) => (
+              <Link
+                to={withdrawalRecordUrl(id)}
+                aria-label={`查看提现单 ${id}`}
+              >
+                {id.slice(0, 8)}…
+              </Link>
+            ),
+          },
+        ]
+      : []),
     {
       title: '时间',
       dataIndex: 'creationTime',
@@ -395,18 +481,10 @@ export default function WithdrawalsPage({
     },
   ];
 
-  const content = (
+  return (
     <>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-        <Card
-          title="提现状态"
-          size="small"
-          extra={
-            access.canAdminWithdrawals && (
-              <Link to="/web3/config?view=withdraw">提现规则与启停</Link>
-            )
-          }
-        >
+        <Card title="提现状态" size="small">
           {statusError ? (
             <Alert
               type="error"
@@ -528,7 +606,7 @@ export default function WithdrawalsPage({
           {focused && (
             <RecordFocus
               kind="提现"
-              listPath="/web3/operations?view=withdrawals&status=all"
+              listPath="/collection/withdrawals?status=all"
               invalid={invalidId}
               failed={loadFailed}
               loading={loading}
@@ -542,6 +620,16 @@ export default function WithdrawalsPage({
                     </Text>
                     {renderStatus(record.status)}
                     <Text copyable>提现单号 {record.id}</Text>
+                    {access.canViewMemberFunds && (
+                      <>
+                        <Link to={withdrawalFundsUrl(record.userId, record.id)}>
+                          查看提现关联流水
+                        </Link>
+                        <Link to={memberFundsUrl(record.userId)}>
+                          查看用户资金
+                        </Link>
+                      </>
+                    )}
                     {record.broadcastSenderAddress && (
                       <Text copyable={{ text: record.broadcastSenderAddress }}>
                         打款钱包 {record.broadcastSenderAddress}
@@ -710,10 +798,5 @@ export default function WithdrawalsPage({
         </Text>
       </Modal>
     </>
-  );
-  return embedded ? (
-    content
-  ) : (
-    <PageContainer title="提现审核与打款">{content}</PageContainer>
   );
 }

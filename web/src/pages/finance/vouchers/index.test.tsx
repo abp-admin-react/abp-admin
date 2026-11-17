@@ -1,21 +1,25 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from 'antd';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModuleAvailabilityContext } from '@/hooks/useModuleAvailability';
 import VouchersPage from './index';
 
 const mocks = vi.hoisted(() => ({
   access: vi.fn(),
   location: vi.fn(),
   table: vi.fn(),
+  getAdjusts: vi.fn(),
   getVoucher: vi.fn(),
   getVouchers: vi.fn(),
+  approveAdjust: vi.fn(),
+  updateAdjust: vi.fn(),
 }));
 
 vi.mock('@umijs/max', () => ({
   useAccess: mocks.access,
   useLocation: mocks.location,
-  useModel: () => ({}),
+  useModel: () => ({ initialState: { currentUser: { userid: 'operator', name: '审批员' } } }),
   Link: ({ to, children }: { to: string; children: ReactNode }) => (
     <a href={to}>{children}</a>
   ),
@@ -28,13 +32,16 @@ vi.mock('@/components/AutoHeightProTable', () => ({
 }));
 vi.mock('@/abp/finance', async (original) => ({
   ...(await original<typeof import('@/abp/finance')>()),
+  getAdjusts: mocks.getAdjusts,
   getVoucher: mocks.getVoucher,
   getVouchers: mocks.getVouchers,
+  approveAdjust: mocks.approveAdjust,
+  updateAdjust: mocks.updateAdjust,
 }));
 vi.mock('@/requestErrorConfig', () => ({ isNotFound: () => false }));
 
 const withdrawalId = '21a49a4f-d42e-4fc1-8665-75f0cce722a9';
-const withdrawalPath = `/web3/operations?view=withdrawals&status=all&withdrawalId=${withdrawalId}`;
+const withdrawalPath = `/collection/withdrawals?status=all&withdrawalId=${withdrawalId}`;
 
 function vouchers() {
   return (
@@ -49,6 +56,7 @@ describe('会计凭证的提现单链接', () => {
     vi.resetAllMocks();
     mocks.access.mockReturnValue({ canViewFinanceVouchers: true });
     mocks.getVouchers.mockResolvedValue({ items: [], totalCount: 0 });
+    mocks.getAdjusts.mockResolvedValue({ items: [], totalCount: 0 });
   });
 
   it('使用提现单业务类型和单号精确过滤凭证，允许返回提现或查看全部凭证', async () => {
@@ -121,7 +129,7 @@ describe('会计凭证的提现单链接', () => {
     });
     expect(screen.getByRole('link', { name: '返回充值单' })).toHaveAttribute(
       'href',
-      `/web3/operations?view=deposits&depositId=${withdrawalId}`,
+      `/operations/payments?view=deposits&depositId=${withdrawalId}`,
     );
   });
 
@@ -159,5 +167,88 @@ describe('会计凭证的提现单链接', () => {
       'href',
       `/finance/biz-docs?bizRefId=${withdrawalId}`,
     );
+  });
+
+  it.each([
+    ['canApproveFinanceAdjust', '账簿调账待审批', 'Pending'],
+    ['canRejectFinanceAdjust', '账簿调账待审批', 'Pending'],
+    ['canSubmitFinanceAdjust', '账簿调账草稿', 'Draft,Rejected'],
+    ['canReverseFinanceAdjust', '已过账调账', 'Posted,Reversed'],
+  ])('独立的 %s 角色只加载已有权限的调账列表', async (permission, label, status) => {
+    mocks.access.mockReturnValue({ [permission]: true });
+    mocks.location.mockReturnValue({ search: '?voucherId=voucher' });
+    render(vouchers());
+
+    expect(screen.getByRole('tab', { name: label, selected: true })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: '凭证列表' })).toBeNull();
+    const table = mocks.table.mock.lastCall?.[0];
+    await table.request({ current: 1, pageSize: 20 });
+    expect(mocks.getAdjusts).toHaveBeenCalledExactlyOnceWith({
+      skipCount: 0,
+      maxResultCount: 20,
+      status,
+    });
+    expect(mocks.getVouchers).not.toHaveBeenCalled();
+    expect(mocks.getVoucher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['canReverseFinanceAdjust', false],
+    ['canReverseFinanceVouchers', true],
+  ])('凭证红冲动作按 %s 对应的服务端权限显示', (permission, visible) => {
+    mocks.access.mockReturnValue({ canViewFinanceVouchers: true, [permission]: true });
+    mocks.location.mockReturnValue({ search: '' });
+    render(vouchers());
+
+    const table = mocks.table.mock.lastCall?.[0];
+    const actionColumn = table.columns.find((column: { title: string }) => column.title === '操作');
+    const actions = actionColumn.render(null, { id: 'voucher', status: 'Posted', bizType: 'manual-adjust' });
+    const row = render(<>{actions}</>);
+    expect(!!row.queryByText('红冲')).toBe(visible);
+  });
+
+  it('停用财务后仍可审批他人的待审调账，且不需要凭证查看授权', async () => {
+    mocks.access.mockReturnValue({ canApproveFinanceAdjust: true });
+    mocks.location.mockReturnValue({ search: '' });
+    render(
+      <ModuleAvailabilityContext.Provider value={{ version: 1, initialized: true, states: { Finance: false } }}>
+        {vouchers()}
+      </ModuleAvailabilityContext.Provider>,
+    );
+    expect(screen.getByText('财务工作区已停止受理新调账')).toBeTruthy();
+    const table = mocks.table.mock.lastCall?.[0];
+    const actionColumn = table.columns.find((column: { title: string }) => column.title === '操作');
+    const row = render(<App>{actionColumn.render(null, { id: 'adjustment', status: 'Pending', applicantId: 'other' })}</App>);
+    fireEvent.click(row.getByText('审批'));
+    const confirmation = await screen.findByRole('tooltip');
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'OK' }));
+    await waitFor(() => expect(mocks.approveAdjust).toHaveBeenCalledExactlyOnceWith('adjustment', { id: 'operator', name: '审批员' }));
+    expect(mocks.getVouchers).not.toHaveBeenCalled();
+  });
+
+  it('编辑已存在的账簿调账会保留借贷科目和归属', async () => {
+    mocks.access.mockReturnValue({ canCreateFinanceAdjust: true });
+    mocks.location.mockReturnValue({ search: '' });
+    render(vouchers());
+    const table = mocks.table.mock.lastCall?.[0];
+    const actionColumn = table.columns.find((column: { title: string }) => column.title === '操作');
+    const row = render(<>{actionColumn.render(null, {
+      id: 'adjustment', adjustNo: 'ADJ-1', status: 'Draft', applicantId: 'operator',
+      amount: 15, currency: 'USD', summary: '原摘要',
+      debitOwnerType: 'Platform', debitOwnerId: '',
+      creditOwnerType: 'User', creditOwnerId: 'customer',
+      lines: [{ accountCode: '1002' }, { accountCode: '2002' }],
+    })}</>);
+    fireEvent.click(row.getByText('编辑'));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('贷方科目编码（可空，默认 3101）')).toHaveValue('2002');
+    const ownerId = within(dialog).getByLabelText('借方 OwnerId');
+    expect(ownerId).toHaveValue('');
+    const form = ownerId.closest('form');
+    if (form) fireEvent.submit(form);
+    await waitFor(() => expect(mocks.updateAdjust).toHaveBeenCalledWith('adjustment', expect.objectContaining({
+      debitAccountCode: '1002', debitOwnerType: 'Platform', debitOwnerId: '',
+      creditAccountCode: '2002', creditOwnerType: 'User', creditOwnerId: 'customer',
+    })));
   });
 });

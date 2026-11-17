@@ -1,37 +1,27 @@
-import {
-  PageContainer,
-  ProCard,
-  ProForm,
-  ProFormDigit,
-  ProFormSelect,
-  ProFormSwitch,
-  ProFormText,
-  ProFormTextArea,
-} from '@ant-design/pro-components';
-import { useAccess } from '@umijs/max';
-import { App, Collapse, Empty, Spin } from 'antd';
-import React, { useCallback, useEffect, useId, useState } from 'react';
-import {
-  getEmailSettings,
-  getTimezone,
-  getTimezones,
-  sendTestEmail,
-  updateEmailSettings,
-  updateTimezone,
-} from '@/abp/settings';
+import { PageContainer, ProCard } from '@ant-design/pro-components';
+import { history, Link, useAccess, useLocation } from '@umijs/max';
+import { App, Empty, Space, Spin } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
 import { getSettingGroups } from '@/abp/settingUi';
 import {
-  dedicatedSettingGroupNames,
+  getUnclaimedChannelSettings,
   tenantGeneralSettingGroupNames,
 } from './channelGroups';
 import SettingGroupPanel from './SettingGroupPanel';
 
-const SettingsPage: React.FC = () => {
-  const access = useAccess();
-  const { message } = App.useApp();
-  const formId = useId();
+const ownerLocations: Record<string, [string, string]> = {
+  Account: ['登录策略', '/administration/identity/security-logs?settings=policy'],
+  Saas: ['租户策略', '/administration/saas/tenants?settings=policy'],
+  Audit: ['保留策略', '/administration/audit-logs?settings=retention'],
+  Mail: ['发送渠道', '/system/notifications?settings=channels'],
+  Sms: ['发送渠道', '/system/notifications?settings=channels'],
+};
 
-  // SettingUi 通用设置分组（T1.4）
+export default function SettingsPage() {
+  const access = useAccess();
+  const { pathname, search } = useLocation();
+  const groupFromUrl = new URLSearchParams(search).get('group');
+  const { message } = App.useApp();
   const [settingGroups, setSettingGroups] = useState<API.SettingGroup[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
 
@@ -39,216 +29,72 @@ const SettingsPage: React.FC = () => {
     if (!access.canManageSettings) return;
     setLoadingGroups(true);
     try {
-      const groups = await getSettingGroups();
-      setSettingGroups(
-        (groups || []).filter((group) => {
-          const name = group.groupName ?? '';
-          return (
-            !dedicatedSettingGroupNames.has(name) ||
-            (!access.canManagePaymentSettings &&
-              tenantGeneralSettingGroupNames.has(name))
-          );
-        }),
-      );
+      setSettingGroups((await getSettingGroups()) ?? []);
     } catch (e: any) {
       message.error(e?.message || '加载设置失败');
     } finally {
       setLoadingGroups(false);
     }
-  }, [access.canManageSettings, access.canManagePaymentSettings, message]);
+  }, [access.canManageSettings, message]);
 
   useEffect(() => {
     loadSettingGroups();
   }, [loadSettingGroups]);
 
-  // SettingUi 通用渲染区：每个 SettingGroup 一个一级 Tab
-  const settingUiItems = settingGroups.map((group) => ({
-    key: `settingui-${group.groupName}`,
-    label: group.groupDisplayName || group.groupName,
-    children: <SettingGroupPanel group={group} onChanged={loadSettingGroups} />,
-  }));
-
-  // ABP 标准邮件与时区设置；语言统一在语言管理页维护。
-  const customItems = [
-    access.canManageEmailing
-      ? {
-          key: 'email',
-          label: '邮件',
-          children: (
-            <>
-              <ProForm
-                formKey={`${formId}-email`}
-                request={getEmailSettings}
-                submitter={{
-                  searchConfig: { submitText: '保存邮件设置' },
-                  resetButtonProps: { style: { display: 'none' } },
-                }}
-                onFinish={async (values) => {
-                  await updateEmailSettings(values);
-                  message.success('邮件设置已保存');
-                  return true;
-                }}
-              >
-                <ProCard ghost gutter={[0, 12]} direction="column">
-                  <ProCard
-                    title="发件人"
-                    size="small"
-                    headerBordered
-                    colSpan={24}
-                  >
-                    <ProFormText
-                      name="defaultFromDisplayName"
-                      label="默认发件人名称"
-                      rules={[{ required: true, message: '请输入发件人名称' }]}
-                    />
-                    <ProFormText
-                      name="defaultFromAddress"
-                      label="默认发件人邮箱"
-                      rules={[
-                        { required: true, message: '请输入发件人邮箱' },
-                        { type: 'email', message: '邮箱格式不正确' },
-                      ]}
-                    />
-                  </ProCard>
-                  <ProCard
-                    title="SMTP"
-                    size="small"
-                    headerBordered
-                    colSpan={24}
-                  >
-                    <ProFormText name="smtpHost" label="主机" />
-                    <ProFormDigit
-                      name="smtpPort"
-                      label="端口"
-                      min={1}
-                      max={65535}
-                    />
-                    <ProFormSwitch name="smtpEnableSsl" label="启用 SSL" />
-                    <ProFormSwitch
-                      name="smtpUseDefaultCredentials"
-                      label="使用默认凭据"
-                    />
-                    <ProFormText name="smtpDomain" label="域" />
-                    <ProFormText name="smtpUserName" label="用户名" />
-                    <ProFormText.Password
-                      name="smtpPassword"
-                      label="密码"
-                      placeholder="留空表示不修改已保存密码"
-                    />
-                  </ProCard>
-                </ProCard>
-              </ProForm>
-              {access.canManageEmailingTest ? (
-                <Collapse
-                  items={[
-                    {
-                      key: 'test-email',
-                      label: '发送测试邮件',
-                      children: (
-                        <ProForm
-                          submitter={{
-                            searchConfig: { submitText: '发送测试邮件' },
-                            resetButtonProps: { style: { display: 'none' } },
-                          }}
-                          onFinish={async (values) => {
-                            await sendTestEmail({
-                              senderEmailAddress: values.senderEmailAddress,
-                              targetEmailAddress: values.targetEmailAddress,
-                              subject: values.subject,
-                              body: values.body,
-                            });
-                            message.success('测试邮件已发送');
-                            return true;
-                          }}
-                        >
-                          <ProFormText
-                            name="senderEmailAddress"
-                            label="发件人"
-                            rules={[
-                              { required: true, message: '请输入发件人' },
-                              { type: 'email', message: '邮箱格式不正确' },
-                            ]}
-                          />
-                          <ProFormText
-                            name="targetEmailAddress"
-                            label="收件人"
-                            rules={[
-                              { required: true, message: '请输入收件人' },
-                              { type: 'email', message: '邮箱格式不正确' },
-                            ]}
-                          />
-                          <ProFormText
-                            name="subject"
-                            label="主题"
-                            rules={[{ required: true, message: '请输入主题' }]}
-                          />
-                          <ProFormTextArea name="body" label="正文" />
-                        </ProForm>
-                      ),
-                    },
-                  ]}
-                />
-              ) : null}
-            </>
-          ),
-        }
-      : null,
-    access.canManageTimezone
-      ? {
-          key: 'timezone',
-          label: '时区',
-          children: (
-            <ProForm
-              formKey={`${formId}-timezone`}
-              request={async () => ({
-                timezone: (await getTimezone()) || 'Unspecified',
-              })}
-              submitter={{
-                searchConfig: { submitText: '保存时区' },
-                resetButtonProps: { style: { display: 'none' } },
-              }}
-              onFinish={async (values) => {
-                await updateTimezone(values.timezone || 'Unspecified');
-                message.success('时区已保存');
-                return true;
-              }}
-            >
-              <ProFormSelect
-                name="timezone"
-                label="时区"
-                showSearch
-                request={async () => {
-                  const items = await getTimezones();
-                  return [
-                    { label: '未指定（跟随系统）', value: 'Unspecified' },
-                    ...(items || []).map((item) => ({
-                      label: item.name || item.value,
-                      value: item.name || item.value,
-                    })),
-                  ];
-                }}
-              />
-            </ProForm>
-          ),
-        }
-      : null,
-  ].filter(Boolean);
-
-  const items = [...settingUiItems, ...customItems];
+  const ownerLinks = new Map<string, string>();
+  const items = settingGroups.flatMap((group) => {
+    const name = group.groupName;
+    if (!name) return [];
+    const location = ownerLocations[name];
+    if (location && (name !== 'Saas' || access.canManageTenantPolicy)) {
+      const [label, href] = location;
+      ownerLinks.set(href, label);
+      return [];
+    }
+    const available =
+      !access.canManagePaymentSettings && tenantGeneralSettingGroupNames.has(name)
+        ? group
+        : getUnclaimedChannelSettings(group);
+    if (!available) return [];
+    return [{
+      key: name,
+      label: available.groupDisplayName || name,
+      children: <SettingGroupPanel group={available} onChanged={loadSettingGroups} />,
+    }];
+  });
+  if (access.canManageEmailing) ownerLinks.set('/system/notifications?settings=channels', '发送渠道');
+  if (access.canManageTimezone) ownerLinks.set('/administration/localization/languages?settings=timezone', '默认时区');
+  const selected = items.find(({ key }) => key === groupFromUrl)?.key;
 
   return (
-    <PageContainer title="通用设置">
+    <PageContainer title="扩展配置">
       <Spin spinning={loadingGroups}>
         {items.length ? (
-          <ProCard tabs={{ items: items as any }} />
-        ) : (
+          <ProCard tabs={{
+            items,
+            activeKey: selected,
+            destroyOnHidden: true,
+            onChange: (group) => {
+              const query = new URLSearchParams(search);
+              query.set('group', group);
+              history.replace(`${pathname}?${query}`);
+            },
+          }} />
+        ) : !ownerLinks.size && !loadingGroups ? (
           <ProCard>
             <Empty description="没有可管理的设置权限。" />
+          </ProCard>
+        ) : null}
+        {!!ownerLinks.size && (
+          <ProCard title="功能内配置" style={{ marginTop: items.length ? 12 : 0 }}>
+            <Space wrap size="middle">
+              {[...ownerLinks].map(([href, label]) => (
+                <Link key={href} to={href}>{label}</Link>
+              ))}
+            </Space>
           </ProCard>
         )}
       </Spin>
     </PageContainer>
   );
-};
-
-export default SettingsPage;
+}

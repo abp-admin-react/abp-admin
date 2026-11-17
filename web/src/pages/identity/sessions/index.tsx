@@ -4,6 +4,7 @@ import {
   PageContainer,
   type ProColumns,
   ProFormSelect,
+  ProFormText,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
 import { App, Button, Popconfirm } from 'antd';
@@ -135,26 +136,47 @@ const SessionsPage: React.FC = () => {
                     return true;
                   }}
                 >
-                  <ProFormSelect
-                    name="userId"
-                    label="用户"
-                    showSearch
-                    debounceTime={300}
-                    rules={[{ required: true, message: '请选择用户' }]}
-                    request={async ({ keyWords }) => {
-                      const result = await getUsers({
-                        current: 1,
-                        pageSize: 20,
-                        filter: keyWords,
-                      });
-                      return (result.items || []).map((item) => ({
-                        label: `${item.userName}${
-                          item.email ? ` (${item.email})` : ''
-                        }`,
-                        value: item.id,
-                      }));
-                    }}
-                  />
+                  {access.canManageUsers ? (
+                    <ProFormSelect
+                      name="userId"
+                      label="用户"
+                      showSearch
+                      debounceTime={300}
+                      rules={[{ required: true, message: '请选择用户' }]}
+                      request={async ({ keyWords }) => {
+                        const result = await getUsers({
+                          current: 1,
+                          pageSize: 20,
+                          filter: keyWords,
+                        });
+                        return (result.items || []).map((item) => ({
+                          label: `${item.userName}${
+                            item.email ? ` (${item.email})` : ''
+                          }`,
+                          value: item.id,
+                        }));
+                      }}
+                    />
+                  ) : (
+                    <ProFormText
+                      name="userId"
+                      label="用户 ID"
+                      placeholder="可从会话表复制完整的用户 ID"
+                      rules={[
+                        { required: true, message: '请输入用户 ID' },
+                        {
+                          pattern:
+                            /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,
+                          message: '请输入带连字符的完整用户 ID',
+                        },
+                      ]}
+                      fieldProps={{
+                        autoCapitalize: 'none',
+                        autoCorrect: 'off',
+                        spellCheck: false,
+                      }}
+                    />
+                  )}
                 </ModalForm>,
               ]
             : undefined

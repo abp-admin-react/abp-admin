@@ -1,13 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { getDataDictionaryByCode } from '@/abp/dataDictionary';
-
-export interface DictionaryItem {
-  code: string;
-  displayText: string;
-  description?: string;
-  /** 标签颜色等展示元数据，来自自建端点（T3.4 第 12 步的 AppDataDictionaryItemMetas） */
-  tagType?: string;
-}
+import { type DataDictionaryItemView, getDataDictionaryByCode } from '@/abp/dataDictionary';
 
 /** 字典数据变化频率极低，缓存 10 分钟，窗口聚焦不重取。 */
 const DICTIONARY_QUERY_OPTIONS = {
@@ -43,18 +35,18 @@ export function useDictionary(code: string) {
   };
 }
 
-function toValueEnum(items?: API.DataDictionaryItemViewDto[]) {
+function toValueEnum(items?: DataDictionaryItemView[]) {
   return Object.fromEntries(
     (items ?? []).map((it) => [
-      it.code ?? '',
+      it.code,
       { text: it.displayText, color: it.tagType ?? undefined },
     ]),
   );
 }
 
-function toOptions(items?: API.DataDictionaryItemViewDto[]) {
+function toOptions(items?: DataDictionaryItemView[]) {
   return (items ?? []).map((it) => ({
-    label: it.displayText ?? it.code ?? '',
-    value: it.code ?? '',
+    label: it.displayText,
+    value: it.code,
   }));
 }

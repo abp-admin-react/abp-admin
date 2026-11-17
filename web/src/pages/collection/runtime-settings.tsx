@@ -249,16 +249,16 @@ export default function ChainRuntimeSettings() {
             />
           </Form.Item>
           <Form.Item
-            label="Etherscan 密钥池为空时使用部署备用配置"
+            label="Etherscan 交易补查密钥池为空时使用部署备用配置"
             name="useLegacyExplorerFallback"
             valuePropName="checked"
             extra={
               <>
                 优先使用
-                <Link to="/web3/config?view=network">
-                  链网络中的 Etherscan 密钥
+                <Link to="/web3/operations?view=overview&settings=network">
+                  交易 RPC 中的 Etherscan 补查密钥
                 </Link>
-                。关闭后，密钥池为空时无法按地址查询链上转账。
+                。关闭后，密钥池为空时，交易恢复和钱包监控无法按地址补查转账。
               </>
             }
           >

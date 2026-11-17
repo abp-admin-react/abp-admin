@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { Descriptions, Drawer, Tag, Timeline } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Tag, Timeline } from 'antd';
 import React from 'react';
-import { getNotificationDetail } from '../service';
+import { getNotificationDetail } from '@/abp/notificationManagement';
+import { isNotFound } from '@/requestErrorConfig';
 
 interface Props {
   id?: string;
@@ -22,7 +23,7 @@ function statusTag(success?: boolean | null) {
 
 /** 通知详情抽屉：基本信息 + 正文（ExtraProperties）+ 完整尝试链（T3.5 第 12 步）。 */
 const NotificationDetailDrawer: React.FC<Props> = ({ id, open, onClose }) => {
-  const { data, isLoading } = useQuery({
+  const { data, error, isLoading, refetch } = useQuery({
     queryKey: ['notification-management', 'detail', id],
     queryFn: () => getNotificationDetail(id as string),
     enabled: open && !!id,
@@ -37,6 +38,14 @@ const NotificationDetailDrawer: React.FC<Props> = ({ id, open, onClose }) => {
       destroyOnHidden
       loading={isLoading}
     >
+      {error && (
+        <Alert
+          showIcon
+          type="error"
+          title={isNotFound(error) ? '通知记录已不存在' : '通知详情加载失败'}
+          action={<Button onClick={() => void refetch()}>重试</Button>}
+        />
+      )}
       {data && (
         <>
           <Descriptions

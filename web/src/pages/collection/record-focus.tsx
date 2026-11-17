@@ -15,7 +15,7 @@ export function RecordFocus({
   summary,
   reload,
 }: {
-  kind: '充值' | '提现';
+  kind: '充值' | '提现' | '归集任务';
   listPath: string;
   invalid: boolean;
   failed: boolean;
@@ -23,15 +23,16 @@ export function RecordFocus({
   summary?: ReactNode;
   reload: () => void;
 }) {
+  const recordName = kind === '归集任务' ? kind : `${kind}单`;
   const title = invalid
-    ? `${kind}单链接无效`
+    ? `${recordName}链接无效`
     : failed
-      ? `加载${kind}单失败`
+      ? `加载${recordName}失败`
       : loading && !summary
-        ? `正在定位${kind}单`
+        ? `正在定位${recordName}`
         : summary
-          ? `已定位${kind}单`
-          : `未找到该${kind}单`;
+          ? `已定位${recordName}`
+          : `未找到该${recordName}`;
 
   return (
     <Alert
@@ -53,7 +54,7 @@ export function RecordFocus({
               重试
             </Button>
           )}
-          <Link to={listPath}>查看全部{kind}单</Link>
+          <Link to={listPath}>查看全部{recordName}</Link>
         </Space>
       }
     />
