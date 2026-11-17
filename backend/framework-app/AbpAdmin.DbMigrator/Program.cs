@@ -55,12 +55,10 @@ class Program
                  *  2. HttpApi.Host/Configuration/*.json   — infrastructure baseline (SelfUrl/Cors/Redis/Authority),
                  *                                            overrides (1) — same relative order as the host
                  *  3. HttpApi.Host/appsettings.secrets.json — shared secrets
-                 *  4. HttpApi.Host/appsettings.Development.json — Development only
-                 *     (AbpAdmin_TestCli, extra redirect URIs, AllowDefaultAdminPassword).
-                 *     Intentionally skip appsettings.Production.json (Redis multi-instance posture
-                 *     would break migrator without Redis__Configuration).
+                 *  4. HttpApi.Host/appsettings.{Environment}.json — same lock posture as the Host.
+                 *     In Production, provide the same Redis configuration as the running deployment.
                  *  5. this project's appsettings.json      — migrator-only overlays
-                 *  6. environment variables                — highest (prod/CI)
+                 *  6. environment variables, then command line (e.g. --Modules:InitializationMode=New)
                  *
                  * Containers/CI usually lack HttpApi.Host sources; inject DB via env vars.
                  * Run from this project directory (ContentRoot=CWD; hostDir = ../AbpAdmin.HttpApi.Host).
@@ -84,12 +82,10 @@ class Program
                     }
                 }
                 cfg.AddJsonFile(Path.Combine(hostDir, "appsettings.secrets.json"), optional: true, reloadOnChange: false);
-                if (hosting.HostingEnvironment.IsDevelopment())
-                {
-                    cfg.AddJsonFile(Path.Combine(hostDir, "appsettings.Development.json"), optional: true, reloadOnChange: false);
-                }
+                cfg.AddJsonFile(Path.Combine(hostDir, $"appsettings.{hosting.HostingEnvironment.EnvironmentName}.json"), optional: true, reloadOnChange: false);
                 cfg.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
                 cfg.AddEnvironmentVariables();
+                cfg.AddCommandLine(args);
             })
             .ConfigureLogging((context, logging) => logging.ClearProviders())
             .ConfigureServices((hostContext, services) =>

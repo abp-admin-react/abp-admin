@@ -128,13 +128,16 @@ public class HostServiceGraphValidationTests
             descriptor => descriptor.ServiceType == typeof(IDistributedLockProvider)
                           && descriptor.Lifetime == ServiceLifetime.Singleton
                           && descriptor.ImplementationFactory != null),
-        // 锁 + DataProtection 共享连接的持有者：实例注册（ServiceType 即具体类型、嵌套私有，
-        // 只能按名匹配）。删掉 AddSingleton(connection) 编译照过、全部测试照绿——连接从此
-        // 不随宿主释放，必须钉住。
+        // Shared Redis connection must be factory registered so DI owns its disposal.
         new(
-            "SharedRedisConnection (singleton instance, owns the shared lock/DP multiplexer)",
+            "SharedRedisConnection (container-owned singleton, shared lock/DP multiplexer)",
             descriptor => descriptor.Lifetime == ServiceLifetime.Singleton
-                          && descriptor.ServiceType.Name == "SharedRedisConnection")
+                          && descriptor.ServiceType.Name == "SharedRedisConnection"
+                          && descriptor.ImplementationFactory != null),
+        new(
+            "SharedRedisConnectionRegistration (idempotent shared lock configuration)",
+            descriptor => descriptor.Lifetime == ServiceLifetime.Singleton
+                          && descriptor.ServiceType.Name == "SharedRedisConnectionRegistration")
     ];
 
     [Fact]

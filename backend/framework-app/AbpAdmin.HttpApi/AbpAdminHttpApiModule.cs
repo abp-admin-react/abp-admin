@@ -35,6 +35,13 @@ public class AbpAdminHttpApiModule : AbpModule
     {
         ConfigureLocalization();
 
+        Configure<Volo.Abp.AspNetCore.ExceptionHandling.AbpExceptionHttpStatusCodeOptions>(options =>
+        {
+            options.Map(Modules.DeploymentModuleErrorCodes.Disabled, System.Net.HttpStatusCode.Conflict);
+            options.Map(Modules.DeploymentModuleErrorCodes.VersionConflict, System.Net.HttpStatusCode.Conflict);
+            options.Map(Modules.DeploymentModuleErrorCodes.DependencyBlocked, System.Net.HttpStatusCode.Conflict);
+        });
+
         Configure<MvcOptions>(options =>
         {
             // 每个 MVC 动作写入错误受众元数据；属性优先，其余按显式名单，不按权限前缀升级。
@@ -46,6 +53,7 @@ public class AbpAdminHttpApiModule : AbpModule
         {
             options.Contributors.Add(new HttpApi.ClientErrors.Localization.PublicLocalizationApplicationConfigurationContributor());
             options.Contributors.Add(new DataDictionaryTagTypesApplicationConfigurationContributor());
+            options.Contributors.Add(new DeploymentModulesApplicationConfigurationContributor());
             // 审计 F-E3/#4：匿名请求裁剪 setting.values（登录防线画像不下发）。
             // 无宿主依赖（只读 ICurrentUser），按本仓分层惯例（DataDictionary 同款）注册在
             // HttpApi 层＝引用本层的任何组合根默认获得该防线；CookieConsent/SignalR 因依赖

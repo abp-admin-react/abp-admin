@@ -6,6 +6,12 @@ public static class AbpAdminPermissions
 {
     public const string GroupName = "AbpAdmin";
 
+    public static class ModuleManagement
+    {
+        public const string Default = Modules.DeploymentModulePermissions.Default;
+        public const string Update = Modules.DeploymentModulePermissions.Update;
+    }
+
     public static class OrganizationUnits
     {
         public const string Default = GroupName + ".OrganizationUnits";

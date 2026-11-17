@@ -128,6 +128,8 @@ public class AbpAdminDomainModule : AbpModule
     // 反方向是安全的：Async 路径会经基类默认实现调到这里的同步方法，宿主行为不变。
     public override void OnApplicationInitialization(ApplicationInitializationContext context)
     {
+        // Validate installed module IDs and dependency graph before accepting traffic.
+        context.ServiceProvider.GetRequiredService<Modules.DeploymentModuleRegistry>();
         // 双向约束的启动期校验——头像白名单里每个扩展名都必须能被
         // FileSignatures 识别，对不上就快速失败（快速失败胜过运行期放行）
         var imagingOptions = context.ServiceProvider.GetRequiredService<IOptions<Imaging.AbpAdminImagingOptions>>().Value;

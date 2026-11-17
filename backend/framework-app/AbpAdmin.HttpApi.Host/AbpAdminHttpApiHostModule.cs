@@ -93,6 +93,7 @@ using Volo.Abp.BackgroundWorkers;
 using Volo.Abp.BackgroundWorkers.Quartz;
 using Volo.Abp.Caching.StackExchangeRedis;
 using Volo.Abp.DistributedLocking;
+using Volo.Abp.Uow;
 using Volo.Abp.Quartz;
 using Medallion.Threading;
 using Medallion.Threading.Redis;
@@ -542,67 +543,8 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
     private void ConfigureRedis(ServiceConfigurationContext context, IConfiguration configuration)
     {
-        // Redis:IsEnabled 语义与 ABP 缓存模块（AbpCachingStackExchangeRedisModule）及
-        // CacheMonitorRedisConnection 对齐：键缺失/为空=启用（由 Redis:Configuration 是否配置决定），
-        // 仅显式 false 才关闭——否则只配 Redis:Configuration 不写 IsEnabled 的部署会得到
-        // 「缓存走 Redis、分布式锁退化为进程内」的静默不一致，多实例下锁形同虚设。
-        // 值非法（如 "yes"）直接启动失败而不是静默当作关闭——多实例部署里那等于把分布式锁静默关掉。
-        var redisEnabledRaw = configuration["Redis:IsEnabled"];
-        var redisEnabled = true;
-        if (!string.IsNullOrEmpty(redisEnabledRaw))
-        {
-            if (!bool.TryParse(redisEnabledRaw, out redisEnabled))
-            {
-                throw new AbpInitializationException(
-                    $"Configuration value \"Redis:IsEnabled\" is not a valid boolean: \"{redisEnabledRaw}\". " +
-                    "Use true/false, or remove the key (absent = enabled when Redis:Configuration is set).");
-            }
-        }
-
-        if (!redisEnabled)
-        {
-            // 68000ff 把 AbpDistributedLockingModule 补进宿主 [DependsOn] 链后，Redis-off 图里
-            // 也无条件出现了 IAbpDistributedLock -> MedallionAbpDistributedLock（需要
-            // IDistributedLockProvider），而提供者只有下方 Redis 分支才注册——缺位使
-            // BackgroundJobWorker 等首用分布式锁的服务启动即崩（graph 校验与匿名端点扫描
-            // 红灯的根因；本地开发因 secrets 恒开 Redis 而未暴露）。按 appsettings 承诺的
-            // "不开则锁退化为进程内"语义回切到框架抽象层的 LocalAbpDistributedLock
-            // （进程内信号量，即 68000ff 之前 Redis-off 图的形态），并移除无人能构造的
-            // MedallionAbpDistributedLock 瞬态注册，保持 Redis-off 图自洽、可独立启动。
-            // （rebase 整合注：原 feature 线在此注册自研 LocalInProcessDistributedLockProvider
-            // 兜底，与 main 的 b299990 回切方案二选一——保留更新的崩溃修复方案，两个
-            // Redis-off 分支统一姿态。）
-            context.Services.RemoveAll(typeof(MedallionAbpDistributedLock));
-            context.Services.Replace(ServiceDescriptor.Singleton<IAbpDistributedLock, LocalAbpDistributedLock>());
-            return;
-        }
-
-        var redisConfiguration = configuration["Redis:Configuration"];
-        if (string.IsNullOrWhiteSpace(redisConfiguration))
-        {
-            // 未配置 Redis（单实例默认）：与上方显式关闭同姿态——锁退化为进程内
-            // LocalAbpDistributedLock、移除无人能构造的 Medallion 瞬态注册，保持默认
-            // 建图自洽（HostServiceGraphValidationTests 默认配置走的就是这条分支）。
-            // 语义=进程内按锁名互斥；多实例必须配置 Redis:Configuration。
-            context.Services.RemoveAll(typeof(MedallionAbpDistributedLock));
-            context.Services.Replace(ServiceDescriptor.Singleton<IAbpDistributedLock, LocalAbpDistributedLock>());
-            return;
-        }
-
-        // 锁与 DataProtection 密钥共用一条惰性连接（SharedRedisConnection）：ConfigureServices
-        // 只登记持有者，真正的 Connect 推迟到锁/密钥环首次使用——这是被
-        // HostServiceGraphValidationTests/HostInitializationLogTests 钉住的契约（建图阶段不得
-        // 拨号；下游 HFT 仓库为 fail-fast 改成了急切 Connect，代价是 Redis 分支只能在
-        // 有真 Redis 的环境建图验证，此处不跟随）。本宿主的首次解析由启动探针触发
-        // （OnPostApplicationInitializationAsync 的 startup-probe，早于 Kestrel 接受请求）：
-        // Redis 不可达时启动失败，语义与急切版等价；连接失败不缓存（30s 冷却后可自愈），
-        // 探针万一被移除，首用失败也只是冷却期快速报错而非永久砖化到进程重启。
-        var connection = new SharedRedisConnection(redisConfiguration);
-        context.Services.AddSingleton(connection);
-
-        context.Services.AddSingleton<IDistributedLockProvider>(_ =>
-            new RedisDistributedSynchronizationProvider(connection.GetDatabase()));
-        context.Services.AddTransient<IAbpDistributedLock, MedallionAbpDistributedLock>();
+        var connection = AbpAdmin.Modules.DeploymentLockingConfiguration.Configure(context.Services, configuration);
+        if (connection == null) return;
 
         // DataProtection 签名密钥持久化到 Redis：ASP.NET Core 默认把密钥落在本地文件系统，
         // 多实例下机器 A 签发的 cookie/OpenIddict 令牌到机器 B 验不过，必须集中存储。四个配套决定：
@@ -671,99 +613,6 @@ public class AbpAdminHttpApiHostModule : AbpModule
         return string.IsNullOrEmpty(instanceDiscriminator)
             ? $"AbpAdmin:DataProtection-Keys:{environmentName}"
             : $"AbpAdmin:DataProtection-Keys:{environmentName}:{instanceDiscriminator}";
-    }
-
-    /// <summary>
-    /// 锁与 DataProtection 共享的惰性 Redis 连接：构造只记下连接串，首次 <see cref="GetDatabase"/>
-    /// 才真正 Connect（建图零拨号契约见 ConfigureRedis 注释）；实例注册进容器，关停时随宿主释放。
-    /// 刻意不用 <c>Lazy&lt;T&gt;</c>：其默认模式会把首次连接异常永久缓存——Redis 恢复后也要
-    /// 重启进程才能自愈；这里与 <see cref="CacheMonitorRedisConnection"/> 同一纪律：失败进入
-    /// 冷却期，期间快速抛错不再重拨。两个消费面（锁提供程序工厂、DP 密钥环委托）都是同步
-    /// API，Connect 因此用同步版本；串行化只发生在启动探针期，请求路径不付拨号成本。
-    /// 关停语义：Dispose 后 GetDatabase 抛 <see cref="ObjectDisposedException"/>——关停窗口里
-    /// DP 密钥环仍可能调工厂委托，不闩锁会复活一条永不释放的新连接（审计发现的泄漏路径）。
-    /// </summary>
-    private sealed class SharedRedisConnection : IDisposable
-    {
-        private static readonly TimeSpan FailureCooldown = TimeSpan.FromSeconds(30);
-
-        private readonly string _configuration;
-        private readonly object _gate = new();
-        private ConnectionMultiplexer? _multiplexer;
-        private DateTime _lastFailureUtc = DateTime.MinValue;
-        private Exception? _lastFailure;
-        private bool _disposed;
-
-        public SharedRedisConnection(string configuration)
-        {
-            _configuration = configuration;
-        }
-
-        public IDatabase GetDatabase()
-        {
-            if (_disposed)
-            {
-                throw new ObjectDisposedException(nameof(SharedRedisConnection));
-            }
-
-            var multiplexer = _multiplexer;
-            if (multiplexer != null)
-            {
-                return multiplexer.GetDatabase();
-            }
-
-            lock (_gate)
-            {
-                if (_disposed)
-                {
-                    throw new ObjectDisposedException(nameof(SharedRedisConnection));
-                }
-                if (_multiplexer != null)
-                {
-                    return _multiplexer.GetDatabase();
-                }
-                if (DateTime.UtcNow - _lastFailureUtc < FailureCooldown)
-                {
-                    // 冷却期内不重拨：Redis 故障时受保护的操作快速失败，而不是各付一次
-                    // 同步拨号超时（Connect 默认预算约 9 秒，会卡住所有并发首用）。
-                    // 原始异常挂在 InnerException 上——消费方（锁拦截器/日志）能继续区分
-                    // 连接类与配置类故障，不因冷却包装吞掉类型。
-                    throw new InvalidOperationException(
-                        $"Redis connection failed within the last {FailureCooldown.TotalSeconds:F0}s " +
-                        "(failure cooldown, retry deferred); the original failure is the InnerException " +
-                        "of this exception (and was logged at first occurrence).",
-                        _lastFailure);
-                }
-
-                var options = ConfigurationOptions.Parse(_configuration);
-                // AbortOnConnectFail 强制 true：连接串里常见的 abortConnect=false 会让 Connect 在
-                // Redis 不可达时静默返回未连接的多路复用器——那正是「带病运行」的静默形态；
-                // 运行期断线自愈由 SE.Redis 的自动重连承担，不依赖该开关。
-                options.AbortOnConnectFail = true;
-                try
-                {
-                    _multiplexer = ConnectionMultiplexer.Connect(options);
-                }
-                catch (Exception ex)
-                {
-                    _lastFailureUtc = DateTime.UtcNow;
-                    _lastFailure = ex;
-                    throw;
-                }
-                return _multiplexer.GetDatabase();
-            }
-        }
-
-        public void Dispose()
-        {
-            // 拨号与释放在同一把锁下：关停撞上首用拨号时不会泄漏刚建好的连接
-            lock (_gate)
-            {
-                _disposed = true;
-                _multiplexer?.Dispose();
-                _multiplexer = null;
-            }
-        }
     }
 
     /// <summary>
@@ -1413,12 +1262,17 @@ public class AbpAdminHttpApiHostModule : AbpModule
     // 缺脚本才执行迁移+种子。库不可读（数据库不存在、History 表还没有）时检查会抛错，
     // 视为需要迁移，走完整流程（存量库由 EfCoreLegacySchemaBaseliner 自动打戳，不自动建库）。
     // 生产多实例部署若担心启动竞争，可用环境变量 Database__AutoMigrateOnStartup=false 关闭，改由 DbMigrator 负责。
-    private async Task MigrateSchemaIfConfiguredAsync(ApplicationInitializationContext context)
+    internal async Task MigrateSchemaIfConfiguredAsync(ApplicationInitializationContext context)
     {
         var autoMigrate = context.ServiceProvider.GetRequiredService<IConfiguration>()
             .GetValue<bool>("Database:AutoMigrateOnStartup");
         if (!autoMigrate)
         {
+            using var validationScope = context.ServiceProvider.CreateScope();
+            var modules = await validationScope.ServiceProvider
+                .GetRequiredService<Modules.IDeploymentModuleStateReader>().GetAsync();
+            if (!modules.Initialized)
+                throw new AbpInitializationException("Deployment modules have not been initialized. Run AbpAdmin.DbMigrator with this deployment's database and Redis configuration before starting the Host (Modules:InitializationMode=New for a new installation; Upgrade for an existing installation).");
             return;
         }
 
@@ -1457,8 +1311,21 @@ public class AbpAdminHttpApiHostModule : AbpModule
             {
                 context.ServiceProvider.GetRequiredService<ILogger<AbpAdminHttpApiHostModule>>()
                     .LogInformation("数据库 schema 已就绪（EF 迁移均已应用、History 记账齐全），跳过自动迁移");
+                // Data-only upgrades do not add EF migrations and must not be skipped with an up-to-date schema.
+                await ApplyRuntimeDataUpdatesAsync(scope.ServiceProvider);
             }
         }
+    }
+
+    private static async Task ApplyRuntimeDataUpdatesAsync(IServiceProvider serviceProvider)
+    {
+        await serviceProvider.GetRequiredService<Modules.DeploymentModuleManager>().InitializeAsync();
+        using var uow = serviceProvider.GetRequiredService<Volo.Abp.Uow.IUnitOfWorkManager>()
+            .Begin(requiresNew: true, isTransactional: true);
+        await serviceProvider.GetRequiredService<Modules.ModuleManagementPermissionDataSeedContributor>()
+            .SeedAsync(new Volo.Abp.Data.DataSeedContext());
+        await serviceProvider.GetRequiredService<Menus.MenuManager>().SeedHostTemplateAsync();
+        await uow.CompleteAsync();
     }
 
     public override async Task OnApplicationInitializationAsync(ApplicationInitializationContext context)

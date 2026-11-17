@@ -104,6 +104,10 @@ public class AbpAdminApplicationModule : AbpModule
                 AbpAdminPermissions.Editions.ManageFeatures;
         });
 
+        // 开源 OpenIddict 集成默认引用 Pro 的权限名，客户端授权弹窗使用本项目的权限。
+        context.Services.PostConfigure<Volo.Abp.PermissionManagement.PermissionManagementOptions>(options =>
+            options.ProviderPolicies["C"] = AbpAdminPermissions.OpenIddict.Applications.ManagePermissions);
+
         var builder = context.Services.AddHttpClient(AuthServerTokenExchangeHttpClient);
         // 显式 30 秒超时：HttpClient 默认 100 秒，/connect/token 是登录链路上的同步回环调用，
         // 挂 100 秒会把登录请求一起拖死；30 秒足够覆盖慢握手 + token 签发（要调长走配置）。

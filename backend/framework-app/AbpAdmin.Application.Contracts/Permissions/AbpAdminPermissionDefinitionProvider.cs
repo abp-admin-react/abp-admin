@@ -13,6 +13,10 @@ public class AbpAdminPermissionDefinitionProvider : PermissionDefinitionProvider
     {
         var group = context.AddGroup(AbpAdminPermissions.GroupName, L("Permission:AbpAdmin"));
 
+        group.AddPermission(AbpAdminPermissions.ModuleManagement.Default, L("Permission:ModuleManagement"),
+                multiTenancySide: MultiTenancySides.Host)
+            .AddChild(AbpAdminPermissions.ModuleManagement.Update, L("Permission:ModuleManagement.Update"), MultiTenancySides.Host);
+
         var ous = group.AddPermission(
             AbpAdminPermissions.OrganizationUnits.Default,
             L("Permission:OrganizationUnits"));
