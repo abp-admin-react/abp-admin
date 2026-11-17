@@ -1,9 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using EasyAbp.Abp.SettingUi;
 using Shouldly;
 using Volo.Abp.Modularity;
+using Volo.Abp.MultiTenancy;
 using Volo.Abp.Settings;
 using Xunit;
 
@@ -66,6 +68,24 @@ public abstract class SettingUiWriteScopeTests<TStartupModule> : AbpAdminApplica
 
         (await _settingProvider.GetOrNullAsync(SettingUiWriteScopeTestSettingProvider.UiRegisteredName))
             .ShouldBe("ui-new-value");
+    }
+
+    [Fact]
+    public async Task Tenant_Cannot_Save_Or_Reset_An_Inherited_Global_Field()
+    {
+        var name = SettingUiWriteScopeTestSettingProvider.GlobalUiName;
+        await _settingUiAppService.SetSettingValuesAsync(new() { [name] = "forest" });
+
+        using (GetRequiredService<ICurrentTenant>().Change(Guid.NewGuid()))
+        {
+            var groups = await _settingUiAppService.GroupSettingDefinitionsAsync();
+            var field = groups.SelectMany(group => group.SettingInfos).Single(info => info.Name == name);
+            field.Properties["CanWriteInCurrentScope"].ShouldBe(false);
+            await _settingUiAppService.SetSettingValuesAsync(new() { [name] = "river" });
+            await _settingUiAppService.ResetSettingValuesAsync([name]);
+        }
+
+        (await _settingProvider.GetOrNullAsync(name)).ShouldBe("forest");
     }
 
     /// <summary>设置名 → 上游表单键形态（Setting_A_B_C）。测试用定义的段本身是 PascalCase，

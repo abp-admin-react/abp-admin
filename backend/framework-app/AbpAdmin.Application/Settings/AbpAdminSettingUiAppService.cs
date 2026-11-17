@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Modules;
 using AbpAdmin.OperationLogs;
 using AbpAdmin.Permissions;
 using EasyAbp.Abp.SettingUi;
@@ -93,6 +94,7 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
     protected override async Task<SettingInfo> CreateSettingInfoAsync(SettingDefinition settingDefinition)
     {
         var info = await base.CreateSettingInfoAsync(settingDefinition);
+        info.Properties["CanWriteInCurrentScope"] = CanWriteInCurrentScope(settingDefinition);
 
         if (settingDefinition.IsEncrypted)
         {
@@ -105,6 +107,28 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
 
         return info;
     }
+
+    public override async Task<List<SettingGroup>> GroupSettingDefinitionsAsync()
+    {
+        var groups = await base.GroupSettingDefinitionsAsync();
+        foreach (var group in groups)
+        {
+            group.SettingInfos.RemoveAll(info => DeploymentModuleSettings.IsReserved(info.Name));
+        }
+        return groups.Where(group => group.SettingInfos.Count > 0).ToList();
+    }
+
+    private bool CanWriteInCurrentScope(SettingDefinition definition) =>
+        definition.Providers.Count == 0 ||
+        definition.Providers.Contains(TenantSettingValueProvider.ProviderName) ||
+        definition.Providers.Contains(UserSettingValueProvider.ProviderName) ||
+        !CurrentTenant.IsAvailable && definition.Providers.Contains(GlobalSettingValueProvider.ProviderName);
+
+    private async Task<HashSet<string>> GetAccessibleSettingNamesAsync() =>
+        (await GroupSettingDefinitionsAsync())
+            .SelectMany(group => group.SettingInfos)
+            .Select(info => info.Name)
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// 写值入口：读门禁（类级 ShowSettingPage）之外再要求 SettingUi.Update。
@@ -136,17 +160,19 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
         // Collection.Withdraw.Halt / Withdraw.Enabled / Chain.* 资金开关故意 omit WithUi 移出设置页
         // （唯一写门是 Withdraw.Admin / Network.Admin 域端点 + AssertHost），裸持 SettingUi.Update
         // 即可经本面清掉全局急停。收紧后非 UI 设置与未知表单键同语义：静默跳过，不产生任何层写入。
+        var accessible = await GetAccessibleSettingNamesAsync();
         var writable = new Dictionary<string, string>(normalized.Count);
         foreach (var (formKey, value) in normalized)
         {
             var name = ResolveSettingName(formKey);
-            if (name == null)
+            if (name == null || !accessible.Contains(name))
             {
                 continue;
             }
 
             var definition = await _settingDefinitionManager.GetOrNullAsync(name);
-            if (definition == null || !definition.Properties.ContainsKey(SettingUiConst.Group1))
+            if (definition == null || !definition.Properties.ContainsKey(SettingUiConst.Group1) ||
+                !CanWriteInCurrentScope(definition))
             {
                 continue;
             }
@@ -198,12 +224,13 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
     [Authorize(AbpAdminPermissions.SettingUi.Update)]
     public override async Task ResetSettingValuesAsync(List<string> settingNames)
     {
+        var accessible = await GetAccessibleSettingNamesAsync();
         var processed = new List<string>();
 
         foreach (var settingName in settingNames)
         {
             var definition = await _settingDefinitionManager.GetOrNullAsync(settingName);
-            if (definition == null)
+            if (definition == null || !accessible.Contains(settingName) || !CanWriteInCurrentScope(definition))
             {
                 continue;
             }
@@ -337,7 +364,8 @@ public class AbpAdminSettingUiAppService : SettingUiAppService
         // 声明了 Global provider，租户管理员经此入口会改到宿主全局值（Setting 实体本身
         // 不分租户）。钳到租户层，宿主全局只能由 host 上下文写——与 Reset 的
         // !CurrentTenant.IsAvailable 才清 G 层同一口径。
-        if (CurrentTenant.IsAvailable && setting.Providers.Contains(GlobalSettingValueProvider.ProviderName))
+        if (CurrentTenant.IsAvailable && setting.Providers.Contains(GlobalSettingValueProvider.ProviderName) &&
+            !setting.Providers.Contains(UserSettingValueProvider.ProviderName))
         {
             return _settingManager.SetForCurrentTenantAsync(setting.Name, value);
         }

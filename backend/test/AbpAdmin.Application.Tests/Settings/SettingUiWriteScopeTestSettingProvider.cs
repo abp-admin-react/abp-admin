@@ -14,6 +14,7 @@ public class SettingUiWriteScopeTestSettingProvider : SettingDefinitionProvider
 {
     public const string DomainOnlyName = "AbpAdminTest.DomainOnly";
     public const string UiRegisteredName = "AbpAdminTest.UiRegistered";
+    public const string GlobalUiName = "AbpAdminTest.GlobalUi";
 
     public override void Define(ISettingDefinitionContext context)
     {
@@ -22,6 +23,10 @@ public class SettingUiWriteScopeTestSettingProvider : SettingDefinitionProvider
                 .WithProviders(GlobalSettingValueProvider.ProviderName, DefaultValueSettingValueProvider.ProviderName),
 
             new SettingDefinition(UiRegisteredName, "ui-default", isVisibleToClients: false)
+                .WithUi(AbpAdminSettingUiConsts.Groups.Sms, "WriteScopeTest", SettingUiConst.Components.Text),
+
+            new SettingDefinition(GlobalUiName, "global-default", isVisibleToClients: false)
+                .WithProviders(GlobalSettingValueProvider.ProviderName, DefaultValueSettingValueProvider.ProviderName)
                 .WithUi(AbpAdminSettingUiConsts.Groups.Sms, "WriteScopeTest", SettingUiConst.Components.Text));
     }
 }
