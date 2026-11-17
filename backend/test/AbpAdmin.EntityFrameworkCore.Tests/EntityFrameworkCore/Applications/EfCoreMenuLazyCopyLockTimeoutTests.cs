@@ -13,20 +13,33 @@ using Xunit;
 
 namespace AbpAdmin.EntityFrameworkCore.Applications;
 
-/// <summary>TryAcquireAsync 恒返回 null——模拟分布式锁持续超时（持锁方拷贝异常缓慢 / 锁竞争激烈）。</summary>
-public class AlwaysTimeoutDistributedLock : IAbpDistributedLock
+/// <summary>仅让租户菜单复制锁超时；模块初始化等其他锁不属于本测试的故障注入范围。</summary>
+public class TenantCopyTimeoutDistributedLock : IAbpDistributedLock
 {
+    public string? LastTimedOutKey { get; private set; }
+
     public Task<IAbpDistributedLockHandle?> TryAcquireAsync(
         string name,
         TimeSpan timeout = default,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult<IAbpDistributedLockHandle?>(null);
+        if (name.StartsWith("AbpAdmin:Menu:TenantCopy:", StringComparison.Ordinal))
+        {
+            LastTimedOutKey = name;
+            return Task.FromResult<IAbpDistributedLockHandle?>(null);
+        }
+
+        return Task.FromResult<IAbpDistributedLockHandle?>(new TestHandle());
+    }
+
+    private sealed class TestHandle : IAbpDistributedLockHandle
+    {
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
 
 /// <summary>
-/// 把 IAbpDistributedLock 换成恒超时桩：覆盖 EnsureTenantMenusAsync 的「锁超时裸拷贝」分支。
+/// 把菜单复制锁换成恒超时桩：覆盖 EnsureTenantMenusAsync 的「锁超时裸拷贝」分支。
 /// 默认进程内 LocalAbpDistributedLock 恒可获取，常规菜单测试永远走不到该分支——
 /// 若删掉裸拷贝代码（或锁用法改坏），本模块下的测试会失败而常规测试仍然全绿。
 /// </summary>
@@ -36,7 +49,7 @@ public class MenuLazyCopyLockTimeoutTestModule : AbpModule
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
         context.Services.Replace(
-            ServiceDescriptor.Singleton<IAbpDistributedLock, AlwaysTimeoutDistributedLock>());
+            ServiceDescriptor.Singleton<IAbpDistributedLock, TenantCopyTimeoutDistributedLock>());
     }
 }
 
@@ -62,6 +75,8 @@ public class EfCoreMenuLazyCopyLockTimeoutTests : AbpAdminApplicationTestBase<Me
             await WithUnitOfWorkAsync(() => menuManager.EnsureTenantMenusAsync(tenantId));
             var count = await WithUnitOfWorkAsync(() => menuRepository.GetCountAsync());
             count.ShouldBeGreaterThan(0);
+            ((TenantCopyTimeoutDistributedLock)GetRequiredService<IAbpDistributedLock>()).LastTimedOutKey
+                .ShouldBe(MenuManager.CopyLockKey(tenantId));
 
             // 二次调用：计数短路，幂等不重复拷贝
             await WithUnitOfWorkAsync(() => menuManager.EnsureTenantMenusAsync(tenantId));

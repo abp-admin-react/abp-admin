@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using NSubstitute;
@@ -13,6 +14,7 @@ using Volo.Abp.Guids;
 using Volo.Abp.Modularity;
 using Volo.Abp.MultiTenancy;
 using Volo.Abp.Uow;
+using AbpAdmin.Tenants;
 using Xunit;
 
 namespace AbpAdmin.Menus;
@@ -81,220 +83,605 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
         }
     }
 
-    /* 模板同步语义（菜单重排引入）：SeedHostTemplateAsync 不只补缺——已有节点会被对齐到
-     * 模板的父/序/题/图标/权限，模板重排后重跑迁移即生效；模板外的自定义节点不被删除。 */
     [Fact]
-    public async Task Seed_Should_Sync_Existing_Nodes_To_Template()
+    public async Task Upgrade_Should_Move_Old_Defaults_And_Preserve_Ids_And_Customizations()
     {
         await CleanMenusAsync();
+        var platform = LegacyMenu(null, MenuTypeEnum.Catalog, "平台管理", "administration", "/administration", 800);
+        var config = LegacyMenu(null, MenuTypeEnum.Catalog, "设置中心", "configuration", "/configuration", 1000);
+        var baseSettings = LegacyMenu(config.Id, MenuTypeEnum.Catalog, "平台设置", "base-settings", "/administration/base-settings", 1040);
+        var settings = LegacyMenu(baseSettings.Id, MenuTypeEnum.Menu, "通用设置", "settings", "/administration/settings", 141, "SettingUi.ShowSettingPage");
+        var menus = LegacyMenu(baseSettings.Id, MenuTypeEnum.Menu, "自定义菜单标题", "menus", "/administration/menus", 1234, "AbpAdmin.Menus");
+        var financeConfig = LegacyMenu(config.Id, MenuTypeEnum.Catalog, "会计设置", "finance-config", "/finance/configuration", 1030);
+        var rules = LegacyMenu(financeConfig.Id, MenuTypeEnum.Menu, "自动记账规则", "finance-rules", "/finance/rules", 662, "Finance.Rule.View");
+        financeConfig.Disable();
+        await WithUnitOfWorkAsync(() => _menuRepository.InsertManyAsync([platform, config, baseSettings, settings, menus, financeConfig, rules]));
+
         await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
-
-        // 模拟旧布局：SaaS 和示例是顶层组，设置在管理目录，链上页面混在收付款目录。
-        var existingIdsByPath = await WithUnitOfWorkAsync(async () =>
-        {
-            var all = await _menuRepository.GetListAsync();
-            var byPath = all.ToDictionary(x => x.Path!);
-            var administration = byPath["/administration"];
-            var saas = byPath["/administration/saas"];
-            saas.SetParent(null);
-            saas.SetOrderNo(60);
-            saas.SetTitle("SaaS");
-            await _menuRepository.UpdateAsync(saas);
-
-            var demos = byPath["/demos"];
-            demos.SetParent(null);
-            await _menuRepository.UpdateAsync(demos);
-
-            var settings = byPath["/administration/settings"];
-            settings.SetParent(administration.Id);
-            await _menuRepository.UpdateAsync(settings);
-            await _menuRepository.HardDeleteAsync(x => x.Path == "/administration/base-settings");
-
-            var collection = byPath["/collection"];
-            collection.SetParent(null);
-            collection.SetPermissionName("AbpAdmin.Ordering.Orders");
-            await _menuRepository.UpdateAsync(collection);
-            var previousRulesPage = byPath["/web3/settings"];
-            previousRulesPage.Show();
-            previousRulesPage.SetParent(byPath["/web3"].Id);
-            await _menuRepository.UpdateAsync(previousRulesPage);
-
-            foreach (var path in new[]
-                     {
-                         "/collection/dashboard", "/collection/deposits", "/collection/withdrawals",
-                         "/collection/sweeps", "/collection/network", "/collection/wallets", "/web3/rules"
-                     })
-            {
-                var page = byPath[path];
-                page.Show();
-                await _menuRepository.UpdateAsync(page);
-            }
-
-            // 上一个版本的 Web3 运营和配置是同目录内的两个现有页面。
-            foreach (var path in new[] { "/web3/operations", "/web3/config" })
-            {
-                byPath[path].SetParent(byPath["/web3"].Id);
-                await _menuRepository.UpdateAsync(byPath[path]);
-            }
-
-            foreach (var path in new[]
-                     {
-                         "/configuration", "/configuration/content", "/configuration/integrations",
-                         "/configuration/payments", "/operations/payments"
-                     })
-            {
-                await _menuRepository.HardDeleteAsync(x => x.Path == path);
-                byPath.Remove(path);
-            }
-
-            foreach (var path in new[] { "/web3", "/collection", "/alipay", "/wechat", "/stripe" })
-            {
-                byPath[path].Show();
-                await _menuRepository.UpdateAsync(byPath[path]);
-            }
-
-            foreach (var path in new[]
-                     {
-                         "/collection/dashboard", "/collection/deposits", "/collection/withdrawals",
-                         "/collection/sweeps", "/collection/vault", "/collection/hot-wallet", "/collection/network"
-                     })
-            {
-                var page = byPath[path];
-                page.SetParent(collection.Id);
-                await _menuRepository.UpdateAsync(page);
-            }
-
-            var custom = new Menu(
-                _guidGenerator.Create(), null, saas.Id, MenuTypeEnum.Menu,
-                "自定义节点", "custom", "/custom-page", null, 999, false, isEnabled: true);
-            await _menuRepository.InsertAsync(custom);
-            byPath.Add(custom.Path!, custom);
-            byPath.Remove("/administration/base-settings");
-            return byPath.ToDictionary(pair => pair.Key, pair => pair.Value.Id);
-        });
-
         await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
 
         await WithUnitOfWorkAsync(async () =>
         {
-            var all = await _menuRepository.GetListAsync();
-            var byPath = all.ToDictionary(x => x.Path!);
-            foreach (var (path, id) in existingIdsByPath)
-            {
-                byPath[path].Id.ShouldBe(id);
-            }
-
-            var saas = byPath["/administration/saas"];
-            saas.ParentId.ShouldBe(byPath["/administration"].Id);
-            saas.OrderNo.ShouldBe(MenuTemplateDefinition.All.Single(d => d.Key == "saas").OrderNo);
-            saas.Title.ShouldBe("租户管理");
-            byPath["/custom-page"].ParentId.ShouldBe(saas.Id);
-            byPath["/demos"].ParentId.ShouldBe(byPath["/system"].Id);
-            byPath["/administration/settings"].ParentId.ShouldBe(byPath["/administration/base-settings"].Id);
-            byPath["/collection"].ParentId.ShouldBe(byPath["/order-payments"].Id);
-            byPath["/web3"].ParentId.ShouldBe(byPath["/order-payments"].Id);
-            byPath["/order-payments"].ParentId.ShouldBeNull();
-            byPath["/order-payments"].Title.ShouldBe("交易运营");
-            byPath["/welcome"].Title.ShouldBe("工作台");
-            byPath["/business"].IsHide.ShouldBeTrue();
-            byPath["/collection"].PermissionName.ShouldBeNull();
-            byPath["/collection"].Title.ShouldBe("订单");
-            byPath["/collection"].IsHide.ShouldBeTrue();
-            byPath["/collection/orders"].Title.ShouldBe("订单管理");
-            byPath["/collection/orders"].ParentId.ShouldBe(byPath["/order-payments"].Id);
-            byPath["/collection/orders"].GetAnyPermissionNames().ShouldBe(new[]
-            {
-                "AbpAdmin.Ordering.Orders", "AbpAdmin.Ordering.Orders.ViewAll"
-            });
-            byPath["/administration/payments"].Title.ShouldBe("跨渠道收款与退款");
-            byPath["/administration/payments"].IsHide.ShouldBeTrue();
-            byPath["/collection/dashboard"].Title.ShouldBe("链上监控");
-            byPath["/collection/deposits"].Title.ShouldBe("充值记录");
-            byPath["/collection/withdrawals"].Title.ShouldBe("提现审核与打款");
-            var web3 = byPath["/web3"];
-            web3.IsHide.ShouldBeTrue();
-            foreach (var path in new[]
-                     {
-                         "/collection/dashboard", "/collection/deposits", "/collection/withdrawals",
-                         "/collection/sweeps", "/collection/vault", "/collection/hot-wallet",
-                         "/collection/network", "/collection/wallets", "/web3/rules", "/web3/configuration"
-                     })
-            {
-                byPath[path].ParentId.ShouldBe(web3.Id);
-                byPath[path].IsHide.ShouldBeTrue();
-            }
-
-            all.Where(x => x.ParentId == byPath["/order-payments"].Id && !x.IsHide)
-                .OrderBy(x => x.OrderNo).Select(x => x.Path)
-                .ShouldBe(new[] { "/collection/orders", "/operations/payments", "/web3/operations" });
-            byPath["/operations/payments"].PermissionName.ShouldBe("AbpAdmin.Collection.Payments.View");
-            byPath["/web3/operations"].Title.ShouldBe("链上充提");
-            byPath["/web3/config"].Title.ShouldBe("链上充提");
-            byPath["/web3/operations"].Type.ShouldBe(MenuTypeEnum.Menu);
-            byPath["/web3/config"].Type.ShouldBe(MenuTypeEnum.Menu);
-            byPath["/collection/network"].PermissionName.ShouldBe("AbpAdmin.Collection.Network.Admin");
-            byPath["/collection/network"].GetAnyPermissionNames().ShouldBeEmpty();
-            byPath["/web3/rules"].GetAnyPermissionNames().ShouldBe(new[]
-            {
-                "AbpAdmin.Collection.Network.Admin", "SettingUi.ShowSettingPage"
-            });
-            byPath["/collection/wallets"].GetAnyPermissionNames().ShouldBe(new[]
-            {
-                "AbpAdmin.Collection.Network.Admin", "AbpAdmin.Collection.WithdrawAdmin"
-            });
-
-            foreach (var channel in new[] { "alipay", "wechat", "stripe" })
-            {
-                byPath[$"/{channel}"].ParentId.ShouldBe(byPath["/order-payments"].Id);
-                byPath[$"/{channel}"].IsHide.ShouldBeTrue();
-                byPath[$"/{channel}"].PermissionName.ShouldBeNull();
-                byPath[$"/{channel}/payments"].ParentId.ShouldBe(byPath[$"/{channel}"].Id);
-                byPath[$"/{channel}/payments"].PermissionName.ShouldBe("AbpAdmin.Collection.Payments.View");
-                byPath[$"/{channel}/payments"].IsHide.ShouldBeTrue();
-                byPath[$"/{channel}/settings"].ParentId.ShouldBe(byPath[$"/{channel}"].Id);
-                byPath[$"/{channel}/settings"].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
-                byPath[$"/{channel}/settings"].IsHide.ShouldBeTrue();
-            }
-
-            byPath["/web3/settings"].ParentId.ShouldBe(byPath["/web3/configuration"].Id);
-            byPath["/web3/settings"].IsHide.ShouldBeTrue();
-            byPath["/web3/settings"].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
-            byPath["/collection/settings"].ParentId.ShouldBe(byPath["/collection"].Id);
-            byPath["/collection/settings"].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
-            byPath["/collection/settings"].IsHide.ShouldBeTrue();
-            byPath["/collection/order-settings"].IsHide.ShouldBeTrue();
-            byPath["/collection/member-funds"].ParentId.ShouldBe(byPath["/user-funds"].Id);
-            byPath["/finance/balance-adjustments"].ParentId.ShouldBe(byPath["/user-funds"].Id);
-            byPath["/financial-management"].ParentId.ShouldBeNull();
-            byPath["/user-funds"].ParentId.ShouldBe(byPath["/financial-management"].Id);
-            byPath["/finance"].ParentId.ShouldBe(byPath["/financial-management"].Id);
-            byPath["/finance/vouchers"].ParentId.ShouldBe(byPath["/finance"].Id);
-            byPath["/finance/transactions"].IsHide.ShouldBeTrue();
-            byPath["/finance/biz-docs"].PermissionName.ShouldBe("Finance.BizDoc.View");
-
-            var configuration = byPath["/configuration"];
-            configuration.ParentId.ShouldBeNull();
-            all.Where(x => x.ParentId == null && !x.IsHide).OrderBy(x => x.OrderNo).Select(x => x.Path)
-                .ShouldBe(new[] { "/welcome", "/order-payments", "/financial-management", "/administration", "/system", "/configuration" });
-            all.Where(x => x.ParentId == configuration.Id).OrderBy(x => x.OrderNo).Select(x => x.Path)
-                .ShouldBe(new[]
-                {
-                    "/configuration/payments", "/web3/config", "/finance/configuration", "/administration/base-settings",
-                    "/configuration/content", "/configuration/integrations"
-                });
-            byPath["/configuration/payments"].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
-            byPath["/administration/localization"].Title.ShouldBe("内容与通知");
-            byPath["/administration/files"].ParentId.ShouldBe(byPath["/administration/localization"].Id);
-            byPath["/system/notifications"].ParentId.ShouldBe(byPath["/administration/localization"].Id);
-            byPath["/administration/text-templates"].ParentId.ShouldBe(byPath["/configuration/content"].Id);
-            byPath["/administration/localization/languages"].ParentId.ShouldBe(byPath["/configuration/content"].Id);
-            byPath["/administration/localization/texts"].ParentId.ShouldBe(byPath["/configuration/content"].Id);
-            byPath["/administration/openiddict"].Title.ShouldBe("登录与令牌");
-            byPath["/administration/openiddict/token-management"].ParentId.ShouldBe(byPath["/administration/openiddict"].Id);
-            byPath["/administration/openiddict/applications"].ParentId.ShouldBe(byPath["/configuration/integrations"].Id);
-            byPath["/administration/openiddict/scopes"].ParentId.ShouldBe(byPath["/configuration/integrations"].Id);
-            byPath["/administration/webhooks"].ParentId.ShouldBe(byPath["/configuration/integrations"].Id);
+            var byPath = (await _menuRepository.GetListAsync()).ToDictionary(x => x.Path!);
+            byPath[config.Path!].IsHide.ShouldBeTrue();
+            byPath[settings.Path!].Id.ShouldBe(settings.Id);
+            byPath[settings.Path!].Title.ShouldBe("扩展配置");
+            byPath[settings.Path!].ParentId.ShouldBe(platform.Id);
+            byPath[settings.Path!].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
+            byPath[settings.Path!].GetTemplateKey().ShouldBe("settings");
+            byPath[menus.Path!].Id.ShouldBe(menus.Id);
+            byPath[menus.Path!].Title.ShouldBe("自定义菜单标题");
+            byPath[menus.Path!].OrderNo.ShouldBe(1234);
+            byPath[rules.Path!].ParentId.ShouldBe(financeConfig.Id);
+            byPath[financeConfig.Path!].IsEnabled.ShouldBeFalse();
         });
+    }
+
+    [Fact]
+    public async Task Tenant_Upgrade_Should_Retain_Only_The_Previously_Selected_Settings_Leaf()
+    {
+        await CleanMenusAsync();
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            var config = LegacyMenu(null, MenuTypeEnum.Catalog, "设置中心", "configuration", "/configuration", 1000);
+            var baseSettings = LegacyMenu(config.Id, MenuTypeEnum.Catalog, "平台设置", "base-settings", "/administration/base-settings", 1040);
+            var settings = LegacyMenu(baseSettings.Id, MenuTypeEnum.Menu, "通用设置", "settings", "/administration/settings", 141, "SettingUi.ShowSettingPage");
+            await WithUnitOfWorkAsync(() => _menuRepository.InsertManyAsync([config, baseSettings, settings]));
+
+            await WithUnitOfWorkAsync(() => _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value));
+            await WithUnitOfWorkAsync(() => _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value));
+
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var byPath = (await _menuRepository.GetListAsync()).ToDictionary(x => x.Path!);
+                byPath.Values.Where(x => x.Type == MenuTypeEnum.Menu).Select(x => x.Id).ShouldBe([settings.Id]);
+                byPath[settings.Path!].ParentId.ShouldBe(byPath["/administration"].Id);
+                byPath[settings.Path!].IsHide.ShouldBeFalse();
+                byPath[settings.Path!].PermissionName.ShouldBe("SettingUi.ShowSettingPage");
+            });
+        }
+    }
+
+    private Menu LegacyMenu(Guid? parentId, MenuTypeEnum type, string title, string name, string path,
+        int order, string? permission = null) => new(_guidGenerator.Create(), _currentTenant.Id, parentId,
+        type, title, name, path, orderNo: order, permissionName: permission);
+
+    [Fact]
+    public async Task Fresh_Template_Should_Have_Five_Task_Roots_And_Embedded_Finance_Configuration()
+    {
+        await CleanMenusAsync();
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        var visible = await WithUnitOfWorkAsync(() => _myMenuAppService.GetAsync());
+        visible.Items.Select(x => x.Title).ShouldBe(["工作台", "业务中心", "资金与财务", "平台管理", "系统运维"]);
+        var paths = Flatten(visible.Items).Select(x => x.Path).ToList();
+        paths.ShouldNotContain("/order-payments");
+        paths.ShouldNotContain("/administration/settings");
+        paths.ShouldNotContain("/finance/settings");
+        paths.ShouldNotContain("/finance/accounts");
+        paths.ShouldNotContain("/finance/rules");
+        paths.ShouldNotContain("/finance/period");
+        visible.Items.Single(x => x.Path == "/business").Children.Select(x => x.Path).ShouldBe(["/collection/orders"]);
+        visible.Items.Single(x => x.Path == "/financial-management").Children.Select(x => x.Path)
+            .ShouldBe(["/operations/payments", "/user-funds", "/web3/operations", "/finance"]);
+        visible.Items.Single(x => x.Path == "/financial-management").Children.Select(x => x.Title)
+            .ShouldBe(["收款管理", "用户资金", "钱包与链网", "会计与对账"]);
+        Flatten(visible.Items).Single(x => x.Path == "/user-funds").Children.Select(x => x.Path)
+            .ShouldBe(["/collection/member-funds", "/collection/withdrawals", "/finance/balance-adjustments"]);
+        Flatten(visible.Items).Single(x => x.Path == "/collection/member-funds").Title.ShouldBe("用户余额");
+        Flatten(visible.Items).Single(x => x.Path == "/finance/balances").Title.ShouldBe("账簿余额");
+    }
+
+    [Fact]
+    public async Task V4_Upgrade_Renames_Member_Funds_And_Puts_Withdrawals_Before_Adjustments()
+    {
+        await CleanMenusAsync();
+        var original = await InsertPublishedLayoutAsync(4);
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+
+        var visible = await WithUnitOfWorkAsync(() => _myMenuAppService.GetAsync());
+        var funds = Flatten(visible.Items).Single(x => x.Path == "/user-funds");
+        funds.Children.Select(x => x.Path).ShouldBe([
+            "/collection/member-funds", "/collection/withdrawals", "/finance/balance-adjustments"
+        ]);
+        funds.Children.Select(x => x.Title).ShouldBe(["用户余额", "提现审核与打款", "余额调整审批"]);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            (await _menuRepository.GetAsync(original["collection-member-funds"].Id)).Id
+                .ShouldBe(original["collection-member-funds"].Id);
+            (await _menuRepository.GetAsync(original["collection-withdrawals"].Id)).OrderNo.ShouldBe(612);
+            (await _menuRepository.GetAsync(original["finance-balance-adjustments"].Id)).OrderNo.ShouldBe(613);
+        });
+    }
+
+    [Fact]
+    public async Task V4_Upgrade_Preserves_Custom_Member_Funds_Title_And_Sibling_Order()
+    {
+        await CleanMenusAsync();
+        var original = await InsertPublishedLayoutAsync(4);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var funds = await _menuRepository.GetAsync(original["collection-member-funds"].Id);
+            funds.SetTitle("项目余额");
+            var withdrawal = await _menuRepository.GetAsync(original["collection-withdrawals"].Id);
+            withdrawal.SetOrderNo(42);
+            var adjustment = await _menuRepository.GetAsync(original["finance-balance-adjustments"].Id);
+            adjustment.SetOrderNo(7);
+        });
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        await WithUnitOfWorkAsync(async () =>
+        {
+            (await _menuRepository.GetAsync(original["collection-member-funds"].Id)).Title.ShouldBe("项目余额");
+            (await _menuRepository.GetAsync(original["collection-withdrawals"].Id)).OrderNo.ShouldBe(42);
+            (await _menuRepository.GetAsync(original["finance-balance-adjustments"].Id)).OrderNo.ShouldBe(7);
+        });
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public async Task Published_Layouts_Upgrade_To_V5_Without_Replacing_Ids_Paths_Or_Package_References(int version)
+    {
+        await CleanMenusAsync();
+        var original = await InsertPublishedLayoutAsync(version);
+        var package = new TenantPackage(_guidGenerator.Create(), "版本升级配置套餐");
+        package.SetMenus([original["finance-rules"].Id], _guidGenerator);
+        var packages = GetRequiredService<IRepository<TenantPackage, Guid>>();
+        await WithUnitOfWorkAsync(() => packages.InsertAsync(package));
+
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var current = (await _menuRepository.GetListAsync()).ToDictionary(x => x.GetTemplateKey()!);
+            foreach (var (key, old) in original)
+            {
+                current[key].Id.ShouldBe(old.Id);
+                current[key].Path.ShouldBe(old.Path);
+                current[key].GetTemplateVersion().ShouldBe(5);
+            }
+            current["collection-orders"].ParentId.ShouldBe(current["business"].Id);
+            current["operations-payments"].ParentId.ShouldBe(current["financial-management"].Id);
+            current["web3-operations"].ParentId.ShouldBe(current["financial-management"].Id);
+            current["collection-withdrawals"].ParentId.ShouldBe(current["user-funds"].Id);
+            current["collection-withdrawals"].IsHide.ShouldBeFalse();
+            current["collection-withdrawals"].IsHostOnlyTemplate().ShouldBeTrue();
+            current["collection-withdrawals"].PermissionName.ShouldBeNull();
+            current["collection-withdrawals"].GetAnyPermissionNames().ShouldBe(
+                ["AbpAdmin.Collection.WithdrawAdmin", "AbpAdmin.Collection.Network.Admin", "SettingUi.ShowSettingPage"]);
+            current["operations-payments"].GetAnyPermissionNames().ShouldContain("AbpAdmin.Collection.Collections");
+            current["business"].IsHide.ShouldBeFalse();
+            current["order-payments"].ParentId.ShouldBe(current["business"].Id);
+            current["order-payments"].IsHide.ShouldBeTrue();
+            current["financial-management"].Title.ShouldBe("资金与财务");
+            current["administration"].OrderNo.ShouldBe(300);
+            current["system"].OrderNo.ShouldBe(400);
+            current["finance-overview"].PermissionName.ShouldBeNull();
+            current["finance-overview"].GetAnyPermissionNames().ShouldContain("Finance.Rule.View");
+            current["finance-rules"].IsHide.ShouldBeTrue();
+            (await packages.WithDetailsAsync(x => x.Menus)).Single(x => x.Id == package.Id).Menus.Single().TemplateMenuId
+                .ShouldBe(original["finance-rules"].Id);
+        });
+    }
+
+    [Fact]
+    public async Task V1_Upgrade_Preserves_Custom_Fields_And_Keeps_Custom_Trading_Descendants_In_Business()
+    {
+        await CleanMenusAsync();
+        var original = await InsertPublishedLayoutAsync(1);
+        var customChild = LegacyMenu(original["order-payments"].Id, MenuTypeEnum.Menu,
+            "项目自己的业务", "custom-work", "/custom-work", 123);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var finance = await _menuRepository.GetAsync(original["financial-management"].Id);
+            finance.SetTitle("项目资金台");
+            finance.SetIcon("customIcon");
+            finance.SetOrderNo(2345);
+            await _menuRepository.UpdateAsync(finance);
+            await _menuRepository.InsertAsync(customChild);
+        });
+
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        var visible = await WithUnitOfWorkAsync(() => _myMenuAppService.GetAsync());
+        visible.Items.ShouldNotContain(x => x.Path == "/order-payments" || x.Path == customChild.Path);
+        var business = visible.Items.Single(x => x.Path == "/business");
+        business.Children.Single(x => x.Path == "/order-payments").Children.ShouldContain(x => x.Path == customChild.Path);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var finance = await _menuRepository.GetAsync(original["financial-management"].Id);
+            finance.Title.ShouldBe("项目资金台");
+            finance.Icon.ShouldBe("customIcon");
+            finance.OrderNo.ShouldBe(2345);
+            (await _menuRepository.GetAsync(customChild.Id)).ParentId.ShouldBe(original["order-payments"].Id);
+        });
+    }
+
+    [Fact]
+    public async Task V1_Upgrade_Does_Not_Reenable_Children_From_Disabled_Trading_Ancestor_Or_Move_Custom_Parents()
+    {
+        await CleanMenusAsync();
+        var original = await InsertPublishedLayoutAsync(1);
+        var customParent = LegacyMenu(null, MenuTypeEnum.Catalog, "自定义分组", "custom-group", "/custom-group", 150);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            await _menuRepository.InsertAsync(customParent);
+            var trading = await _menuRepository.GetAsync(original["order-payments"].Id);
+            trading.Disable();
+            await _menuRepository.UpdateAsync(trading);
+            var payments = await _menuRepository.GetAsync(original["operations-payments"].Id);
+            payments.SetParent(customParent.Id);
+            await _menuRepository.UpdateAsync(payments);
+        });
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        await WithUnitOfWorkAsync(async () =>
+        {
+            (await _menuRepository.GetAsync(original["collection-orders"].Id)).ParentId.ShouldBe(original["order-payments"].Id);
+            (await _menuRepository.GetAsync(original["web3-operations"].Id)).ParentId.ShouldBe(original["order-payments"].Id);
+            (await _menuRepository.GetAsync(original["operations-payments"].Id)).ParentId.ShouldBe(customParent.Id);
+        });
+        var visible = await WithUnitOfWorkAsync(() => _myMenuAppService.GetAsync());
+        Flatten(visible.Items).ShouldNotContain(x => x.Path == "/collection/orders" || x.Path == "/web3/operations");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task Legacy_Custom_Settings_Stay_In_Platform_While_Independent_Custom_Roots_Are_Preserved(int version)
+    {
+        await CleanMenusAsync();
+        var original = await InsertPublishedLayoutAsync(version);
+        var customSettings = LegacyMenu(original["configuration"].Id, MenuTypeEnum.Menu,
+            "第三方模块参数", "custom-settings", "/custom-settings", 1500);
+        var independent = LegacyMenu(null, MenuTypeEnum.Menu, "独立工作区", "independent", "/independent", 2000);
+        await WithUnitOfWorkAsync(() => _menuRepository.InsertManyAsync([customSettings, independent]));
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        var visible = await WithUnitOfWorkAsync(() => _myMenuAppService.GetAsync());
+        visible.Items.ShouldNotContain(x => x.Path == "/configuration" || x.Path == customSettings.Path);
+        Flatten(visible.Items.Single(x => x.Path == "/administration").Children)
+            .ShouldContain(x => x.Path == customSettings.Path);
+        visible.Items.ShouldContain(x => x.Path == independent.Path);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var compatibilityRoot = await _menuRepository.GetAsync(original["configuration"].Id);
+            compatibilityRoot.ParentId.ShouldBe(original["administration"].Id);
+            compatibilityRoot.IsHide.ShouldBe(version == 1);
+            (await _menuRepository.GetAsync(customSettings.Id)).ParentId.ShouldBe(compatibilityRoot.Id);
+            (await _menuRepository.GetAsync(independent.Id)).ParentId.ShouldBeNull();
+        });
+    }
+
+    [Fact]
+    public async Task Explicit_Configuration_Package_Keeps_Only_The_Selected_Compatibility_Page()
+    {
+        await CleanMenusAsync();
+        var original = await InsertPublishedLayoutAsync(1);
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            await WithUnitOfWorkAsync(() => _menuManager.EnsureTenantMenusAsync(_currentTenant.Id!.Value,
+                [original["finance-rules"].Id]));
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var menus = await _menuRepository.GetListAsync();
+                var leaf = menus.Single(x => x.Type == MenuTypeEnum.Menu);
+                leaf.Path.ShouldBe("/finance/rules");
+                leaf.PermissionName.ShouldBe("Finance.Rule.View");
+                leaf.IsHide.ShouldBeFalse();
+                menus.ShouldNotContain(x => x.Path == "/finance/overview" || x.Path == "/finance/vouchers");
+            });
+        }
+    }
+
+    [Fact]
+    public async Task V1_Tenant_Config_Snapshot_Keeps_Selected_Leaves_And_Their_Permissions()
+    {
+        await CleanMenusAsync();
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            var original = await InsertPublishedLayoutAsync(1, ["financial-management", "finance", "finance-rules"]);
+            await WithUnitOfWorkAsync(() => _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value));
+            await WithUnitOfWorkAsync(() => _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value));
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var menus = await _menuRepository.GetListAsync();
+                menus.Count.ShouldBe(3);
+                var rules = menus.Single(x => x.Type == MenuTypeEnum.Menu);
+                rules.Id.ShouldBe(original["finance-rules"].Id);
+                rules.IsHide.ShouldBeFalse();
+                rules.PermissionName.ShouldBe("Finance.Rule.View");
+                menus.Single(x => x.GetTemplateKey() == "financial-management").Title.ShouldBe("资金与财务");
+            });
+        }
+    }
+
+    [Fact]
+    public async Task V3_Upgrade_Preserves_Custom_Workspace_And_Withdrawal_Fields()
+    {
+        await CleanMenusAsync();
+        var original = await InsertPublishedLayoutAsync(3);
+        var customParent = await CreateMenuAsync("自定义资金目录");
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var payment = await _menuRepository.GetAsync(original["operations-payments"].Id);
+            payment.SetTitle("我的收款");
+            payment.SetAnyPermissionNames(["Custom.Payments"]);
+            var withdrawal = await _menuRepository.GetAsync(original["collection-withdrawals"].Id);
+            withdrawal.SetParent(customParent.Id);
+            withdrawal.SetTitle("我的提现");
+            withdrawal.SetOrderNo(9876);
+            withdrawal.SetPermissionName("Custom.Withdrawals");
+        });
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var payment = await _menuRepository.GetAsync(original["operations-payments"].Id);
+            payment.Title.ShouldBe("我的收款");
+            payment.GetAnyPermissionNames().ShouldBe(["Custom.Payments"]);
+            var withdrawal = await _menuRepository.GetAsync(original["collection-withdrawals"].Id);
+            withdrawal.ParentId.ShouldBe(customParent.Id);
+            withdrawal.Title.ShouldBe("我的提现");
+            withdrawal.OrderNo.ShouldBe(9876);
+            withdrawal.PermissionName.ShouldBe("Custom.Withdrawals");
+        });
+    }
+
+    [Fact]
+    public async Task V3_Tenant_Upgrade_Does_Not_Add_Host_Leaves_Or_Expand_Selected_Permissions()
+    {
+        await CleanMenusAsync();
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            var original = await InsertPublishedLayoutAsync(3, ["financial-management", "operations-payments"]);
+            await WithUnitOfWorkAsync(() => _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value));
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var stored = await _menuRepository.GetListAsync();
+                stored.Select(x => x.Id).OrderBy(x => x).ShouldBe(original.Values.Select(x => x.Id).OrderBy(x => x));
+                stored.Single(x => x.GetTemplateKey() == "operations-payments").GetAnyPermissionNames()
+                    .ShouldBe(["AbpAdmin.Collection.Payments.View", "SettingUi.ShowSettingPage"]);
+            });
+            var visible = await WithUnitOfWorkAsync(() => _myMenuAppService.GetAsync());
+            Flatten(visible.Items).ShouldNotContain(x => x.Path == "/operations/payments" || x.Path == "/collection/withdrawals");
+        }
+    }
+
+    private async Task<Dictionary<string, Menu>> InsertPublishedLayoutAsync(int version, string[]? selectedKeys = null)
+    {
+        var definitions = (version switch
+            {
+                0 => MenuTemplateDefinition.PreviousLayout,
+                1 => MenuTemplateDefinition.Version1Layout,
+                2 => MenuTemplateDefinition.Version2Layout,
+                3 => MenuTemplateDefinition.Version3Layout,
+                4 => MenuTemplateDefinition.Version4Layout,
+                _ => throw new ArgumentOutOfRangeException(nameof(version))
+            })
+            .Where(x => x.Key != "biz-template-data-scope" && (selectedKeys == null || selectedKeys.Contains(x.Key))).ToArray();
+        var ids = definitions.ToDictionary(x => x.Key, _ => _guidGenerator.Create());
+        var menus = definitions.ToDictionary(x => x.Key, x =>
+        {
+            var menu = new Menu(ids[x.Key], _currentTenant.Id, x.ParentKey == null ? null : ids[x.ParentKey],
+                x.Type, x.Title, x.Name, x.Path, x.Icon, x.OrderNo, x.IsHide, true, x.PermissionName);
+            menu.SetAnyPermissionNames(x.AnyPermissionNames ?? []);
+            if (version > 0) menu.SetTemplate(x.Key, version, x.HostOnly);
+            return menu;
+        });
+        await WithUnitOfWorkAsync(() => _menuRepository.InsertManyAsync(menus.Values));
+        return menus;
+    }
+
+    [Fact]
+    public async Task V2_Tenant_Workspace_Upgrade_Fixes_Default_Subview_Permissions_Without_Adding_Leaves()
+    {
+        await CleanMenusAsync();
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            var original = await InsertPublishedLayoutAsync(2,
+                ["financial-management", "finance", "finance-vouchers", "administration", "configuration-integrations", "webhooks"]);
+            await WithUnitOfWorkAsync(() => _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value));
+            await WithUnitOfWorkAsync(() => _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value));
+
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var current = (await _menuRepository.GetListAsync()).ToDictionary(x => x.GetTemplateKey()!);
+                current.Keys.Order().ShouldBe(original.Keys.Order());
+                foreach (var key in new[] { "finance-vouchers", "webhooks" })
+                {
+                    var expected = MenuTemplateDefinition.All.Single(x => x.Key == key);
+                    current[key].Id.ShouldBe(original[key].Id);
+                    current[key].PermissionName.ShouldBeNull();
+                    current[key].GetAnyPermissionNames().ShouldBe(expected.AnyPermissionNames!);
+                    current[key].GetTemplateVersion().ShouldBe(5);
+                }
+            });
+            var service = MenuServiceWithPermissions(new HashSet<string> { "Finance.Adjust.Approve", "AbpAdmin.Webhooks.SendRecords" });
+            var visible = await WithUnitOfWorkAsync(() => service.GetAsync());
+            Flatten(visible.Items).Where(x => x.Children.Count == 0).Select(x => x.Path)
+                .ShouldBe(["/finance/vouchers", "/administration/webhooks"]);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task V2_Workspace_Upgrade_Preserves_Either_Custom_Permission_Field(bool tenant, bool customAnyPermissions)
+    {
+        await CleanMenusAsync();
+        using (_currentTenant.Change(tenant ? Guid.NewGuid() : null))
+        {
+            var original = await InsertPublishedLayoutAsync(2,
+                ["financial-management", "finance", "finance-vouchers", "administration", "configuration-integrations", "webhooks"]);
+            await WithUnitOfWorkAsync(async () =>
+            {
+                foreach (var key in new[] { "finance-vouchers", "webhooks" })
+                {
+                    var menu = await _menuRepository.GetAsync(original[key].Id);
+                    if (customAnyPermissions) menu.SetAnyPermissionNames(["Project.RestrictedWorkspace"]);
+                    else menu.SetPermissionName("Project.RestrictedWorkspace");
+                    await _menuRepository.UpdateAsync(menu);
+                }
+            });
+            await WithUnitOfWorkAsync(() => tenant
+                ? _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value)
+                : _menuManager.SeedHostTemplateAsync());
+
+            await WithUnitOfWorkAsync(async () =>
+            {
+                foreach (var key in new[] { "finance-vouchers", "webhooks" })
+                {
+                    var menu = await _menuRepository.GetAsync(original[key].Id);
+                    var baseline = MenuTemplateDefinition.Version2Layout.Single(x => x.Key == key);
+                    menu.PermissionName.ShouldBe(customAnyPermissions ? baseline.PermissionName : "Project.RestrictedWorkspace");
+                    menu.GetAnyPermissionNames().ShouldBe(customAnyPermissions ? ["Project.RestrictedWorkspace"] : []);
+                    menu.GetTemplateVersion().ShouldBe(5);
+                }
+            });
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Reconcile_Requires_All_Scope_When_Agent_Scope_Is_Granted(bool allScope)
+    {
+        await CleanMenusAsync();
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        var permissions = new HashSet<string> { "Finance.Ledger.View", "Finance.Scope.Agent" };
+        if (allScope) permissions.Add("Finance.Scope.All");
+        var service = MenuServiceWithPermissions(permissions);
+        var result = await WithUnitOfWorkAsync(() => service.GetAsync());
+        Flatten(result.Items).Any(x => x.Path == "/finance/reconcile").ShouldBe(allScope);
+        Flatten(result.Items).ShouldContain(x => x.Path == "/finance/overview");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Tenant_Old_Overview_Uses_Its_Original_Ledger_Permission_And_Never_SettingsRead_Alone(bool ledgerPermission)
+    {
+        await CleanMenusAsync();
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            await InsertPublishedLayoutAsync(1, ["financial-management", "finance", "finance-overview"]);
+            await WithUnitOfWorkAsync(() => _menuManager.UpgradeTenantTemplateAsync(_currentTenant.Id!.Value));
+            var permissions = new HashSet<string> { "SettingUi.ShowSettingPage" };
+            if (ledgerPermission) permissions.Add("Finance.Ledger.View");
+            var service = MenuServiceWithPermissions(permissions);
+            var result = await WithUnitOfWorkAsync(() => service.GetAsync());
+            Flatten(result.Items).Any(x => x.Path == "/finance/overview").ShouldBe(ledgerPermission);
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var overview = (await _menuRepository.GetListAsync()).Single(x => x.Path == "/finance/overview");
+                overview.PermissionName.ShouldBe("Finance.Ledger.View");
+                overview.GetAnyPermissionNames().ShouldBeEmpty();
+            });
+        }
+    }
+
+    private MyMenuAppService MenuServiceWithPermissions(ISet<string> grantedPermissions)
+    {
+        var checker = Substitute.For<IPermissionChecker>();
+        checker.IsGrantedAsync(Arg.Any<string[]>()).Returns(call =>
+        {
+            var result = new MultiplePermissionGrantResult();
+            foreach (var name in call.Arg<string[]>())
+                result.Result[name] = grantedPermissions.Contains(name) ? PermissionGrantResult.Granted : PermissionGrantResult.Prohibited;
+            return Task.FromResult(result);
+        });
+        return new MyMenuAppService(_menuRepository, _menuManager, checker)
+        {
+            LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>()
+        };
+    }
+
+    [Theory]
+    [InlineData("finance-overview", "/finance/overview/")]
+    [InlineData("finance-overview", "/finance/overview?settings=posting")]
+    [InlineData("finance-overview", "/finance/overview#summary")]
+    [InlineData("finance-reconcile", "/finance/reconcile/")]
+    [InlineData("finance-reconcile", "/finance/reconcile?tab=overview")]
+    [InlineData("finance-reconcile", "/finance/reconcile#summary")]
+    public async Task BuiltIn_Finance_Constraints_Still_Apply_To_Equivalent_Deep_Links(string key, string path)
+    {
+        await CleanMenusAsync();
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            var original = await InsertPublishedLayoutAsync(2, ["financial-management", "finance", key]);
+            await WithUnitOfWorkAsync(async () =>
+            {
+                var menu = await _menuRepository.GetAsync(original[key].Id);
+                menu.SetPath(path);
+                await _menuRepository.UpdateAsync(menu);
+            });
+            var permissions = key == "finance-overview"
+                ? new HashSet<string> { "SettingUi.ShowSettingPage" }
+                : new HashSet<string> { "Finance.Ledger.View", "Finance.Scope.Agent" };
+            var visible = await WithUnitOfWorkAsync(() => MenuServiceWithPermissions(permissions).GetAsync());
+            Flatten(visible.Items).ShouldNotContain(x => x.Path == path);
+        }
+    }
+
+    [Theory]
+    [InlineData("finance-overview")]
+    [InlineData("finance-reconcile")]
+    public async Task Repurposed_Finance_Template_Node_Uses_Its_Custom_Route_And_Permission(string key)
+    {
+        await CleanMenusAsync();
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            var original = await InsertPublishedLayoutAsync(2, ["financial-management", "finance", key]);
+            await WithUnitOfWorkAsync(() => _menuAppService.UpdateAsync(original[key].Id, new MenuUpdateDto
+            {
+                Type = MenuTypeEnum.Menu,
+                Title = "我的配置入口",
+                ParentId = original["finance"].Id,
+                Path = "/administration/identity/security-logs?settings=policy",
+                PermissionName = "SettingUi.ShowSettingPage",
+                IsEnabled = true
+            }));
+            var permissions = new HashSet<string> { "SettingUi.ShowSettingPage", "Finance.Scope.Agent" };
+            var visible = await WithUnitOfWorkAsync(() => MenuServiceWithPermissions(permissions).GetAsync());
+            Flatten(visible.Items).ShouldContain(x => x.Path == "/administration/identity/security-logs?settings=policy");
+            var denied = await WithUnitOfWorkAsync(() => MenuServiceWithPermissions(new HashSet<string>()).GetAsync());
+            Flatten(denied.Items).ShouldNotContain(x => x.Path == "/administration/identity/security-logs?settings=policy");
+        }
+    }
+
+    [Theory]
+    [InlineData("AbpAdmin.ModuleManagement")]
+    [InlineData("AbpAdmin.ModuleManagement.Update")]
+    public async Task Tenant_Module_Only_Role_Never_Receives_Host_Module_Management(string permission)
+    {
+        await CleanMenusAsync();
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            var visible = await WithUnitOfWorkAsync(() => MenuServiceWithPermissions(new HashSet<string> { permission }).GetAsync());
+            Flatten(visible.Items).Select(x => x.Path).ShouldBe(["/welcome"]);
+        }
+    }
+
+    [Fact]
+    public async Task Tenant_Settings_Only_Role_Receives_Only_Its_Usable_Configuration_Workspaces()
+    {
+        await CleanMenusAsync();
+        await WithUnitOfWorkAsync(() => _menuManager.SeedHostTemplateAsync());
+        using (_currentTenant.Change(Guid.NewGuid()))
+        {
+            var visible = await WithUnitOfWorkAsync(() => MenuServiceWithPermissions(
+                new HashSet<string> { "SettingUi.ShowSettingPage" }).GetAsync());
+            Flatten(visible.Items).Where(x => x.Children.Count == 0).Select(x => x.Path).ShouldBe(
+                ["/welcome", "/administration/identity/security-logs", "/system/notifications", "/administration/audit-logs"]);
+        }
     }
 
     [Fact]
@@ -613,27 +1000,30 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
     [Theory]
     [InlineData("AbpAdmin.Collection.Collections", new[]
     {
-        "/welcome", "/order-payments", "/web3/operations",
-        "/financial-management", "/user-funds", "/collection/member-funds"
+        "/welcome", "/financial-management", "/operations/payments", "/user-funds", "/collection/member-funds", "/web3/operations"
     })]
     [InlineData("AbpAdmin.Collection.Payments.View", new[]
     {
-        "/welcome", "/order-payments", "/operations/payments"
+        "/welcome", "/financial-management", "/operations/payments"
     })]
-    [InlineData("AbpAdmin.Ordering.Orders", new[] { "/welcome", "/order-payments", "/collection/orders" })]
-    [InlineData("AbpAdmin.Ordering.Orders.ViewAll", new[] { "/welcome", "/order-payments", "/collection/orders" })]
+    [InlineData("AbpAdmin.Ordering.Orders", new[] { "/welcome", "/business", "/collection/orders" })]
+    [InlineData("AbpAdmin.Ordering.Orders.ViewAll", new[] { "/welcome", "/business", "/collection/orders" })]
     [InlineData("SettingUi.ShowSettingPage", new[]
     {
-        "/welcome", "/configuration", "/configuration/payments", "/web3/config", "/finance/configuration", "/finance/settings",
-        "/administration/base-settings", "/administration/settings"
+        "/welcome", "/business", "/collection/orders", "/financial-management", "/operations/payments",
+        "/user-funds", "/collection/withdrawals", "/web3/operations",
+        "/finance", "/finance/overview", "/administration", "/administration/openiddict",
+        "/administration/identity/security-logs", "/administration/saas", "/administration/saas/tenants",
+        "/administration/notifications", "/system/notifications",
+        "/system", "/system/audit", "/administration/audit-logs"
     })]
     [InlineData("AbpAdmin.Collection.Network.Admin", new[]
     {
-        "/welcome", "/order-payments", "/web3/operations", "/configuration", "/web3/config"
+        "/welcome", "/financial-management", "/operations/payments", "/user-funds", "/collection/withdrawals", "/web3/operations"
     })]
     [InlineData("AbpAdmin.Collection.WithdrawAdmin", new[]
     {
-        "/welcome", "/order-payments", "/web3/operations", "/configuration", "/web3/config"
+        "/welcome", "/financial-management", "/user-funds", "/collection/withdrawals", "/web3/operations"
     })]
     [InlineData("AbpAdmin.Collection.BalanceAdjustments.View", new[]
     {
@@ -641,10 +1031,22 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
     })]
     [InlineData("Finance.BizDoc.View", new[] { "/welcome", "/financial-management", "/finance", "/finance/biz-docs" })]
     [InlineData("Finance.Voucher.View", new[] { "/welcome", "/financial-management", "/finance", "/finance/vouchers" })]
-    [InlineData("Finance.Rule.View", new[] { "/welcome", "/configuration", "/finance/configuration", "/finance/rules" })]
-    [InlineData("AbpAdmin.Languages", new[] { "/welcome", "/configuration", "/configuration/content", "/administration/localization/languages" })]
-    [InlineData("AbpAdmin.Webhooks.Subscriptions", new[] { "/welcome", "/configuration", "/configuration/integrations", "/administration/webhooks" })]
-    public async Task MyMenu_Keeps_Separate_Channel_Groups_With_Only_The_Granted_Children(
+    [InlineData("Finance.Adjust.Create", new[] { "/welcome", "/financial-management", "/finance", "/finance/vouchers" })]
+    [InlineData("Finance.Adjust.Submit", new[] { "/welcome", "/financial-management", "/finance", "/finance/vouchers" })]
+    [InlineData("Finance.Adjust.Approve", new[] { "/welcome", "/financial-management", "/finance", "/finance/vouchers" })]
+    [InlineData("Finance.Adjust.Reject", new[] { "/welcome", "/financial-management", "/finance", "/finance/vouchers" })]
+    [InlineData("Finance.Adjust.Reverse", new[] { "/welcome", "/financial-management", "/finance", "/finance/vouchers" })]
+    [InlineData("Finance.Rule.View", new[] { "/welcome", "/financial-management", "/finance", "/finance/overview" })]
+    [InlineData("Finance.Period.View", new[] { "/welcome", "/financial-management", "/finance", "/finance/overview" })]
+    [InlineData("Finance.Account.Manage", new[] { "/welcome", "/financial-management", "/finance", "/finance/overview" })]
+    [InlineData("AbpAdmin.Languages", new[] { "/welcome", "/administration", "/administration/localization", "/administration/localization/languages" })]
+    [InlineData("SettingManagement.TimeZone", new[] { "/welcome", "/administration", "/administration/localization", "/administration/localization/languages" })]
+    [InlineData("SettingManagement.Emailing", new[] { "/welcome", "/administration", "/administration/notifications", "/system/notifications" })]
+    [InlineData("AbpAdmin.Webhooks.Subscriptions", new[] { "/welcome", "/administration", "/configuration/integrations", "/administration/webhooks" })]
+    [InlineData("AbpAdmin.Webhooks.SendRecords", new[] { "/welcome", "/administration", "/configuration/integrations", "/administration/webhooks" })]
+    [InlineData("AbpAdmin.ModuleManagement", new[] { "/welcome", "/administration", "/administration/modules" })]
+    [InlineData("No.Permissions.Granted", new[] { "/welcome" })]
+    public async Task MyMenu_Shows_Only_Workspace_Entries_Available_To_The_Current_Role(
         string grantedPermission, string[] expectedPaths)
     {
         await CleanMenusAsync();
@@ -752,7 +1154,7 @@ public abstract class MenuAppServiceTests<TStartupModule> : AbpAdminApplicationT
             var paths = Flatten(myMenu.Items).Select(x => x.Path).ToList();
             paths.ShouldContain("/system/server-monitor");
             paths.ShouldNotContain("/collection/orders");
-            paths.ShouldContain("/administration/settings");
+            paths.ShouldNotContain("/administration/settings");
             paths.ShouldNotContain("/operations/payments");
             paths.ShouldNotContain("/configuration/payments");
             paths.ShouldNotContain("/collection/order-settings");

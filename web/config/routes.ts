@@ -51,7 +51,7 @@ export default [
           {
             path: '/administration/saas/tenants',
             name: 'tenants',
-            access: 'canManageTenants',
+            access: 'canOpenTenantWorkspace',
             component: './tenants',
           },
           {
@@ -101,7 +101,7 @@ export default [
           {
             path: '/administration/identity/security-logs',
             name: 'security-logs',
-            access: 'canManageSecurityLogs',
+            access: 'canOpenLoginSecurityWorkspace',
             component: './identity/security-logs',
           },
           {
@@ -116,7 +116,7 @@ export default [
         path: '/administration/webhooks',
         name: 'webhooks',
         icon: 'api',
-        access: 'canManageWebhooks',
+        access: 'canOpenWebhookWorkspace',
         component: './webhooks',
       },
       {
@@ -159,7 +159,7 @@ export default [
           {
             path: '/administration/localization/languages',
             name: 'languages',
-            access: 'canManageLanguages',
+            access: 'canOpenLanguageWorkspace',
             component: './languages',
           },
           {
@@ -181,7 +181,7 @@ export default [
         path: '/administration/audit-logs',
         name: 'audit-logs',
         icon: 'fileSearch',
-        access: 'canManageAuditLogs',
+        access: 'canOpenAuditWorkspace',
         component: './audit-logs',
       },
       {
@@ -206,10 +206,18 @@ export default [
         component: './menus',
       },
       {
+        path: '/administration/modules',
+        name: 'modules',
+        icon: 'appstore',
+        access: 'canViewModuleManagement',
+        component: './modules',
+      },
+      {
         path: '/administration/settings',
         name: 'settings',
+        hideInMenu: true,
         icon: 'setting',
-        access: 'canManageSettings',
+        access: 'canOpenCompatibilitySettings',
         component: './settings',
       },
     ],
@@ -237,7 +245,7 @@ export default [
         path: '/system/notifications',
         name: 'notifications',
         icon: 'bell',
-        access: 'canManageNotifications',
+        access: 'canOpenNotificationWorkspace',
         component: './notifications',
       },
       {
@@ -289,7 +297,7 @@ export default [
       {
         path: '/finance/overview',
         name: 'finance-overview',
-        access: 'canViewFinanceLedger',
+        access: 'canOpenFinanceOverview',
         component: './finance/overview',
       },
       {
@@ -314,7 +322,7 @@ export default [
       {
         path: '/finance/vouchers',
         name: 'finance-vouchers',
-        access: 'canViewFinanceVouchers',
+        access: 'canOpenFinanceVouchersWorkspace',
         component: './finance/vouchers',
       },
       {
@@ -333,31 +341,32 @@ export default [
         path: '',
         name: 'finance-config',
         access: 'canViewFinanceConfiguration',
+        hideInMenu: true,
         routes: [
-          { path: '/finance/configuration', redirect: '/finance/accounts' },
+          { path: '/finance/configuration', component: './finance/overview/legacy-configuration' },
           {
             path: '/finance/accounts',
             name: 'finance-accounts',
             access: 'canViewFinanceAccounts',
-            component: './finance/accounts',
+            component: './finance/overview/legacy-configuration',
           },
           {
             path: '/finance/rules',
             name: 'finance-rules',
             access: 'canViewFinanceRules',
-            component: './finance/rules',
+            component: './finance/overview/legacy-configuration',
           },
           {
             path: '/finance/settings',
             name: 'finance-settings',
             access: 'canManagePaymentSettings',
-            component: './settings/channel',
+            component: './finance/overview/legacy-configuration',
           },
           {
             path: '/finance/period',
             name: 'finance-period',
             access: 'canViewFinancePeriod',
-            component: './finance/period',
+            component: './finance/overview/legacy-configuration',
           },
         ],
       },
@@ -374,20 +383,20 @@ export default [
       {
         path: '/collection/orders',
         name: 'collection-orders',
-        access: 'canViewOrders',
+        access: 'canOpenOrderWorkspace',
         component: './ordering',
       },
       {
         path: '/collection/order-settings',
-        redirect: '/configuration/payments?view=order',
+        component: './workspace/legacy-route', hideInMenu: true,
       },
       {
         path: '/operations/payments',
         name: 'operations-payments',
-        access: 'canViewCollectionPayments',
+        access: 'canOpenPaymentWorkspace',
         component: './payments',
       },
-      { path: '/administration/payments', redirect: '/operations/payments' },
+      { path: '/administration/payments', component: './workspace/legacy-route', hideInMenu: true },
       {
         path: '/collection/member-funds',
         name: 'collection-member-funds',
@@ -395,8 +404,14 @@ export default [
         component: './collection/member-funds',
       },
       {
+        path: '/collection/withdrawals',
+        name: 'collection-withdrawals',
+        access: 'canOpenWithdrawalWorkspace',
+        component: './collection/withdrawals',
+      },
+      {
         path: '/collection/settings',
-        redirect: '/configuration/payments?view=balance',
+        component: './workspace/legacy-route', hideInMenu: true,
       },
     ],
   },
@@ -409,7 +424,7 @@ export default [
       {
         path: '/web3/operations',
         name: 'web3-operations',
-        access: 'canViewWeb3Operations',
+        access: 'canViewWeb3',
         component: './collection/operations',
       },
       {
@@ -430,26 +445,22 @@ export default [
       },
       {
         path: '/collection/dashboard',
-        redirect: '/web3/operations?view=overview',
+        component: './workspace/legacy-route', hideInMenu: true,
       },
       {
         path: '/collection/deposits',
-        redirect: '/web3/operations?view=deposits',
+        component: './workspace/legacy-route', hideInMenu: true,
       },
-      { path: '/collection/sweeps', redirect: '/web3/operations?view=sweeps' },
-      { path: '/collection/vault', redirect: '/web3/operations?view=vault' },
-      {
-        path: '/collection/withdrawals',
-        redirect: '/web3/operations?view=withdrawals',
-      },
+      { path: '/collection/sweeps', component: './workspace/legacy-route', hideInMenu: true },
+      { path: '/collection/vault', component: './workspace/legacy-route', hideInMenu: true },
       {
         path: '/collection/hot-wallet',
-        redirect: '/web3/operations?view=hot-wallet',
+        component: './workspace/legacy-route', hideInMenu: true,
       },
-      { path: '/web3/configuration', redirect: '/web3/config' },
-      { path: '/web3/settings', redirect: '/web3/config?view=deposit' },
-      { path: '/collection/network', redirect: '/web3/config?view=network' },
-      { path: '/collection/wallets', redirect: '/web3/config?view=wallets' },
+      { path: '/web3/configuration', component: './workspace/legacy-route', hideInMenu: true },
+      { path: '/web3/settings', component: './workspace/legacy-route', hideInMenu: true },
+      { path: '/collection/network', component: './workspace/legacy-route', hideInMenu: true },
+      { path: '/collection/wallets', component: './workspace/legacy-route', hideInMenu: true },
     ],
   },
   {
@@ -457,16 +468,17 @@ export default [
     name: 'configuration-payments',
     access: 'canManagePaymentSettings',
     component: './settings/channel',
+    hideInMenu: true,
   },
-  { path: '/alipay', redirect: '/operations/payments?view=alipay' },
-  { path: '/alipay/payments', redirect: '/operations/payments?view=alipay' },
-  { path: '/alipay/settings', redirect: '/configuration/payments?view=alipay' },
-  { path: '/wechat', redirect: '/operations/payments?view=wechat' },
-  { path: '/wechat/payments', redirect: '/operations/payments?view=wechat' },
-  { path: '/wechat/settings', redirect: '/configuration/payments?view=wechat' },
-  { path: '/stripe', redirect: '/operations/payments?view=stripe' },
-  { path: '/stripe/payments', redirect: '/operations/payments?view=stripe' },
-  { path: '/stripe/settings', redirect: '/configuration/payments?view=stripe' },
+  { path: '/alipay', component: './workspace/legacy-route', hideInMenu: true },
+  { path: '/alipay/payments', component: './workspace/legacy-route', hideInMenu: true },
+  { path: '/alipay/settings', component: './workspace/legacy-route', hideInMenu: true },
+  { path: '/wechat', component: './workspace/legacy-route', hideInMenu: true },
+  { path: '/wechat/payments', component: './workspace/legacy-route', hideInMenu: true },
+  { path: '/wechat/settings', component: './workspace/legacy-route', hideInMenu: true },
+  { path: '/stripe', component: './workspace/legacy-route', hideInMenu: true },
+  { path: '/stripe/payments', component: './workspace/legacy-route', hideInMenu: true },
+  { path: '/stripe/settings', component: './workspace/legacy-route', hideInMenu: true },
   {
     path: '/account/center',
     name: 'account-center',
@@ -562,7 +574,7 @@ export default [
   },
   {
     path: '/settings',
-    redirect: '/administration/settings',
+    component: './workspace/legacy-route', hideInMenu: true,
   },
   {
     path: '/background-jobs',
@@ -590,7 +602,7 @@ export default [
   },
   {
     path: '/payments',
-    redirect: '/operations/payments',
+    component: './workspace/legacy-route', hideInMenu: true,
   },
   ...(process.env.NODE_ENV === 'production'
     ? []

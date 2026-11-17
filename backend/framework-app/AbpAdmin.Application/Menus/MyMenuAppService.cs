@@ -45,7 +45,7 @@ public class MyMenuAppService : AbpAdminAppService, IMyMenuAppService
         if (CurrentTenant.Id != null)
         {
             // 租户菜单快照可能仍含宿主专属目录。移除该目录后，断链的子树会一起不可见。
-            menus.RemoveAll(menu => MenuTemplateDefinition.IsHostOnlyPath(menu.Path));
+            menus.RemoveAll(menu => menu.IsHostOnlyTemplate() || MenuTemplateDefinition.IsHostOnlyPath(menu.Path));
         }
         if (menus.Count == 0)
         {
@@ -53,8 +53,29 @@ public class MyMenuAppService : AbpAdminAppService, IMyMenuAppService
         }
 
         var grantedPermissions = await GetGrantedPermissionsAsync(menus);
+        // 内置工作区的范围限制与页面/API 保持一致；自定义节点仍按自己的权限定义计算。
+        menus.RemoveAll(menu => menu.GetTemplateKey() switch
+        {
+            "finance-reconcile" when IsTemplateRoute(menu, "finance-reconcile", "/finance/reconcile") => grantedPermissions.Contains("Finance.Scope.Agent")
+                && !grantedPermissions.Contains("Finance.Scope.All"),
+            "finance-overview" when IsTemplateRoute(menu, "finance-overview", "/finance/overview") => CurrentTenant.Id != null
+                && !menu.GetAnyPermissionNames().Append(menu.PermissionName).Any(permission =>
+                    permission != null &&
+                    permission != "SettingUi.ShowSettingPage" && grantedPermissions.Contains(permission)),
+            _ => false
+        });
         var roots = MenuVisibilityCalculator.Build(menus, grantedPermissions);
         return new ListResultDto<MyMenuItemDto>(roots);
+    }
+
+    // A template node may be repurposed through the menu editor. Apply function-specific
+    // constraints only while it still targets that function, including its deep links.
+    private static bool IsTemplateRoute(Menu menu, string key, string route)
+    {
+        if (menu.GetTemplateKey() != key || menu.Path == null) return false;
+        var suffix = menu.Path.IndexOfAny(['?', '#']);
+        var path = suffix >= 0 ? menu.Path[..suffix] : menu.Path;
+        return string.Equals(path.TrimEnd('/'), route, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>去重后批量检查菜单绑定的 ABP 权限，减少逐项调用权限提供器。</summary>
@@ -64,6 +85,10 @@ public class MyMenuAppService : AbpAdminAppService, IMyMenuAppService
             .SelectMany(menu => menu.PermissionName == null
                 ? menu.GetAnyPermissionNames()
                 : menu.GetAnyPermissionNames().Append(menu.PermissionName))
+            // 代理范围不能运行全量对账；Scope.All 可覆盖管理员同时拥有的 Scope.Agent。
+            .Concat(menus.Any(menu => IsTemplateRoute(menu, "finance-reconcile", "/finance/reconcile"))
+                ? new[] { "Finance.Scope.Agent", "Finance.Scope.All" }
+                : Array.Empty<string>())
             .Distinct()
             .ToArray();
         if (permissionNames.Length == 0)

@@ -118,6 +118,8 @@ public static class MenuVisibilityCalculator
             result.Add(new MyMenuItemDto
             {
                 Title = menu.Title,
+                IsCustomTitle = MenuTemplateDefinition.UsesCustomTitle(menu),
+                TemplateKey = menu.GetTemplateKey(),
                 Name = menu.Name,
                 Path = menu.Path,
                 Icon = menu.Icon,

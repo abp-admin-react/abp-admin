@@ -18,6 +18,19 @@ public class Menu : FullAuditedAggregateRoot<Guid>, IMultiTenant
 {
     private const string AnyPermissionNamesProperty = "AnyPermissionNames";
 
+    public string? GetTemplateKey() => this.GetProperty<string>("TemplateKey");
+
+    internal int GetTemplateVersion() => this.GetProperty<int>("TemplateVersion");
+
+    public bool IsHostOnlyTemplate() => this.GetProperty<bool>("TemplateHostOnly");
+
+    internal void SetTemplate(string key, int version, bool hostOnly)
+    {
+        this.SetProperty("TemplateKey", key);
+        this.SetProperty("TemplateVersion", version);
+        this.SetProperty("TemplateHostOnly", hostOnly);
+    }
+
     [NotMapped]
     public string[] AnyPermissionNames => GetAnyPermissionNames();
 

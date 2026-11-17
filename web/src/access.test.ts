@@ -2,6 +2,78 @@ import { describe, expect, it } from 'vitest';
 import access from './access';
 
 describe('access', () => {
+  it.each([
+    ['AbpAdmin.Collection.Payments.View', true, false, false],
+    ['AbpAdmin.Collection.Collections', true, true, false],
+    ['AbpAdmin.Collection.Network.Admin', true, true, true],
+    ['AbpAdmin.Collection.WithdrawAdmin', false, false, true],
+    ['SettingUi.ShowSettingPage', true, false, true],
+  ])('资金工作区沿用各类记录独立授权：%s', (permission, receipts, deposits, withdrawals) => {
+    const grantedPolicies = { [permission]: true };
+    expect(access({ grantedPolicies })).toMatchObject({
+      canOpenPaymentWorkspace: receipts,
+      canViewDepositRecords: deposits,
+      canOpenWithdrawalWorkspace: withdrawals,
+      canViewTrade: true,
+    });
+    expect(access({ grantedPolicies, currentTenant: { isAvailable: true } })).toMatchObject({
+      canOpenPaymentWorkspace: false,
+      canViewDepositRecords: false,
+      canOpenWithdrawalWorkspace: false,
+      canViewTrade: false,
+    });
+  });
+  it('平台只读授权允许独立页面，写入动作分别由服务端子权限控制', () => {
+    const grantedPolicies = {
+      'AbpTenantManagement.Tenants': true,
+      'AbpAdmin.Editions': true,
+      'AbpAdmin.Languages': true,
+      'AbpAdmin.TextTemplates': true,
+    };
+    const host = access({ grantedPolicies });
+    expect(host).toMatchObject({
+      canManageTenants: true,
+      canCreateTenants: false,
+      canUpdateTenants: false,
+      canDeleteTenants: false,
+      canManageTenantConnectionStrings: false,
+      canManageEditions: true,
+      canUpdateEditions: false,
+      canManageLanguages: true,
+      canCreateLanguages: false,
+      canUpdateLanguages: false,
+      canDeleteLanguages: false,
+      canManageTextTemplates: true,
+      canUpdateTextTemplates: false,
+    });
+    expect(access({
+      grantedPolicies: {
+        ...grantedPolicies,
+        'AbpTenantManagement.Tenants.Update': true,
+        'AbpAdmin.Editions.Update': true,
+        'AbpAdmin.Languages.Update': true,
+      },
+      currentTenant: { isAvailable: true },
+    })).toMatchObject({ canUpdateTenants: false, canUpdateEditions: false, canUpdateLanguages: true });
+  });
+
+  it('Webhook 发送记录权限独立进入页面', () => {
+    expect(access({ grantedPolicies: { 'AbpAdmin.Webhooks.SendRecords': true } })).toMatchObject({
+      canOpenWebhookWorkspace: true,
+      canManageWebhooks: false,
+      canManageWebhookSendRecords: true,
+    });
+  });
+
+  it('仅调账审批可进入凭证工作区，但不加载凭证接口', () => {
+    expect(access({ grantedPolicies: { 'Finance.Adjust.Approve': true } })).toMatchObject({
+      canViewFinance: true,
+      canOpenFinanceVouchersWorkspace: true,
+      canViewFinanceManualAdjusts: true,
+      canViewFinanceVouchers: false,
+    });
+  });
+
   it('用户余额调账独立授权并允许进入资金账务目录', () => {
     const grantedPolicies = {
       'AbpAdmin.Collection.BalanceAdjustments.View': true,

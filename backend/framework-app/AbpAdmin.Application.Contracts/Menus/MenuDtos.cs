@@ -127,6 +127,10 @@ public class MyMenuItemDto
 {
     public string Title { get; set; } = default!;
 
+    public bool IsCustomTitle { get; set; }
+
+    public string? TemplateKey { get; set; }
+
     public string? Name { get; set; }
 
     public string? Path { get; set; }

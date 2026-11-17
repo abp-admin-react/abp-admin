@@ -58,6 +58,8 @@ export type PermissionOptionDto = {
 
 export type MyMenuItemDto = {
   title: string;
+  isCustomTitle?: boolean;
+  templateKey?: string | null;
   name?: string | null;
   path?: string | null;
   icon?: string | null;

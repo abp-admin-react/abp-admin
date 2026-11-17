@@ -187,7 +187,7 @@ describe('工作台业务运营', () => {
       await activity.findByRole('link', { name: 'QA USDT 提现' }),
     ).toHaveAttribute(
       'href',
-      '/web3/operations?view=withdrawals&status=all&withdrawalId=withdrawal-1',
+      '/collection/withdrawals?status=all&withdrawalId=withdrawal-1',
     );
     navigate('?activity=deposits');
     expect(activity.getAllByRole('listitem')).toHaveLength(8);
@@ -195,7 +195,7 @@ describe('工作台业务运营', () => {
       activity.getAllByRole('link', { name: 'QA USDT 充值' })[0],
     ).toHaveAttribute(
       'href',
-      '/web3/operations?view=deposits&depositId=deposit-8',
+      '/operations/payments?view=deposits&depositId=deposit-8',
     );
     expect(activity.queryByText('HASH-0')).toBeNull();
     expect(activity.queryByRole('link', { name: 'QA USDT 提现' })).toBeNull();
@@ -229,10 +229,10 @@ describe('工作台业务运营', () => {
 
     const tasks = within(screen.getByRole('region', { name: '待处理' }));
     const expected = [
-      [/待审核提现.*12/, '/web3/operations?view=withdrawals&status=Pending'],
+      [/待审核提现.*12/, '/collection/withdrawals?status=Pending'],
       [
         /打款失败.*3/,
-        '/web3/operations?view=withdrawals&status=BroadcastFailed',
+        '/collection/withdrawals?status=BroadcastFailed',
       ],
       [/待审批调账.*9/, '/finance/balance-adjustments?status=Pending'],
       [/归集失败.*7/, '/web3/operations?view=sweeps&status=Failed'],

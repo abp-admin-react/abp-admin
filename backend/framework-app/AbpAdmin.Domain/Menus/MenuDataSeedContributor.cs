@@ -6,8 +6,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Menus;
 
 /// <summary>
-/// 菜单种子：仅在 Host 上下文播种全局模板（DbMigrator 会对 host 和每个租户各跑一遍种子，
-/// 租户上下文跳过——租户菜单走 MenuManager.EnsureTenantMenusAsync 懒拷贝）。
+/// 播种宿主模板并升级已有租户快照。首次创建租户菜单仍由套餐复制流程处理。
 /// </summary>
 public class MenuDataSeedContributor : IDataSeedContributor, ITransientDependency
 {
@@ -26,6 +25,6 @@ public class MenuDataSeedContributor : IDataSeedContributor, ITransientDependenc
             return _menuManager.SeedHostTemplateAsync();
         }
 
-        return Task.CompletedTask;
+        return _menuManager.UpgradeTenantTemplateAsync(context.TenantId.Value);
     }
 }

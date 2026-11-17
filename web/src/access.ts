@@ -27,6 +27,15 @@ export default function access(
     isHost && !!policies['AbpAdmin.Ordering.Orders.ViewAll'];
   const canManagePaymentSettings =
     isHost && !!policies['SettingUi.ShowSettingPage'];
+  const canViewDepositRecords =
+    isHost &&
+    (!!policies['AbpAdmin.Collection.Collections'] ||
+      !!policies['AbpAdmin.Collection.Network.Admin']);
+  const canOpenWithdrawalWorkspace =
+    canManagePaymentSettings ||
+    (isHost &&
+      (!!policies['AbpAdmin.Collection.WithdrawAdmin'] ||
+        !!policies['AbpAdmin.Collection.Network.Admin']));
   const canViewWeb3Operations =
     isHost &&
     (!!policies['AbpAdmin.Collection.Collections'] ||
@@ -39,7 +48,45 @@ export default function access(
         !!policies['AbpAdmin.Collection.WithdrawAdmin']));
   const canViewBalanceAdjustments =
     isHost && !!policies['AbpAdmin.Collection.BalanceAdjustments.View'];
+  const canManageSettings = !!policies['SettingUi.ShowSettingPage'];
+  const canManageEmailing = !!policies['SettingManagement.Emailing'];
+  const canManageTimezone = !!policies['SettingManagement.TimeZone'];
+  const canManageNotificationChannels = canManageEmailing || canManageSettings;
+  const canManageTenantPolicy = isHost && canManageSettings;
+  const canManageTenants = isHost && !!policies['AbpTenantManagement.Tenants'];
+  const canManageEditions = isHost && !!policies['AbpAdmin.Editions'];
+  const canManageLanguages = !!policies['AbpAdmin.Languages'];
+  const canManageTextTemplates = !!policies['AbpAdmin.TextTemplates'];
+  const canManageWebhooks = !!policies['AbpAdmin.Webhooks.Subscriptions'];
+  const canManageWebhookSendRecords =
+    !!policies['AbpAdmin.Webhooks.SendRecords'];
+  const canViewFinanceLedger =
+    !!policies['Finance.Ledger.View'] || financeShell;
+  const financeAgentScoped =
+    !!policies['Finance.Scope.Agent'] && !policies['Finance.Scope.All'];
+  const canViewFinanceOverviewStats =
+    canViewFinanceLedger && !financeAgentScoped;
+  const canViewFinanceAccounts =
+    canViewFinanceLedger || !!policies['Finance.Account.Manage'];
+  const canViewFinanceRules = !!policies['Finance.Rule.View'] || financeShell;
+  const canViewFinancePeriod =
+    !!policies['Finance.Period.View'] || financeShell;
+  const canViewFinanceConfiguration =
+    canViewFinanceAccounts ||
+    canViewFinanceRules ||
+    canViewFinancePeriod ||
+    canManagePaymentSettings;
+  const canViewFinanceVouchers =
+    !!policies['Finance.Voucher.View'] || financeShell;
+  const canViewFinanceManualAdjusts =
+    canViewFinanceVouchers ||
+    !!policies['Finance.Adjust.Create'] ||
+    !!policies['Finance.Adjust.Submit'] ||
+    !!policies['Finance.Adjust.Approve'] ||
+    !!policies['Finance.Adjust.Reject'] ||
+    !!policies['Finance.Adjust.Reverse'];
   return {
+    isHostContext: isHost,
     canAdmin: !!policies['AbpIdentity.Users'],
     canManageUsers: !!policies['AbpIdentity.Users'],
     canManageRoles: !!policies['AbpIdentity.Roles'],
@@ -55,13 +102,28 @@ export default function access(
     canManageRolePermissions: !!policies['AbpIdentity.Roles.ManagePermissions'],
     // 数据范围示例的扩展配置；常规角色管理只使用 ABP 功能权限。
     canManageRoleDataScopes: !!policies['AbpAdmin.DataScopes.Manage'],
-    canManageTenants: !!policies['AbpTenantManagement.Tenants'] && isHost,
+    canManageTenants,
+    canCreateTenants:
+      canManageTenants && !!policies['AbpTenantManagement.Tenants.Create'],
+    canUpdateTenants:
+      canManageTenants && !!policies['AbpTenantManagement.Tenants.Update'],
+    canDeleteTenants:
+      canManageTenants && !!policies['AbpTenantManagement.Tenants.Delete'],
+    canManageTenantConnectionStrings:
+      canManageTenants &&
+      !!policies['AbpTenantManagement.Tenants.ManageConnectionStrings'],
     canManageHostFeatures:
       !!policies['FeatureManagement.ManageHostFeatures'] && isHost,
-    canManageEmailing: !!policies['SettingManagement.Emailing'],
+    canManageEmailing,
     canManageEmailingTest: !!policies['SettingManagement.Emailing.Test'],
-    canManageTimezone: !!policies['SettingManagement.TimeZone'],
-    canManageLanguages: !!policies['AbpAdmin.Languages'],
+    canManageTimezone,
+    canManageLanguages,
+    canCreateLanguages:
+      canManageLanguages && !!policies['AbpAdmin.Languages.Create'],
+    canUpdateLanguages:
+      canManageLanguages && !!policies['AbpAdmin.Languages.Update'],
+    canDeleteLanguages:
+      canManageLanguages && !!policies['AbpAdmin.Languages.Delete'],
     canChangeDefaultLanguage: !!policies['AbpAdmin.Languages.ChangeDefault'],
     canManageLanguageTexts: !!policies['AbpAdmin.LanguageTexts'],
     canEditLanguageTexts: !!policies['AbpAdmin.LanguageTexts.Edit'],
@@ -89,14 +151,15 @@ export default function access(
     // 实体变更回滚：能看变更历史 ≠ 能改写业务数据，独立权限
     canRestoreEntityChange: !!policies['AbpAdmin.AuditLogs.Restore'],
     // Webhook 管理（模块自持权限组 AbpAdmin.Webhooks.*）
-    canManageWebhooks: !!policies['AbpAdmin.Webhooks.Subscriptions'],
+    canManageWebhooks,
+    canOpenWebhookWorkspace: canManageWebhooks || canManageWebhookSendRecords,
     canCreateWebhookSubscriptions:
       !!policies['AbpAdmin.Webhooks.Subscriptions.Create'],
     canUpdateWebhookSubscriptions:
       !!policies['AbpAdmin.Webhooks.Subscriptions.Update'],
     canDeleteWebhookSubscriptions:
       !!policies['AbpAdmin.Webhooks.Subscriptions.Delete'],
-    canManageWebhookSendRecords: !!policies['AbpAdmin.Webhooks.SendRecords'],
+    canManageWebhookSendRecords,
     canResendWebhookSendRecords:
       !!policies['AbpAdmin.Webhooks.SendRecords.Resend'],
     canDeleteWebhookSendRecords:
@@ -113,6 +176,9 @@ export default function access(
       !!policies['AbpAdmin.OpenIddict.Applications.Update'] && isHost,
     canDeleteOpenIddictApplication:
       !!policies['AbpAdmin.OpenIddict.Applications.Delete'] && isHost,
+    canManageOpenIddictApplicationPermissions:
+      !!policies['AbpAdmin.OpenIddict.Applications.ManagePermissions'] &&
+      isHost,
     canCreateOpenIddictScope:
       !!policies['AbpAdmin.OpenIddict.Scopes.Create'] && isHost,
     canUpdateOpenIddictScope:
@@ -128,7 +194,13 @@ export default function access(
       !!policies['AbpAdmin.OpenIddict.Tokens'] && isHost,
     canRevokeTokens: !!policies['AbpAdmin.OpenIddict.Tokens.Revoke'] && isHost,
     canPruneTokens: !!policies['AbpAdmin.OpenIddict.Tokens.Prune'] && isHost,
-    canManageEditions: !!policies['AbpAdmin.Editions'] && isHost,
+    canManageEditions,
+    canCreateEditions:
+      canManageEditions && !!policies['AbpAdmin.Editions.Create'],
+    canUpdateEditions:
+      canManageEditions && !!policies['AbpAdmin.Editions.Update'],
+    canDeleteEditions:
+      canManageEditions && !!policies['AbpAdmin.Editions.Delete'],
     // 版本/租户级功能开关编辑（对应 FeatureManagement provider 策略：E→版本权限，T→租户权限）
     canManageEditionFeatures:
       !!policies['AbpAdmin.Editions.ManageFeatures'] && isHost,
@@ -142,18 +214,48 @@ export default function access(
     canMoveFile: !!policies['EasyAbp.FileManagement.File.Move'],
     canGetFileDownloadInfo:
       !!policies['EasyAbp.FileManagement.File.GetDownloadInfo'],
-    canManageTextTemplates: !!policies['AbpAdmin.TextTemplates'],
+    canManageTextTemplates,
+    canUpdateTextTemplates:
+      canManageTextTemplates && !!policies['AbpAdmin.TextTemplates.Update'],
     canEditNonSandboxedTemplates:
       !!policies['AbpAdmin.TextTemplates.EditNonSandboxedContents'],
     canManageBackgroundJobs: !!policies['AbpAdmin.BackgroundJobs'],
+    canRetryBackgroundJobs: !!policies['AbpAdmin.BackgroundJobs.Retry'],
+    canAbandonBackgroundJobs: !!policies['AbpAdmin.BackgroundJobs.Abandon'],
+    canDeleteBackgroundJobs: !!policies['AbpAdmin.BackgroundJobs.Delete'],
     canManageScheduledJobs: !!policies['AbpAdmin.ScheduledJobs'],
+    canCreateScheduledJobs: !!policies['AbpAdmin.ScheduledJobs.Create'],
+    canUpdateScheduledJobs: !!policies['AbpAdmin.ScheduledJobs.Update'],
+    canDeleteScheduledJobs: !!policies['AbpAdmin.ScheduledJobs.Delete'],
+    canTriggerScheduledJobs: !!policies['AbpAdmin.ScheduledJobs.Trigger'],
     canManageVirtualFileExplorer: !!policies['AbpAdmin.VirtualFileExplorer'],
     // 服务监控 / 缓存监控（权限本身定义在 Host 侧，租户拿不到授予，这里无需再叠 isHost）
     canViewServerMonitor: !!policies['AbpAdmin.ServerMonitor'],
     canViewCacheMonitor: !!policies['AbpAdmin.CacheMonitor'],
     canManageCache: !!policies['AbpAdmin.CacheMonitor.Manage'],
     // SettingUi 通用设置页权限（T1.4）
-    canManageSettings: !!policies['SettingUi.ShowSettingPage'],
+    canManageSettings,
+    canOpenCompatibilitySettings:
+      canManageSettings || canManageEmailing || canManageTimezone,
+    canManageNotificationChannels,
+    canManageTenantPolicy,
+    canOpenNotificationWorkspace:
+      canManageNotificationChannels ||
+      !!policies['EasyAbp.NotificationService.Notification.Manage'],
+    canOpenTenantWorkspace:
+      isHost &&
+      (canManageTenantPolicy || !!policies['AbpTenantManagement.Tenants']),
+    canOpenLoginSecurityWorkspace:
+      canManageSettings || !!policies['AbpAdmin.SecurityLogs'],
+    canOpenAuditWorkspace:
+      canManageSettings || !!policies['AbpAdmin.AuditLogs'],
+    canOpenLanguageWorkspace:
+      canManageTimezone || !!policies['AbpAdmin.Languages'],
+    canViewModuleManagement: isHost && !!policies['AbpAdmin.ModuleManagement'],
+    canUpdateModuleManagement:
+      isHost &&
+      !!policies['AbpAdmin.ModuleManagement'] &&
+      !!policies['AbpAdmin.ModuleManagement.Update'],
     // SettingUi 写权限（读写分离）：后端 AbpAdminSettingUiAppService 方法级 Authorize，
     // 前端只做按钮态联动，防线在后端
     canUpdateSettings: !!policies['AbpAdmin.SettingUi.Update'],
@@ -165,6 +267,14 @@ export default function access(
         !!policies['AbpIdentity.Roles']),
     // 订单/收款模块（只给 Host 用户：后端应用服务有 Host 守卫，这里只管菜单可见性）
     canViewOrders: canViewOwnOrders || canViewAllOrders,
+    canOpenOrderWorkspace:
+      canViewOwnOrders || canViewAllOrders || canManagePaymentSettings,
+    canOpenPaymentWorkspace:
+      canManagePaymentSettings ||
+      canViewDepositRecords ||
+      (isHost && !!policies['AbpAdmin.Collection.Payments.View']),
+    canViewDepositRecords,
+    canOpenWithdrawalWorkspace,
     canViewOwnOrders,
     canViewAllOrders,
     canViewCollections: !!policies['AbpAdmin.Collection.Collections'],
@@ -183,7 +293,8 @@ export default function access(
     canViewTrade:
       canViewOwnOrders ||
       canViewAllOrders ||
-      !!policies['AbpAdmin.Collection.Collections'] ||
+      canViewDepositRecords ||
+      canOpenWithdrawalWorkspace ||
       canManagePaymentSettings ||
       (isHost && !!policies['AbpAdmin.Collection.Payments.View']),
     canManagePaymentSettings,
@@ -256,20 +367,21 @@ export default function access(
     // localStorage finance.shellAccess=1：仅放开前端菜单/按钮看壳；接口仍 403，不是绕权。
     // 不变量：canApproveOwnFinanceAdjust / canFinanceScopeAgent 故意不吃 shellAccess。
     // 调账动作与五态：Create/Submit/Approve/Reject/Reverse + ApproveOwn（自批，默认关）。
-    canViewFinanceLedger: !!policies['Finance.Ledger.View'] || financeShell,
-    canViewFinanceReconcile:
-      (!!policies['Finance.Ledger.View'] || financeShell) &&
-      (!policies['Finance.Scope.Agent'] || !!policies['Finance.Scope.All']),
+    canViewFinanceLedger,
+    canViewFinanceOverviewStats,
+    canOpenFinanceOverview:
+      canViewFinanceOverviewStats || canViewFinanceConfiguration,
+    canViewFinanceReconcile: canViewFinanceLedger && !financeAgentScoped,
     canExportFinanceLedger: !!policies['Finance.Ledger.Export'] || financeShell,
     canManageFinanceAccounts:
       !!policies['Finance.Account.Manage'] || financeShell,
     // A2 科目页可见：读权限 = Ledger.View | Account.Manage（与登录落地 / 产品清单一致）
-    canViewFinanceAccounts:
-      !!policies['Finance.Ledger.View'] ||
-      !!policies['Finance.Account.Manage'] ||
-      financeShell,
-    canViewFinanceRules: !!policies['Finance.Rule.View'] || financeShell,
-    canViewFinanceVouchers: !!policies['Finance.Voucher.View'] || financeShell,
+    canViewFinanceAccounts,
+    canViewFinanceRules,
+    canViewFinanceVouchers,
+    canViewFinanceManualAdjusts,
+    canOpenFinanceVouchersWorkspace:
+      canViewFinanceVouchers || canViewFinanceManualAdjusts,
     canReverseFinanceVouchers:
       !!policies['Finance.Voucher.Reverse'] || financeShell,
     canCreateFinanceAdjust: !!policies['Finance.Adjust.Create'] || financeShell,
@@ -281,30 +393,19 @@ export default function access(
       !!policies['Finance.Adjust.Reverse'] || financeShell,
     canApproveOwnFinanceAdjust: !!policies['Finance.Adjust.ApproveOwn'],
     canRunFinanceReconcile: !!policies['Finance.Reconcile.Run'] || financeShell,
-    canViewFinancePeriod: !!policies['Finance.Period.View'] || financeShell,
+    canViewFinancePeriod,
     canViewFinanceBizDocs: !!policies['Finance.BizDoc.View'] || financeShell,
     canViewFinanceBalances: !!policies['Finance.Balance.View'] || financeShell,
-    canFinanceScopeAgent: !!policies['Finance.Scope.Agent'],
-    canViewFinanceConfiguration:
-      !!policies['Finance.Ledger.View'] ||
-      !!policies['Finance.Account.Manage'] ||
-      !!policies['Finance.Rule.View'] ||
-      !!policies['Finance.Period.View'] ||
-      canManagePaymentSettings ||
-      financeShell,
+    canFinanceScopeAgent: financeAgentScoped,
+    canViewFinanceConfiguration,
     // 财务总菜单可见性：产品主口径是 Finance.Ledger.View；子页各绑各的码。
     // 代理若只有 BizDoc/Balance.View，父路由 access=false 会整枝藏掉子菜单，
     // 故父级用「任一子页权限 ∪ shellAccess」并集；细权仍在子路由 / 按钮上。
     canViewFinance:
-      !!policies['Finance.Ledger.View'] ||
-      !!policies['Finance.Account.Manage'] ||
-      !!policies['Finance.Rule.View'] ||
-      !!policies['Finance.Voucher.View'] ||
-      !!policies['Finance.Period.View'] ||
+      canViewFinanceConfiguration ||
+      canViewFinanceManualAdjusts ||
       !!policies['Finance.BizDoc.View'] ||
       !!policies['Finance.Balance.View'] ||
-      canManagePaymentSettings ||
-      canViewBalanceAdjustments ||
-      financeShell,
+      canViewBalanceAdjustments,
   };
 }

@@ -17,7 +17,7 @@ using Volo.Abp.Uow;
 
 namespace AbpAdmin.Menus;
 
-/// <summary>全局模板中的一个节点定义。Key/ParentKey 只用于模板内部组装，不落库。</summary>
+/// <summary>全局模板中的一个节点定义，Key 在模板升级时保持稳定。</summary>
 public record MenuDefinition(
     string Key,
     string? ParentKey,
@@ -32,17 +32,25 @@ public record MenuDefinition(
     string[]? AnyPermissionNames = null,
     bool HostOnly = false);
 
+/// <summary>已装配模块可贡献带稳定 Key 的默认菜单。父级可引用既有目录 Key。</summary>
+public interface IMenuTemplateContributor
+{
+    IEnumerable<MenuDefinition> GetMenus();
+}
+
 /// <summary>
 /// 同步宿主菜单模板，并按租户套餐创建或重置租户菜单。
 /// </summary>
 public class MenuManager : DomainService, ITransientDependency
 {
+    private const int TemplateVersion = 5;
     private readonly IRepository<Menu, Guid> _menuRepository;
     private readonly IRepository<TenantPackage, Guid> _tenantPackageRepository;
     private readonly ITenantRepository _tenantRepository;
     private readonly IDataFilter _dataFilter;
     private readonly Volo.Abp.Uow.IUnitOfWorkManager _unitOfWorkManager;
     private readonly IAbpDistributedLock _distributedLock;
+    private readonly IEnumerable<IMenuTemplateContributor> _templateContributors;
 
     /// <summary>
     /// 「租户已播种」检查结果的进程内短缓存（按租户）：消灭 my-menu 热路径上每请求一次的
@@ -67,7 +75,8 @@ public class MenuManager : DomainService, ITransientDependency
         ITenantRepository tenantRepository,
         IDataFilter dataFilter,
         Volo.Abp.Uow.IUnitOfWorkManager unitOfWorkManager,
-        IAbpDistributedLock distributedLock)
+        IAbpDistributedLock distributedLock,
+        IEnumerable<IMenuTemplateContributor> templateContributors)
     {
         _menuRepository = menuRepository;
         _tenantPackageRepository = tenantPackageRepository;
@@ -75,77 +84,142 @@ public class MenuManager : DomainService, ITransientDependency
         _dataFilter = dataFilter;
         _unitOfWorkManager = unitOfWorkManager;
         _distributedLock = distributedLock;
+        _templateContributors = templateContributors;
     }
 
-    /// <summary>
-    /// 按路径幂等同步宿主模板。已有节点保留 ID，仅更新父级、顺序、标题、图标和权限。
-    /// 模板外菜单和已有租户的菜单快照保留。
-    /// </summary>
-    public virtual async Task SeedHostTemplateAsync()
+    /// <summary>补齐宿主默认菜单，已有节点按已发布模板基线升级。</summary>
+    public virtual Task SeedHostTemplateAsync() => ApplyTemplateAsync(null);
+
+    /// <summary>迁移已有租户快照，只为已选中的功能补充目录。</summary>
+    public virtual Task UpgradeTenantTemplateAsync(Guid tenantId) => ApplyTemplateAsync(tenantId);
+
+    private async Task ApplyTemplateAsync(Guid? tenantId)
     {
-        using (_dataFilter.Disable<IMultiTenant>())
+        using (CurrentTenant.Change(tenantId))
         {
-            var hostMenusByPath = (await _menuRepository.GetListAsync(x => x.TenantId == null))
-                .Where(x => x.Path != null)
-                .GroupBy(x => x.Path!)
-                .ToDictionary(g => g.Key, g => g.First());
+            var menus = await _menuRepository.GetListAsync(item => item.TenantId == tenantId);
+            if (tenantId.HasValue && menus.Count == 0)
+            {
+                return;
+            }
+            var definitions = MenuTemplateDefinition.Build(_templateContributors.SelectMany(contributor => contributor.GetMenus()));
+            var definitionsByKey = definitions.ToDictionary(item => item.Key);
+            var previousLayouts = new Dictionary<int, Dictionary<string, MenuDefinition>>
+            {
+                [0] = MenuTemplateDefinition.PreviousLayout.ToDictionary(item => item.Key),
+                [1] = MenuTemplateDefinition.Version1Layout.ToDictionary(item => item.Key),
+                [2] = MenuTemplateDefinition.Version2Layout.ToDictionary(item => item.Key),
+                [3] = MenuTemplateDefinition.Version3Layout.ToDictionary(item => item.Key),
+                [4] = MenuTemplateDefinition.Version4Layout.ToDictionary(item => item.Key)
+            };
+            MenuDefinition? Baseline(string key, Menu menu) =>
+                previousLayouts.TryGetValue(menu.GetTemplateVersion(), out var layout)
+                    ? layout.GetValueOrDefault(key)
+                    : definitionsByKey.GetValueOrDefault(key);
+            var byPath = menus.Where(item => item.Path != null).ToDictionary(item => item.Path!);
+            var byKey = menus.Where(item => item.GetTemplateKey() != null)
+                .ToDictionary(item => item.GetTemplateKey()!);
+            var byId = menus.ToDictionary(item => item.Id);
+            var originalParentIds = menus.ToDictionary(item => item.Id, item => item.ParentId);
+            var existing = new Dictionary<string, Menu>();
 
-            var definitions = MenuTemplateDefinition.All;
-            var keyToId = new Dictionary<string, Guid>();
-            var existingByTemplateKey = new List<(MenuDefinition Def, Guid Id)>();
-
-            // 按父先子后补齐节点，并记录新旧节点的 ID。
             foreach (var def in definitions)
             {
-                if (def.Path != null && hostMenusByPath.TryGetValue(def.Path, out var existing))
+                if (byKey.TryGetValue(def.Key, out var menu) ||
+                    def.Path != null && byPath.TryGetValue(def.Path, out menu))
                 {
-                    keyToId[def.Key] = existing.Id;
-                    existingByTemplateKey.Add((def, existing.Id));
-                    continue;
+                    existing[def.Key] = menu;
                 }
-
-                var parentKey = def.ParentKey;
-                var parentId = parentKey != null && keyToId.TryGetValue(parentKey, out var pid) ? pid : (Guid?)null;
-                var menu = new Menu(
-                    GuidGenerator.Create(),
-                    null,
-                    parentId,
-                    def.Type,
-                    def.Title,
-                    def.Name,
-                    def.Path,
-                    def.Icon,
-                    def.OrderNo,
-                    def.IsHide,
-                    isEnabled: true,
-                    def.PermissionName);
-                menu.SetAnyPermissionNames(def.AnyPermissionNames ?? []);
-                await _menuRepository.InsertAsync(menu, autoSave: true);
-                keyToId[def.Key] = menu.Id;
             }
 
-            // 全部 ID 已就绪，已有节点也能移到新目录。
-            foreach (var (def, id) in existingByTemplateKey)
+            bool IsRecognized(MenuDefinition old, Menu menu) =>
+                menu.GetTemplateKey() is { } storedKey ? storedKey == old.Key : menu.Name == old.Name && menu.Type == old.Type;
+
+            var knownIds = existing.Where(pair => Baseline(pair.Key, pair.Value) is { } old && IsRecognized(old, pair.Value))
+                .Select(pair => pair.Value.Id).ToHashSet();
+            var customAncestorIds = menus.Where(menu => !knownIds.Contains(menu.Id))
+                .SelectMany(menu => MenuTreeWalker.AncestorChainOf(byId, menu.Id) ?? [])
+                .Select(item => item.Id).ToHashSet();
+
+            bool CanMove(MenuDefinition def, MenuDefinition old, Menu menu)
             {
-                var menu = await _menuRepository.GetAsync(id);
-                var parentId = def.ParentKey != null && keyToId.TryGetValue(def.ParentKey, out var pid) ? pid : (Guid?)null;
-                var changed = false;
-                if (menu.ParentId != parentId) { menu.SetParent(parentId); changed = true; }
-                if (menu.OrderNo != def.OrderNo) { menu.SetOrderNo(def.OrderNo); changed = true; }
-                if (menu.Title != def.Title) { menu.SetTitle(def.Title); changed = true; }
-                if (menu.Icon != def.Icon) { menu.SetIcon(def.Icon); changed = true; }
-                if (menu.PermissionName != def.PermissionName) { menu.SetPermissionName(def.PermissionName); changed = true; }
-                if (def.IsHide && !menu.IsHide) { menu.Hide(); changed = true; }
-                var anyPermissionNames = def.AnyPermissionNames ?? [];
-                if (!menu.GetAnyPermissionNames().SequenceEqual(anyPermissionNames))
+                if (old.ParentKey == def.ParentKey)
                 {
-                    menu.SetAnyPermissionNames(anyPermissionNames);
-                    changed = true;
+                    return false;
                 }
-                if (changed)
+                var expectedOldParent = old.ParentKey == null ? null : existing.GetValueOrDefault(old.ParentKey);
+                return (old.ParentKey == null || expectedOldParent != null) &&
+                    originalParentIds[menu.Id] == expectedOldParent?.Id &&
+                    MenuTreeWalker.AncestorChainOf(byId, menu.Id) is { } chain && chain.All(item => item.IsEnabled);
+            }
+
+            // 租户套餐只复制选定项和祖先。升级补齐搬移所需的目录，不添加新叶节点。
+            var requiredTenantCatalogs = new HashSet<string>();
+            var moveKeys = new HashSet<string>();
+            foreach (var def in definitions)
+            {
+                if (!existing.TryGetValue(def.Key, out var menu) || Baseline(def.Key, menu) is not { } old ||
+                    menu.GetTemplateVersion() >= TemplateVersion || !IsRecognized(old, menu) || !CanMove(def, old, menu))
                 {
-                    await _menuRepository.UpdateAsync(menu, autoSave: true);
+                    continue;
                 }
+                moveKeys.Add(def.Key);
+                for (var key = def.ParentKey; key != null && !existing.ContainsKey(key); key = definitionsByKey[key].ParentKey)
+                {
+                    requiredTenantCatalogs.Add(key);
+                }
+            }
+
+            foreach (var def in definitions)
+            {
+                if (existing.ContainsKey(def.Key) || tenantId.HasValue &&
+                    (!requiredTenantCatalogs.Contains(def.Key) || def.Type != MenuTypeEnum.Catalog || def.HostOnly))
+                {
+                    continue;
+                }
+                var parentId = def.ParentKey != null ? existing[def.ParentKey].Id : (Guid?)null;
+                var menu = new Menu(GuidGenerator.Create(), tenantId, parentId, def.Type, def.Title,
+                    def.Name, def.Path, def.Icon, def.OrderNo, def.IsHide, isEnabled: true, def.PermissionName);
+                menu.SetAnyPermissionNames(def.AnyPermissionNames ?? []);
+                menu.SetTemplate(def.Key, TemplateVersion, def.HostOnly);
+                await _menuRepository.InsertAsync(menu);
+                existing.Add(def.Key, menu);
+                byId.Add(menu.Id, menu);
+            }
+
+            foreach (var def in definitions)
+            {
+                if (!existing.TryGetValue(def.Key, out var menu) || Baseline(def.Key, menu) is not { } old ||
+                    menu.GetTemplateVersion() >= TemplateVersion || !IsRecognized(old, menu))
+                {
+                    continue;
+                }
+                var parent = def.ParentKey == null ? null : existing.GetValueOrDefault(def.ParentKey);
+                if (moveKeys.Contains(def.Key) && (def.ParentKey == null || parent != null &&
+                    MenuTreeWalker.AncestorChainOf(byId, parent.Id, includeSelf: true) is { } parents &&
+                    parents.All(item => item.Id != menu.Id)))
+                {
+                    menu.SetParent(parent?.Id);
+                }
+                if (menu.Title == old.Title) menu.SetTitle(def.Title);
+                if (menu.Icon == old.Icon) menu.SetIcon(def.Icon);
+                if (menu.OrderNo == old.OrderNo) menu.SetOrderNo(def.OrderNo);
+                if (menu.IsHide == old.IsHide && !(tenantId.HasValue && menu.Type == MenuTypeEnum.Menu) &&
+                    !(def.IsHide && customAncestorIds.Contains(menu.Id)))
+                {
+                    menu.SetVisible(!def.IsHide);
+                }
+                // 默认宿主约束随模板升级。租户只修正 v3 两个已选工作区的独立子视图权限；
+                // 其他套餐约束，以及任一权限字段经过人工改动的节点，始终保持原样。
+                if ((!tenantId.HasValue || MenuTemplateDefinition.HasVersion3PermissionCorrection(def.Key)) &&
+                    menu.PermissionName == old.PermissionName &&
+                    menu.GetAnyPermissionNames().SequenceEqual(old.AnyPermissionNames ?? []))
+                {
+                    menu.SetPermissionName(def.PermissionName);
+                    menu.SetAnyPermissionNames(def.AnyPermissionNames ?? []);
+                }
+                menu.SetTemplate(def.Key, TemplateVersion, def.HostOnly);
+                await _menuRepository.UpdateAsync(menu);
             }
         }
     }
@@ -333,10 +407,18 @@ public class MenuManager : DomainService, ITransientDependency
                     template.Path,
                     template.Icon,
                     template.OrderNo,
-                    template.IsHide,
+                    // A package may explicitly select a former standalone configuration page.
+                    // Preserve that exact entry without adding the broader overview workspace.
+                    template.IsHide && !(template.Type == MenuTypeEnum.Menu &&
+                        allowedTemplateMenuIds?.Contains(template.Id) == true &&
+                        MenuTemplateDefinition.IsEmbeddedConfigurationMenu(template.GetTemplateKey())),
                     template.IsEnabled,
                     template.PermissionName);
                 tenantMenu.SetAnyPermissionNames(template.GetAnyPermissionNames());
+                if (template.GetTemplateKey() is { } key)
+                {
+                    tenantMenu.SetTemplate(key, template.GetTemplateVersion(), template.IsHostOnlyTemplate());
+                }
                 await _menuRepository.InsertAsync(tenantMenu);
             }
 

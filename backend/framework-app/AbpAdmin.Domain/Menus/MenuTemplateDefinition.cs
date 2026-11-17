@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using Volo.Abp;
 
 namespace AbpAdmin.Menus;
 
@@ -8,14 +11,25 @@ namespace AbpAdmin.Menus;
 public static class MenuTemplateDefinition
 {
     /// <summary>已知的宿主专属菜单路径，供租户已有菜单过滤。</summary>
-    public static bool IsHostOnlyPath(string? path) => path != null && HostOnlyPaths.Contains(path);
+    public static bool IsHostOnlyPath(string? path)
+    {
+        if (path == null) return false;
+        var suffix = path.IndexOfAny(['?', '#']);
+        var route = suffix >= 0 ? path[..suffix] : path;
+        return HostOnlyPaths.Contains(route.TrimEnd('/'));
+    }
 
     private static readonly HashSet<string> HostOnlyPaths = BuildHostOnlyPaths();
+    private static readonly Dictionary<string, MenuDefinition> DefaultsByKey = All.ToDictionary(item => item.Key);
+
+    public static bool UsesCustomTitle(Menu menu) =>
+        menu.GetTemplateKey() is not { } key ||
+        !DefaultsByKey.TryGetValue(key, out var definition) || menu.Title != definition.Title;
 
     private static HashSet<string> BuildHostOnlyPaths()
     {
         var keys = new HashSet<string>();
-        var paths = new HashSet<string>();
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var menu in All)
         {
             if (menu.HostOnly || menu.ParentKey is { } parent && keys.Contains(parent))
@@ -31,10 +45,212 @@ public static class MenuTemplateDefinition
     }
 
     /// <summary>
-    /// 父目录先于子项定义。路径是模板同步标识，移动菜单时保留原路径。
-    /// 前端按菜单层级和名称翻译，缺少词条时使用模板标题。
+    /// 当前默认布局。已发布节点保留 Key 和路径；旧叶节点继续为旧地址和套餐提供兼容入口。
     /// </summary>
-    public static List<MenuDefinition> All => new()
+    public static List<MenuDefinition> All => Build([]);
+
+    internal static List<MenuDefinition> Build(IEnumerable<MenuDefinition> contributedMenus)
+    {
+        var adjusted = Version4Layout.Select(PlaceInVersion5Workspace).ToList();
+        adjusted.AddRange(contributedMenus);
+        var duplicate = adjusted.GroupBy(item => item.Key).FirstOrDefault(group => group.Count() > 1);
+        if (duplicate != null)
+        {
+            throw new AbpException($"Duplicate menu template key '{duplicate.Key}'.");
+        }
+        var duplicatePath = adjusted.Where(item => item.Path != null).GroupBy(item => item.Path)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicatePath != null)
+        {
+            throw new AbpException($"Duplicate menu template path '{duplicatePath.Key}'.");
+        }
+
+        var byParent = adjusted.ToLookup(item => item.ParentKey);
+        var ordered = new List<MenuDefinition>(adjusted.Count);
+        void AddChildren(string? key, bool hostOnly)
+        {
+            foreach (var child in byParent[key])
+            {
+                var resolved = hostOnly ? child with { HostOnly = true } : child;
+                ordered.Add(resolved);
+                AddChildren(resolved.Key, resolved.HostOnly);
+            }
+        }
+        AddChildren(null, false);
+        if (ordered.Count != adjusted.Count)
+        {
+            throw new AbpException("A menu template has an unknown parent or a cycle.");
+        }
+        return ordered;
+    }
+
+    private const string SettingsRead = "SettingUi.ShowSettingPage";
+
+    internal static bool IsEmbeddedConfigurationMenu(string? key) => key is
+        "settings" or "finance-accounts" or "finance-rules" or "finance-period" or "finance-settings";
+
+    /// <summary>Version 3: existing workspaces expose each independently authorized subview.</summary>
+    private static MenuDefinition AlignWorkspacePermissions(MenuDefinition item) => item.Key switch
+    {
+        "finance-vouchers" => item with
+        {
+            PermissionName = null,
+            AnyPermissionNames = ["Finance.Voucher.View", "Finance.Adjust.Create", "Finance.Adjust.Submit",
+                "Finance.Adjust.Approve", "Finance.Adjust.Reject", "Finance.Adjust.Reverse"]
+        },
+        "webhooks" => item with
+        {
+            PermissionName = null,
+            AnyPermissionNames = ["AbpAdmin.Webhooks.Subscriptions", "AbpAdmin.Webhooks.SendRecords"]
+        },
+        _ => item
+    };
+
+    // Only these already-selected leaves may receive the v3 permission correction in a tenant snapshot.
+    // This changes menu reachability, never ABP grants or the package's selected leaf set.
+    internal static bool HasVersion3PermissionCorrection(string key) => key is "finance-vouchers" or "webhooks";
+
+    /// <summary>Frozen published version 3, including the voucher/webhook permission corrections.</summary>
+    internal static List<MenuDefinition> Version3Layout => Version2Layout.Select(AlignWorkspacePermissions).ToList();
+
+    /// <summary>Frozen published version 4. Do not edit; version 5 migrates from this baseline.</summary>
+    internal static List<MenuDefinition> Version4Layout => Version3Layout.Select(PlaceInVersion4Workspace).ToList();
+
+    /// <summary>
+    /// Version 5: the user-funds leaf is the balance-account list. Withdrawal review sits ahead of adjustment approval.
+    /// Per-user activity stays on the same path with ?userId=.
+    /// </summary>
+    private static MenuDefinition PlaceInVersion5Workspace(MenuDefinition item) => item.Key switch
+    {
+        "collection-member-funds" => item with { Title = "用户余额" },
+        "collection-withdrawals" => item with { OrderNo = 612 },
+        "finance-balance-adjustments" => item with { OrderNo = 613 },
+        _ => item
+    };
+
+    private static MenuDefinition PlaceInVersion4Workspace(MenuDefinition item) => item.Key switch
+    {
+        "operations-payments" => item with
+        {
+            Title = "收款管理",
+            AnyPermissionNames = ["AbpAdmin.Collection.Payments.View", SettingsRead,
+                "AbpAdmin.Collection.Collections", "AbpAdmin.Collection.Network.Admin"]
+        },
+        "user-funds" => item with { OrderNo = 220 },
+        "web3-operations" => item with { Title = "钱包与链网", OrderNo = 230 },
+        // Keep the existing leaf ID/path; configuration-only users can open its permitted settings pane.
+        // The new parent is not Host-only, so the leaf carries the restriction explicitly.
+        "collection-withdrawals" => item with
+        {
+            ParentKey = "user-funds", IsHide = false, OrderNo = 613, HostOnly = true,
+            PermissionName = null,
+            AnyPermissionNames = ["AbpAdmin.Collection.WithdrawAdmin", "AbpAdmin.Collection.Network.Admin", SettingsRead]
+        },
+        _ => item
+    };
+
+    /// <summary>Frozen published version 2; retained as the migration baseline for installed deployments.</summary>
+    internal static List<MenuDefinition> Version2Layout => Version1Layout.Select(PlaceInVersion2Workspace).ToList();
+
+    /// <summary>Version 2: task-oriented roots. Paths and keys remain compatible with existing packages and links.</summary>
+    private static MenuDefinition PlaceInVersion2Workspace(MenuDefinition item) => item.Key switch
+    {
+        "welcome" => item with { OrderNo = 10 },
+        "business" => item with { IsHide = false, OrderNo = 100 },
+        "collection-orders" => item with { ParentKey = "business", OrderNo = 110 },
+        // Keep custom descendants inside Business instead of lifting them to an extra root.
+        "order-payments" => item with { ParentKey = "business", IsHide = true, OrderNo = 190 },
+        "configuration" => item with { ParentKey = "administration", IsHide = true },
+        "financial-management" => item with { Title = "资金与财务", OrderNo = 200 },
+        "operations-payments" => item with { ParentKey = "financial-management", OrderNo = 210 },
+        "web3-operations" => item with { ParentKey = "financial-management", OrderNo = 220 },
+        "user-funds" => item with { OrderNo = 230 },
+        "finance" => item with { OrderNo = 240 },
+        "finance-overview" => item with
+        {
+            PermissionName = null,
+            AnyPermissionNames = ["Finance.Ledger.View", "Finance.Account.Manage", "Finance.Rule.View", "Finance.Period.View", SettingsRead]
+        },
+        "finance-balances" => item with { Title = "账簿余额" },
+        "administration" => item with { OrderNo = 300 },
+        "system" => item with { OrderNo = 400 },
+        "openiddict-tokens" => item with { Title = "令牌与授权" },
+        "settings" or "finance-accounts" or "finance-rules" or "finance-period" or "finance-settings" => item with { IsHide = true },
+        _ => item
+    };
+
+    /// <summary>
+    /// Frozen published version 1. Migration compares each stored version with its actual baseline;
+    /// changing this layout would mistake version-1 defaults for administrator customizations.
+    /// </summary>
+    internal static List<MenuDefinition> Version1Layout =>
+    [
+        .. PreviousLayout.Where(item => item.Key != "biz-template-data-scope").Select(PlaceInVersion1Workspace),
+        new("notification-workspace", "administration", MenuTypeEnum.Catalog, "通知与模板",
+            "notification-workspace", "/administration/notifications", "bell", 136),
+        new("deployment-modules", "administration", MenuTypeEnum.Menu, "模块管理",
+            "modules", "/administration/modules", "appstore", 148, "AbpAdmin.ModuleManagement", HostOnly: true)
+    ];
+
+    private static MenuDefinition PlaceInVersion1Workspace(MenuDefinition item) => item.Key switch
+    {
+        "configuration" => item with { IsHide = true },
+        "configuration-payments" => item with { ParentKey = "order-payments", IsHide = true },
+        "web3-configuration-page" => item with { ParentKey = "web3", IsHide = true },
+        "finance-config" or "configuration-content" or "base-settings" => item with { IsHide = true },
+        "configuration-integrations" => item with { ParentKey = "administration", OrderNo = 138 },
+        "localization" => item with { Title = "语言与区域" },
+        "localization-languages" => item with
+        {
+            ParentKey = "localization", OrderNo = 131, PermissionName = null,
+            AnyPermissionNames = ["AbpAdmin.Languages", "SettingManagement.TimeZone"]
+        },
+        "localization-texts" => item with { ParentKey = "localization", OrderNo = 132 },
+        "text-templates" => item with { ParentKey = "notification-workspace", OrderNo = 138 },
+        "notifications" => item with
+        {
+            ParentKey = "notification-workspace", Title = "通知管理", OrderNo = 137, PermissionName = null,
+            AnyPermissionNames = ["EasyAbp.NotificationService.Notification.Manage", "SettingManagement.Emailing", SettingsRead]
+        },
+        "files" or "menus" or "data-dictionary" or "settings" => item with
+        {
+            ParentKey = "administration", Title = item.Key == "settings" ? "扩展配置" : item.Title,
+            OrderNo = item.Key == "files" ? 140 : item.OrderNo
+        },
+        "features" => item with { ParentKey = "saas", Title = "宿主功能配置", HostOnly = true },
+        "saas-tenants" => item with
+        {
+            PermissionName = null, AnyPermissionNames = ["AbpTenantManagement.Tenants", SettingsRead], HostOnly = true
+        },
+        "openiddict" => item with { ParentKey = "administration", Title = "登录与安全", OrderNo = 115 },
+        "openiddict-tokens" => item with { ParentKey = "configuration-integrations", OrderNo = 1064 },
+        "identity-security-logs" => item with
+        {
+            PermissionName = null, AnyPermissionNames = ["AbpAdmin.SecurityLogs", SettingsRead]
+        },
+        "audit-logs" => item with
+        {
+            PermissionName = null, AnyPermissionNames = ["AbpAdmin.AuditLogs", SettingsRead]
+        },
+        "collection-orders" => item with
+        {
+            AnyPermissionNames = ["AbpAdmin.Ordering.Orders", "AbpAdmin.Ordering.Orders.ViewAll", SettingsRead]
+        },
+        "operations-payments" => item with
+        {
+            PermissionName = null, AnyPermissionNames = ["AbpAdmin.Collection.Payments.View", SettingsRead]
+        },
+        "web3-operations" => item with
+        {
+            AnyPermissionNames = ["AbpAdmin.Collection.Collections", "AbpAdmin.Collection.WithdrawAdmin",
+                "AbpAdmin.Collection.Network.Admin", SettingsRead]
+        },
+        "finance-accounts" or "finance-rules" or "finance-period" or "finance-settings" => item with { ParentKey = "finance" },
+        _ => item
+    };
+
+    /// <summary>发布前的模板，用于辨别旧默认字段和管理员定制。升级后也要保留这份基线。</summary>
+    internal static List<MenuDefinition> PreviousLayout => new()
     {
         new("welcome", null, MenuTypeEnum.Menu, "工作台", "welcome", "/welcome", "smile", 10),
 

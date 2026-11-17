@@ -42,8 +42,8 @@ const paths = {
   orders: '/collection/orders',
   allOrders: '/collection/orders?view=all',
   payments: '/operations/payments',
-  deposits: '/web3/operations?view=deposits',
-  withdrawals: '/web3/operations?view=withdrawals',
+  deposits: '/operations/payments?view=deposits',
+  withdrawals: '/collection/withdrawals',
   sweeps: '/web3/operations?view=sweeps',
   adjustments: '/finance/balance-adjustments',
 };
@@ -134,7 +134,7 @@ export function recentSources(access: OperationAccess) {
     {
       key: 'withdrawals',
       label: '链上提现',
-      path: `${paths.withdrawals}&status=all`,
+      path: `${paths.withdrawals}?status=all`,
       allowed: access.canViewWeb3Operations && access.canAdminWithdrawals,
       load: async (): Promise<RecentRecord[]> => {
         const { items } = await getWithdrawals(recentPage);
@@ -145,7 +145,7 @@ export function recentSources(access: OperationAccess) {
           amount: amountLabel(row.amount, currencyLabel(row.currency)),
           status: WD_STATUS_LABELS[row.status]?.text ?? row.status,
           createdAt: row.creationTime,
-          path: `${paths.withdrawals}&status=all&withdrawalId=${encodeURIComponent(row.id)}`,
+          path: `${paths.withdrawals}?status=all&withdrawalId=${encodeURIComponent(row.id)}`,
         }));
       },
     },
@@ -177,10 +177,10 @@ export function taskSources(access: OperationAccess) {
       label: '提现',
       allowed: access.canViewWeb3Operations && access.canAdminWithdrawals,
       alerts: [
-        { label: '待审核提现', path: `${paths.withdrawals}&status=Pending` },
+        { label: '待审核提现', path: `${paths.withdrawals}?status=Pending` },
         {
           label: '打款失败',
-          path: `${paths.withdrawals}&status=BroadcastFailed`,
+          path: `${paths.withdrawals}?status=BroadcastFailed`,
         },
       ],
       load: async () => {

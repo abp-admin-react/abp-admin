@@ -1,6 +1,7 @@
 import component from './zh-CN/component';
 import globalHeader from './zh-CN/globalHeader';
 import menu from './zh-CN/menu';
+import modules from './zh-CN/modules';
 import network from './zh-CN/network';
 import pages from './zh-CN/pages';
 import settingDrawer from './zh-CN/settingDrawer';
@@ -15,6 +16,7 @@ export default {
   ...pages,
   ...globalHeader,
   ...menu,
+  ...modules,
   ...settingDrawer,
   ...settings,
   ...network,

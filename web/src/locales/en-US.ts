@@ -1,6 +1,7 @@
 import component from './en-US/component';
 import globalHeader from './en-US/globalHeader';
 import menu from './en-US/menu';
+import modules from './en-US/modules';
 import network from './en-US/network';
 import pages from './en-US/pages';
 import settingDrawer from './en-US/settingDrawer';
@@ -14,6 +15,7 @@ export default {
   'app.preview.down.block': 'Download this page to your local project',
   ...globalHeader,
   ...menu,
+  ...modules,
   ...settingDrawer,
   ...settings,
   ...network,

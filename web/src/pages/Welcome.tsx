@@ -247,18 +247,18 @@ export default function WorkbenchPage() {
       allowed: access.canManageOrganizationUnits,
     },
     {
-      title: '菜单管理',
+      title: '后台菜单管理',
       detail: '调整导航和可见性',
       path: '/administration/menus',
       Icon: MenuOutlined,
       allowed: access.canManageMenus,
     },
     {
-      title: '系统设置',
-      detail: '管理系统参数',
-      path: '/administration/settings',
+      title: '模块管理',
+      detail: '查看部署模块和启停状态',
+      path: '/administration/modules',
       Icon: SettingOutlined,
-      allowed: access.canManageSettings,
+      allowed: access.canViewModuleManagement,
     },
     {
       title: '服务监控',
@@ -319,7 +319,7 @@ export default function WorkbenchPage() {
           >
             <div className={styles.panelHeader}>
               <h2 className={styles.sectionTitle} id="workbench-shortcuts">
-                系统管理入口
+                平台与运维快捷入口
               </h2>
             </div>
             {shortcuts.length ? (
