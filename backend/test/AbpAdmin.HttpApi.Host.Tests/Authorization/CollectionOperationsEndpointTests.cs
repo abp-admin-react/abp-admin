@@ -98,6 +98,38 @@ public class CollectionOperationsEndpointTests
     }
 
     [RequiresHostDatabaseFact]
+    public async Task Scanner_Management_Protects_Credentials_And_Exposes_Explicit_Routes()
+    {
+        var app = await HostTestBed.HostTask;
+        const string route = "api/app/collection-scan-provider";
+        var endpoints = app.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()?.ControllerTypeInfo.AsType() ==
+                typeof(CollectionScanProviderAppService)).ToArray();
+
+        endpoints.Length.ShouldBe(10);
+        foreach (var endpoint in endpoints)
+        {
+            var path = endpoint.RoutePattern.RawText!.TrimStart('/');
+            path.ShouldStartWith(route);
+            endpoint.Metadata.GetMetadata<IAllowAnonymous>().ShouldBeNull();
+            var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
+            policies.ShouldNotBeEmpty();
+            policies.Any(item => item.Policy == CollectionPermissions.Network.Admin)
+                .ShouldBe(path != route + "/dashboard-balance", path);
+        }
+
+        foreach (var action in new[] { nameof(CollectionScanProviderAppService.CreateAsync),
+            nameof(CollectionScanProviderAppService.UpdateAsync), nameof(CollectionScanProviderAppService.TestAsync),
+            nameof(CollectionScanProviderAppService.TestBalanceAsync) })
+        {
+            var endpoint = endpoints.Single(item => item.Metadata.GetMetadata<ControllerActionDescriptor>()!.MethodInfo.Name == action);
+            var descriptor = endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()!;
+            endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.ShouldNotContain("GET");
+            descriptor.Parameters.ShouldContain(parameter => parameter.BindingInfo != null && parameter.BindingInfo.BindingSource == BindingSource.Body);
+        }
+    }
+
+    [RequiresHostDatabaseFact]
     public async Task Operations_Reads_Require_One_Read_Permission_And_Host_Context()
     {
         var app = await HostTestBed.HostTask;
