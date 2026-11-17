@@ -1,13 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Balances;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
@@ -28,6 +31,26 @@ public class CollectionBalanceManagerTests : CollectionTestBase
 
     private CollectionBalanceManager Manager =>
         GetRequiredService<CollectionBalanceManager>();
+
+    [Fact]
+    public async Task Paused_Debit_Allows_Identical_Replay_And_Reversal_Without_A_New_Debit()
+    {
+        await Manager.CreditAsync(User1, CollectionCurrency.Usdt, 100m, $"dep-{Guid.NewGuid()}");
+        var businessId = Guid.NewGuid();
+        var txnId = await Manager.DebitAsync("Order", businessId, User1, CollectionCurrency.Usdt, 30m);
+        GetRequiredService<IDeploymentModuleStateReader>().GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new DeploymentModuleSnapshot(1, initialized: true, new Dictionary<string, bool>()));
+
+        (await Manager.DebitAsync("Order", businessId, User1, CollectionCurrency.Usdt, 30m)).ShouldBe(txnId);
+        (await Should.ThrowAsync<BusinessException>(
+            () => Manager.DebitAsync("Order", businessId, User2, CollectionCurrency.Usdt, 30m)))
+            .Code.ShouldBe(CollectionErrorCodes.DebitConflict);
+        await Manager.ReverseAsync("Order", businessId);
+        (await Should.ThrowAsync<BusinessException>(
+            () => Manager.DebitAsync("Order", businessId, User1, CollectionCurrency.Usdt, 30m)))
+            .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        (await BalanceOfAsync(User1, CollectionCurrency.Usdt)).ShouldBe(100m);
+    }
 
     [Fact]
     public async Task Debit_Then_Reverse_Restores_Balance_And_Allows_New_Debit()

@@ -85,4 +85,7 @@ public static class FinanceErrorCodes
 
     /// <summary>红冲凭证本身不可再红冲。HTTP 400。</summary>
     public const string VoucherNotReversible = Namespace + ":VoucherNotReversible";
+
+    /// <summary>人工调账碰到用户可用、冻结或订单预收桶。HTTP 400。</summary>
+    public const string ControlledWalletAccount = Namespace + ":ControlledWalletAccount";
 }

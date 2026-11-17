@@ -1,6 +1,8 @@
 using Npgsql;
 using System;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Contracts;
+using AbpAdmin.Modules;
 using AbpAdmin.Ordering.Data;
 using AbpAdmin.Ordering.Entities;
 using AbpAdmin.Ordering.Settings;
@@ -39,15 +41,18 @@ public class QuoteManager : DomainService
     private readonly IDbContextProvider<OrderingDbContext> _dbContextProvider;
     private readonly ISettingProvider _settingProvider;
     private readonly IClock _clock;
+    private readonly IDeploymentModuleStateReader _moduleStates;
 
     public QuoteManager(
         IDbContextProvider<OrderingDbContext> dbContextProvider,
         ISettingProvider settingProvider,
-        IClock clock)
+        IClock clock,
+        IDeploymentModuleStateReader moduleStates)
     {
         _dbContextProvider = dbContextProvider;
         _settingProvider = settingProvider;
         _clock = clock;
+        _moduleStates = moduleStates;
     }
 
     public virtual async Task<OrdQuote> GetOrCreateActiveQuoteAsync(OrdOrder order, OrderingPayChannel method)
@@ -70,6 +75,7 @@ public class QuoteManager : DomainService
             return active;
         }
 
+        await CheckNewQuoteAsync(order, method);
         if (active != null)
         {
             // 插入新报价的同一事务里，先把该订单该方式已过 ExpiresAt 的 Active 行标成过期
@@ -94,6 +100,7 @@ public class QuoteManager : DomainService
                 .WithData("OrderId", order.Id);
         }
 
+        await CheckNewQuoteAsync(order, method);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var now = _clock.Now;
 
@@ -106,6 +113,17 @@ public class QuoteManager : DomainService
         }
 
         return await InsertNewQuoteAsync(order, method, now);
+    }
+
+    private async Task CheckNewQuoteAsync(OrdOrder order, OrderingPayChannel method)
+    {
+        if (!CollectionPaymentAdmission.Covers(OrderingConsts.OrderBusinessType, order.Id,
+                method.ToCollectionChannel(), method.BalanceCurrency())
+            && !(await _moduleStates.GetAsync()).IsEnabled(DeploymentModuleIds.Orders))
+        {
+            throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                .WithData("ModuleId", DeploymentModuleIds.Orders);
+        }
     }
 
     private async Task<OrdQuote> InsertNewQuoteAsync(OrdOrder order, OrderingPayChannel method, DateTime now)

@@ -77,8 +77,19 @@ export default function CollectionDashboardPage({
       align: 'right' as const,
     },
   ];
+  const withdrawColumns = [
+    { title: '状态', dataIndex: 'status', width: 140 },
+    { title: '币种', dataIndex: 'currency', width: 90 },
+    { title: '单数', dataIndex: 'count', width: 80, align: 'right' as const },
+    {
+      title: '金额合计',
+      dataIndex: 'total',
+      width: 140,
+      align: 'right' as const,
+    },
+  ];
   const depositTable = useResizableColumns(statusColumns);
-  const withdrawTable = useResizableColumns(statusColumns);
+  const withdrawTable = useResizableColumns(withdrawColumns);
 
   const content = (
     <Space orientation="vertical" style={{ width: '100%' }} size={16}>
@@ -92,7 +103,7 @@ export default function CollectionDashboardPage({
           unconfiguredAction={
             access.canAdminNetwork &&
             access.canConfigureCollectionNetwork && (
-              <Link to="/web3/config?view=network">前往链网络配置</Link>
+              <Link to="/web3/operations?view=overview&settings=providers">前往第三方扫链</Link>
             )
           }
         />
@@ -126,8 +137,13 @@ export default function CollectionDashboardPage({
             <StatisticCard
               statistic={{
                 title: '在途提现净额',
-                value: data.withdrawInFlightAmount,
-                description: '待审+待广播+广播中（热钱包待付敞口）',
+                value:
+                  (data.withdrawInFlight?.length ?? 0) > 1
+                    ? data.withdrawInFlight!
+                        .map((row) => `${row.currency} ${row.amount}`)
+                        .join(' / ')
+                    : data.withdrawInFlightAmount,
+                description: '审核后未打款且未退款，含广播失败',
               }}
             />
             <StatisticCard.Divider />
@@ -226,7 +242,7 @@ export default function CollectionDashboardPage({
               headerBordered
             >
               <Table
-                rowKey="status"
+                rowKey={(row) => `${row.status}-${row.currency ?? ''}`}
                 dataSource={data.withdrawByStatus}
                 columns={withdrawTable.columns}
                 components={withdrawTable.components}

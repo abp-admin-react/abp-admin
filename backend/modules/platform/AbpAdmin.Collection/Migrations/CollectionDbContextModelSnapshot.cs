@@ -450,6 +450,9 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<DateTime>("CreationTime")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<bool>("IsRetired")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid>("NetworkId")
                         .HasColumnType("uuid");
 
@@ -464,7 +467,8 @@ namespace AbpAdmin.Collection.Migrations
                         .IsUnique();
 
                     b.HasIndex("UserId", "NetworkId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("NOT \"IsRetired\"");
 
                     b.ToTable("ColDepositAddresses", (string)null);
                 });
@@ -720,6 +724,12 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<long?>("LatestChainHead")
                         .HasColumnType("bigint");
 
+                    b.Property<int?>("LegacyAddressIndexHighWaterMark")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LegacyDepositRpcCipher")
+                        .HasColumnType("text");
+
                     b.Property<string>("MnemonicCipher")
                         .HasColumnType("text");
 
@@ -731,11 +741,17 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<int?>("NodeLogResultCap")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("PreferManagedScanProviders")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("RpcCipher")
                         .HasColumnType("text");
 
                     b.Property<DateTime?>("ScanBehindAlertedAt")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("ScanBillingClaimPending")
+                        .HasColumnType("boolean");
 
                     b.Property<DateTime?>("ScanHeartbeatAt")
                         .HasColumnType("timestamp without time zone");
@@ -758,6 +774,65 @@ namespace AbpAdmin.Collection.Migrations
                         .IsUnique();
 
                     b.ToTable("ColNetworks", (string)null);
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColScanProvider", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Group")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("KeyCipher")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("KeyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PlatformAuthKeyCipher")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "KeyHash");
+
+                    b.ToTable("ColScanProviders", (string)null);
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColScanProviderNetwork", b =>
+                {
+                    b.Property<Guid>("ProviderId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("NetworkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("LogResultCap")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ProviderId", "NetworkId");
+
+                    b.HasIndex("NetworkId");
+
+                    b.ToTable("ColScanProviderNetworks", (string)null);
                 });
 
             modelBuilder.Entity("AbpAdmin.Collection.Entities.ColSweepTask", b =>
@@ -874,6 +949,17 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<DateTime?>("LastScanAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("LastScanFailure")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("LastScanProvider")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("LastScanProviderAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<long?>("LastScannedBlock")
                         .HasColumnType("bigint");
 
@@ -884,6 +970,12 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.Property<Guid>("NetworkId")
                         .HasColumnType("uuid");
+
+                    b.Property<long?>("ScanReplayFromBlock")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ScanReplayToBlock")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Symbol")
                         .IsRequired()
@@ -946,6 +1038,48 @@ namespace AbpAdmin.Collection.Migrations
                     b.HasIndex("TokenId", "CheckedAt");
 
                     b.ToTable("ColVaultChecks", (string)null);
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColWalletRefund", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<Guid?>("BalanceTxnId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreationTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("Currency")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("OriginalDebitTxnId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RequestId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OriginalDebitTxnId");
+
+                    b.HasIndex("OriginalDebitTxnId", "RequestId")
+                        .IsUnique();
+
+                    b.ToTable("ColWalletRefunds", (string)null);
                 });
 
             modelBuilder.Entity("AbpAdmin.Collection.Entities.ColWithdrawOrder", b =>
@@ -1084,6 +1218,26 @@ namespace AbpAdmin.Collection.Migrations
                         .HasForeignKey("CollectionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColScanProviderNetwork", b =>
+                {
+                    b.HasOne("AbpAdmin.Collection.Entities.ColNetwork", null)
+                        .WithMany()
+                        .HasForeignKey("NetworkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AbpAdmin.Collection.Entities.ColScanProvider", null)
+                        .WithMany("Networks")
+                        .HasForeignKey("ProviderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColScanProvider", b =>
+                {
+                    b.Navigation("Networks");
                 });
 #pragma warning restore 612, 618
         }

@@ -11,6 +11,9 @@ public static class FinanceAccountCodes
     public const string AccountsReceivable = "1122";
     public const string AccountsPayable = "2241";
     public const string Unearned = "2205";
+
+    /// <summary>订单余额支付的预收桶。空桶 2205 仍是普通预收，不能拿来退订单。</summary>
+    public const string OrderPrepayBucket = "order";
     public const string OpeningEquity = "3001";
     public const string ManualAdjust = "3101";
     public const string RetainedEarnings = "3104";

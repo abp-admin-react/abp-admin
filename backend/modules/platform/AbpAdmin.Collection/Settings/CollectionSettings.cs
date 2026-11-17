@@ -185,6 +185,12 @@ public static class CollectionSettings
         public const string AutoApproveBatchSize = Prefix + ".Withdraw.AutoApproveBatchSize";
     }
 
+    /// <summary>为 true 时，新的余额支付、技术回冲和商业退款必须同事务写财务分录。</summary>
+    public static class WalletLedger
+    {
+        public const string Enforce = Prefix + ".WalletLedger.Enforce";
+    }
+
 }
 
 /// <summary>提现运行期参数的代码默认值（设置读不出/解析失败时兜底）。</summary>

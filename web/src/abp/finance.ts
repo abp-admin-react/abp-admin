@@ -148,6 +148,8 @@ export type FinManualAdjustDto = {
   /** 借方归属——编辑表单回填用（live 归一为名称串，mock 种子可能是数字），缺省 Channel/default 会静默改写原归属 */
   debitOwnerType?: FinOwnerTypeName | number;
   debitOwnerId?: string | null;
+  creditOwnerType?: FinOwnerTypeName | number;
+  creditOwnerId?: string | null;
   creationTime: string;
   lines: {
     accountCode: string;
@@ -216,6 +218,16 @@ export type FinOverviewDto = {
   frozenTotal: number;
   prepaymentTotal: number;
   recognizedIncome: number;
+  currencyTotals?: {
+    currency: string;
+    todayIncome: number;
+    todayExpense: number;
+    available: number;
+    frozen: number;
+    unearned: number;
+    recognizedIncome: number;
+    isBalanced: boolean;
+  }[];
 };
 
 /**
@@ -964,6 +976,18 @@ export async function getFinanceOverview(): Promise<FinOverviewDto> {
       frozenTotal: num(raw.frozenTotal),
       prepaymentTotal: num(raw.unearnedTotal),
       recognizedIncome: num(raw.recognizedIncomeTotal),
+      currencyTotals: Array.isArray(raw.currencyTotals)
+        ? (raw.currencyTotals as Record<string, unknown>[]).map((row) => ({
+            currency: String(row.currency ?? ''),
+            todayIncome: num(row.todayIncome),
+            todayExpense: num(row.todayExpense),
+            available: num(row.available),
+            frozen: num(row.frozen),
+            unearned: num(row.unearned),
+            recognizedIncome: num(row.recognizedIncome),
+            isBalanced: row.isBalanced !== false,
+          }))
+        : [],
     };
   }
   return {
@@ -1405,6 +1429,9 @@ function fromLiveAdjust(raw: Record<string, unknown>): FinManualAdjustDto {
     debitOwnerType: finOwnerTypeName(raw.debitOwnerType),
     debitOwnerId:
       raw.debitOwnerId != null ? String(raw.debitOwnerId) : 'default',
+    creditOwnerType:
+      raw.creditOwnerType == null ? undefined : finOwnerTypeName(raw.creditOwnerType),
+    creditOwnerId: (raw.creditOwnerId as string | null) ?? null,
     creationTime: String(
       raw.creationTime || raw.submittedAt || new Date().toISOString(),
     ),

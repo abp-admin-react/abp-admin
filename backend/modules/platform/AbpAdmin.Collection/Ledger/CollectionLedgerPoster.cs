@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Ledger.Integration.Contracts;
@@ -207,6 +209,70 @@ public class CollectionLedgerPoster : DomainService
             Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()), CurrencyCode(currency));
     }
 
+    public virtual Task<decimal> GetUserFrozenBalanceAsync(Guid userId, Contracts.CollectionCurrency currency)
+    {
+        return _ledger.GetBalanceAsync(
+            Ref(FinanceAccountCodes.UserFrozen, FinOwnerType.User, userId.ToString()), CurrencyCode(currency));
+    }
+
+    public virtual Task<decimal> GetOrderPrepayBalanceAsync(Guid userId, Contracts.CollectionCurrency currency)
+    {
+        return _ledger.GetBalanceAsync(
+            Ref(FinanceAccountCodes.Unearned, FinOwnerType.User, userId.ToString(), FinanceAccountCodes.OrderPrepayBucket),
+            CurrencyCode(currency));
+    }
+
+    /// <summary>订单余额扣款。凭证键是余额流水号，同单再扣会得到新流水和新凭证。</summary>
+    public virtual Task<Guid> PostOrderDebitAsync(Guid balanceTxnId, Guid userId, Contracts.CollectionCurrency currency, decimal amount)
+    {
+        var code = CurrencyCode(currency);
+        return _ledger.PostAsync(new FinanceBizEvent(
+            FinanceBizTypes.OrderWallet, balanceTxnId.ToString("D"), FinanceBizTypes.Phases.OrderDebit,
+            code, amount,
+            UserId: userId,
+            From: Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()),
+            To: Ref(FinanceAccountCodes.Unearned, FinOwnerType.User, userId.ToString(), FinanceAccountCodes.OrderPrepayBucket),
+            Summary: "订单余额扣款"));
+    }
+
+    /// <summary>技术回冲红冲原扣款凭证。没有原凭证时由调用方先拒绝，这里不发明反向分录。</summary>
+    public virtual Task<Guid> PostOrderDebitReverseAsync(Guid balanceTxnId)
+    {
+        return _ledger.ReverseAsync(
+            FinanceBizTypes.OrderWallet, balanceTxnId.ToString("D"), FinanceBizTypes.Phases.OrderDebit);
+    }
+
+    public virtual Task<bool> HasOrderDebitVoucherAsync(Guid balanceTxnId)
+    {
+        return _ledger.HasVoucherAsync(
+            FinanceBizTypes.OrderWallet, balanceTxnId.ToString("D"), FinanceBizTypes.Phases.OrderDebit);
+    }
+
+    public virtual async Task<IReadOnlySet<string>> FindOrderDebitVoucherRefsAsync(IReadOnlyCollection<string> balanceTxnIds)
+    {
+        var found = await _ledger.FindVoucherRefsAsync(
+            FinanceBizTypes.OrderWallet, FinanceBizTypes.Phases.OrderDebit, balanceTxnIds);
+        return found.ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>商业退款回钱包。凭证键是退款行 Id，不调用充值入账。</summary>
+    public virtual Task<Guid> PostOrderRefundAsync(Guid refundId, Guid userId, Contracts.CollectionCurrency currency, decimal amount)
+    {
+        var code = CurrencyCode(currency);
+        return _ledger.PostAsync(new FinanceBizEvent(
+            FinanceBizTypes.OrderWallet, refundId.ToString("D"), FinanceBizTypes.Phases.OrderRefund,
+            code, amount,
+            UserId: userId,
+            From: Ref(FinanceAccountCodes.Unearned, FinOwnerType.User, userId.ToString(), FinanceAccountCodes.OrderPrepayBucket),
+            To: Ref(FinanceAccountCodes.UserAvailable, FinOwnerType.User, userId.ToString()),
+            Summary: "订单退回钱包"));
+    }
+
+    public virtual Task<System.Collections.Generic.IReadOnlyList<FinanceUserBalanceLine>> ListUserLiabilityBalancesAsync()
+    {
+        return _ledger.ListUserLiabilityBalancesAsync();
+    }
+
     private static FinanceBizEvent Event(
         ColWithdrawOrder order, string phase, decimal amount,
         AccountRef? From = null, AccountRef? To = null, string? summary = null)
@@ -220,8 +286,8 @@ public class CollectionLedgerPoster : DomainService
             Summary: summary);
     }
 
-    private static AccountRef Ref(string code, FinOwnerType? owner = null, string? ownerId = null)
+    private static AccountRef Ref(string code, FinOwnerType? owner = null, string? ownerId = null, string? bucket = null)
     {
-        return new AccountRef(code, owner, ownerId);
+        return new AccountRef(code, owner, ownerId, bucket);
     }
 }

@@ -23,6 +23,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
     public DbSet<ColBalanceTxn> BalanceTxns { get; set; } = default!;
 
+    public DbSet<ColWalletRefund> WalletRefunds { get; set; } = default!;
+
     public DbSet<ColBalanceAdjustment> BalanceAdjustments { get; set; } = default!;
 
     public DbSet<ColNetwork> Networks { get; set; } = default!;
@@ -38,6 +40,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
     public DbSet<ColVaultCheck> VaultChecks { get; set; } = default!;
 
     public DbSet<ColChainApiKey> ChainApiKeys { get; set; } = default!;
+
+    public DbSet<ColScanProvider> ScanProviders { get; set; } = default!;
 
     public DbSet<ColWithdrawOrder> WithdrawOrders { get; set; } = default!;
 
@@ -137,6 +141,16 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.Action, x.CreationTime }, "IX_ColBalanceTxns_Action_CreationTime");
         });
 
+        builder.Entity<ColWalletRefund>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "WalletRefunds");
+            b.ConfigureByConvention();
+            b.Property(x => x.RequestId).IsRequired().HasMaxLength(64);
+            b.Property(x => x.Amount).HasPrecision(28, 18);
+            b.HasIndex(x => new { x.OriginalDebitTxnId, x.RequestId }).IsUnique();
+            b.HasIndex(x => x.OriginalDebitTxnId);
+        });
+
         builder.Entity<ColNetwork>(b =>
         {
             b.ToTable(CollectionConsts.DbTablePrefix + "Networks");
@@ -159,6 +173,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.Property(x => x.ContractAddress).IsRequired().HasMaxLength(42);
             b.Property(x => x.MinDeposit).IsRequired().HasMaxLength(32);
             b.Property(x => x.VaultAddress).HasMaxLength(42);
+            b.Property(x => x.LastScanProvider).HasMaxLength(64);
+            b.Property(x => x.LastScanFailure).HasMaxLength(32);
 
             // 一网一币一符号；扫链游标与合约都在行上
             b.HasIndex(x => new { x.NetworkId, x.Symbol }).IsUnique();
@@ -172,9 +188,7 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
             b.Property(x => x.Address).IsRequired().HasMaxLength(42);
 
-            // 计划第 5.6 节：唯一 (UserId, NetworkId)、唯一 (NetworkId, AddressIndex)——
-            // 并发派生撞索引靠后者兜底（锁内重读）
-            b.HasIndex(x => new { x.UserId, x.NetworkId }).IsUnique();
+            b.HasIndex(x => new { x.UserId, x.NetworkId }).IsUnique().HasFilter("NOT \"IsRetired\"");
             b.HasIndex(x => new { x.NetworkId, x.AddressIndex }).IsUnique();
             b.HasIndex(x => new { x.NetworkId, x.Address });
         });
@@ -257,6 +271,25 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => new { x.NetworkId, x.Provider, x.KeyHash }).IsUnique();
             // 工厂取启用 key 的查询路径
             b.HasIndex(x => new { x.NetworkId, x.Provider, x.IsEnabled });
+        });
+
+        builder.Entity<ColScanProvider>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "ScanProviders");
+            b.ConfigureByConvention();
+            b.Property(x => x.Label).HasMaxLength(64);
+            b.Property(x => x.KeyHash).IsRequired().HasMaxLength(64);
+            b.Property(x => x.Group).HasMaxLength(128);
+            b.HasIndex(x => new { x.Provider, x.KeyHash });
+            b.HasMany(x => x.Networks).WithOne().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ColScanProviderNetwork>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "ScanProviderNetworks");
+            b.ConfigureByConvention();
+            b.HasKey(x => new { x.ProviderId, x.NetworkId });
+            b.HasOne<ColNetwork>().WithMany().HasForeignKey(x => x.NetworkId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<ColWithdrawOrder>(b =>

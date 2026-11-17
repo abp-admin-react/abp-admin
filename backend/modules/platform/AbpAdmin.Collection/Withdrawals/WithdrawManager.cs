@@ -8,6 +8,7 @@ using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Settings;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Volo.Abp;
@@ -34,6 +35,7 @@ public class WithdrawManager : DomainService
     private readonly ISettingProvider _settings;
     private readonly IClock _clock;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
+    private readonly IDeploymentModuleStateReader _moduleStates;
 
     public WithdrawManager(
         CollectionBalanceManager balances,
@@ -41,7 +43,8 @@ public class WithdrawManager : DomainService
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         ISettingProvider settings,
         IClock clock,
-        IUnitOfWorkManager unitOfWorkManager)
+        IUnitOfWorkManager unitOfWorkManager,
+        IDeploymentModuleStateReader moduleStates)
     {
         _balances = balances;
         _ledger = ledger;
@@ -49,6 +52,7 @@ public class WithdrawManager : DomainService
         _settings = settings;
         _clock = clock;
         _unitOfWorkManager = unitOfWorkManager;
+        _moduleStates = moduleStates;
     }
 
     // ── 提交 ─────────────────────────────────────────────────────────────────────────────
@@ -60,6 +64,12 @@ public class WithdrawManager : DomainService
     public virtual async Task<ColWithdrawOrder> SubmitAsync(
         Guid userId, CollectionCurrency currency, string toAddress, decimal amount)
     {
+        if (!(await _moduleStates.GetAsync()).IsEnabled(DeploymentModuleIds.Chain))
+        {
+            throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                .WithData("ModuleId", DeploymentModuleIds.Chain);
+        }
+
         await AssertEnabledAsync();
         await AssertNotHaltedAsync();
         if (currency != CollectionCurrency.Usdt && currency != CollectionCurrency.Usdc)

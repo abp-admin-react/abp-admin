@@ -9,7 +9,9 @@ using AbpAdmin.Collection.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
+using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.MultiTenancy;
 using Volo.Abp.Uow;
 using Xunit;
 
@@ -41,6 +43,51 @@ public class TreasuryDashboardTests : CollectionTestBase
 
         var txns = await admin.GetMemberTxnsAsync(userId, 0, 50);
         txns.TotalCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Member_Balance_Accounts_Page_By_User_And_Fill_Missing_Currency()
+    {
+        var older = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var newest = Guid.NewGuid();
+        var middle = Guid.NewGuid();
+        var oldest = Guid.NewGuid();
+        await InsertBalanceAsync(oldest, CollectionCurrency.Usdc, 8m, 0.5m, older);
+        await InsertBalanceAsync(middle, CollectionCurrency.Usdt, 4m, 2m, older.AddDays(1));
+        await InsertBalanceAsync(newest, CollectionCurrency.Usdt, 10m, 1m, older.AddDays(2));
+        await InsertBalanceAsync(newest, CollectionCurrency.Usdc, 3m, 0m, older.AddDays(2));
+
+        var admin = GetRequiredService<CollectionBalanceAdminAppService>();
+        var first = await admin.GetMemberBalanceAccountsAsync(0, 2);
+        first.TotalCount.ShouldBe(3);
+        first.Items.Select(x => x.UserId).ShouldBe([newest, middle]);
+        var both = first.Items[0];
+        both.UsdtBalance.ShouldBe("10");
+        both.UsdtFrozen.ShouldBe("1");
+        both.UsdcBalance.ShouldBe("3");
+        both.UsdcFrozen.ShouldBe("0");
+        both.UpdatedAt.ShouldBe(older.AddDays(2));
+        var usdtOnly = first.Items[1];
+        usdtOnly.UsdtBalance.ShouldBe("4");
+        usdtOnly.UsdtFrozen.ShouldBe("2");
+        usdtOnly.UsdcBalance.ShouldBe("0");
+        usdtOnly.UsdcFrozen.ShouldBe("0");
+
+        var second = await admin.GetMemberBalanceAccountsAsync(2, 2);
+        second.Items.Count.ShouldBe(1);
+        second.Items[0].UserId.ShouldBe(oldest);
+        second.Items[0].UsdtBalance.ShouldBe("0");
+        second.Items[0].UsdcBalance.ShouldBe("8");
+        second.Items[0].UsdcFrozen.ShouldBe("0.5");
+    }
+
+    [Fact]
+    public async Task Tenant_Cannot_List_Member_Balance_Accounts()
+    {
+        var admin = GetRequiredService<CollectionBalanceAdminAppService>();
+        using var tenant = GetRequiredService<ICurrentTenant>().Change(Guid.NewGuid());
+        var error = await Should.ThrowAsync<BusinessException>(() => admin.GetMemberBalanceAccountsAsync(0, 20));
+        error.Code.ShouldBe(CollectionErrorCodes.HostOnly);
     }
 
     [Fact]
@@ -214,7 +261,8 @@ public class TreasuryDashboardTests : CollectionTestBase
         dashboard.UserBalances.Single(b => b.Currency == "Usdc").Balance.ShouldBe("7");
     }
 
-    private async Task InsertBalanceAsync(Guid userId, CollectionCurrency currency, decimal balance, decimal frozen)
+    private async Task InsertBalanceAsync(
+        Guid userId, CollectionCurrency currency, decimal balance, decimal frozen, DateTime? updatedAt = null)
     {
         using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
         var dbContext = await DbAsync();
@@ -224,7 +272,7 @@ public class TreasuryDashboardTests : CollectionTestBase
             Currency = currency,
             Balance = balance,
             Frozen = frozen,
-            UpdatedAt = DateTime.UtcNow,
+            UpdatedAt = updatedAt ?? DateTime.UtcNow,
         });
         await dbContext.SaveChangesAsync();
         await uow.CompleteAsync();

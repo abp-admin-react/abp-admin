@@ -184,6 +184,17 @@ public class OrderCommerceTests : OrderingTestBase
         result.Count.ShouldBe(1);
         result.Single().BalanceTxnId.ShouldBe(txnA);
         result.Single().OrderId.ShouldBe(orderA.Id);
+
+        var myOrders = GetRequiredService<OrderAppService>();
+        var adminOrders = GetRequiredService<OrderAdminAppService>();
+        var own = await UowAsync(() => myOrders.GetListAsync(new OrderListFilterDto { BalanceTxnId = txnA }));
+        own.Items.ShouldHaveSingleItem().Id.ShouldBe(orderA.Id);
+        (await UowAsync(() => myOrders.GetListAsync(new OrderListFilterDto { BalanceTxnId = txnB, UserId = orderB.UserId })))
+            .Items.ShouldBeEmpty();
+        (await UowAsync(() => adminOrders.GetListAsync(new OrderListFilterDto { BalanceTxnId = txnB, UserId = orderB.UserId })))
+            .Items.ShouldHaveSingleItem().Id.ShouldBe(orderB.Id);
+        (await UowAsync(() => adminOrders.GetListAsync(new OrderListFilterDto { BalanceTxnId = txnB, UserId = Me })))
+            .Items.ShouldBeEmpty();
     }
 
     [Fact]
@@ -265,7 +276,7 @@ public class OrderCommerceTests : OrderingTestBase
 
         var after = await UowAsync(() => ReloadAsync(order.Id));
         after.PayChannel.ShouldBe(OrderingPayChannel.BalanceUsdt);
-        after.PayNetwork.ShouldBe("BSC");
+        after.PayNetwork.ShouldBeNull();
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Volo.Abp;
@@ -41,4 +42,30 @@ public interface ILedgerIntegrationService : IApplicationService
     /// 调用方需与「余额为 0」区分处理。
     /// </summary>
     Task<decimal> GetBalanceAsync(AccountRef account, string currency, CancellationToken cancellationToken = default);
+
+    /// <summary>该业务键是否已有凭证。不存在时返回 false，不抛 VoucherNotFound。</summary>
+    Task<bool> HasVoucherAsync(
+        string bizType,
+        string bizRefId,
+        string phase,
+        string? batchKey = null,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<string>> FindVoucherRefsAsync(
+        string bizType,
+        string phase,
+        IReadOnlyCollection<string> bizRefIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>用户负债子户当前投影：2201、2202，以及 2205 的 order 桶。供同一快照核对。</summary>
+    Task<IReadOnlyList<FinanceUserBalanceLine>> ListUserLiabilityBalancesAsync(
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>用户负债子户的当前投影。OwnerId 是用户 Id 的字符串。</summary>
+public sealed record FinanceUserBalanceLine(
+    string OwnerId,
+    string Currency,
+    string AccountCode,
+    string Bucket,
+    decimal Balance);

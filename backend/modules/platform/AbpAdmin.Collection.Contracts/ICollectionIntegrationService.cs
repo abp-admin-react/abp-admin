@@ -54,8 +54,42 @@ public interface ICollectionIntegrationService
     Task<ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount);
 
     /// <summary>
-    /// 返回该用户的 BSC 地址。扫链尚未成功跑过一轮时拒绝新派生（有地址可以返回，
-    /// 同时标明充值未开放）。有副作用，不是纯查询。
+    /// 返回该用户的 BSC 充值地址。模块暂停受理时不返回充值地址。
+    /// 模块开启时，扫链未就绪会拒绝新派生，已有地址返回且标明充值未开放。
     /// </summary>
     Task<DepositAddressDto> GetDepositAddressAsync(Guid userId);
+
+    /// <summary>
+    /// 占用原扣款的待核实额度，不给钱包入账。双写未启用时 Applied 为 false，调用方保持原补录。
+    /// </summary>
+    Task<WalletRefundHoldResult> HoldWalletRefundAsync(Guid originalDebitTxnId, string requestId, decimal amount);
+
+    /// <summary>确认待核实占用。只保留额度，不再入账。</summary>
+    Task ConfirmWalletRefundHoldAsync(Guid originalDebitTxnId, string requestId);
+
+    /// <summary>
+    /// 把原扣款的一部分退回钱包。同一扣款下 RequestId 同内容重放、异内容冲突。
+    /// 双写未启用时抛 WalletLedgerNotEnforced，不改余额。
+    /// </summary>
+    Task<WalletRefundHoldResult> RefundWalletAsync(Guid originalDebitTxnId, string requestId, decimal amount);
+
+    /// <summary>
+    /// 说明关联到已成功或已核实的退款，不再占用第二次。金额若填写必须与该行一致。
+    /// 待核实、不存在或原扣款已技术撤销时拒绝。双写未启用时抛 WalletLedgerNotEnforced。
+    /// </summary>
+    Task LinkWalletRefundNoteAsync(Guid originalDebitTxnId, string requestId, decimal? amount = null);
+
+    /// <summary>该扣款是否已有待核实、已核实或已入账的钱包退款。补状态作业不能再把它当成未处理的支付。</summary>
+    Task<bool> HasWalletRefundAsync(Guid balanceTxnId);
+}
+
+/// <summary>同一扣款下的退款请求结果。未启用双写时不落行。</summary>
+public class WalletRefundHoldResult
+{
+    public bool Applied { get; set; }
+
+    public Guid? RefundId { get; set; }
+
+    /// <summary>同一扣款下的幂等号。核实和退款要带上它。</summary>
+    public string? RequestId { get; set; }
 }

@@ -49,12 +49,21 @@ public static class CollectionErrorCodes
 
     /// <summary>重置助记词被拒（已有充值地址或未完成归集）。</summary>
     public const string MnemonicResetRefused = Namespace + ":MnemonicResetRefused";
+    public const string LegacyWalletInvalidManifest = Namespace + ":LegacyWalletInvalidManifest";
+    public const string LegacyWalletMnemonicInvalid = Namespace + ":LegacyWalletMnemonicInvalid";
+    public const string LegacyWalletAddressMismatch = Namespace + ":LegacyWalletAddressMismatch";
+    public const string LegacyWalletUnknownUser = Namespace + ":LegacyWalletUnknownUser";
+    public const string LegacyWalletWorkersRunning = Namespace + ":LegacyWalletWorkersRunning";
+    public const string LegacyWalletTargetOccupied = Namespace + ":LegacyWalletTargetOccupied";
 
     /// <summary>链网运维动作缺少 Collection:MasterKey 配置。</summary>
     public const string MasterKeyMissing = Namespace + ":MasterKeyMissing";
 
     /// <summary>RPC 地址非法（仅允许 https）。</summary>
     public const string InvalidRpcUrl = Namespace + ":InvalidRpcUrl";
+
+    /// <summary>停用备用交易 RPC 前须启用至少一个 Ankr RPC。</summary>
+    public const string TransactionRpcRequired = Namespace + ":TransactionRpcRequired";
 
     /// <summary>金库地址非法（需 0x + 40 位十六进制）。</summary>
     public const string InvalidVaultAddress = Namespace + ":InvalidVaultAddress";
@@ -154,4 +163,19 @@ public static class CollectionErrorCodes
 
     /// <summary>热钱包流水当前状态不可确认（仅 Anomaly 可「确认已知」）。</summary>
     public const string HotWalletTxnNotAckable = Namespace + ":HotWalletTxnNotAckable";
+
+    /// <summary>钱包与财务投影不一致，或旧扣款没有原凭证。不退回只改钱包的路径。</summary>
+    public const string WalletLedgerPending = Namespace + ":WalletLedgerPending";
+
+    /// <summary>钱包双写尚未启用。</summary>
+    public const string WalletLedgerNotEnforced = Namespace + ":WalletLedgerNotEnforced";
+
+    /// <summary>同一扣款下 RequestId 已存在且内容不同。</summary>
+    public const string WalletRefundConflict = Namespace + ":WalletRefundConflict";
+
+    /// <summary>退款超过原扣款减去已退和待核实占用。</summary>
+    public const string WalletRefundExceeds = Namespace + ":WalletRefundExceeds";
+
+    /// <summary>原扣款不能退：不是未回冲的消费扣款、待核实中，或已有商业退款还要整笔撤销。</summary>
+    public const string WalletRefundNotAllowed = Namespace + ":WalletRefundNotAllowed";
 }

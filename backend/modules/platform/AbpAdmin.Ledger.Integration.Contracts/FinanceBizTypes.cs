@@ -19,6 +19,9 @@ public static class FinanceBizTypes
     /// <summary>链上提现（freeze/unfreeze/approve/fee-take/payout/refund/fee-refund 七个 phase，见提现过账表）。</summary>
     public const string Withdraw = "withdraw";
 
+    /// <summary>订单余额扣款、技术回冲和商业退款。不计入外部收付。</summary>
+    public const string OrderWallet = "order-wallet";
+
     public static class Phases
     {
         public const string Pay = "pay";
@@ -47,6 +50,12 @@ public static class FinanceBizTypes
 
         /// <summary>充值手续费：用户可用 → 手续费收入（净额入账后收取；Fee=0 不落凭证）。</summary>
         public const string Fee = "fee";
+
+        /// <summary>订单余额扣款：用户 2201 → 用户 2205 的 order 桶。不进外部流入。</summary>
+        public const string OrderDebit = "order-debit";
+
+        /// <summary>商业退款回钱包：同一 order 桶 → 用户 2201。不进外部流出。</summary>
+        public const string OrderRefund = "order-refund";
     }
 
     /// <summary>

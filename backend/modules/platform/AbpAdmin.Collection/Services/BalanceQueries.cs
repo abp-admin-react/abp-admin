@@ -42,10 +42,19 @@ internal static class BalanceQueries
 
     public static async Task<(int Total, List<BalanceTxnDto> Items)> GetTxnsAsync(
         CollectionDbContext dbContext, Guid userId,
-        int skipCount, int maxResultCount, DateTime? fromTime = null, DateTime? toTime = null)
+        int skipCount, int maxResultCount, DateTime? fromTime = null, DateTime? toTime = null,
+        Guid? txnId = null, Guid? withdrawalId = null)
     {
         var query = dbContext.BalanceTxns.AsNoTracking()
             .Where(t => t.UserId == userId);
+        if (txnId.HasValue)
+        {
+            query = query.Where(t => t.Id == txnId.Value);
+        }
+        if (withdrawalId.HasValue)
+        {
+            query = query.Where(t => t.BusinessType == CollectionBusinessTypes.Withdraw && t.BusinessId == withdrawalId.Value);
+        }
         if (fromTime.HasValue)
         {
             query = query.Where(t => t.CreationTime >= fromTime.Value);
@@ -91,7 +100,7 @@ internal static class BalanceQueries
         var txHashByDepositOrderId = depositOrderIds.Count == 0
             ? new Dictionary<Guid, string>()
             : await dbContext.DepositOrders.AsNoTracking()
-                .Where(o => depositOrderIds.Contains(o.Id))
+                .Where(o => o.UserId == userId && depositOrderIds.Contains(o.Id))
                 .Select(o => new { o.Id, o.TxHash })
                 .ToDictionaryAsync(x => x.Id, x => x.TxHash);
 
@@ -106,6 +115,8 @@ internal static class BalanceQueries
             BusinessType = t.BusinessType,
             BusinessId = t.BusinessId,
             RefTxnId = t.RefTxnId,
+            DepositOrderId = txHashByTxnId.TryGetValue(t.Id, out var linkedDepositId)
+                             && txHashByDepositOrderId.ContainsKey(linkedDepositId) ? linkedDepositId : null,
             TxHash = t.Action == BalanceActions.DepositCredit
                      && txHashByTxnId.TryGetValue(t.Id, out var depositOrderId)
                      && txHashByDepositOrderId.TryGetValue(depositOrderId, out var txHash)

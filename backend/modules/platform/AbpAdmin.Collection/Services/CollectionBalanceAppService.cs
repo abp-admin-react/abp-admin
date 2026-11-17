@@ -57,6 +57,9 @@ public class BalanceTxnDto
     /// <summary>回冲行的原扣款流水 Id（用户侧把回冲关联回原订单用）。</summary>
     public Guid? RefTxnId { get; set; }
 
+    /// <summary>充值贷记幂等键对应的同一用户进款单；历史或无对应记录时为 null。</summary>
+    public Guid? DepositOrderId { get; set; }
+
     /// <summary>充值行的链上转账凭证（ColDepositOrders.TxHash 回填；非充值行为 null）。</summary>
     public string? TxHash { get; set; }
 }
@@ -94,7 +97,7 @@ public class CollectionBalanceAppService : ApplicationService
     /// 据此查 ColDepositOrders.TxHash——用户对账要能看到链上转账，不只是余额数字。
     /// </summary>
     public virtual async Task<PagedResultDto<BalanceTxnDto>> GetMyTxnsAsync(
-        int skipCount, int maxResultCount, DateTime? fromTime = null, DateTime? toTime = null)
+        int skipCount, int maxResultCount, DateTime? fromTime = null, DateTime? toTime = null, Guid? txnId = null)
     {
         AssertHost();
         if (maxResultCount <= 0 || maxResultCount > 200)
@@ -105,7 +108,7 @@ public class CollectionBalanceAppService : ApplicationService
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var (total, items) = await BalanceQueries.GetTxnsAsync(
-            dbContext, CurrentUser.Id!.Value, skipCount, maxResultCount, fromTime, toTime);
+            dbContext, CurrentUser.Id!.Value, skipCount, maxResultCount, fromTime, toTime, txnId);
         await uow.CompleteAsync();
         return new PagedResultDto<BalanceTxnDto>(total, items);
     }

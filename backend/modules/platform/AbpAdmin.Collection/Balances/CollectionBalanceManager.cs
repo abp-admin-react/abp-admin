@@ -5,7 +5,9 @@ using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Collection.Ledger;
 using AbpAdmin.Collection.Settings;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Volo.Abp;
@@ -19,7 +21,8 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Balances;
 
 /// <summary>
-/// 稳定币余额记账。扣款加入订单事务时，流水、余额和支付状态一起提交；扣款回冲使用独立事务。
+/// 稳定币余额记账。扣款加入调用方事务；技术回冲自己开事务，并先锁原扣款再看有没有商业退款。
+/// <c>Collection.WalletLedger.Enforce</c> 打开后，扣款、回冲和退回钱包在同一事务里写财务分录。
 /// </summary>
 public class CollectionBalanceManager : DomainService
 {
@@ -31,19 +34,25 @@ public class CollectionBalanceManager : DomainService
     private readonly IDistributedEventBus _distributedEventBus;
     private readonly IClock _clock;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
+    private readonly IDeploymentModuleStateReader _moduleStates;
+    private readonly CollectionLedgerPoster _ledgerPoster;
 
     public CollectionBalanceManager(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         ISettingProvider settingProvider,
         IDistributedEventBus distributedEventBus,
         IClock clock,
-        IUnitOfWorkManager unitOfWorkManager)
+        IUnitOfWorkManager unitOfWorkManager,
+        IDeploymentModuleStateReader moduleStates,
+        CollectionLedgerPoster ledgerPoster)
     {
         _dbContextProvider = dbContextProvider;
         _settingProvider = settingProvider;
         _distributedEventBus = distributedEventBus;
         _clock = clock;
         _unitOfWorkManager = unitOfWorkManager;
+        _moduleStates = moduleStates;
+        _ledgerPoster = ledgerPoster;
     }
 
     /// <summary>
@@ -76,7 +85,25 @@ public class CollectionBalanceManager : DomainService
             throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
         }
 
+        if (!CollectionPaymentAdmission.TryConsume(businessType, businessId, channel: null, balanceCurrency: currency)
+            && !(await _moduleStates.GetAsync()).IsEnabled(DeploymentModuleIds.Collection))
+        {
+            var existing = await FindUnreversedDebitAsync(businessType, businessId);
+            if (existing == null)
+            {
+                throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                    .WithData("ModuleId", DeploymentModuleIds.Collection);
+            }
+
+            AssertDebitIdentity(existing, userId, currency, amount);
+            return existing.Id;
+        }
+
         var dbContext = await _dbContextProvider.GetDbContextAsync();
+        if (await WalletLedgerEnforcedAsync())
+        {
+            await EnsureWalletMatchesLedgerAsync(userId, currency);
+        }
         var now = _clock.Now;
         var txnId = GuidGenerator.Create();
 
@@ -97,12 +124,7 @@ public class CollectionBalanceManager : DomainService
                 .OrderByDescending(t => t.Seq)
                 .FirstAsync();
 
-            if (winner.Currency != currency || winner.Amount != -amount)
-            {
-                throw new BusinessException(CollectionErrorCodes.DebitConflict)
-                    .WithData("BusinessType", businessType)
-                    .WithData("BusinessId", businessId);
-            }
+            AssertDebitIdentity(winner, userId, currency, amount);
 
             // 金额币种相同的重试：返回原流水，不重复扣
             return winner.Id;
@@ -139,14 +161,27 @@ public class CollectionBalanceManager : DomainService
         }
 
         await SetBalanceAfterAsync(dbContext, txnId, balances[0]);
+        if (await WalletLedgerEnforcedAsync())
+        {
+            await _ledgerPoster.PostOrderDebitAsync(txnId, userId, currency, amount);
+        }
 
         return txnId;
     }
 
+    private static void AssertDebitIdentity(ColBalanceTxn existing, Guid userId, CollectionCurrency currency, decimal amount)
+    {
+        if (existing.UserId != userId || existing.Currency != currency || existing.Amount != -amount)
+        {
+            throw new BusinessException(CollectionErrorCodes.DebitConflict)
+                .WithData("BusinessType", existing.BusinessType!)
+                .WithData("BusinessId", existing.BusinessId!.Value);
+        }
+    }
+
     /// <summary>
-    /// 回冲该业务单未回冲的扣款。并发两次只加回一次余额（条件更新带 WHERE ReversedAt IS NULL，
-    /// 0 行 = 已回冲，直接成功）；没有未回冲扣款时直接成功。回冲行流水用 IdempotencyKey 兜底。
-    /// 调用方约束（订单不是 Paid/Fulfilled）由调用方负责——本模块不知道订单状态。
+    /// 回冲未撤销的消费扣款。先锁扣款行：已有商业退款则拒绝，避免和退回钱包各入账一次。
+    /// 双写打开时没有原凭证就拒绝，不发明反向分录。订单是否已支付由调用方约束。
     /// </summary>
     public virtual async Task ReverseAsync(string businessType, Guid businessId)
     {
@@ -166,9 +201,30 @@ public class CollectionBalanceManager : DomainService
             return;
         }
 
+        // 与商业退款共用这把行锁。先看到退款行就不再加回余额，避免两边都入账。
+        await LockDebitAsync(dbContext, debit.Id);
+        var locked = await dbContext.BalanceTxns.AsNoTracking().FirstAsync(txn => txn.Id == debit.Id);
+        if (locked.ReversedAt != null)
+        {
+            await uow.CompleteAsync();
+            return;
+        }
+
+        if (await dbContext.WalletRefunds.AnyAsync(refund => refund.OriginalDebitTxnId == locked.Id))
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletRefundNotAllowed)
+                .WithData("BalanceTxnId", locked.Id);
+        }
+
+        if (await WalletLedgerEnforcedAsync() && !await _ledgerPoster.HasOrderDebitVoucherAsync(locked.Id))
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletLedgerPending)
+                .WithData("BalanceTxnId", locked.Id);
+        }
+
         var now = _clock.Now;
         var reversed = await dbContext.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE \"ColBalanceTxns\" SET \"ReversedAt\" = {now} WHERE \"Id\" = {debit.Id} AND \"ReversedAt\" IS NULL");
+            $"UPDATE \"ColBalanceTxns\" SET \"ReversedAt\" = {now} WHERE \"Id\" = {locked.Id} AND \"ReversedAt\" IS NULL");
         if (reversed == 0)
         {
             // 另一个并发回冲已经赢：不加回余额，直接成功
@@ -192,6 +248,10 @@ public class CollectionBalanceManager : DomainService
 
         var reverseBalanceAfter = await AddToBalanceAsync(dbContext, debit.UserId, debit.Currency, amount, now);
         await SetBalanceAfterAsync(dbContext, reverseId, reverseBalanceAfter);
+        if (await WalletLedgerEnforcedAsync())
+        {
+            await _ledgerPoster.PostOrderDebitReverseAsync(debit.Id);
+        }
 
         await uow.CompleteAsync();
     }
@@ -766,5 +826,264 @@ public class CollectionBalanceManager : DomainService
                 Logger.LogWarning(ex, "BalanceCreditedEto 发布失败，充值补插作业会兜底（BalanceTxnId={TxnId})", eto.BalanceTxnId);
             }
         });
+    }
+
+    public virtual Task<WalletRefundHoldResult> HoldWalletRefundAsync(Guid originalDebitTxnId, string requestId, decimal amount)
+    {
+        return ChangeWalletRefundAsync(originalDebitTxnId, requestId, amount, creditWallet: false, confirmOnly: false);
+    }
+
+    public virtual Task ConfirmWalletRefundHoldAsync(Guid originalDebitTxnId, string requestId)
+    {
+        return ChangeWalletRefundAsync(originalDebitTxnId, requestId, 0m, creditWallet: false, confirmOnly: true);
+    }
+
+    public virtual Task<WalletRefundHoldResult> RefundWalletAsync(Guid originalDebitTxnId, string requestId, decimal amount)
+    {
+        return ChangeWalletRefundAsync(originalDebitTxnId, requestId, amount, creditWallet: true, confirmOnly: false);
+    }
+
+    /// <summary>
+    /// 把说明系到已成功或已核实的退款上。不新增退款行，也不入钱包。
+    /// 双写未开启、待核实、金额不一致或原扣款已撤销时拒绝。
+    /// </summary>
+    public virtual async Task LinkWalletRefundNoteAsync(Guid originalDebitTxnId, string requestId, decimal? amount = null)
+    {
+        AssertRequestId(requestId);
+        if (!await WalletLedgerEnforcedAsync())
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletLedgerNotEnforced)
+                .WithData("BalanceTxnId", originalDebitTxnId);
+        }
+
+        using var uow = BeginWalletRefundUnitOfWork();
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        await LockDebitAsync(dbContext, originalDebitTxnId);
+        var debit = await dbContext.BalanceTxns.AsNoTracking().FirstOrDefaultAsync(txn => txn.Id == originalDebitTxnId);
+        var row = await dbContext.WalletRefunds.FirstOrDefaultAsync(refund =>
+            refund.OriginalDebitTxnId == originalDebitTxnId && refund.RequestId == requestId);
+        if (debit == null
+            || debit.Action != BalanceActions.BusinessDebit
+            || debit.ReversedAt != null
+            || row == null
+            || row.Status == WalletRefundStatus.PendingVerification)
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletRefundNotAllowed)
+                .WithData("BalanceTxnId", originalDebitTxnId)
+                .WithData("RequestId", requestId);
+        }
+
+        if (amount.HasValue && amount.Value != row.Amount)
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletRefundConflict)
+                .WithData("BalanceTxnId", originalDebitTxnId)
+                .WithData("RequestId", requestId)
+                .WithData("Amount", amount.Value);
+        }
+
+        if (uow != null)
+        {
+            await uow.CompleteAsync();
+        }
+    }
+
+    private async Task<WalletRefundHoldResult> ChangeWalletRefundAsync(
+        Guid originalDebitTxnId, string requestId, decimal amount, bool creditWallet, bool confirmOnly)
+    {
+        AssertRequestId(requestId);
+        if (!await WalletLedgerEnforcedAsync())
+        {
+            if (!creditWallet && !confirmOnly)
+            {
+                return new WalletRefundHoldResult { Applied = false };
+            }
+
+            throw new BusinessException(CollectionErrorCodes.WalletLedgerNotEnforced);
+        }
+
+        if (!confirmOnly && amount <= 0)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
+        }
+
+        using var uow = BeginWalletRefundUnitOfWork();
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        await LockDebitAsync(dbContext, originalDebitTxnId);
+        var debit = await dbContext.BalanceTxns.FirstOrDefaultAsync(txn => txn.Id == originalDebitTxnId);
+        if (debit == null
+            || debit.Action != BalanceActions.BusinessDebit
+            || debit.ReversedAt != null
+            || debit.BusinessId == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletRefundNotAllowed)
+                .WithData("BalanceTxnId", originalDebitTxnId);
+        }
+
+        var rows = await dbContext.WalletRefunds
+            .Where(refund => refund.OriginalDebitTxnId == debit.Id)
+            .ToListAsync();
+        var existing = rows.FirstOrDefault(refund => refund.RequestId == requestId);
+        if (confirmOnly)
+        {
+            if (existing == null || existing.Status != WalletRefundStatus.PendingVerification)
+            {
+                throw new BusinessException(CollectionErrorCodes.WalletRefundNotAllowed)
+                    .WithData("RequestId", requestId);
+            }
+
+            existing.Status = WalletRefundStatus.VerifiedExternal;
+            await dbContext.SaveChangesAsync();
+            if (uow != null)
+            {
+                await uow.CompleteAsync();
+            }
+
+            return new WalletRefundHoldResult { Applied = true, RefundId = existing.Id, RequestId = requestId };
+        }
+
+        if (existing != null)
+        {
+            var sameCredit = creditWallet
+                ? existing.Status == WalletRefundStatus.Succeeded
+                : existing.Status == WalletRefundStatus.PendingVerification;
+            if (existing.Amount != amount || !sameCredit)
+            {
+                throw new BusinessException(CollectionErrorCodes.WalletRefundConflict)
+                    .WithData("RequestId", requestId)
+                    .WithData("BalanceTxnId", debit.Id);
+            }
+
+            if (uow != null)
+            {
+                await uow.CompleteAsync();
+            }
+
+            return new WalletRefundHoldResult { Applied = true, RefundId = existing.Id, RequestId = requestId };
+        }
+
+        if (rows.Any(refund => refund.Status == WalletRefundStatus.PendingVerification))
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletRefundNotAllowed)
+                .WithData("BalanceTxnId", debit.Id)
+                .WithData("Reason", "pending verification");
+        }
+
+        var occupied = rows.Sum(refund => refund.Amount);
+        if (occupied + amount > -debit.Amount)
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletRefundExceeds)
+                .WithData("BalanceTxnId", debit.Id)
+                .WithData("Amount", amount);
+        }
+
+        if (!await _ledgerPoster.HasOrderDebitVoucherAsync(debit.Id))
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletLedgerPending)
+                .WithData("BalanceTxnId", debit.Id);
+        }
+
+        await EnsureWalletMatchesLedgerAsync(debit.UserId, debit.Currency);
+        var refundId = GuidGenerator.Create();
+        Guid? balanceTxnId = null;
+        if (creditWallet)
+        {
+            var now = _clock.Now;
+            balanceTxnId = GuidGenerator.Create();
+            var inserted = await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "ColBalanceTxns" ("Id", "UserId", "Currency", "Action", "Amount", "BalanceAfter", "IdempotencyKey", "BusinessType", "BusinessId", "RefTxnId", "ReversedAt", "CreationTime")
+                VALUES ({balanceTxnId}, {debit.UserId}, {(int)debit.Currency}, {BalanceActions.WalletRefund}, {amount}, {0m}, {"wallet-refund:" + debit.Id.ToString("N") + ":" + requestId}, {debit.BusinessType}, {debit.BusinessId}, {debit.Id}, NULL, {now})
+                ON CONFLICT ("IdempotencyKey") DO NOTHING
+                """);
+            if (inserted == 0)
+            {
+                throw new BusinessException(CollectionErrorCodes.WalletRefundConflict)
+                    .WithData("RequestId", requestId);
+            }
+
+            var balanceAfter = await AddToBalanceAsync(dbContext, debit.UserId, debit.Currency, amount, now);
+            await SetBalanceAfterAsync(dbContext, balanceTxnId.Value, balanceAfter);
+        }
+
+        dbContext.WalletRefunds.Add(new ColWalletRefund(refundId)
+        {
+            OriginalDebitTxnId = debit.Id,
+            RequestId = requestId,
+            UserId = debit.UserId,
+            Currency = debit.Currency,
+            Amount = amount,
+            Status = creditWallet ? WalletRefundStatus.Succeeded : WalletRefundStatus.PendingVerification,
+            BalanceTxnId = balanceTxnId,
+            CreationTime = _clock.Now,
+        });
+        await dbContext.SaveChangesAsync();
+        if (creditWallet)
+        {
+            await _ledgerPoster.PostOrderRefundAsync(refundId, debit.UserId, debit.Currency, amount);
+        }
+
+        if (uow != null)
+        {
+            await uow.CompleteAsync();
+        }
+
+        return new WalletRefundHoldResult { Applied = true, RefundId = refundId, RequestId = requestId };
+    }
+
+    public virtual Task<bool> HasWalletRefundAsync(Guid balanceTxnId)
+    {
+        return QueryAsync(async () =>
+        {
+            var dbContext = await _dbContextProvider.GetDbContextAsync();
+            return await dbContext.WalletRefunds.AnyAsync(refund => refund.OriginalDebitTxnId == balanceTxnId);
+        });
+    }
+
+    /// <summary>请求号是同一扣款下的幂等键，空值或超长会让两笔退款共用或写不进唯一索引。</summary>
+    private static void AssertRequestId(string requestId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId) || requestId.Length > 64 || requestId.Any(char.IsControl))
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount)
+                .WithData("RequestId", "RequestId is required, at most 64 characters, without control characters.");
+        }
+    }
+
+    private IUnitOfWork? BeginWalletRefundUnitOfWork()
+    {
+        var current = _unitOfWorkManager.Current;
+        if (current?.Options.IsTransactional == true)
+        {
+            return null;
+        }
+
+        return _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+    }
+
+    private static Task LockDebitAsync(CollectionDbContext dbContext, Guid debitId)
+    {
+        return dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT 1 FROM \"ColBalanceTxns\" WHERE \"Id\" = {debitId} FOR UPDATE");
+    }
+
+    private async Task<bool> WalletLedgerEnforcedAsync()
+    {
+        return await _settingProvider.IsTrueAsync(CollectionSettings.WalletLedger.Enforce);
+    }
+
+    private async Task EnsureWalletMatchesLedgerAsync(Guid userId, CollectionCurrency currency)
+    {
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var row = await dbContext.Balances.AsNoTracking()
+            .FirstOrDefaultAsync(balance => balance.UserId == userId && balance.Currency == currency);
+        var available = row?.Balance ?? 0m;
+        var frozen = row?.Frozen ?? 0m;
+        var ledgerAvailable = await _ledgerPoster.GetUserAvailableBalanceAsync(userId, currency);
+        var ledgerFrozen = await _ledgerPoster.GetUserFrozenBalanceAsync(userId, currency);
+        if (available != ledgerAvailable || frozen != ledgerFrozen)
+        {
+            throw new BusinessException(CollectionErrorCodes.WalletLedgerPending)
+                .WithData("UserId", userId)
+                .WithData("Currency", currency);
+        }
     }
 }

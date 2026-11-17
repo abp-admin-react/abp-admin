@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Integration.Contracts;
@@ -36,4 +37,16 @@ public class LedgerIntegrationService : ApplicationService, ILedgerIntegrationSe
 
     public virtual Task<decimal> GetBalanceAsync(AccountRef account, string currency, CancellationToken cancellationToken = default) =>
         _engine.GetBalanceAsync(account, currency);
+
+    public virtual Task<bool> HasVoucherAsync(string bizType, string bizRefId, string phase, string? batchKey = null,
+        CancellationToken cancellationToken = default) =>
+        _engine.HasVoucherAsync(bizType, bizRefId, phase, batchKey);
+
+    public virtual Task<IReadOnlyList<string>> FindVoucherRefsAsync(
+        string bizType, string phase, IReadOnlyCollection<string> bizRefIds, CancellationToken cancellationToken = default) =>
+        _engine.FindVoucherRefsAsync(bizType, phase, bizRefIds);
+
+    public virtual Task<IReadOnlyList<FinanceUserBalanceLine>> ListUserLiabilityBalancesAsync(
+        CancellationToken cancellationToken = default) =>
+        _engine.ListUserLiabilityBalancesAsync();
 }

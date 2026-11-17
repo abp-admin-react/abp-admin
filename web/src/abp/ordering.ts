@@ -16,14 +16,14 @@ export type OrderDto = {
   currency?: string;
   /** PendingPayment | Paid | Closed | Fulfilled */
   status: string;
-  /** WechatNative | AlipayPrecreate | StripeCheckout | BalanceUsdt | BalanceUsdc */
+  /** WechatNative | AlipayPrecreate | StripeCheckout | BalanceUsdt | BalanceUsdc | ChainDeposit */
   payChannel?: string;
   payAmount?: string;
   payCurrency?: string;
   paidAt?: string;
   /** 外部收款渠道单号，余额支付为 null。 */
   channelTradeNo?: string;
-  /** 支付网络（Web3 渠道如 "BSC"；法币渠道为 null） */
+  /** 充值入账的网络。余额支付沿用历史结算网络字段。 */
   payNetwork?: string;
   /** 履约时间 */
   fulfilledAt?: string;
@@ -63,6 +63,7 @@ export type OrderListFilterDto = {
   status?: string;
   hasAnomaly?: boolean;
   userId?: string;
+  balanceTxnId?: string;
 };
 
 export type QuoteDto = {
@@ -91,7 +92,7 @@ export type PagedResult<T> = {
 };
 
 /** 渠道大类：法币 / Web3 链上 / 账户余额（账本划扣，非外部渠道） */
-export type PayChannelCategory = 'Fiat' | 'Web3' | 'Balance';
+export type PayChannelCategory = 'Fiat' | 'Balance' | 'Chain';
 
 /** 渠道元数据（与后端 OrderingPayChannel 对齐）——全站渠道显示的唯一出处 */
 export const PAY_CHANNEL_META: Record<
@@ -107,10 +108,8 @@ export const PAY_CHANNEL_META: Record<
   },
   BalanceUsdt: { category: 'Balance', label: '余额 USDT', color: 'default' },
   BalanceUsdc: { category: 'Balance', label: '余额 USDC', color: 'default' },
+  ChainDeposit: { category: 'Chain', label: '链上充值', color: 'gold' },
 };
-
-/** 当前唯一支付网络（与后端 ColNetwork 种子一致）；多链上线后此兜底移除、以 payNetwork 为准 */
-const DEFAULT_NETWORK = 'BSC';
 
 export const currencyLabel = (c?: string) =>
   c === 'Usdt'
@@ -123,23 +122,19 @@ export const currencyLabel = (c?: string) =>
           ? 'USD'
           : (c ?? '');
 
-/**
- * 订单支付方式的组合显示标签：
- * - 法币渠道：渠道名（+币种，如 微信 Native·CNY）
- * - Web3/余额：网络·币种（如 BSC·USDT / 余额·USDT）
- * 网络读 order.payNetwork，缺失按单链兜底 BSC（余额单网络含义是「余额来源链」）。
- */
 export function payChannelLabel(
-  order: Pick<OrderDto, 'payChannel' | 'payCurrency' | 'payNetwork'>,
+  order: Pick<OrderDto, 'orderType' | 'payChannel' | 'payCurrency' | 'payNetwork'>,
 ): string | null {
+  if (order.orderType === 'TopUp') {
+    return ['链上充值', order.payNetwork, currencyLabel(order.payCurrency)]
+      .filter(Boolean)
+      .join(' · ');
+  }
   if (!order.payChannel) return null;
   const meta = PAY_CHANNEL_META[order.payChannel];
   if (!meta) return order.payChannel;
   if (meta.category === 'Balance') {
     return `余额·${currencyLabel(order.payCurrency)}`;
-  }
-  if (meta.category === 'Web3') {
-    return `${order.payNetwork ?? DEFAULT_NETWORK}·${currencyLabel(order.payCurrency)}`;
   }
   return order.payCurrency
     ? `${meta.label}·${currencyLabel(order.payCurrency)}`
@@ -181,6 +176,7 @@ export async function getMyOrders(
       Status: params.status,
       HasAnomaly: params.hasAnomaly,
       UserId: params.userId,
+      ...(params.balanceTxnId ? { BalanceTxnId: params.balanceTxnId } : {}),
       SkipCount: params.skipCount ?? 0,
       MaxResultCount: params.maxResultCount ?? 10,
     },
@@ -245,6 +241,7 @@ export async function adminGetOrders(
       Status: params.status,
       HasAnomaly: params.hasAnomaly,
       UserId: params.userId,
+      ...(params.balanceTxnId ? { BalanceTxnId: params.balanceTxnId } : {}),
       SkipCount: params.skipCount ?? 0,
       MaxResultCount: params.maxResultCount ?? 200,
     },
@@ -265,7 +262,7 @@ export async function markOrderFulfilled(id: string) {
 /** 人工退款记录：追加异常明细，不改订单状态 */
 export async function recordManualRefund(
   id: string,
-  data: { amount?: string; currency?: string; note: string },
+  data: { amount?: string; currency?: string; note: string; linkedRequestId?: string },
 ) {
   return request<OrderDto>(`/api/app/order-admin/${id}/record-manual-refund`, {
     method: 'POST',

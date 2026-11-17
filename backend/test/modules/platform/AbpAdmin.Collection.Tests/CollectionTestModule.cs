@@ -1,8 +1,12 @@
+using System.Collections.Generic;
+using System.Threading;
 using AbpAdmin.EntityFrameworkCore;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using NSubstitute;
 using Volo.Abp;
 using Volo.Abp.Data;
 using Volo.Abp.EntityFrameworkCore;
@@ -28,6 +32,11 @@ public class CollectionTestModule : AbpModule
 {
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
+        var moduleStates = Substitute.For<IDeploymentModuleStateReader>();
+        moduleStates.GetAsync(Arg.Any<CancellationToken>()).Returns(new DeploymentModuleSnapshot(0, initialized: true,
+            new Dictionary<string, bool> { [DeploymentModuleIds.Collection] = true, [DeploymentModuleIds.Chain] = true }));
+        context.Services.Replace(ServiceDescriptor.Singleton(moduleStates));
+
         Configure<FeatureManagementOptions>(options =>
         {
             options.SaveStaticFeaturesToDatabase = false;

@@ -402,7 +402,7 @@ public class OrderStateMachineTests : OrderingStubTestBase
         current.BalanceTxnId.ShouldNotBeNull();
         current.PayChannel.ShouldBe(OrderingPayChannel.BalanceUsdt);
         current.PayCurrency.ShouldBe(CollectionCurrency.Usdt);
-        current.PayNetwork.ShouldBe("BSC");   // 渠道模型：余额支付主路径也写来源网络
+        current.PayNetwork.ShouldBeNull();
     }
 
     [Fact]

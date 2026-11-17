@@ -9,6 +9,7 @@ using AbpAdmin.Ordering.Orders;
 using AbpAdmin.ScheduledJobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Volo.Abp;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Timing;
@@ -189,6 +190,14 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                     continue;
                 }
 
+                if (await _integrationService.HasWalletRefundAsync(debit.BalanceTxnId))
+                {
+                    _logger.LogWarning(
+                        "订单 {OrderId} 的扣款 {TxnId} 已有钱包退款或待核实，不补标支付",
+                        order.Id, debit.BalanceTxnId);
+                    continue;
+                }
+
                 // 状态转移统一走状态机（作业只编排扫描，不自己拼 Paid 的列集）
                 if (await _orderPaymentManager.MarkPaidFromDebitAsync(order.Id, debit.BalanceTxnId, debit.Currency))
                 {
@@ -225,6 +234,14 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
 
                 if (order.CloseReason == OrderCloseReason.Expired)
                 {
+                    if (amountsMatch && await _integrationService.HasWalletRefundAsync(debit.BalanceTxnId))
+                    {
+                        _logger.LogWarning(
+                            "过期关闭的订单 {OrderId} 的扣款 {TxnId} 已有钱包退款或待核实，不复活为已支付",
+                            order.Id, debit.BalanceTxnId);
+                        continue;
+                    }
+
                     if (amountsMatch)
                     {
                         // 过期关闭 + 金额一致 + 无异常明细：标回 Paid 并写归因（余额版复活，状态机统一守卫）
@@ -249,12 +266,30 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
 
                 if (order.CloseReason == OrderCloseReason.UserCancel)
                 {
-                    await _integrationService.ReverseDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
-                    await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
-                        null, debit.BalanceTxnId.ToString(),
-                        "Order was cancelled by the user, but an unreversed balance debit was found; debit reversed.");
-                    _logger.LogWarning("用户取消的订单 {OrderId} 发现未回冲扣款，已回冲（BalanceTxnId={TxnId}）",
-                        order.Id, debit.BalanceTxnId);
+                    try
+                    {
+                        await _integrationService.ReverseDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
+                        await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
+                            null, debit.BalanceTxnId.ToString(),
+                            "Order was cancelled by the user, but an unreversed balance debit was found; debit reversed.");
+                        _logger.LogWarning("用户取消的订单 {OrderId} 发现未回冲扣款，已回冲（BalanceTxnId={TxnId}）",
+                            order.Id, debit.BalanceTxnId);
+                    }
+                    catch (BusinessException ex) when (ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletLedgerPending
+                        || ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletRefundNotAllowed)
+                    {
+                        var blockedByRefund = ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletRefundNotAllowed;
+                        await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
+                            null, debit.BalanceTxnId.ToString(),
+                            blockedByRefund
+                                ? "Unreversed debit already has a wallet refund. Compensation will not reverse it."
+                                : "Unreversed debit has no finance voucher. Left visible for confirmation; compensation will not invent a reversing entry.");
+                        _logger.LogWarning(
+                            blockedByRefund
+                                ? "订单 {OrderId} 的扣款 {TxnId} 已有钱包退款，已停止自动回冲"
+                                : "订单 {OrderId} 的扣款 {TxnId} 没有财务凭证，已停止自动回冲",
+                            order.Id, debit.BalanceTxnId);
+                    }
                 }
             }
             catch (Exception ex)

@@ -17,9 +17,10 @@ namespace AbpAdmin.Collection.Services;
 
 /// <summary>
 /// 会员资金查询 + 资金看板（管理端只读，收款查看权限 Collections.Default——与菜单/路由同位）：
-/// member-\* 按 userId 查余额与流水，查询内核与用户侧 my-\* 单源共享（<see cref="BalanceQueries"/>，
+/// member-balance-accounts 分页列出已有余额行的用户（一人一行，按最近更新倒序）；
+/// member-\* 按 userId 查该用户余额与流水，查询内核与用户侧 my-\* 单源共享（<see cref="BalanceQueries"/>，
 /// 含充值行链上凭证回填口径）；用户名解析在前端走 identity 搜索（模块不做身份耦合——
-/// 用户不存在时余额返回 0 行不报错，与「新用户无余额行」同形）。
+/// 用户不存在时余额返回 0 行不报错，与「新用户无余额行」同形，因此不会出现在账户列表里）。
 /// dashboard 是纯 DB 聚合的看板（今日 = UTC 日界，与当日笔数限额同口径），不碰链——
 /// RPC 不进看板关键路径（热钱包余额/熔断在热钱包监控页）。
 /// AssertHost 双保险（同模块其余 Admin 服务纪律）。
@@ -35,6 +36,62 @@ public class CollectionBalanceAdminAppService : ApplicationService
         _dbContextProvider = dbContextProvider;
     }
 
+    /// <summary>
+    /// 已有余额行的用户（一人一行）。没有发生过资金往来的用户没有余额行，不出现在这里。
+    /// 缺一种币时该币可用/冻结为 0。用户名不在此解析。
+    /// </summary>
+    public virtual async Task<PagedResultDto<MemberBalanceAccountDto>> GetMemberBalanceAccountsAsync(
+        int skipCount, int maxResultCount)
+    {
+        AssertHost();
+        if (maxResultCount <= 0 || maxResultCount > 200)
+        {
+            maxResultCount = 20;
+        }
+
+        if (skipCount < 0)
+        {
+            skipCount = 0;
+        }
+
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var grouped = dbContext.Balances.AsNoTracking()
+            .GroupBy(b => b.UserId)
+            .Select(g => new { UserId = g.Key, UpdatedAt = g.Max(b => b.UpdatedAt) });
+        var total = await grouped.CountAsync();
+        var page = await grouped
+            .OrderByDescending(x => x.UpdatedAt)
+            .ThenBy(x => x.UserId)
+            .Skip(skipCount)
+            .Take(maxResultCount)
+            .ToListAsync();
+        var userIds = page.Select(x => x.UserId).ToList();
+        var rows = userIds.Count == 0
+            ? new List<ColBalance>()
+            : await dbContext.Balances.AsNoTracking()
+                .Where(b => userIds.Contains(b.UserId))
+                .ToListAsync();
+        var items = page.Select(entry =>
+        {
+            var mine = rows.Where(b => b.UserId == entry.UserId).ToList();
+            return new MemberBalanceAccountDto
+            {
+                UserId = entry.UserId,
+                UpdatedAt = entry.UpdatedAt,
+                UsdtBalance = CollectionAmounts.Format(Sum(mine, CollectionCurrency.Usdt, b => b.Balance)),
+                UsdtFrozen = CollectionAmounts.Format(Sum(mine, CollectionCurrency.Usdt, b => b.Frozen)),
+                UsdcBalance = CollectionAmounts.Format(Sum(mine, CollectionCurrency.Usdc, b => b.Balance)),
+                UsdcFrozen = CollectionAmounts.Format(Sum(mine, CollectionCurrency.Usdc, b => b.Frozen)),
+            };
+        }).ToList();
+        await uow.CompleteAsync();
+        return new PagedResultDto<MemberBalanceAccountDto>(total, items);
+    }
+
+    private static decimal Sum(List<ColBalance> rows, CollectionCurrency currency, Func<ColBalance, decimal> selector)
+        => rows.Where(b => b.Currency == currency).Sum(selector);
+
     /// <summary>某用户的两种稳定币余额（没有余额行时返回 0，不缺项）。</summary>
     public virtual async Task<ListResultDto<MyBalanceDto>> GetMemberBalancesAsync(Guid userId)
     {
@@ -49,7 +106,7 @@ public class CollectionBalanceAdminAppService : ApplicationService
     /// <summary>某用户的余额流水（倒序分页，可选时间范围；充值行回填链上凭证）。</summary>
     public virtual async Task<PagedResultDto<BalanceTxnDto>> GetMemberTxnsAsync(
         Guid userId, int skipCount, int maxResultCount,
-        DateTime? fromTime = null, DateTime? toTime = null)
+        DateTime? fromTime = null, DateTime? toTime = null, Guid? txnId = null, Guid? withdrawalId = null)
     {
         AssertHost();
         if (maxResultCount <= 0 || maxResultCount > 200)
@@ -60,7 +117,7 @@ public class CollectionBalanceAdminAppService : ApplicationService
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var (total, items) = await BalanceQueries.GetTxnsAsync(
-            dbContext, userId, skipCount, maxResultCount, fromTime, toTime);
+            dbContext, userId, skipCount, maxResultCount, fromTime, toTime, txnId, withdrawalId);
         await uow.CompleteAsync();
         return new PagedResultDto<BalanceTxnDto>(total, items);
     }
@@ -87,38 +144,49 @@ public class CollectionBalanceAdminAppService : ApplicationService
                 Total = CollectionAmounts.Format(g.Sum(o => o.Amount ?? 0m)),
             })
             .ToListAsync();
-        var withdraws = await dbContext.WithdrawOrders.AsNoTracking()
-            .GroupBy(o => o.Status)
-            .Select(g => new StatusBucketDto
+        var withdrawRows = await dbContext.WithdrawOrders.AsNoTracking()
+            .GroupBy(o => new { o.Status, o.Currency })
+            .Select(g => new
             {
-                Status = g.Key.ToString(),
+                g.Key.Status,
+                g.Key.Currency,
                 Count = g.Count(),
-                Total = CollectionAmounts.Format(g.Sum(o => o.Amount)),
+                Total = g.Sum(o => o.Amount),
             })
             .ToListAsync();
+        var withdraws = withdrawRows.Select(g => new StatusBucketDto
+        {
+            Status = g.Status.ToString(),
+            Currency = g.Currency.ToString(),
+            Count = g.Count,
+            Total = CollectionAmounts.Format(g.Total),
+        }).ToList();
 
         var depositToday = await dbContext.DepositOrders.AsNoTracking()
             .Where(o => o.CreationTime >= todayStart)
             .GroupBy(_ => 1)
             .Select(g => new { Count = g.Count(), Total = g.Sum(o => o.Amount ?? 0m) })
             .FirstOrDefaultAsync();
-        var withdrawToday = await dbContext.WithdrawOrders.AsNoTracking()
+        var withdrawTodayRows = await dbContext.WithdrawOrders.AsNoTracking()
             .Where(o => o.CreationTime >= todayStart)
-            .GroupBy(_ => 1)
-            .Select(g => new { Count = g.Count(), Total = g.Sum(o => o.Amount) })
-            .FirstOrDefaultAsync();
-
+            .GroupBy(o => o.Currency)
+            .Select(g => new { g.Key, Count = g.Count(), Total = g.Sum(o => o.Amount) })
+            .ToListAsync();
+        var withdrawFeeRows = await dbContext.WithdrawOrders.AsNoTracking()
+            .Where(o => o.Status == WithdrawStatus.Completed)
+            .GroupBy(o => o.Currency)
+            .Select(g => new { g.Key, Total = g.Sum(o => o.Fee) })
+            .ToListAsync();
+        var inFlightRows = await dbContext.WithdrawOrders.AsNoTracking()
+            .Where(o => o.Status == WithdrawStatus.Processing
+                        || o.Status == WithdrawStatus.Broadcasting
+                        || o.Status == WithdrawStatus.BroadcastFailed)
+            .GroupBy(o => o.Currency)
+            .Select(g => new { g.Key, Total = g.Sum(o => o.ActualAmount) })
+            .ToListAsync();
         var depositFee = await dbContext.DepositOrders.AsNoTracking()
             .Where(o => o.Status == DepositOrderStatus.Swept)
-            .SumAsync(o => o.Fee);
-        var withdrawFee = await dbContext.WithdrawOrders.AsNoTracking()
-            .Where(o => o.Status == WithdrawStatus.Completed)
             .SumAsync(o => (decimal?)o.Fee);
-        var inFlight = await dbContext.WithdrawOrders.AsNoTracking()
-            .Where(o => o.Status == WithdrawStatus.Pending
-                        || o.Status == WithdrawStatus.Processing
-                        || o.Status == WithdrawStatus.Broadcasting)
-            .SumAsync(o => (decimal?)o.ActualAmount);
 
         // 聚合在 DB 侧、枚举转字符串在客户端——投影里的 g.Key.ToString() 会被 EF 翻译成
         // int::text（枚举列存 int），负债卡会显示「用户 0 合计」；
@@ -166,11 +234,21 @@ public class CollectionBalanceAdminAppService : ApplicationService
             HeldDepositTotal = CollectionAmounts.Format(held?.Total ?? 0m),
             DepositTodayCount = depositToday?.Count ?? 0,
             DepositTodayAmount = CollectionAmounts.Format(depositToday?.Total ?? 0m),
-            WithdrawTodayCount = withdrawToday?.Count ?? 0,
-            WithdrawTodayAmount = CollectionAmounts.Format(withdrawToday?.Total ?? 0m),
+            WithdrawTodayCount = withdrawTodayRows.Sum(row => row.Count),
+            WithdrawTodayAmount = SingleCurrencyAmount(withdrawTodayRows.Select(row => (row.Key.ToString(), row.Total))),
             DepositFeeTotal = CollectionAmounts.Format(depositFee ?? 0m),
-            WithdrawFeeTotal = CollectionAmounts.Format(withdrawFee ?? 0m),
-            WithdrawInFlightAmount = CollectionAmounts.Format(inFlight ?? 0m),
+            WithdrawFeeTotal = SingleCurrencyAmount(withdrawFeeRows.Select(row => (row.Key.ToString(), row.Total))),
+            WithdrawFees = withdrawFeeRows.Select(row => new CurrencyAmountDto
+            {
+                Currency = row.Key.ToString(),
+                Amount = CollectionAmounts.Format(row.Total),
+            }).ToList(),
+            WithdrawInFlightAmount = SingleCurrencyAmount(inFlightRows.Select(row => (row.Key.ToString(), row.Total))),
+            WithdrawInFlight = inFlightRows.Select(row => new CurrencyAmountDto
+            {
+                Currency = row.Key.ToString(),
+                Amount = CollectionAmounts.Format(row.Total),
+            }).ToList(),
             UserBalances = userBalances,
             VaultChecks = vaultChecks,
         };
@@ -184,6 +262,33 @@ public class CollectionBalanceAdminAppService : ApplicationService
             throw new BusinessException(CollectionErrorCodes.HostOnly);
         }
     }
+
+    private static string SingleCurrencyAmount(IEnumerable<(string Currency, decimal Amount)> rows)
+    {
+        var list = rows.ToList();
+        if (list.Count > 1)
+        {
+            return "0";
+        }
+
+        return CollectionAmounts.Format(list.Count == 0 ? 0m : list[0].Amount);
+    }
+}
+
+/// <summary>一个用户的 USDT / USDC 余额账户。缺币种时对应金额为 0。</summary>
+public class MemberBalanceAccountDto
+{
+    public Guid UserId { get; set; }
+
+    public string UsdtBalance { get; set; } = "0";
+
+    public string UsdtFrozen { get; set; } = "0";
+
+    public string UsdcBalance { get; set; } = "0";
+
+    public string UsdcFrozen { get; set; } = "0";
+
+    public DateTime UpdatedAt { get; set; }
 }
 
 /// <summary>资金看板（纯 DB 聚合，不碰链——RPC 不进看板关键路径；热钱包余额/熔断在热钱包监控页）。</summary>
@@ -215,11 +320,16 @@ public class TreasuryDashboardDto
     /// <summary>充值手续费累计（已入账 Swept 单的 Fee 合计）。</summary>
     public string DepositFeeTotal { get; set; } = default!;
 
-    /// <summary>提现手续费累计（已完成 Completed 单的 Fee 合计）。</summary>
+    /// <summary>一种币时的提现手续费。多种币时为 0，看 WithdrawFees。</summary>
     public string WithdrawFeeTotal { get; set; } = default!;
 
-    /// <summary>在途提现净额（Pending/Processing/Broadcasting 的 ActualAmount 合计——热钱包待付敞口）。</summary>
+    /// <summary>提现手续费，按币。多于一种币时上面的合计字符串为 0，以本列表为准。</summary>
+    public List<CurrencyAmountDto> WithdrawFees { get; set; } = new();
+
+    /// <summary>审核后未清偿的提现净额。一种币时等于合计字符串；待审不在这里，广播失败在这里。</summary>
     public string WithdrawInFlightAmount { get; set; } = default!;
+
+    public List<CurrencyAmountDto> WithdrawInFlight { get; set; } = new();
 
     /// <summary>用户余额合计（按币：可用/冻结——平台负债口径）。</summary>
     public List<UserBalanceBucketDto> UserBalances { get; set; } = new();
@@ -232,8 +342,20 @@ public class TreasuryDashboardDto
 public class StatusBucketDto
 {
     public string Status { get; set; } = default!;
+
+    /// <summary>提现按币拆开。进款单没有币种列时为空。</summary>
+    public string Currency { get; set; } = "";
+
     public int Count { get; set; }
+
     public string Total { get; set; } = default!;
+}
+
+public class CurrencyAmountDto
+{
+    public string Currency { get; set; } = default!;
+
+    public string Amount { get; set; } = default!;
 }
 
 /// <summary>按币用户余额桶。</summary>

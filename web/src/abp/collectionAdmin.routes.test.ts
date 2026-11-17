@@ -7,6 +7,7 @@ import {
   getCollectionPayment,
   getCollectionPayments,
   getCollectionRefunds,
+  getMemberBalanceAccounts,
   getMemberBalances,
   getMemberTxns,
   getTreasuryDashboard,
@@ -73,6 +74,14 @@ describe('collectionAdmin endpoint URL shapes', () => {
     ]);
   });
 
+  it('getMemberBalanceAccounts 按用户分页，不带 userId', async () => {
+    await getMemberBalanceAccounts({ skipCount: 20, maxResultCount: 20 });
+    expect(request).toHaveBeenCalledWith(
+      '/api/app/collection-balance-admin/member-balance-accounts',
+      { params: { SkipCount: 20, MaxResultCount: 20 } },
+    );
+  });
+
   it('getMemberBalances 走 userId 路径段', async () => {
     await getMemberBalances('u1');
     expect(request.mock.calls[0][0]).toBe(
@@ -88,12 +97,23 @@ describe('collectionAdmin endpoint URL shapes', () => {
   });
 
   it('getMemberTxns 路径段 + 分页 query', async () => {
-    await getMemberTxns({ userId: 'u1', skipCount: 20, maxResultCount: 20 });
+    await getMemberTxns({
+      userId: 'u1',
+      skipCount: 20,
+      maxResultCount: 20,
+      txnId: 't1',
+      withdrawalId: 'w1',
+    });
     expect(request.mock.calls[0][0]).toBe(
       '/api/app/collection-balance-admin/member-txns/u1',
     );
     expect(request.mock.calls[0][1]).toMatchObject({
-      params: { skipCount: 20, maxResultCount: 20 },
+      params: {
+        SkipCount: 20,
+        MaxResultCount: 20,
+        TxnId: 't1',
+        WithdrawalId: 'w1',
+      },
     });
   });
 });

@@ -9,6 +9,7 @@ using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Payments;
 using AbpAdmin.Collection.Settings;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Volo.Abp;
@@ -37,9 +38,9 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
     private readonly CollectionPaymentConfirmationService _confirmation;
     private readonly Balances.CollectionBalanceManager _balanceManager;
     private readonly Chain.DepositAddressManager _depositAddressManager;
-    private readonly Chain.ChainKeyProvider _chainKeyProvider;
     private readonly IClock _clock;
     private readonly ILogger<CollectionIntegrationService> _logger;
+    private readonly IDeploymentModuleStateReader _moduleStates;
 
     public CollectionIntegrationService(
         IUnitOfWorkManager unitOfWorkManager,
@@ -49,9 +50,9 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         CollectionPaymentConfirmationService confirmation,
         Balances.CollectionBalanceManager balanceManager,
         Chain.DepositAddressManager depositAddressManager,
-        Chain.ChainKeyProvider chainKeyProvider,
         IClock clock,
-        ILogger<CollectionIntegrationService> logger)
+        ILogger<CollectionIntegrationService> logger,
+        IDeploymentModuleStateReader moduleStates)
     {
         _unitOfWorkManager = unitOfWorkManager;
         _dbContextProvider = dbContextProvider;
@@ -60,9 +61,9 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         _confirmation = confirmation;
         _balanceManager = balanceManager;
         _depositAddressManager = depositAddressManager;
-        _chainKeyProvider = chainKeyProvider;
         _clock = clock;
         _logger = logger;
+        _moduleStates = moduleStates;
     }
 
     public virtual async Task<CollectionDto> CreateAsync(CreateCollectionInput input, Func<CollectionDto, Task>? onPrepared = null)
@@ -71,6 +72,12 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         if (amount <= 0)
         {
             throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", input.Amount);
+        }
+
+        if (!CollectionPaymentAdmission.TryConsume(input.BusinessType, input.BusinessId, input.Channel, balanceCurrency: null)
+            && !(await _moduleStates.GetAsync()).IsEnabled(DeploymentModuleIds.Collection))
+        {
+            return await ReadAdmittedCollectionAsync(input, amount);
         }
 
         await AssertWithinChannelLimitAsync(input.Channel, input.Currency, amount);
@@ -95,19 +102,13 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
             var db = await _dbContextProvider.GetDbContextAsync();
             await CollectionPaymentIdentity.LockBusinessAsync(db, input.BusinessType, input.BusinessId);
             var now = _clock.Now;
-            var original = await db.Collections.AsNoTracking()
-                .Where(row => row.BusinessType == input.BusinessType && row.BusinessId == input.BusinessId
-                    && (row.Status == CollectionStatus.Pending || row.Status == CollectionStatus.Completed))
-                .OrderByDescending(row => row.Status)
-                .ThenByDescending(row => row.CreationTime)
-                .FirstOrDefaultAsync();
+            var original = await FindActiveCollectionAsync(db, input.BusinessType, input.BusinessId);
 
             ColCollection row;
             if (original is not null)
             {
-                if (original.Channel != input.Channel || original.Currency != input.Currency
-                    || original.Amount != amount || original.UserId != input.UserId
-                    || !string.Equals(original.MerchantAccountId, merchantAccount, StringComparison.Ordinal))
+                AssertCollectionIdentity(original, input, amount);
+                if (!string.Equals(original.MerchantAccountId, merchantAccount, StringComparison.Ordinal))
                 {
                     throw new BusinessException(CollectionErrorCodes.PendingCollectionConflict)
                         .WithData("BusinessType", input.BusinessType)
@@ -191,6 +192,48 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         }
 
         return updated;
+    }
+
+    private Task<CollectionDto> ReadAdmittedCollectionAsync(CreateCollectionInput input, decimal amount) =>
+        ReadAsync(async () =>
+        {
+            var db = await _dbContextProvider.GetDbContextAsync();
+            var existing = await FindActiveCollectionAsync(db, input.BusinessType, input.BusinessId);
+            if (existing == null)
+            {
+                throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                    .WithData("ModuleId", DeploymentModuleIds.Collection);
+            }
+
+            AssertCollectionIdentity(existing, input, amount);
+            var result = Map(existing);
+            if (existing.ExpiresAt <= _clock.Now)
+            {
+                result.ChannelPayload = null;
+            }
+
+            // This branch only returns durable state. It must not bind a new order
+            // snapshot, renew a create lease or touch the existing merchant account.
+            return result;
+        });
+
+    private static Task<ColCollection?> FindActiveCollectionAsync(CollectionDbContext db, string businessType, Guid businessId) =>
+        db.Collections.AsNoTracking()
+            .Where(row => row.BusinessType == businessType && row.BusinessId == businessId
+                && (row.Status == CollectionStatus.Pending || row.Status == CollectionStatus.Completed))
+            .OrderByDescending(row => row.Status)
+            .ThenByDescending(row => row.CreationTime)
+            .FirstOrDefaultAsync();
+
+    private static void AssertCollectionIdentity(ColCollection existing, CreateCollectionInput input, decimal amount)
+    {
+        if (existing.Channel != input.Channel || existing.Currency != input.Currency
+            || existing.Amount != amount || existing.UserId != input.UserId)
+        {
+            throw new BusinessException(CollectionErrorCodes.PendingCollectionConflict)
+                .WithData("BusinessType", input.BusinessType)
+                .WithData("BusinessId", input.BusinessId);
+        }
     }
 
     public virtual async Task<CancelCollectionResult> CancelAsync(Guid collectionId)
@@ -383,6 +426,31 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         return _balanceManager.ReverseAsync(businessType, businessId);
     }
 
+    public virtual Task<WalletRefundHoldResult> HoldWalletRefundAsync(Guid originalDebitTxnId, string requestId, decimal amount)
+    {
+        return _balanceManager.HoldWalletRefundAsync(originalDebitTxnId, requestId, amount);
+    }
+
+    public virtual Task ConfirmWalletRefundHoldAsync(Guid originalDebitTxnId, string requestId)
+    {
+        return _balanceManager.ConfirmWalletRefundHoldAsync(originalDebitTxnId, requestId);
+    }
+
+    public virtual Task<WalletRefundHoldResult> RefundWalletAsync(Guid originalDebitTxnId, string requestId, decimal amount)
+    {
+        return _balanceManager.RefundWalletAsync(originalDebitTxnId, requestId, amount);
+    }
+
+    public virtual Task LinkWalletRefundNoteAsync(Guid originalDebitTxnId, string requestId, decimal? amount = null)
+    {
+        return _balanceManager.LinkWalletRefundNoteAsync(originalDebitTxnId, requestId, amount);
+    }
+
+    public virtual Task<bool> HasWalletRefundAsync(Guid balanceTxnId)
+    {
+        return _balanceManager.HasWalletRefundAsync(balanceTxnId);
+    }
+
     /// <summary>按业务单号读取未回冲扣款（补状态作业判断「已扣未标支付」）。</summary>
     public virtual async Task<Contracts.DebitDto?> GetDebitAsync(string businessType, Guid businessId)
     {
@@ -415,11 +483,8 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
     /// </summary>
     public virtual async Task<Contracts.DepositAddressDto> GetDepositAddressAsync(Guid userId)
     {
-        var (networkId, estimatedArrivalMinutes) = await _depositAddressManager
-            .WithMasterKey(await _chainKeyProvider.GetAsync())
-            .ResolveBscDepositNetworkAsync();
-        var (address, enabled, notice) = await _depositAddressManager
-            .GetOrDeriveAsync(networkId, userId);
+        var (address, enabled, notice, estimatedArrivalMinutes) =
+            await _depositAddressManager.GetBscAddressForDepositAsync(userId);
         return new Contracts.DepositAddressDto
         {
             UserId = userId,

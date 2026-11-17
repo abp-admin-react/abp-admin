@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
+using AbpAdmin.Modules;
 using AbpAdmin.Ordering.Data;
 using AbpAdmin.Ordering.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -53,19 +54,38 @@ public class OrderPaymentManager : DomainService
     private readonly IClock _clock;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
     private readonly Volo.Abp.EventBus.Distributed.IDistributedEventBus _distributedEventBus;
+    private readonly IDeploymentModuleStateReader _moduleStates;
 
     public OrderPaymentManager(
         IDbContextProvider<OrderingDbContext> dbContextProvider,
         AbpAdmin.Collection.Contracts.ICollectionIntegrationService integrationService,
         IClock clock,
         IUnitOfWorkManager unitOfWorkManager,
-        Volo.Abp.EventBus.Distributed.IDistributedEventBus distributedEventBus)
+        Volo.Abp.EventBus.Distributed.IDistributedEventBus distributedEventBus,
+        IDeploymentModuleStateReader moduleStates)
     {
         _dbContextProvider = dbContextProvider;
         _integrationService = integrationService;
         _clock = clock;
         _unitOfWorkManager = unitOfWorkManager;
         _distributedEventBus = distributedEventBus;
+        _moduleStates = moduleStates;
+    }
+
+    internal async Task CheckPaymentAdmissionAsync()
+    {
+        var state = await _moduleStates.GetAsync();
+        if (!state.IsEnabled(DeploymentModuleIds.Orders))
+        {
+            throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                .WithData("ModuleId", DeploymentModuleIds.Orders);
+        }
+
+        if (!state.IsEnabled(DeploymentModuleIds.Collection))
+        {
+            throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                .WithData("ModuleId", DeploymentModuleIds.Collection);
+        }
     }
 
     // ── 发起支付（外部渠道，计划第 6 节时序）──────────────────────────────────────────────
@@ -78,6 +98,15 @@ public class OrderPaymentManager : DomainService
     public virtual async Task<StartPayResult> StartChannelPayAsync(OrdOrder order, OrdQuote quote)
     {
         AssertPayable(order, quote);
+        var channel = quote.PayMethod.ToCollectionChannel()!.Value;
+        var alreadyAdmitted = CollectionPaymentAdmission.Covers(
+            OrderingConsts.OrderBusinessType, order.Id, channel, balanceCurrency: null);
+        if (!alreadyAdmitted)
+        {
+            await CheckPaymentAdmissionAsync();
+        }
+        using var admission = alreadyAdmitted ? null : CollectionPaymentAdmission.Begin(
+            OrderingConsts.OrderBusinessType, order.Id, channel, balanceCurrency: null);
 
         if (order.QuoteId != quote.Id && await CancelPendingCollectionAsync(order))
         {
@@ -96,7 +125,7 @@ public class OrderPaymentManager : DomainService
                 BusinessType = OrderingConsts.OrderBusinessType,
                 BusinessId = order.Id,
                 UserId = order.UserId,
-                Channel = quote.PayMethod.ToCollectionChannel()!.Value,
+                Channel = channel,
                 Currency = quote.PayCurrency,
                 Amount = CollectionAmounts.Format(quote.PayAmount),
                 ExpiresAt = quote.ExpiresAt,
@@ -170,6 +199,15 @@ public class OrderPaymentManager : DomainService
     public virtual async Task<StartPayResult> PayWithBalanceAsync(OrdOrder order, OrdQuote quote)
     {
         AssertPayable(order, quote);
+        var currency = quote.PayMethod.BalanceCurrency()!.Value;
+        var alreadyAdmitted = CollectionPaymentAdmission.Covers(
+            OrderingConsts.OrderBusinessType, order.Id, channel: null, currency);
+        if (!alreadyAdmitted)
+        {
+            await CheckPaymentAdmissionAsync();
+        }
+        using var admission = alreadyAdmitted ? null : CollectionPaymentAdmission.Begin(
+            OrderingConsts.OrderBusinessType, order.Id, channel: null, currency);
 
         if (await CancelPendingCollectionAsync(order))
         {
@@ -193,7 +231,7 @@ public class OrderPaymentManager : DomainService
                 BusinessType = OrderingConsts.OrderBusinessType,
                 BusinessId = order.Id,
                 UserId = order.UserId,
-                Currency = quote.PayMethod.BalanceCurrency()!.Value,
+                Currency = currency,
                 Amount = AbpAdmin.Collection.Contracts.CollectionAmounts.Format(quote.PayAmount),
             });
 
@@ -207,7 +245,7 @@ public class OrderPaymentManager : DomainService
                     .SetProperty(o => o.PayAmount, quote.PayAmount)
                     .SetProperty(o => o.PayCurrency, quote.PayCurrency)
                     .SetProperty(o => o.PayChannel, quote.PayMethod)
-                    .SetProperty(o => o.PayNetwork, OrderingConsts.BscNetworkName)
+                    .SetProperty(o => o.PayNetwork, (string?)null)
                     .SetProperty(o => o.QuoteId, quote.Id)
                     .SetProperty(o => o.BalanceTxnId, debit.BalanceTxnId));
 
@@ -390,9 +428,7 @@ public class OrderPaymentManager : DomainService
             Subject = "TopUp",
             PayAmount = amount,
             PayCurrency = currency,
-            PayChannel = currency == AbpAdmin.Collection.Contracts.CollectionCurrency.Usdt
-                ? OrderingPayChannel.BalanceUsdt
-                : OrderingPayChannel.BalanceUsdc,
+            PayChannel = OrderingPayChannel.ChainDeposit,
             PayNetwork = OrderingConsts.BscNetworkName,
             Status = OrderStatus.Paid,
             PaidAt = creditedAt,
@@ -573,25 +609,71 @@ public class OrderPaymentManager : DomainService
     }
 
     /// <summary>
-    /// 记录人工退款，空金额只保存说明。调用方校验金额和币种，并用事务一起提交退款明细和累计金额。
+    /// 人工退款记录。关联已有退款或原资产待核实都不累加 RefundedAmount；只有标价币种金额才累加。
+    /// 关联和待核实先过收款锁，失败时不写说明。
     /// </summary>
     public virtual async Task AppendManualRefundAsync(
-        Guid orderId, decimal? amount, AbpAdmin.Collection.Contracts.CollectionCurrency? currency, string note)
+        Guid orderId, decimal? amount, AbpAdmin.Collection.Contracts.CollectionCurrency? currency, string note,
+        string? linkedRequestId = null)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
+
+        if (!string.IsNullOrWhiteSpace(linkedRequestId))
+        {
+            var linkedOrder = await dbContext.Orders.FirstAsync(o => o.Id == orderId);
+            if (linkedOrder.BalanceTxnId == null
+                || linkedOrder.PayChannel is not (OrderingPayChannel.BalanceUsdt or OrderingPayChannel.BalanceUsdc))
+            {
+                throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
+                    .WithData("LinkedRequestId", "Only a balance-paid order can link an existing wallet refund.");
+            }
+
+            if (currency.HasValue && currency != linkedOrder.PayCurrency)
+            {
+                throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
+                    .WithData("Currency", "A linked note must use the paid asset, or omit the currency.");
+            }
+
+            await _integrationService.LinkWalletRefundNoteAsync(linkedOrder.BalanceTxnId.Value, linkedRequestId, amount);
+            await AppendAnomalyAsync(orderId, amount, currency ?? linkedOrder.PayCurrency, null, linkedRequestId,
+                "Wallet refund note " + linkedRequestId + ": " + note, markAnomaly: false);
+            return;
+        }
+
+        if (!amount.HasValue)
+        {
+            await AppendAnomalyAsync(orderId, null, currency, null, null,
+                "Manual refund record: " + note, markAnomaly: false);
+            return;
+        }
+
+        var order = await dbContext.Orders.FirstAsync(o => o.Id == orderId);
+        if (order.BalanceTxnId != null
+            && order.PayChannel is OrderingPayChannel.BalanceUsdt or OrderingPayChannel.BalanceUsdc
+            && currency == order.PayCurrency)
+        {
+            var requestId = Guid.NewGuid().ToString("N");
+            var held = await _integrationService.HoldWalletRefundAsync(
+                order.BalanceTxnId.Value, requestId, amount.Value);
+            if (!held.Applied)
+            {
+                throw new BusinessException(AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletLedgerNotEnforced)
+                    .WithData("BalanceTxnId", order.BalanceTxnId);
+            }
+
+            await AppendAnomalyAsync(orderId, amount, currency, null, requestId,
+                "Wallet refund hold " + requestId + ": " + note, markAnomaly: false);
+            return;
+        }
 
         await AppendAnomalyAsync(orderId, amount, currency, null, null,
             "Manual refund record: " + note, markAnomaly: false);
 
-        if (amount.HasValue)
-        {
-            await dbContext.Orders
-                .Where(o => o.Id == orderId)
-                .ExecuteUpdateAsync(s => s.SetProperty(
-                    o => o.RefundedAmount,
-                    // 两参重载：第二个 lambda 逐行计算（列引用 o 在这个作用域才有效）
-                    o => (o.RefundedAmount ?? 0m) + amount.Value));
-        }
+        await dbContext.Orders
+            .Where(o => o.Id == orderId)
+            .ExecuteUpdateAsync(s => s.SetProperty(
+                o => o.RefundedAmount,
+                o => (o.RefundedAmount ?? 0m) + amount.Value));
     }
 
     // ── 内部 ─────────────────────────────────────────────────────────────────────────────
@@ -710,7 +792,7 @@ public class OrderPaymentManager : DomainService
                 .SetProperty(o => o.PayChannel, currency == AbpAdmin.Collection.Contracts.CollectionCurrency.Usdc
                     ? OrderingPayChannel.BalanceUsdc
                     : OrderingPayChannel.BalanceUsdt)
-                .SetProperty(o => o.PayNetwork, OrderingConsts.BscNetworkName)
+                .SetProperty(o => o.PayNetwork, (string?)null)
                 .SetProperty(o => o.BalanceTxnId, balanceTxnId));
         return rows > 0;
     }
@@ -737,7 +819,7 @@ public class OrderPaymentManager : DomainService
                 .SetProperty(o => o.PayChannel, currency == AbpAdmin.Collection.Contracts.CollectionCurrency.Usdc
                     ? OrderingPayChannel.BalanceUsdc
                     : OrderingPayChannel.BalanceUsdt)
-                .SetProperty(o => o.PayNetwork, OrderingConsts.BscNetworkName)
+                .SetProperty(o => o.PayNetwork, (string?)null)
                 .SetProperty(o => o.BalanceTxnId, balanceTxnId));
         return rows > 0;
     }

@@ -1,8 +1,9 @@
 import { PlusOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
-import { history, useAccess, useLocation } from '@umijs/max';
+import { history, Link, useAccess, useLocation, useModel } from '@umijs/max';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -43,6 +44,20 @@ import {
   getMyTxns,
 } from '@/abp/collection';
 import { isNotFound } from '@/requestErrorConfig';
+import {
+  ConfigurationLink,
+  ConfigurationPage,
+  useConfigurationLocation,
+} from '@/components/ContextConfiguration';
+import { useModuleEnabled } from '@/hooks/useModuleAvailability';
+import { isValidRecordId } from '@/pages/collection/record-focus';
+import {
+  depositRecordUrl,
+  memberFundsUrl,
+  orderRecordUrl,
+  paymentRecordUrl,
+} from '@/pages/collection/record-links';
+import { SettingsForm } from '../settings/channel';
 
 /** 订单及余额流水。个人与管理视图按各自权限请求数据。 */
 
@@ -59,6 +74,17 @@ const CLOSE_REASON_LABELS: Record<string, string> = {
 };
 
 const fmtTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '-');
+
+const orderTypeOptions = [
+  { value: 'Business', label: '业务订单' },
+  { value: 'TopUp', label: '账户充值' },
+] as const;
+
+function orderStatus(order: OrderDto) {
+  return order.orderType === 'TopUp' && order.status === 'Paid'
+    ? { color: 'success', text: '已入账' }
+    : (STATUS_TAGS[order.status] ?? { color: 'default', text: order.status });
+}
 
 /** 链上交易哈希形状（写入侧来自链上 log，渲染侧仍守形状——非 0x64hex 只显示文本不出链接） */
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -103,79 +129,171 @@ const TxHashLink: React.FC<{ txHash?: string | null }> = ({ txHash }) =>
   );
 
 /** 订单事实区（渠道单号 / 退款累计 / 异常与退款明细）——行展开与详情弹窗共用的唯一渲染 */
-const OrderDetailFacts: React.FC<{ order: OrderDto }> = ({ order }) => (
-  <>
-    {order.channelTradeNo && (
-      <Typography.Paragraph style={{ marginBottom: 4 }} type="secondary">
-        渠道单号：
-        <Typography.Text copyable={{ text: order.channelTradeNo }}>
-          {order.channelTradeNo}
-        </Typography.Text>
-      </Typography.Paragraph>
-    )}
-    {order.refundedAmount != null && (
-      <Typography.Paragraph style={{ marginBottom: 4 }}>
-        退款累计：
-        <Typography.Text type="warning">{order.refundedAmount}</Typography.Text>
-      </Typography.Paragraph>
-    )}
-    {order.anomalyLines?.length ? (
-      <ul style={{ margin: 0, paddingLeft: 16 }}>
-        {order.anomalyLines.map((line) => (
-          <li key={line.id}>
-            {fmtTime(line.creationTime)} · {line.amount ?? '-'}{' '}
-            {line.currency ?? ''} · {line.channelTradeNo ?? ''} · {line.note}
-          </li>
-        ))}
-      </ul>
+const OrderDetailFacts: React.FC<{ order: OrderDto }> = ({ order }) => {
+  const access = useAccess();
+  const collectionId = PAY_CHANNEL_META[order.payChannel ?? '']?.category === 'Balance'
+    ? undefined
+    : order.collectionId;
+  const balanceTxnId = order.balanceTxnId;
+
+  function renderCollection(id: string) {
+    return access.canViewCollectionPayments ? (
+      <Link to={paymentRecordUrl(id)} aria-label={`查看渠道收款单 ${id}`}>
+        查看渠道收款单
+      </Link>
     ) : (
-      <Typography.Text type="secondary">无异常/退款明细</Typography.Text>
-    )}
-  </>
-);
+      <Typography.Text copyable={{ text: id }}>渠道收款单 {id}</Typography.Text>
+    );
+  }
+
+  return (
+    <>
+      {order.channelTradeNo && (
+        <Typography.Paragraph style={{ marginBottom: 4 }} type="secondary">
+          渠道单号：
+          <Typography.Text copyable={{ text: order.channelTradeNo }}>
+            {order.channelTradeNo}
+          </Typography.Text>
+        </Typography.Paragraph>
+      )}
+      {collectionId && (
+        <Typography.Paragraph style={{ marginBottom: 4 }}>
+          {renderCollection(collectionId)}
+        </Typography.Paragraph>
+      )}
+      {balanceTxnId && (
+        <Typography.Paragraph style={{ marginBottom: 4 }}>
+          {access.canViewMemberFunds && order.userId ? (
+            <Link
+              to={memberFundsUrl(order.userId, balanceTxnId)}
+              aria-label={`查看余额流水 ${balanceTxnId}`}
+            >
+              查看余额流水
+            </Link>
+          ) : (
+            <Typography.Text copyable={{ text: balanceTxnId }}>
+              余额流水 {balanceTxnId}
+            </Typography.Text>
+          )}
+        </Typography.Paragraph>
+      )}
+      {order.refundedAmount != null && (
+        <Typography.Paragraph style={{ marginBottom: 4 }}>
+          退款累计：
+          <Typography.Text type="warning">{order.refundedAmount}</Typography.Text>
+        </Typography.Paragraph>
+      )}
+      {order.anomalyLines?.length ? (
+        <ul style={{ margin: 0, paddingLeft: 16 }}>
+          {order.anomalyLines.map((line) => (
+            <li key={line.id}>
+              {fmtTime(line.creationTime)} · {line.amount ?? '-'}{' '}
+              {line.currency ?? ''} · {line.channelTradeNo ?? ''} · {line.note}
+              {line.collectionId && <> · {renderCollection(line.collectionId)}</>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <Typography.Text type="secondary">无异常/退款明细</Typography.Text>
+      )}
+    </>
+  );
+};
 
 /** 订单时间线（商城口径：创建 → 支付 → 履约 → 关闭） */
 const OrderTimeline: React.FC<{ order: OrderDto }> = ({ order }) => {
   const items = [
     order.creationTime && {
       color: 'blue',
-      children: `创建 · ${fmtTime(order.creationTime)}`,
+      content: `创建 · ${fmtTime(order.creationTime)}`,
     },
     order.paidAt && {
       color: 'green',
-      children: `支付 · ${fmtTime(order.paidAt)}${
+      content: `${order.orderType === 'TopUp' ? '充值入账' : '支付'} · ${fmtTime(order.paidAt)}${
         order.channelTradeNo
           ? ` · 渠道单号 ${order.channelTradeNo}`
-          : PAY_CHANNEL_META[order.payChannel ?? '']?.category === 'Balance'
+          : order.orderType !== 'TopUp' && PAY_CHANNEL_META[order.payChannel ?? '']?.category === 'Balance'
             ? ' · 余额支付'
             : ''
       }`,
     },
     order.fulfilledAt && {
       color: 'purple',
-      children: `履约 · ${fmtTime(order.fulfilledAt)}`,
+      content: `履约 · ${fmtTime(order.fulfilledAt)}`,
     },
     order.status === 'Closed' && {
       color: 'gray',
-      children: `关闭 · ${fmtTime(order.closedAt ?? order.expiresAt)} · ${
+      content: `关闭 · ${fmtTime(order.closedAt ?? order.expiresAt)} · ${
         CLOSE_REASON_LABELS[order.closeReason ?? ''] ?? order.closeReason ?? ''
       }${order.closedAt ? '' : '（截止时间，实际关闭时刻未记录）'}`,
     },
-  ].filter(Boolean) as { color: string; children: React.ReactNode }[];
+  ].filter(Boolean) as { color: string; content: React.ReactNode }[];
   return <Timeline items={items} style={{ margin: '8px 0 0' }} />;
 };
 
 export default function OrderingPage() {
   const access = useAccess();
+  const { setting, link } = useConfigurationLocation();
+  const canViewRecords = access.canViewOwnOrders || access.canViewAllOrders;
+  const canConfigure = access.canManagePaymentSettings;
+
+  if (canConfigure && (setting || !canViewRecords)) {
+    const balance = setting === 'balance';
+    return (
+      <ConfigurationPage
+        parent="订单管理"
+        title={balance ? '余额支付规则' : '订单与报价规则'}
+        returnTo={canViewRecords ? link() : undefined}
+      >
+        <Space style={{ marginBottom: 12 }} size="middle">
+          <ConfigurationLink to={link('rules')}>订单与报价</ConfigurationLink>
+          <ConfigurationLink to={link('balance')}>余额支付</ConfigurationLink>
+        </Space>
+        <SettingsForm
+          key={balance ? 'balance' : 'rules'}
+          path={balance ? '/collection/settings' : '/collection/order-settings'}
+        />
+      </ConfigurationPage>
+    );
+  }
+
+  return canViewRecords ? (
+    <OrderRecords configurationPath={canConfigure ? link('rules') : undefined} />
+  ) : null;
+}
+
+function OrderRecords({ configurationPath }: { configurationPath?: string }) {
+  const access = useAccess();
+  const { initialState } = useModel('@@initialState');
+  const currentUserId = initialState?.currentUser?.userid;
+  const acceptsOrders = useModuleEnabled('Orders');
+  const acceptsPayments = useModuleEnabled('Collection');
+  const canStartPayment = acceptsOrders && acceptsPayments;
   const { pathname, search } = useLocation();
   const query = new URLSearchParams(search);
   const view = query.get('view');
+  const lookupBalanceTxnId = query.get('balanceTxnId');
+  const lookupUserId = query.get('userId');
+  const hasTopUpLookup = lookupBalanceTxnId !== null || lookupUserId !== null;
   const personalAllowed = access.canViewOwnOrders;
   const showAll =
-    access.canViewAllOrders && (view === 'all' || !personalAllowed || !view);
-  const activeTab = showAll ? 'all' : view === 'txns' ? 'txns' : 'orders';
-  const hasAnomaly = showAll && query.get('hasAnomaly') === 'true';
+    access.canViewAllOrders && (hasTopUpLookup || view === 'all' || !personalAllowed || !view);
+  const activeTab = showAll ? 'all' : view === 'txns' && !hasTopUpLookup ? 'txns' : 'orders';
   const requestedId = query.get('orderId');
+  const invalidOrderLink = requestedId !== null && !isValidRecordId(requestedId);
+  const canViewLookupOwner = showAll || (
+    personalAllowed &&
+    currentUserId &&
+    currentUserId.toLowerCase() === lookupUserId?.toLowerCase()
+  );
+  const invalidTopUpLookup = hasTopUpLookup && !(
+    lookupBalanceTxnId && isValidRecordId(lookupBalanceTxnId) &&
+    lookupUserId && isValidRecordId(lookupUserId) && canViewLookupOwner
+  );
+  const orderType = hasTopUpLookup || query.get('orderType') === 'TopUp' ? 'TopUp' : 'Business';
+  const isTopUpView = orderType === 'TopUp';
+  const hasAnomaly = showAll && !isTopUpView && query.get('hasAnomaly') === 'true';
+  const recordsKey = `${orderType}:${hasAnomaly}:${lookupUserId ?? ''}:${lookupBalanceTxnId ?? ''}`;
   const { message, modal } = App.useApp();
   const actionRef = useRef<ActionType | undefined>(undefined);
   const [createOpen, setCreateOpen] = useState(false);
@@ -202,6 +320,7 @@ export default function OrderingPage() {
   }, [personalAllowed, activeTab]);
 
   const submitCreate = async () => {
+    if (!acceptsOrders) return;
     // 同一拍内的重复点击仍读到旧的 React state，先拿同步提交锁。
     if (createInFlight.current) return;
     createInFlight.current = true;
@@ -239,7 +358,7 @@ export default function OrderingPage() {
   };
 
   const submitPay = async () => {
-    if (!payTarget || payCredential || payInFlight.current) return;
+    if (!canStartPayment || !payTarget || payCredential || payInFlight.current) return;
     payInFlight.current = true;
     setPaying(true);
     try {
@@ -322,30 +441,69 @@ export default function OrderingPage() {
   // 表格立即重查，使用 ref 读取本次选择的起止时间。
   const txnRangeRef = useRef<[string | null, string | null]>([null, null]);
   const [orderDetail, setOrderDetail] = useState<OrderDto | null>(null);
+  const [detailError, setDetailError] = useState<string>();
   useEffect(() => {
     setOrderDetail(null);
-    if (!requestedId) return;
+    setDetailError(undefined);
+    if (!requestedId || invalidOrderLink) return;
     let active = true;
     const getDetails = showAll ? adminGetOrder : getOrder;
     getDetails(requestedId)
       .then((order) => {
-        if (active) setOrderDetail(order);
+        if (!active) return;
+        if (order?.id?.toLowerCase() === requestedId.toLowerCase()) setOrderDetail(order);
+        else setDetailError('未找到该订单');
       })
       .catch((error: unknown) => {
-        if (active && isNotFound(error)) message.error('订单不存在');
+        if (active) setDetailError(isNotFound(error) ? '未找到该订单' : '加载订单详情失败');
       });
     return () => {
       active = false;
     };
-  }, [requestedId, showAll, message]);
+  }, [requestedId, showAll, invalidOrderLink]);
 
   function closeOrderDetail() {
     setOrderDetail(null);
-    if (requestedId) {
+    setDetailError(undefined);
+    if (requestedId !== null) {
       const next = new URLSearchParams(search);
       next.delete('orderId');
       history.replace(next.size ? `${pathname}?${next}` : pathname);
     }
+  }
+
+  const orderTypeSelect = (
+    <Select<'Business' | 'TopUp'>
+      key="order-type"
+      aria-label="订单类型"
+      value={orderType}
+      options={[...orderTypeOptions]}
+      onChange={(value) => {
+        const next = new URLSearchParams(search);
+        if (value === 'Business') next.delete('orderType');
+        else next.set('orderType', value);
+        next.delete('hasAnomaly');
+        next.delete('orderId');
+        next.delete('balanceTxnId');
+        next.delete('userId');
+        history.push(next.size ? `${pathname}?${next}` : pathname);
+      }}
+    />
+  );
+
+  function detailHref(orderId: string) {
+    const next = new URLSearchParams(search);
+    next.delete('orderId');
+    if (!next.has('view')) next.set('view', activeTab);
+    return `${orderRecordUrl(orderId)}&${next}`;
+  }
+
+  function renderDetailsLink(order: OrderDto) {
+    return (
+      <Link to={detailHref(order.id)} aria-label={`查看订单 ${order.orderNo}`}>
+        详情
+      </Link>
+    );
   }
   /** 扣款/回冲行 → 来源订单（request 回调里批量反查后写入；回冲按原扣款流水关联） */
   const [txnRefs, setTxnRefs] = useState<
@@ -405,21 +563,26 @@ export default function OrderingPage() {
       ),
     },
     {
-      title: '关联订单',
+      title: '关联单据',
       key: 'orderRef',
       width: 200,
       render: (_, t) => {
         const ref = txnOrderRef(t);
-        return ref ? (
-          <Typography.Link
-            onClick={async () =>
-              setOrderDetail(await getOrder(ref.orderId).catch(() => null))
-            }
-          >
-            {ref.orderNo}
-          </Typography.Link>
-        ) : (
-          '-'
+        const depositId = t.depositOrderId;
+        if (!ref && !depositId) return '-';
+        return (
+          <Space wrap>
+            {ref && <Link to={detailHref(ref.orderId)}>{ref.orderNo}</Link>}
+            {depositId && (
+              access.canViewDepositRecords ? (
+                <Link to={depositRecordUrl(depositId)} aria-label={`查看充值单 ${depositId}`}>
+                  充值记录
+                </Link>
+              ) : (
+                <Typography.Text copyable={{ text: depositId }}>充值单 {depositId}</Typography.Text>
+              )
+            )}
+          </Space>
         );
       },
     },
@@ -432,7 +595,39 @@ export default function OrderingPage() {
   ];
 
   return (
-    <PageContainer title="订单管理">
+    <PageContainer
+      title="订单管理"
+      extra={configurationPath && (
+        <ConfigurationLink to={configurationPath}>订单规则</ConfigurationLink>
+      )}
+    >
+      {hasTopUpLookup && (
+        <Alert
+          showIcon
+          type={invalidTopUpLookup ? 'warning' : 'info'}
+          title={invalidTopUpLookup ? '充值入账记录链接无效或没有查看权限' : `余额流水 ${lookupBalanceTxnId} 的充值入账记录`}
+          action={<Link to={`${pathname}?view=${activeTab}&orderType=TopUp`}>查看全部充值入账记录</Link>}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {(invalidOrderLink || detailError) && (
+        <Alert
+          showIcon
+          type="warning"
+          title={invalidOrderLink ? '订单链接无效' : detailError}
+          action={<Button size="small" onClick={closeOrderDetail}>查看订单列表</Button>}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {!acceptsOrders && (
+        <Alert
+          type="warning"
+          showIcon
+          title="订单已停止受理"
+          description="可以查看已有订单并处理已发起事项。"
+          style={{ marginBottom: 12 }}
+        />
+      )}
       {activeTab !== 'all' && !!balances.length && (
         <Card size="small" style={{ marginBottom: 16 }}>
           {headerTitle}
@@ -448,30 +643,38 @@ export default function OrderingPage() {
                 {
                   key: 'all',
                   label: '全部订单',
-                  children: showAll && (
+                  children: showAll && !invalidTopUpLookup && (
                     <AutoHeightProTable<OrderDto>
-                      key={hasAnomaly ? 'anomalies' : 'all'}
+                      key={recordsKey}
                       rowKey="id"
                       search={false}
                       pagination={{ defaultPageSize: 20 }}
                       headerTitle={hasAnomaly ? '有支付异常的订单' : undefined}
                       toolBarRender={() => [
-                        <Button
-                          key="anomaly"
-                          onClick={() =>
-                            history.push(
-                              `${pathname}?view=all${hasAnomaly ? '' : '&hasAnomaly=true'}`,
-                            )
-                          }
-                        >
-                          {hasAnomaly ? '查看全部' : '仅看支付异常'}
-                        </Button>,
+                        orderTypeSelect,
+                        ...(!isTopUpView ? [
+                          <Button
+                            key="anomaly"
+                            onClick={() =>
+                              history.push(
+                                `${pathname}?view=all${hasAnomaly ? '' : '&hasAnomaly=true'}`,
+                              )
+                            }
+                          >
+                            {hasAnomaly ? '查看全部' : '仅看支付异常'}
+                          </Button>,
+                        ] : []),
                       ]}
                       request={async ({ current = 1, pageSize = 20 }) => {
                         const result = await adminGetOrders({
                           skipCount: (current - 1) * pageSize,
                           maxResultCount: pageSize,
+                          orderType,
                           hasAnomaly: hasAnomaly || undefined,
+                          ...(hasTopUpLookup ? {
+                            balanceTxnId: lookupBalanceTxnId ?? undefined,
+                            userId: lookupUserId ?? undefined,
+                          } : {}),
                         });
                         return {
                           data: result.items,
@@ -487,14 +690,21 @@ export default function OrderingPage() {
                           ellipsis: true,
                           width: 170,
                         },
-                        { title: '标题', dataIndex: 'subject', ellipsis: true },
                         {
-                          title: '标价（USD）',
-                          dataIndex: 'amount',
-                          width: 115,
+                          title: '标题',
+                          dataIndex: 'subject',
+                          ellipsis: true,
+                          render: (_, order) => order.orderType === 'TopUp' ? '账户充值' : order.subject,
                         },
                         {
-                          title: '支付方式',
+                          title: isTopUpView ? '入账金额' : '标价（USD）',
+                          width: 125,
+                          render: (_, order) => isTopUpView
+                            ? `${order.payAmount ?? '—'} ${currencyLabel(order.payCurrency)}`
+                            : (order.amount ?? '—'),
+                        },
+                        {
+                          title: isTopUpView ? '充值方式' : '支付方式',
                           width: 150,
                           render: (_, order) => payChannelLabel(order) ?? '—',
                         },
@@ -503,9 +713,8 @@ export default function OrderingPage() {
                           width: 160,
                           render: (_, order) => (
                             <Space size={4} wrap>
-                              <Tag color={STATUS_TAGS[order.status]?.color}>
-                                {STATUS_TAGS[order.status]?.text ??
-                                  order.status}
+                              <Tag color={orderStatus(order).color}>
+                                {orderStatus(order).text}
                               </Tag>
                               {order.paymentAnomaly && (
                                 <Tag color="warning">支付异常</Tag>
@@ -522,20 +731,7 @@ export default function OrderingPage() {
                         {
                           title: '操作',
                           width: 72,
-                          render: (_, order) => (
-                            <Button
-                              size="small"
-                              type="link"
-                              onClick={() => {
-                                const next = new URLSearchParams(search);
-                                next.set('view', 'all');
-                                next.set('orderId', order.id);
-                                history.push(`${pathname}?${next}`);
-                              }}
-                            >
-                              详情
-                            </Button>
-                          ),
+                          render: (_, order) => renderDetailsLink(order),
                         },
                       ]}
                     />
@@ -548,8 +744,9 @@ export default function OrderingPage() {
                 {
                   key: 'orders',
                   label: '我的订单',
-                  children: (
+                  children: !invalidTopUpLookup && (
                     <AutoHeightProTable<OrderDto>
+                      key={recordsKey}
                       rowKey="id"
                       actionRef={actionRef}
                       search={false}
@@ -560,6 +757,11 @@ export default function OrderingPage() {
                             ((params.current || 1) - 1) *
                             (params.pageSize || 10),
                           maxResultCount: params.pageSize || 10,
+                          orderType,
+                          ...(hasTopUpLookup ? {
+                            balanceTxnId: lookupBalanceTxnId ?? undefined,
+                            userId: lookupUserId ?? undefined,
+                          } : {}),
                         });
                         return {
                           data: result.items,
@@ -568,21 +770,31 @@ export default function OrderingPage() {
                         };
                       }}
                       toolBarRender={() => [
-                        <Button
-                          key="create"
-                          type="primary"
-                          icon={<PlusOutlined />}
-                          onClick={() => setCreateOpen(true)}
-                        >
-                          创建订单
-                        </Button>,
+                        orderTypeSelect,
+                        ...(!isTopUpView ? [
+                          <Button
+                            key="create"
+                            type="primary"
+                            icon={<PlusOutlined />}
+                            disabled={!acceptsOrders}
+                            onClick={() => setCreateOpen(true)}
+                          >
+                            创建订单
+                          </Button>,
+                        ] : []),
                       ]}
                       columns={[
                         { title: '订单号', dataIndex: 'orderNo', width: 220 },
-                        { title: '标题', dataIndex: 'subject', ellipsis: true },
+                        {
+                          title: '标题',
+                          dataIndex: 'subject',
+                          ellipsis: true,
+                          render: (_, order) => order.orderType === 'TopUp' ? '账户充值' : order.subject,
+                        },
                         {
                           title: '标价 (USD)',
                           dataIndex: 'amount',
+                          hideInTable: isTopUpView,
                           width: 110,
                           render: (_, record) => record.amount ?? '-',
                         },
@@ -591,10 +803,7 @@ export default function OrderingPage() {
                           dataIndex: 'status',
                           width: 160,
                           render: (_, record) => {
-                            const tag = STATUS_TAGS[record.status] ?? {
-                              color: 'default',
-                              text: record.status,
-                            };
+                            const tag = orderStatus(record);
                             return (
                               <Space size={4} wrap>
                                 <Tag color={tag.color}>{tag.text}</Tag>
@@ -610,15 +819,15 @@ export default function OrderingPage() {
                           },
                         },
                         {
-                          title: '应付',
+                          title: isTopUpView ? '入账金额' : '应付',
                           width: 140,
                           render: (_, order) =>
                             order.payAmount
-                              ? `${order.payAmount} ${order.payCurrency ?? ''}`
+                              ? `${order.payAmount} ${currencyLabel(order.payCurrency)}`
                               : '-',
                         },
                         {
-                          title: '支付方式',
+                          title: isTopUpView ? '充值方式' : '支付方式',
                           dataIndex: 'payChannel',
                           width: 150,
                           render: (_, record) => {
@@ -636,13 +845,16 @@ export default function OrderingPage() {
                         },
                         {
                           title: '操作',
-                          width: 160,
-                          render: (_, order) => (
+                          width: 195,
+                          render: (_, order) => order.orderType === 'TopUp' ? (
+                            renderDetailsLink(order)
+                          ) : (
                             <Space>
+                              {renderDetailsLink(order)}
                               <Button
                                 size="small"
                                 type="primary"
-                                disabled={order.status !== 'PendingPayment'}
+                                disabled={!canStartPayment || order.status !== 'PendingPayment'}
                                 onClick={() => {
                                   if (payInFlight.current) return;
                                   setPayTarget(order);
@@ -743,6 +955,7 @@ export default function OrderingPage() {
         title="创建订单"
         open={createOpen}
         okText="创建订单"
+        okButtonProps={{ disabled: !acceptsOrders }}
         onOk={submitCreate}
         onCancel={() => {
           if (!createInFlight.current) setCreateOpen(false);
@@ -781,6 +994,7 @@ export default function OrderingPage() {
         title={`${payCredential ? '支付凭据' : '发起支付'} · ${payTarget?.orderNo ?? ''}`}
         open={payTarget != null}
         okText="发起支付"
+        okButtonProps={{ disabled: !canStartPayment }}
         onOk={submitPay}
         onCancel={closePayment}
         confirmLoading={paying}
@@ -848,7 +1062,7 @@ export default function OrderingPage() {
       </Modal>
 
       <Modal
-        title={`订单详情 · ${orderDetail?.orderNo ?? ''}`}
+        title={`${orderDetail?.orderType === 'TopUp' ? '充值入账详情' : '订单详情'} · ${orderDetail?.orderNo ?? ''}`}
         open={orderDetail != null}
         footer={null}
         onCancel={closeOrderDetail}
@@ -857,15 +1071,17 @@ export default function OrderingPage() {
         {orderDetail && (
           <Space orientation="vertical" style={{ width: '100%' }} size={8}>
             <Space wrap>
-              <Tag color={STATUS_TAGS[orderDetail.status]?.color ?? 'default'}>
-                {STATUS_TAGS[orderDetail.status]?.text ?? orderDetail.status}
+              <Tag color={orderStatus(orderDetail).color}>
+                {orderStatus(orderDetail).text}
               </Tag>
               {orderDetail.refundedAmount != null && (
                 <Tag color="orange">退款累计 {orderDetail.refundedAmount}</Tag>
               )}
             </Space>
             <Typography.Paragraph style={{ marginBottom: 0 }}>
-              {orderDetail.subject} · 标价 {orderDetail.amount ?? '-'} USD
+              {orderDetail.orderType === 'TopUp'
+                ? `账户充值 · 入账 ${orderDetail.payAmount ?? '—'} ${currencyLabel(orderDetail.payCurrency)}`
+                : `${orderDetail.subject} · 标价 ${orderDetail.amount ?? '—'} USD`}
             </Typography.Paragraph>
             <OrderTimeline order={orderDetail} />
             <OrderDetailFacts order={orderDetail} />

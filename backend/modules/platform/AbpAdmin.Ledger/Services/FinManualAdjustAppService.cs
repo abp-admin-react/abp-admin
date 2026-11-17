@@ -9,6 +9,7 @@ using AbpAdmin.Ledger.Integration.Contracts;
 using AbpAdmin.Ledger.Permissions;
 using AbpAdmin.Ledger.Posting;
 using AbpAdmin.Ledger.Services.Dtos;
+using AbpAdmin.Modules;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -30,17 +31,20 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
     private readonly LedgerPostingEngine _engine;
     private readonly PostingRuleProvider _rules;
     private readonly ILogger<FinManualAdjustAppService> _logger;
+    private readonly IDeploymentModuleStateReader _moduleStates;
 
     public FinManualAdjustAppService(
         IDbContextProvider<LedgerDbContext> dbContextProvider,
         LedgerPostingEngine engine,
         PostingRuleProvider rules,
-        ILogger<FinManualAdjustAppService> logger)
+        ILogger<FinManualAdjustAppService> logger,
+        IDeploymentModuleStateReader moduleStates)
     {
         _dbContextProvider = dbContextProvider;
         _engine = engine;
         _rules = rules;
         _logger = logger;
+        _moduleStates = moduleStates;
     }
 
     public virtual async Task<FinManualAdjustDto> GetAsync(Guid id)
@@ -102,6 +106,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
     {
         await RequireAnyAsync(FinanceErrorCodes.AdjustCreateDenied, FinancePermissions.Adjust.Create);
         var applicant = RequireUserId();
+        await CheckNewManualAdjustAsync();
         var lines = await BuildLinesAsync(input);
         var adjust = new FinManualAdjust(GuidGenerator.Create(), applicant, lines, input!.Reason, CurrentTenant.Id);
         var db = await _dbContextProvider.GetDbContextAsync();
@@ -136,6 +141,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
     public virtual async Task<FinManualAdjustDto> SubmitAsync(Guid id)
     {
         var adjust = await LoadForApplicantAsync(id, FinanceErrorCodes.AdjustSubmitDenied, FinancePermissions.Adjust.Submit);
+        await CheckNewManualAdjustAsync();
         if (string.IsNullOrWhiteSpace(adjust.Reason))
         {
             _logger.LogWarning("Adjust submit rejected: reason required. AdjustId={AdjustId} Code={Code}", id, FinanceErrorCodes.AdjustInvalidInput);
@@ -160,6 +166,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
             throw new BusinessException(FinanceErrorCodes.AdjustReopenDenied).WithData("AdjustId", id);
         }
 
+        await CheckNewManualAdjustAsync();
         adjust.Reopen();
         await SaveAsync();
         return await MapAsync(adjust);
@@ -174,6 +181,8 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         var (adjust, auditor) = await LoadForAuditAsync(id, FinanceErrorCodes.AdjustApproveDenied, FinancePermissions.Adjust.Approve);
         // 按 Id 取借贷两侧科目（字典含两项），凭证事件要的是科目编码
         var debit = (await _rules.GetAccountsByIdAsync(new[] { adjust.DebitAccountId, adjust.CreditAccountId }));
+        WalletLedgerGuard.RejectManualAccount(debit[adjust.DebitAccountId].Code);
+        WalletLedgerGuard.RejectManualAccount(debit[adjust.CreditAccountId].Code);
         var evt = new FinanceBizEvent(
             FinanceBizTypes.ManualAdjust,
             adjust.Id.ToString("N"),
@@ -219,6 +228,7 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         await RequireAnyAsync(FinanceErrorCodes.AdjustReverseDenied, FinancePermissions.Adjust.Reverse);
         var adjust = await LoadAsync(id);
         adjust.Require(FinManualAdjustStatus.Posted);
+        await _engine.EnsureManualReversalAllowedAsync(adjust.VoucherId!.Value);
         var reversal = await _engine.ReverseVoucherAsync(adjust.VoucherId!.Value);
         adjust.MarkReversed(reversal); // 只改状态并记红冲凭证号，原 VoucherId 保留，下方日志同时打两者
         await SaveAsync();
@@ -230,6 +240,15 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
     /// 审批/驳回共用：需对应权限 + Pending；申请人==审批人时必须另有 ApproveOwn，
     /// 否则抛 AdjustSelfApproveNotAllowed（403；勿与已废弃的 SelfApproveForbidden 混淆）。
     /// </summary>
+    private async Task CheckNewManualAdjustAsync()
+    {
+        if (!(await _moduleStates.GetAsync()).IsEnabled(DeploymentModuleIds.Finance))
+        {
+            throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                .WithData("ModuleId", DeploymentModuleIds.Finance);
+        }
+    }
+
     private async Task<(FinManualAdjust Adjust, Guid Auditor)> LoadForAuditAsync(Guid id, string deniedCode, string permission)
     {
         await RequireAnyAsync(deniedCode, permission);
@@ -304,6 +323,8 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
         var credit = await _rules.GetAccountAsync(string.IsNullOrWhiteSpace(input.CreditAccountCode)
             ? FinanceAccountCodes.ManualAdjust
             : input.CreditAccountCode);
+        WalletLedgerGuard.RejectManualAccount(debit.Code);
+        WalletLedgerGuard.RejectManualAccount(credit.Code);
         var debitOwner = input.DebitOwnerId ?? "";
         var creditOwner = input.CreditOwnerId ?? "";
         if (debit.Id == credit.Id && input.DebitOwnerType == input.CreditOwnerType && debitOwner == creditOwner)

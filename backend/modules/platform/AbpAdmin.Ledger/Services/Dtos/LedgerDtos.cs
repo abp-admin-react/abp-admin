@@ -322,6 +322,32 @@ public class FinOverviewDto
     public decimal FrozenTotal { get; set; }
     public decimal UnearnedTotal { get; set; }
     public decimal RecognizedIncomeTotal { get; set; }
+
+    /// <summary>按原币种。多于一种币时，上面的合计数为 0，以本列表为准。</summary>
+    public System.Collections.Generic.List<FinCurrencyTotalDto> CurrencyTotals { get; set; } = new();
+}
+
+public class FinCurrencyTotalDto
+{
+    public string Currency { get; set; } = default!;
+
+    public decimal TodayIncome { get; set; }
+
+    public decimal TodayExpense { get; set; }
+
+    public decimal TotalDebit { get; set; }
+
+    public decimal TotalCredit { get; set; }
+
+    public bool IsBalanced { get; set; }
+
+    public decimal Available { get; set; }
+
+    public decimal Frozen { get; set; }
+
+    public decimal Unearned { get; set; }
+
+    public decimal RecognizedIncome { get; set; }
 }
 
 public class FinPeriodDto : EntityDto<Guid>

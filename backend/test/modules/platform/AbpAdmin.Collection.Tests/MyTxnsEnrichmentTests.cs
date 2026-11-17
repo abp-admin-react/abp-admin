@@ -85,6 +85,7 @@ public class MyTxnsEnrichmentTests : CollectionTestBase
         page.TotalCount.ShouldBe(3);
         var deposit = page.Items.Single(t => t.Action == BalanceActions.DepositCredit && t.TxHash != null);
         deposit.TxHash.ShouldBe(txHash);
+        deposit.DepositOrderId.ShouldBe(depositOrderId);
         // 非 Guid 幂等键的充值行：无凭证可回填（不误连、不抛）——原断言空洞（挂在扣款行上）
         page.Items.Count(t => t.Action == BalanceActions.DepositCredit && t.TxHash == null).ShouldBe(1);
         deposit.BusinessType.ShouldBe(CollectionBusinessTypes.TopUp);
@@ -93,6 +94,16 @@ public class MyTxnsEnrichmentTests : CollectionTestBase
         debit.BusinessType.ShouldBe("Order");
         debit.BusinessId.ShouldBe(debitBusinessId);
         debit.TxHash.ShouldBeNull();
+        debit.DepositOrderId.ShouldBeNull();
+        page.Items.Single(t => t.Action == BalanceActions.DepositCredit && t.TxHash == null).DepositOrderId.ShouldBeNull();
+
+        var exact = await GetRequiredService<CollectionBalanceAppService>().GetMyTxnsAsync(0, 1, txnId: debitTxnId);
+        exact.TotalCount.ShouldBe(1);
+        exact.Items.ShouldHaveSingleItem().Id.ShouldBe(debitTxnId);
+        var admin = GetRequiredService<CollectionBalanceAdminAppService>();
+        (await admin.GetMemberTxnsAsync(Me, 0, 1, txnId: debitTxnId)).Items.ShouldHaveSingleItem().Id.ShouldBe(debitTxnId);
+        (await admin.GetMemberTxnsAsync(Guid.NewGuid(), 0, 1, txnId: debitTxnId)).Items.ShouldBeEmpty();
+        (await GetRequiredService<CollectionBalanceAppService>().GetMyTxnsAsync(0, 1, txnId: Guid.NewGuid())).Items.ShouldBeEmpty();
 
         // 时间过滤：上界在未来 1 小时内 → 两行都在；下界推到 1 小时后 → 空
         var within = await UowAsync(async () =>
@@ -131,6 +142,41 @@ public class MyTxnsEnrichmentTests : CollectionTestBase
             return await service.GetMyTxnsAsync(0, 50, toTime: boundary);
         });
         atTo.TotalCount.ShouldBe(3);     // <：等于上界的行不计入
+    }
+
+    [Fact]
+    public async Task Withdrawal_Filter_Returns_All_Own_Actions_Without_Cross_User_Or_Business_Links()
+    {
+        var withdrawalId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        var freezeId = Guid.NewGuid();
+        await UowAsync(async () =>
+        {
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await AddRow(freezeId, Me, BalanceActions.WithdrawFreeze, CollectionBusinessTypes.Withdraw, withdrawalId);
+            await AddRow(Guid.NewGuid(), Me, BalanceActions.WithdrawUnfreeze, CollectionBusinessTypes.Withdraw, withdrawalId);
+            await AddRow(Guid.NewGuid(), otherUserId, BalanceActions.WithdrawFreeze, CollectionBusinessTypes.Withdraw, withdrawalId);
+            await AddRow(Guid.NewGuid(), Me, BalanceActions.BusinessDebit, "Order", withdrawalId);
+            await AddRow(Guid.NewGuid(), Me, BalanceActions.WithdrawFreeze, CollectionBusinessTypes.Withdraw, Guid.NewGuid());
+
+            async Task AddRow(Guid id, Guid userId, string action, string type, Guid businessId)
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "ColBalanceTxns" ("Id", "UserId", "Currency", "Action", "Amount", "BalanceAfter", "IdempotencyKey", "BusinessType", "BusinessId", "RefTxnId", "ReversedAt", "CreationTime")
+                    VALUES ({id}, {userId}, {(int)CollectionCurrency.Usdt}, {action}, {1m}, {1m}, {id.ToString("D")}, {type}, {businessId}, NULL, NULL, {DateTime.UtcNow})
+                    """);
+            }
+        });
+
+        var service = GetRequiredService<CollectionBalanceAdminAppService>();
+        var related = await service.GetMemberTxnsAsync(Me, 0, 20, withdrawalId: withdrawalId);
+        related.TotalCount.ShouldBe(2);
+        related.Items.Select(x => x.Action).OrderBy(x => x).ShouldBe(
+            new[] { BalanceActions.WithdrawFreeze, BalanceActions.WithdrawUnfreeze }.OrderBy(x => x));
+        (await service.GetMemberTxnsAsync(Me, 0, 20, txnId: freezeId, withdrawalId: withdrawalId))
+            .Items.ShouldHaveSingleItem().Id.ShouldBe(freezeId);
+        (await service.GetMemberTxnsAsync(otherUserId, 0, 20, txnId: freezeId, withdrawalId: withdrawalId)).Items.ShouldBeEmpty();
+        (await service.GetMemberTxnsAsync(Me, 0, 20, withdrawalId: Guid.NewGuid())).Items.ShouldBeEmpty();
     }
 
     private async Task<T> UowAsync<T>(Func<Task<T>> action)

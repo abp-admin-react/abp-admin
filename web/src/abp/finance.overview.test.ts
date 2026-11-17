@@ -33,6 +33,7 @@ describe('overview live DTO normalization', () => {
       frozenTotal: 30,
       prepaymentTotal: 80,
       recognizedIncome: 55,
+      currencyTotals: [],
     });
   });
 

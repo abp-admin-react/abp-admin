@@ -13,10 +13,8 @@ using Volo.Abp.EntityFrameworkCore;
 namespace AbpAdmin.Ledger.Services;
 
 /// <summary>
-/// A1 资金总览：GET /api/app/fin-overview。需 Finance.Ledger.View。
-/// Today* 按凭证 CreationTime（Clock=Utc）的当日 [today, tomorrow)；
-/// RecognizedIncomeTotal = 全部收入类科目投影合计（框架种子只有 6002，业务模块种的收入科目自动计入）；
-/// Available/Frozen/Unearned 按科目编码汇总投影（业务模块未种对应科目时为 0）。
+/// 资金总览。今日额按凭证创建时间的 UTC 日界；试算、余额和收入按币种分开。
+/// 只有一种币时，顶栏合计等于该币；多于一种币时顶栏合计为 0，以 CurrencyTotals 为准。
 /// </summary>
 [Authorize(FinancePermissions.Ledger.View)]
 public class FinOverviewAppService : FinanceAppServiceBase
@@ -39,63 +37,68 @@ public class FinOverviewAppService : FinanceAppServiceBase
         var today = Clock.Now.Date;
         var tomorrow = today.AddDays(1);
 
-        // 今日借贷合计在 SQL 端按 phase 分组聚合（原实现把当日全部分录拉进内存再求和，随业务量线性变慢）；
-        // 方向词表引用 FinanceBizTypes（契约住一处，新增 phase 不改这里就自动跟口径）
         var todayAgg = await (
             from e in db.Entries.AsNoTracking()
             join v in db.Vouchers.AsNoTracking() on e.VoucherId equals v.Id
             where v.CreationTime >= today && v.CreationTime < tomorrow && !v.IsDemo
-            group e by v.Phase into g
-            select new { Phase = g.Key, Credit = g.Sum(x => x.Credit), Debit = g.Sum(x => x.Debit) }).ToListAsync();
+            group e by new { v.Currency, v.Phase } into g
+            select new { g.Key.Currency, g.Key.Phase, Credit = g.Sum(x => x.Credit), Debit = g.Sum(x => x.Debit) }).ToListAsync();
 
-        var todayIn = todayAgg.Where(x => FinanceBizTypes.IncomePhases.Contains(x.Phase)).Sum(x => x.Credit);
-        var todayOut = todayAgg.Where(x => FinanceBizTypes.ExpensePhases.Contains(x.Phase)).Sum(x => x.Debit);
-
-        // 试算平衡必须对全部非 demo 分录求和（IsBalanced 是全历史不变量，任何有界子集都会弱化语义）——
-        // 该查询无时间界是有意为之；数据量成为问题时的正确出路是基于 FinReconcileRun 的对账结果缓存，而不是改口径
-        var trial = await (
+        var trialRows = await (
             from e in db.Entries.AsNoTracking()
             join v in db.Vouchers.AsNoTracking() on e.VoucherId equals v.Id
             where !v.IsDemo
-            select e).GroupBy(_ => 1)
-            .Select(g => new { D = g.Sum(x => x.Debit), C = g.Sum(x => x.Credit) })
-            .FirstOrDefaultAsync();
+            group e by v.Currency into g
+            select new { Currency = g.Key, Debit = g.Sum(x => x.Debit), Credit = g.Sum(x => x.Credit) }).ToListAsync();
 
-        var available = await SumProjectionAsync(db, FinanceAccountCodes.UserAvailable);
-        var frozen = await SumProjectionAsync(db, FinanceAccountCodes.UserFrozen);
-        var unearned = await SumProjectionAsync(db, FinanceAccountCodes.Unearned);
-        // 已确认收入 = 全部收入类科目合计（框架只有 6002，业务模块种的收入科目自动计入）
-        var income = await (
+        var projections = await (
             from p in db.BalanceProjections.AsNoTracking()
             join s in db.SubAccounts.AsNoTracking() on p.SubAccountId equals s.Id
             join a in db.Accounts.AsNoTracking() on s.AccountId equals a.Id
-            where a.Type == FinAccountType.Income
-            select p.Balance).SumAsync();
+            group p by new { s.Currency, a.Code, a.Type } into g
+            select new { g.Key.Currency, g.Key.Code, g.Key.Type, Balance = g.Sum(x => x.Balance) }).ToListAsync();
+
+        var currencies = todayAgg.Select(x => x.Currency)
+            .Concat(trialRows.Select(x => x.Currency))
+            .Concat(projections.Select(x => x.Currency))
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
+        var totals = currencies.Select(currency =>
+        {
+            var todayOf = todayAgg.Where(x => x.Currency == currency).ToList();
+            var trial = trialRows.FirstOrDefault(x => x.Currency == currency);
+            var of = projections.Where(x => x.Currency == currency).ToList();
+            return new FinCurrencyTotalDto
+            {
+                Currency = currency,
+                TodayIncome = todayOf.Where(x => FinanceBizTypes.IncomePhases.Contains(x.Phase)).Sum(x => x.Credit),
+                TodayExpense = todayOf.Where(x => FinanceBizTypes.ExpensePhases.Contains(x.Phase)).Sum(x => x.Debit),
+                TotalDebit = trial?.Debit ?? 0,
+                TotalCredit = trial?.Credit ?? 0,
+                IsBalanced = trial == null || trial.Debit == trial.Credit,
+                Available = of.Where(x => x.Code == FinanceAccountCodes.UserAvailable).Sum(x => x.Balance),
+                Frozen = of.Where(x => x.Code == FinanceAccountCodes.UserFrozen).Sum(x => x.Balance),
+                Unearned = of.Where(x => x.Code == FinanceAccountCodes.Unearned).Sum(x => x.Balance),
+                RecognizedIncome = of.Where(x => x.Type == FinAccountType.Income).Sum(x => x.Balance),
+            };
+        }).ToList();
 
         var unreconciled = await db.ReconcileRuns.AsNoTracking().CountAsync(r => r.HasDiff && !r.IncludeDemo);
-
+        var single = totals.Count == 1 ? totals[0] : null;
         return new FinOverviewDto
         {
-            TodayIncome = todayIn,
-            TodayExpense = todayOut,
-            IsBalanced = trial == null || trial.D == trial.C,
-            TotalDebit = trial?.D ?? 0,
-            TotalCredit = trial?.C ?? 0,
+            TodayIncome = single?.TodayIncome ?? 0,
+            TodayExpense = single?.TodayExpense ?? 0,
+            IsBalanced = totals.All(x => x.IsBalanced),
+            TotalDebit = single?.TotalDebit ?? 0,
+            TotalCredit = single?.TotalCredit ?? 0,
             UnreconciledCount = unreconciled,
-            AvailableTotal = available,
-            FrozenTotal = frozen,
-            UnearnedTotal = unearned,
-            RecognizedIncomeTotal = income,
+            AvailableTotal = single?.Available ?? 0,
+            FrozenTotal = single?.Frozen ?? 0,
+            UnearnedTotal = single?.Unearned ?? 0,
+            RecognizedIncomeTotal = single?.RecognizedIncome ?? 0,
+            CurrencyTotals = totals,
         };
-    }
-
-    private static async Task<decimal> SumProjectionAsync(LedgerDbContext db, string code)
-    {
-        return await (
-            from p in db.BalanceProjections.AsNoTracking()
-            join s in db.SubAccounts.AsNoTracking() on p.SubAccountId equals s.Id
-            join a in db.Accounts.AsNoTracking() on s.AccountId equals a.Id
-            where a.Code == code
-            select p.Balance).SumAsync();
     }
 }

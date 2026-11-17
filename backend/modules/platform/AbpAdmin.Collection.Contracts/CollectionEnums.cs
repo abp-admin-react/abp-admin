@@ -57,4 +57,7 @@ public static class BalanceActions
     public const string WithdrawUnfreeze = "WithdrawUnfreeze";
     public const string WithdrawSettle = "WithdrawSettle";
     public const string WithdrawRefund = "WithdrawRefund";
+
+    /// <summary>商业退款回钱包。不是充值，也不能当成技术回冲。</summary>
+    public const string WalletRefund = "WalletRefund";
 }

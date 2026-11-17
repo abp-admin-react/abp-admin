@@ -1,9 +1,13 @@
 using System.Globalization;
+using System.Collections.Generic;
+using System.Threading;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Shouldly;
 using AbpAdmin.EntityFrameworkCore;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Volo.Abp.Data;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Modularity;
@@ -25,6 +29,17 @@ public class OrderingTestModule : AbpModule
 {
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
+        var moduleStates = Substitute.For<IDeploymentModuleStateReader>();
+        moduleStates.GetAsync(Arg.Any<CancellationToken>()).Returns(new DeploymentModuleSnapshot(0, initialized: true,
+            new Dictionary<string, bool> { [DeploymentModuleIds.Orders] = true, [DeploymentModuleIds.Collection] = true }));
+        context.Services.Replace(ServiceDescriptor.Singleton(moduleStates));
+        // Isolated ordering fixtures use a fake collection service and do not load
+        // its ABP module. Supply both dependency definitions without its services.
+        context.Services.Replace(ServiceDescriptor.Singleton(new DeploymentModuleRegistry([
+            new OrderingDeploymentModuleDefinitionProvider(),
+            new Collection.CollectionDeploymentModuleDefinitionProvider(),
+        ])));
+
         Configure<FeatureManagementOptions>(options =>
         {
             options.SaveStaticFeaturesToDatabase = false;

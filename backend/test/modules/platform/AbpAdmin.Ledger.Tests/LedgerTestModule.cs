@@ -4,13 +4,16 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.EntityFrameworkCore;
 using AbpAdmin.Ledger.Permissions;
+using AbpAdmin.Modules;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using NSubstitute;
 using Volo.Abp.Authorization;
 using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.Data;
@@ -30,6 +33,11 @@ public class LedgerTestModule : AbpModule
 {
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
+        var moduleStates = Substitute.For<IDeploymentModuleStateReader>();
+        moduleStates.GetAsync(Arg.Any<CancellationToken>()).Returns(new DeploymentModuleSnapshot(0, initialized: true,
+            new Dictionary<string, bool> { [DeploymentModuleIds.Finance] = true }));
+        context.Services.Replace(ServiceDescriptor.Singleton(moduleStates));
+
         // 测试应用的宿主环境显式钉 Production：不设时 ABP 按缺省解析，演示种子（LedgerDataSeed
         // Contributor 的 Finance:SeedDemoData 门控）可能随 IsDevelopment() 一起被打开，演示凭证
         // 与用例自建分录同科目过账，余额断言全部抬高（期望 100 会变 1350）。

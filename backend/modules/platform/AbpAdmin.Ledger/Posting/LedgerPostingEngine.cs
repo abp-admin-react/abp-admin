@@ -150,6 +150,82 @@ public class LedgerPostingEngine : DomainService
         return await ReverseVoucherCoreAsync(db, original);
     }
 
+    public virtual async Task<bool> HasVoucherAsync(string bizType, string bizRefId, string phase, string? batchKey)
+    {
+        var db = await _dbContextProvider.GetDbContextAsync();
+        return await FindVoucherAsync(db, bizType, bizRefId, phase, batchKey ?? "") != null;
+    }
+
+    public virtual async Task<IReadOnlyList<string>> FindVoucherRefsAsync(
+        string bizType, string phase, IReadOnlyCollection<string> bizRefIds)
+    {
+        if (bizRefIds.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var db = await _dbContextProvider.GetDbContextAsync();
+        var found = new List<string>();
+        foreach (var chunk in bizRefIds.Chunk(500))
+        {
+            var keys = chunk.ToArray();
+            found.AddRange(await db.Vouchers.AsNoTracking()
+                .Where(voucher => voucher.BizType == bizType && voucher.Phase == phase && keys.Contains(voucher.BizRefId))
+                .Select(voucher => voucher.BizRefId)
+                .ToListAsync());
+        }
+
+        return found;
+    }
+
+    /// <summary>人工冲销前拒绝受控钱包凭证。空桶 2205 和普通非钱包凭证可以继续。</summary>
+    public virtual async Task EnsureManualReversalAllowedAsync(Guid voucherId)
+    {
+        var db = await _dbContextProvider.GetDbContextAsync();
+        var voucher = await db.Vouchers.AsNoTracking().FirstOrDefaultAsync(v => v.Id == voucherId)
+                      ?? throw new BusinessException(FinanceErrorCodes.VoucherNotFound).WithData("VoucherId", voucherId);
+        if (WalletLedgerGuard.IsControlledBizType(voucher.BizType))
+        {
+            throw new BusinessException(FinanceErrorCodes.VoucherNotReversible)
+                .WithData("VoucherId", voucherId)
+                .WithData("BizType", voucher.BizType);
+        }
+
+        var touches = await (
+            from entry in db.Entries.AsNoTracking()
+            join sub in db.SubAccounts.AsNoTracking() on entry.SubAccountId equals sub.Id
+            join account in db.Accounts.AsNoTracking() on sub.AccountId equals account.Id
+            where entry.VoucherId == voucherId
+            select new { account.Code, sub.Bucket }).ToListAsync();
+        if (touches.Any(line => WalletLedgerGuard.TouchesControlled(line.Code, line.Bucket)))
+        {
+            throw new BusinessException(FinanceErrorCodes.VoucherNotReversible)
+                .WithData("VoucherId", voucherId)
+                .WithData("Reason", "controlled wallet account");
+        }
+    }
+
+    public virtual async Task<IReadOnlyList<FinanceUserBalanceLine>> ListUserLiabilityBalancesAsync()
+    {
+        var db = await _dbContextProvider.GetDbContextAsync();
+        var codes = new[]
+        {
+            FinanceAccountCodes.UserAvailable,
+            FinanceAccountCodes.UserFrozen,
+            FinanceAccountCodes.Unearned,
+        };
+        var rows = await (
+            from projection in db.BalanceProjections.AsNoTracking()
+            join sub in db.SubAccounts.AsNoTracking() on projection.SubAccountId equals sub.Id
+            join account in db.Accounts.AsNoTracking() on sub.AccountId equals account.Id
+            where sub.OwnerType == FinOwnerType.User && codes.Contains(account.Code)
+            select new { sub.OwnerId, sub.Currency, account.Code, sub.Bucket, projection.Balance }).ToListAsync();
+        return rows
+            .Where(row => row.Code != FinanceAccountCodes.Unearned || row.Bucket == FinanceAccountCodes.OrderPrepayBucket)
+            .Select(row => new FinanceUserBalanceLine(row.OwnerId, row.Currency, row.Code, row.Bucket, row.Balance))
+            .ToList();
+    }
+
     private async Task<Guid> ReverseVoucherCoreAsync(LedgerDbContext db, FinVoucher original)
     {
         if (original.ReversalOf != null)

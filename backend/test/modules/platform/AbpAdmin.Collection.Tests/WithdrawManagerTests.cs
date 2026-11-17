@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Balances;
 using AbpAdmin.Collection.Contracts;
@@ -8,8 +10,10 @@ using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Withdrawals;
 using AbpAdmin.Collection.Ledger;
 using AbpAdmin.Ledger.Integration.Contracts;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
@@ -41,6 +45,24 @@ public class WithdrawManagerTests : CollectionTestBase
         // 生产口径：余额行入账 + 账本开账（上线回填路径 PostOpeningAsync）
         await Balances.CreditAsync(userId, currency, amount, $"dep-{Guid.NewGuid()}");
         await Poster.PostOpeningAsync(userId, currency, amount);
+    }
+
+    [Fact]
+    public async Task Paused_Chain_Rejects_New_Freeze_But_Cancellation_Unfreezes_An_Existing_Order()
+    {
+        await FundAsync(User1, 1000m);
+        const string recipient = "0x1111111111111111111111111111111111111111";
+        var order = await Manager.SubmitAsync(User1, CollectionCurrency.Usdt, recipient, 100m);
+        GetRequiredService<IDeploymentModuleStateReader>().GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new DeploymentModuleSnapshot(1, initialized: true, new Dictionary<string, bool>()));
+
+        (await Should.ThrowAsync<BusinessException>(
+            () => Manager.SubmitAsync(User1, CollectionCurrency.Usdt, recipient, 100m)))
+            .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        (await FrozenOfAsync(User1)).ShouldBe(100m);
+        await Manager.CancelAsync(User1, order.Id);
+        (await FrozenOfAsync(User1)).ShouldBe(0m);
+        (await UserAvailableAsync(User1)).ShouldBe(1000m);
     }
 
     [Fact]

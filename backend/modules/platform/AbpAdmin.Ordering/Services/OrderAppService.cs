@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Contracts;
+using AbpAdmin.Modules;
 using AbpAdmin.Ordering.Data;
 using Microsoft.Extensions.Logging;
 using AbpAdmin.Ordering.Entities;
@@ -36,6 +38,7 @@ public class OrderAppService : ApplicationService
     private readonly ISettingProvider _settingProvider;
     private readonly IClock _clock;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
+    private readonly IDeploymentModuleStateReader _moduleStates;
 
     public OrderAppService(
         IDbContextProvider<OrderingDbContext> dbContextProvider,
@@ -43,7 +46,8 @@ public class OrderAppService : ApplicationService
         OrderPaymentManager orderPaymentManager,
         ISettingProvider settingProvider,
         IClock clock,
-        IUnitOfWorkManager unitOfWorkManager)
+        IUnitOfWorkManager unitOfWorkManager,
+        IDeploymentModuleStateReader moduleStates)
     {
         _dbContextProvider = dbContextProvider;
         _quoteManager = quoteManager;
@@ -51,12 +55,18 @@ public class OrderAppService : ApplicationService
         _settingProvider = settingProvider;
         _clock = clock;
         _unitOfWorkManager = unitOfWorkManager;
+        _moduleStates = moduleStates;
     }
 
     /// <summary>创建业务单（待支付）。商品目录、库存、物流不在本计划范围。</summary>
     public virtual async Task<OrderDto> CreateAsync(CreateOrderInput input)
     {
         AssertHost();
+        if (!(await _moduleStates.GetAsync()).IsEnabled(DeploymentModuleIds.Orders))
+        {
+            throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                .WithData("ModuleId", DeploymentModuleIds.Orders);
+        }
 
         var amount = AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(input.Amount);
         // 业务单标价 numeric(18,2)：两位小数 + 正数 + 不超列上限，越界给业务错误而不是 PG 22003 500
@@ -195,6 +205,9 @@ public class OrderAppService : ApplicationService
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var order = await GetOwnOrderAsync(orderId);
         var method = ParsePayMethod(payMethod);
+        await _orderPaymentManager.CheckPaymentAdmissionAsync();
+        using var admission = CollectionPaymentAdmission.Begin(
+            OrderingConsts.OrderBusinessType, order.Id, method.ToCollectionChannel(), method.BalanceCurrency());
         var quote = await _quoteManager.GetOrCreateActiveQuoteAsync(order, method);
 
         // 报价过期后不能支付，过期之后立刻重新报价——翻状态由 QuoteManager 内部完成；

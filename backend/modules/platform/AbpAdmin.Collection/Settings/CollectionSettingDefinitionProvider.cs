@@ -78,6 +78,7 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             S(CollectionSettings.Chain.ScanEnabled),
             S(CollectionSettings.Chain.SweepEnabled),
             S(CollectionSettings.Chain.HotWalletWatchEnabled),
+            S(CollectionSettings.WalletLedger.Enforce),
             W(CollectionSettings.Chain.ScanIntervalSeconds, DefScanIntervalSeconds),
             W(CollectionSettings.Chain.SweepIntervalSeconds, DefSweepIntervalSeconds),
             W(CollectionSettings.Chain.HotWalletWatchIntervalSeconds, DefHotWalletWatchIntervalSeconds),

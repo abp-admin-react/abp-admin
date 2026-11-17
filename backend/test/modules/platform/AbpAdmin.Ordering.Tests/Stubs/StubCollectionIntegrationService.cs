@@ -168,6 +168,21 @@ public class StubCollectionIntegrationService : ICollectionIntegrationService, I
     public Task<DepositAddressDto> GetDepositAddressAsync(Guid userId)
         => throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
 
+    public Task<WalletRefundHoldResult> HoldWalletRefundAsync(Guid originalDebitTxnId, string requestId, decimal amount)
+        => Task.FromResult(new WalletRefundHoldResult { Applied = false });
+
+    public Task ConfirmWalletRefundHoldAsync(Guid originalDebitTxnId, string requestId)
+        => Task.CompletedTask;
+
+    public Task<WalletRefundHoldResult> RefundWalletAsync(Guid originalDebitTxnId, string requestId, decimal amount)
+        => Task.FromResult(new WalletRefundHoldResult { Applied = false });
+
+    public Task LinkWalletRefundNoteAsync(Guid originalDebitTxnId, string requestId, decimal? amount = null)
+        => Task.CompletedTask;
+
+    public Task<bool> HasWalletRefundAsync(Guid balanceTxnId)
+        => Task.FromResult(false);
+
     // ── 内部：把桩里的收款单按业务单号归档，供 ListByBusinessAsync 返回 ─────────────────
 
     public void Track(CollectionDto dto)

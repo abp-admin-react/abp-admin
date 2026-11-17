@@ -81,7 +81,8 @@ public class OrderAdminAppService : ApplicationService
     }
 
     /// <summary>
-    /// 人工退款记录：追加异常明细，不改订单 Status（计划第 4.2 节——不另做渠道退款 API）。
+    /// 人工退款记录，不改订单状态，也不把钱退回钱包。
+    /// 关联已有退款只追加说明；原资产金额进入待核实；标价币种金额才累加 RefundedAmount。
     /// </summary>
     [Authorize(OrderingPermissions.Orders.RecordManualRefund)]
     public virtual async Task<OrderDto> RecordManualRefundAsync(Guid id, RecordManualRefundInput input)
@@ -119,22 +120,57 @@ public class OrderAdminAppService : ApplicationService
         }
 
         var order = await LoadAsync(id);
+        var balancePaid = order.BalanceTxnId != null
+            && order.PayChannel is OrderingPayChannel.BalanceUsdt or OrderingPayChannel.BalanceUsdc;
+        var linkedRequestId = string.IsNullOrWhiteSpace(input.LinkedRequestId) ? null : input.LinkedRequestId.Trim();
+        if (linkedRequestId != null
+            && (linkedRequestId.Length > 64 || OrderServiceHelpers.HasControlChars(linkedRequestId)))
+        {
+            throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
+                .WithData("LinkedRequestId", "LinkedRequestId is at most 64 characters, without control characters.");
+        }
 
-        // 币种必须等于订单标价币种（RefundedAmount 是单币种累计列；混币种累加 = 对用户的错误金额）
-        if (currency.HasValue && !string.Equals(order.Currency, currency.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+        if (linkedRequestId != null)
+        {
+            if (!balancePaid)
+            {
+                throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
+                    .WithData("LinkedRequestId", "Only a balance-paid order can link an existing wallet refund.");
+            }
+
+            if (currency.HasValue && currency != order.PayCurrency)
+            {
+                throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
+                    .WithData("Currency", "A linked note must use the paid asset, or omit the currency.");
+            }
+        }
+
+        // 余额支付的补录按实付资产占用额度。其他订单的累计列仍是标价币种。
+        if (linkedRequestId == null && currency.HasValue && balancePaid)
+        {
+            var matchesAsset = currency == order.PayCurrency;
+            var matchesList = string.Equals(order.Currency, currency.Value.ToString(), StringComparison.OrdinalIgnoreCase);
+            if (!matchesAsset && !matchesList)
+            {
+                throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
+                    .WithData("Currency", "Refund currency must match the paid asset or the order list currency.");
+            }
+        }
+        else if (currency.HasValue && !string.Equals(order.Currency, currency.Value.ToString(), StringComparison.OrdinalIgnoreCase))
         {
             throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
                 .WithData("Currency", $"Refund currency must match the order currency ({order.Currency}).");
         }
-        // 两位小数：RefundedAmount 列是 numeric(18,2)，子分位会让 PG 静默舍入、累计 ≠ Σ 明细
-        if (amount.HasValue && decimal.Round(amount.Value, 2) != amount.Value)
+        var assetAmount = balancePaid && currency == order.PayCurrency;
+        if (!assetAmount && amount.HasValue && decimal.Round(amount.Value, 2) != amount.Value)
         {
             throw new BusinessException(OrderingErrorCodes.InvalidOrderInput)
                 .WithData("Amount", "Refund amount supports at most 2 decimal places.");
         }
 
-        // 退款明细 + RefundedAmount 累加（用户侧订单详情可见，见 OrderPaymentManager.AppendManualRefundAsync）
-        await _orderPaymentManager.AppendManualRefundAsync(order.Id, amount, currency, input.Note.Trim());
+        // 关联和待核实不累加标价币种 RefundedAmount，见 AppendManualRefundAsync。
+        await _orderPaymentManager.AppendManualRefundAsync(
+            order.Id, amount, currency, input.Note.Trim(), linkedRequestId);
         return OrderAppService.Map(await LoadAsync(id), null);
     }
 

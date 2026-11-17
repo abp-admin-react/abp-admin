@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
+using AbpAdmin.Modules;
 using AbpAdmin.Ordering.Data;
 using AbpAdmin.Ordering.Entities;
 using AbpAdmin.Ordering.Orders;
@@ -9,6 +12,7 @@ using AbpAdmin.Ordering.Quotes;
 using AbpAdmin.Ordering.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
@@ -25,6 +29,62 @@ namespace AbpAdmin.Ordering;
 /// </summary>
 public class OrderAppServiceTests : OrderingStubTestBase
 {
+    [Theory]
+    [InlineData("AlipayPrecreate")]
+    [InlineData("BalanceUsdt")]
+    public async Task Paused_Collection_Does_Not_Change_Quote_Or_Cancel_Previous_Attempt(string paymentMethod)
+    {
+        var service = GetRequiredService<OrderAppService>();
+        var orderId = await CreateBusinessOrderAsync(service);
+        var original = await service.StartPayAsync(orderId, "WechatNative");
+        var states = GetRequiredService<IDeploymentModuleStateReader>();
+        states.GetAsync(Arg.Any<CancellationToken>()).Returns(new DeploymentModuleSnapshot(1, initialized: true,
+            new Dictionary<string, bool> { [DeploymentModuleIds.Orders] = true, [DeploymentModuleIds.Collection] = false }));
+
+        var error = await Should.ThrowAsync<BusinessException>(() => service.StartPayAsync(orderId, paymentMethod));
+        error.Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        Stub.CreateCallCount.ShouldBe(1);
+        Stub.CancelCallCount.ShouldBe(0);
+        Stub.DebitCallCount.ShouldBe(0);
+        (await service.GetAsync(orderId)).CollectionId.ShouldBe(original.CollectionId);
+
+        using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
+        var db = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+        (await db.Quotes.CountAsync(q => q.OrderId == orderId)).ShouldBe(1);
+        await uow.CompleteAsync();
+    }
+
+    [Fact]
+    public async Task StartPay_Uses_One_Admission_Through_Quote_And_Channel_Creation()
+    {
+        var service = GetRequiredService<OrderAppService>();
+        var orderId = await CreateBusinessOrderAsync(service);
+        var states = GetRequiredService<IDeploymentModuleStateReader>();
+        states.GetAsync(Arg.Any<CancellationToken>()).Returns(
+            new DeploymentModuleSnapshot(1, initialized: true, new Dictionary<string, bool>
+            {
+                [DeploymentModuleIds.Orders] = true,
+                [DeploymentModuleIds.Collection] = true,
+            }),
+            new DeploymentModuleSnapshot(2, initialized: true, new Dictionary<string, bool>()));
+        states.ClearReceivedCalls();
+
+        Stub.OnChannelCreate = created =>
+        {
+            CollectionPaymentAdmission.Covers(created.BusinessType, created.BusinessId, created.Channel, null).ShouldBeTrue();
+            CollectionPaymentAdmission.Covers(created.BusinessType, Guid.NewGuid(), created.Channel, null).ShouldBeFalse();
+            return Task.CompletedTask;
+        };
+
+        var result = await service.StartPayAsync(orderId, "WechatNative");
+        result.Outcome.ShouldBe(StartPayOutcome.ChannelCreated.ToString());
+        await states.Received(1).GetAsync(Arg.Any<CancellationToken>());
+        CollectionPaymentAdmission.Covers(OrderingConsts.OrderBusinessType, orderId, CollectionChannel.WechatNative, null)
+            .ShouldBeFalse();
+        (await Should.ThrowAsync<BusinessException>(() => service.StartPayAsync(orderId, "AlipayPrecreate")))
+            .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+    }
+
     [Fact]
     public async Task StartPayAsync_Quote_Survives_Channel_Failure()
     {

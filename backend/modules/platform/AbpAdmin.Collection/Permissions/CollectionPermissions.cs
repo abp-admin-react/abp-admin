@@ -37,4 +37,10 @@ public static class CollectionPermissions
     {
         public const string Admin = GroupName + ".WithdrawAdmin";
     }
+
+    /// <summary>商业退款回钱包。和补录说明不是同一个权限。</summary>
+    public static class WalletRefunds
+    {
+        public const string Refund = GroupName + ".WalletRefunds.Refund";
+    }
 }

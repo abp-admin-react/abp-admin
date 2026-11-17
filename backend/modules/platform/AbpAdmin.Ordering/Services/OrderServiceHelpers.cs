@@ -116,6 +116,11 @@ internal static class OrderServiceHelpers
             query = query.Where(o => o.UserId == filter.UserId);
         }
 
+        if (filter.BalanceTxnId != null)
+        {
+            query = query.Where(o => o.BalanceTxnId == filter.BalanceTxnId);
+        }
+
         return query;
     }
 }

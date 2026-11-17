@@ -53,5 +53,11 @@ public class CollectionLedgerSeedProvider : ILedgerSeedProvider, ITransientDepen
         // 存量余额开账回填（管理端一次性，BizRefId = opening:{userId}:{currency}）
         new(FinanceBizTypes.Wallet, FinanceBizTypes.Phases.Post, "存量余额开账",
             "[{\"debit\":\"1001\",\"credit\":\"2201\",\"note\":\"存量余额开账\"}]"),
+
+        // 订单余额：借用户可用，贷用户 2205 的 order 桶。技术回冲走原凭证红字，不另设 phase。
+        new(FinanceBizTypes.OrderWallet, FinanceBizTypes.Phases.OrderDebit, "订单余额扣款",
+            "[{\"debit\":\"2201\",\"credit\":\"2205\",\"note\":\"订单余额扣款\"}]"),
+        new(FinanceBizTypes.OrderWallet, FinanceBizTypes.Phases.OrderRefund, "订单退回钱包",
+            "[{\"debit\":\"2205\",\"credit\":\"2201\",\"note\":\"订单退回钱包\"}]"),
     };
 }

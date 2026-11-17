@@ -1,13 +1,17 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Channels;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Fakes;
 using AbpAdmin.Collection.Payments;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
@@ -32,6 +36,38 @@ public class CollectionIntegrationServiceTests : CollectionTestBase
 
     private CollectionIntegrationService Service =>
         (CollectionIntegrationService)GetRequiredService<AbpAdmin.Collection.Contracts.ICollectionIntegrationService>();
+
+    [Fact]
+    public async Task Paused_Create_Only_Replays_A_Matching_Persisted_Result()
+    {
+        var input = Input("72.45");
+        using var admission = CollectionPaymentAdmission.Begin(
+            input.BusinessType, input.BusinessId, input.Channel, balanceCurrency: null);
+        Fake.NextCreateResult = new ChannelCreateResult(Succeeded: false, Unknown: true);
+        var states = GetRequiredService<IDeploymentModuleStateReader>();
+        states.GetAsync(Arg.Any<CancellationToken>()).Returns(new DeploymentModuleSnapshot(1, initialized: true,
+            new Dictionary<string, bool>()));
+
+        // One caller already passed admission before the pause. It can complete
+        // the first create, but it cannot reuse the scope to acquire another lease.
+        var original = await Service.CreateAsync(input);
+        var callbackInvoked = false;
+        var replay = await Service.CreateAsync(input, _ =>
+        {
+            callbackInvoked = true;
+            return Task.CompletedTask;
+        });
+
+        replay.Id.ShouldBe(original.Id);
+        replay.ChannelResultUnknown.ShouldBeTrue();
+        replay.ChannelPayload.ShouldBeNull();
+        callbackInvoked.ShouldBeFalse();
+        (await Should.ThrowAsync<BusinessException>(() => Service.CreateAsync(Input("72.45"))))
+            .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        (await Should.ThrowAsync<BusinessException>(() => Service.CreateAsync(Input("73.00", businessId: input.BusinessId))))
+            .Code.ShouldBe(CollectionErrorCodes.PendingCollectionConflict);
+        Fake.CreateCallCount.ShouldBe(1);
+    }
 
     [Fact]
     public async Task CreateAsync_Pending_Row_Is_Visible_From_Another_Scope()

@@ -113,6 +113,9 @@ public class OrderListFilterDto
     /// <summary>只看该用户的订单（管理端按用户排查）。</summary>
     public Guid? UserId { get; set; }
 
+    /// <summary>精确关联余额流水；仍与当前用户/管理端 userId 约束共同生效。</summary>
+    public Guid? BalanceTxnId { get; set; }
+
     /// <summary>分页偏移；负数按 0 处理（与 OrderServiceHelpers.NormalizePaging 共同钳制）。</summary>
     public int SkipCount { get; set; }
 
@@ -159,6 +162,9 @@ public class RecordManualRefundInput
     public string? Amount { get; set; }
 
     public string? Currency { get; set; }
+
+    /// <summary>已有退款或已核实记录的请求号。填写后只追加说明，不再占用第二次额度。</summary>
+    public string? LinkedRequestId { get; set; }
 
     public string Note { get; set; } = default!;
 }

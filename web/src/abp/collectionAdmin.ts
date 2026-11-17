@@ -112,6 +112,28 @@ export type MemberBalanceDto = {
   total: string;
 };
 
+/** 已有余额行的用户（一人一行）。没有资金往来的用户不在列表中；缺的币种为 0。 */
+export type MemberBalanceAccountDto = {
+  userId: string;
+  usdtBalance: string;
+  usdtFrozen: string;
+  usdcBalance: string;
+  usdcFrozen: string;
+  updatedAt: string;
+};
+
+export async function getMemberBalanceAccounts(params: {
+  skipCount?: number;
+  maxResultCount?: number;
+}): Promise<{ totalCount: number; items: MemberBalanceAccountDto[] }> {
+  return request(`${BASE}/member-balance-accounts`, {
+    params: {
+      SkipCount: params.skipCount,
+      MaxResultCount: params.maxResultCount,
+    },
+  });
+}
+
 /** 会员流水行（与用户侧 BalanceTxnDto 同形，充值行带链上凭证） */
 export type BalanceTxnDto = {
   id: string;
@@ -124,6 +146,7 @@ export type BalanceTxnDto = {
   businessId?: string;
   refTxnId?: string;
   txHash?: string;
+  depositOrderId: string | null;
 };
 
 // ABP 把 userId 绑定为路径参数。
@@ -138,11 +161,15 @@ export async function getMemberTxns(params: {
   userId: string;
   skipCount?: number;
   maxResultCount?: number;
+  txnId?: string;
+  withdrawalId?: string;
 }): Promise<{ totalCount: number; items: BalanceTxnDto[] }> {
   return request(`${BASE}/member-txns/${params.userId}`, {
     params: {
-      skipCount: params.skipCount,
-      maxResultCount: params.maxResultCount,
+      SkipCount: params.skipCount,
+      MaxResultCount: params.maxResultCount,
+      ...(params.txnId ? { TxnId: params.txnId } : {}),
+      ...(params.withdrawalId ? { WithdrawalId: params.withdrawalId } : {}),
     },
   });
 }
@@ -165,6 +192,7 @@ export const BALANCE_ACTION_LABELS: Record<
 /** 状态桶（计数 + 金额合计） */
 export interface StatusBucketDto {
   status: string;
+  currency?: string;
   count: number;
   total: string;
 }
@@ -197,10 +225,12 @@ export interface TreasuryDashboardDto {
   withdrawTodayAmount: string;
   /** 充值手续费累计（Swept） */
   depositFeeTotal: string;
-  /** 提现手续费累计（Completed） */
+  /** 一种币时的提现手续费。多种币时为 0，看 withdrawFees */
   withdrawFeeTotal: string;
-  /** 在途提现净额（Pending/Processing/Broadcasting） */
+  withdrawFees?: { currency: string; amount: string }[];
+  /** 审核后未清偿净额，含广播失败。多种币时为 0，看 withdrawInFlight */
   withdrawInFlightAmount: string;
+  withdrawInFlight?: { currency: string; amount: string }[];
   userBalances: UserBalanceBucketDto[];
   vaultChecks: VaultCheckLatestDto[];
 }

@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Integration.Contracts;
 using AbpAdmin.Ledger.Services;
 using AbpAdmin.Ledger.Services.Dtos;
+using AbpAdmin.Modules;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.Authorization;
@@ -25,6 +29,36 @@ public class ManualAdjustTests : LedgerScenarioTestBase
         DebitOwnerId = "default",
         Reason = reason ?? "adj",
     };
+
+    [Fact]
+    public async Task Paused_Finance_Declines_New_Work_And_Approves_An_Existing_Submission()
+    {
+        Guid pendingId;
+        Guid draftId;
+        using (As(TestUsers.AccountantA))
+        {
+            pendingId = (await Adjust.CreateAsync(Draft())).Id;
+            await Adjust.SubmitAsync(pendingId);
+            draftId = (await Adjust.CreateAsync(Draft())).Id;
+        }
+
+        GetRequiredService<IDeploymentModuleStateReader>().GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new DeploymentModuleSnapshot(1, initialized: true, new Dictionary<string, bool>()));
+        using (As(TestUsers.AccountantA))
+        {
+            (await Should.ThrowAsync<BusinessException>(() => Adjust.CreateAsync(Draft())))
+                .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+            (await Should.ThrowAsync<BusinessException>(() => Adjust.SubmitAsync(draftId)))
+                .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        }
+
+        using (As(TestUsers.AccountantB))
+        {
+            var posted = await Adjust.ApproveAsync(pendingId);
+            posted.Status.ShouldBe(FinManualAdjustStatus.Posted);
+            posted.VoucherId.ShouldNotBeNull();
+        }
+    }
 
     [Fact]
     public async Task Five_State_Happy_Path_A_Create_B_Approve_Posts_GL()

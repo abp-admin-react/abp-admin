@@ -39,6 +39,9 @@ public enum OrderingPayChannel
     StripeCheckout = 3,
     BalanceUsdt = 4,
     BalanceUsdc = 5,
+
+    /// <summary>链上充值入账。不是余额支付，报价不能选它。</summary>
+    ChainDeposit = 6,
 }
 
 public static class OrderingPayChannelExtensions

@@ -54,29 +54,18 @@ public class AbpAdminCollectionModule : AbpModule
             sp.GetRequiredService<IServiceScopeFactory>()));
 
         // API 密钥位于请求头或 URL 中，探测请求不进入 HTTP 日志及全局出站报文分析器。
-        context.Services.AddHttpClient(Chain.ChainProviderProbe.HttpClientName, client =>
-            {
-                client.Timeout = TimeSpan.FromSeconds(8);
-                client.MaxResponseContentBufferSize = 16 * 1024;
-            })
-            .RemoveAllLoggers()
-            .ConfigureAdditionalHttpMessageHandlers((handlers, _) =>
-            {
-                for (var i = handlers.Count - 1; i >= 0; i--)
-                {
-                    if (handlers[i] is ProfilerDelegatingHandler)
-                    {
-                        handlers.RemoveAt(i);
-                    }
-                }
-            })
-            .ConfigurePrimaryHttpMessageHandler(Chain.ChainHttpTransport.CreateHandler);
+        AddPrivateProviderClient(context.Services, Chain.ChainProviderProbe.HttpClientName, 16 * 1024);
+        AddPrivateProviderClient(context.Services, Chain.BscDepositProviderClient.HttpClientName, 4 * 1024 * 1024);
 
         Configure<AbpAuditingOptions>(options =>
         {
             options.IgnoredTypes.Add(typeof(Services.ConfigureAnkrInput));
             options.IgnoredTypes.Add(typeof(Services.AddNetworkApiKeyInput));
             options.IgnoredTypes.Add(typeof(Services.TestNodeCredentialInput));
+            options.IgnoredTypes.Add(typeof(Services.SaveScanProviderInput));
+            options.IgnoredTypes.Add(typeof(Services.TestScanProviderInput));
+            options.IgnoredTypes.Add(typeof(Services.TestScanBalanceInput));
+            options.IgnoredTypes.Add(typeof(Services.ConfigureTransactionRpcInput));
         });
 
         // 上下文级 UseNpgsql + 独立 History 表；schema 从连接串 SearchPath 显式解析
@@ -133,5 +122,27 @@ public class AbpAdminCollectionModule : AbpModule
         {
             options.MapCodeNamespace("AbpAdmin.Collection", typeof(CollectionResource));
         });
+    }
+
+    private static void AddPrivateProviderClient(IServiceCollection services, string name, int maxResponseBytes)
+    {
+        services.AddHttpClient(name, client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(8);
+                client.MaxResponseContentBufferSize = maxResponseBytes;
+            })
+            .RemoveAllLoggers()
+            .ConfigureAdditionalHttpMessageHandlers((handlers, _) =>
+            {
+                for (var i = handlers.Count - 1; i >= 0; i--)
+                {
+                    if (handlers[i] is ProfilerDelegatingHandler)
+                    {
+                        handlers.RemoveAt(i);
+                    }
+                }
+            })
+            .AddHttpMessageHandler(() => new Chain.PrivateChainEndpointHandler())
+            .ConfigurePrimaryHttpMessageHandler(Chain.ChainHttpTransport.CreateHandler);
     }
 }

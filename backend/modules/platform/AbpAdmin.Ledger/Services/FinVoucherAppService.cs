@@ -171,10 +171,7 @@ public class FinVoucherAppService : FinanceAppServiceBase
     {
         var db = await _dbContextProvider.GetDbContextAsync();
         var v = await GetScopedVoucherAsync(db, id);
-        if (v.BizType == FinanceBizTypes.WalletAdjustment)
-        {
-            throw new BusinessException(FinanceErrorCodes.VoucherNotReversible).WithData("VoucherId", id);
-        }
+        await _engine.EnsureManualReversalAllowedAsync(v.Id);
         Guid reversalId;
         if (v.BizType == FinanceBizTypes.ManualAdjust && Guid.TryParseExact(v.BizRefId, "N", out var adjustId))
         {

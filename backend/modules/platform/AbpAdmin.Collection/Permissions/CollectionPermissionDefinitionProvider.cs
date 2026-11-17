@@ -38,6 +38,8 @@ public class CollectionPermissionDefinitionProvider : PermissionDefinitionProvid
         // 提现出账仅 Host（余额/提现表无租户列；租户管理员自授会越过 Host 资金边界）
         group.AddPermission(CollectionPermissions.Withdraw.Admin, L("Permission:WithdrawAdmin"),
             multiTenancySide: MultiTenancySides.Host);
+        group.AddPermission(CollectionPermissions.WalletRefunds.Refund, L("Permission:WalletRefunds.Refund"),
+            multiTenancySide: MultiTenancySides.Host);
     }
 
     private static LocalizableString L(string name)
