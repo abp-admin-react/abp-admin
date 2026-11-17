@@ -8,7 +8,10 @@ import {
   configureNetwork,
   configureNetworkToken,
   createNetworkApiKey,
+  getDepositOrders,
+  getSweepTasks,
   getWalletStatus,
+  importLegacyWallet,
   removeApiKey,
   retrySweepTask,
   setApiKeyEnabled,
@@ -26,6 +29,24 @@ describe('chainAdmin write endpoint URL shapes', () => {
       '/api/app/collection-network-admin/d1/approve-large-deposit',
     );
     expect(request.mock.calls[0][1]).toMatchObject({ method: 'POST' });
+  });
+
+  it('迁移旧钱包只把网络 ID 放在查询参数', async () => {
+    const input = {
+      mnemonic: 'test-only words',
+      addressIndexHighWaterMark: 9,
+      addresses: [],
+    };
+    await importLegacyWallet('network-2', input);
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/app/collection-network-admin/import-legacy-wallet',
+      {
+        method: 'POST',
+        params: { NetworkId: 'network-2' },
+        data: input,
+        skipErrorHandler: true,
+      },
+    );
   });
 
   it('retrySweepTask 路径段且段名与 api-definition 一致（/retry-sweep-task；E2E 实测 /retry 是 SPA 兜底 HTML）', async () => {
@@ -134,4 +155,18 @@ describe('chainAdmin write endpoint URL shapes', () => {
       { params: { IncludeBalances: true } },
     );
   });
+});
+
+it('充值和归集查询都可以按归集任务 ID 精确匹配', async () => {
+  request.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
+  await getDepositOrders({ skipCount: 0, maxResultCount: 20, sweepTaskId: 'task-1' });
+  expect(request).toHaveBeenLastCalledWith(
+    '/api/app/collection-network-admin/deposit-orders',
+    { params: expect.objectContaining({ SkipCount: 0, MaxResultCount: 20, SweepTaskId: 'task-1' }) },
+  );
+  await getSweepTasks({ skipCount: 0, maxResultCount: 1, sweepTaskId: 'task-1' });
+  expect(request).toHaveBeenLastCalledWith(
+    '/api/app/collection-network-admin/sweep-tasks',
+    { params: expect.objectContaining({ SkipCount: 0, MaxResultCount: 1, SweepTaskId: 'task-1' }) },
+  );
 });

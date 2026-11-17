@@ -47,10 +47,22 @@ public class AddNetworkApiKeyInput
 public class ConfigureNetworkInput
 {
     private int? _estimatedArrivalMinutes;
+    private int? _nodeLogResultCap;
 
     public Guid NetworkId { get; set; }
     public string? RpcUrl { get; set; }
-    public int? NodeLogResultCap { get; set; }
+    public int? NodeLogResultCap
+    {
+        get => _nodeLogResultCap;
+        set
+        {
+            _nodeLogResultCap = value;
+            HasNodeLogResultCap = true;
+        }
+    }
+
+    internal bool HasNodeLogResultCap { get; private set; }
+
     public string DepositFeeRate { get; set; } = default!;
     public string AutoCreditMaxAmount { get; set; } = default!;
 
@@ -67,6 +79,15 @@ public class ConfigureNetworkInput
 
     internal bool HasEstimatedArrivalMinutes { get; private set; }
 }
+
+public class ConfigureTransactionRpcInput
+{
+    public Guid NetworkId { get; set; }
+    public string? RpcUrl { get; set; }
+    public bool ClearRpcUrl { get; set; }
+}
+
+public record TransactionRpcDto(string? RpcUrlMasked);
 
 public class ConfigureAnkrInput
 {
@@ -175,6 +196,10 @@ public class TokenStatusDto
     public string? VaultAddress { get; set; }
     public long? LastScannedBlock { get; set; }
     public DateTime? LastScanAt { get; set; }
+    public string? LastScanProvider { get; set; }
+    public DateTime? LastScanProviderAt { get; set; }
+    public string? LastScanFailure { get; set; }
+    public long? ScanReplayFromBlock { get; set; }
     public bool IsEnabled { get; set; }
     /// <summary>落后块数（链头 - 游标），粗略健康信号。</summary>
     public long? BlocksBehind { get; set; }
@@ -203,6 +228,8 @@ public class DepositOrderListDto
     public long BlockNumber { get; set; }
     public string Status { get; set; } = default!;
     public Guid? SweepTaskId { get; set; }
+    /// <summary>同一用户、同一充值幂等键的贷记流水；尚未入账或历史无关联时为 null。</summary>
+    public Guid? BalanceTxnId { get; set; }
     public bool ManuallyReleased { get; set; }
     public DateTime CreationTime { get; set; }
 }
@@ -268,7 +295,7 @@ public class ChainApiKeysDto
 /// 密钥保存在加密字段中。任务在下一轮读取后台保存的设置。
 /// </summary>
 [Authorize]
-public class CollectionNetworkAdminAppService : ApplicationService
+public partial class CollectionNetworkAdminAppService : ApplicationService
 {
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly IStringEncryptionService _encryptor;
@@ -379,7 +406,9 @@ public class CollectionNetworkAdminAppService : ApplicationService
         }
 
         if (await db.Networks.AnyAsync(network => network.RpcCipher != null || network.MnemonicCipher != null
-                || network.WithdrawVaultKeyCipher != null || network.AnkrPlatformAuthKeyCipher != null) || await db.ChainApiKeys.AnyAsync())
+                || network.WithdrawVaultKeyCipher != null || network.AnkrPlatformAuthKeyCipher != null
+                || network.LegacyDepositRpcCipher != null)
+            || await db.ChainApiKeys.AnyAsync() || await db.ScanProviders.AnyAsync())
         {
             throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
         }
@@ -463,6 +492,10 @@ public class CollectionNetworkAdminAppService : ApplicationService
                 VaultAddress = t.VaultAddress,
                 LastScannedBlock = t.LastScannedBlock,
                 LastScanAt = t.LastScanAt,
+                LastScanProvider = t.LastScanProvider,
+                LastScanProviderAt = t.LastScanProviderAt,
+                LastScanFailure = t.LastScanFailure,
+                ScanReplayFromBlock = t.ScanReplayFromBlock,
                 IsEnabled = t.IsEnabled,
                 BlocksBehind = t.LastScannedBlock.HasValue && head > 0 ? head - t.LastScannedBlock.Value : null,
             }).ToList(),
@@ -584,7 +617,8 @@ public class CollectionNetworkAdminAppService : ApplicationService
     }
 
     public virtual async Task<PagedResultDto<DepositOrderListDto>> GetDepositOrdersAsync(
-        int skipCount, int maxResultCount, string? status = null, string? symbol = null, Guid? depositId = null)
+        int skipCount, int maxResultCount, string? status = null, string? symbol = null,
+        Guid? depositId = null, Guid? sweepTaskId = null)
     {
         await CheckOperationsReadAccessAsync();
         if (maxResultCount <= 0 || maxResultCount > 200) maxResultCount = 20;
@@ -597,6 +631,10 @@ public class CollectionNetworkAdminAppService : ApplicationService
         if (depositId is { } id)
         {
             query = query.Where(o => o.Id == id);
+        }
+        if (sweepTaskId is { } sweepId)
+        {
+            query = query.Where(o => o.SweepTaskId == sweepId);
         }
 
         if (!string.IsNullOrEmpty(status) && Enum.TryParse<DepositOrderStatus>(status, true, out var st))
@@ -616,6 +654,14 @@ public class CollectionNetworkAdminAppService : ApplicationService
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
             .ToListAsync();
+
+        // The unique ledger idempotency key is the stored deposit ID, never a transaction-hash guess.
+        // Keep the owner check even for host operators so malformed legacy rows cannot create a false link.
+        var creditKeys = items.Select(o => BalanceIdempotencyKeys.ForDepositOrder(o.Id)).ToList();
+        var credits = await dbContext.BalanceTxns.AsNoTracking()
+            .Where(t => t.Action == BalanceActions.DepositCredit && creditKeys.Contains(t.IdempotencyKey))
+            .Select(t => new { t.Id, t.UserId, t.IdempotencyKey })
+            .ToDictionaryAsync(t => t.IdempotencyKey);
         await uow.CompleteAsync();
 
         return new PagedResultDto<DepositOrderListDto>(total, items.Select(o => new DepositOrderListDto
@@ -635,6 +681,8 @@ public class CollectionNetworkAdminAppService : ApplicationService
             BlockNumber = o.BlockNumber,
             Status = o.Status.ToString(),
             SweepTaskId = o.SweepTaskId,
+            BalanceTxnId = credits.TryGetValue(BalanceIdempotencyKeys.ForDepositOrder(o.Id), out var credit)
+                           && credit.UserId == o.UserId ? credit.Id : null,
             ManuallyReleased = o.ManuallyReleased,
             CreationTime = o.CreationTime,
         }).ToList());
@@ -642,7 +690,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
 
     /// <summary>归集任务分页。</summary>
     public virtual async Task<PagedResultDto<SweepTaskListDto>> GetSweepTasksAsync(
-        int skipCount, int maxResultCount, string? status = null)
+        int skipCount, int maxResultCount, string? status = null, Guid? sweepTaskId = null)
     {
         await CheckOperationsReadAccessAsync();
         if (maxResultCount <= 0 || maxResultCount > 200) maxResultCount = 20;
@@ -650,6 +698,10 @@ public class CollectionNetworkAdminAppService : ApplicationService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var symbols = await dbContext.Tokens.ToDictionaryAsync(t => t.Id, t => t.Symbol);
         var query = dbContext.SweepTasks.AsNoTracking();
+        if (sweepTaskId is { } id)
+        {
+            query = query.Where(t => t.Id == id);
+        }
 
         if (!string.IsNullOrEmpty(status) && Enum.TryParse<SweepTaskStatus>(status, true, out var st))
         {
@@ -878,6 +930,51 @@ public class CollectionNetworkAdminAppService : ApplicationService
     }
 
     [Authorize(CollectionPermissions.Network.Admin)]
+    [HttpGet("api/app/collection-network-admin/transaction-rpc")]
+    public virtual async Task<TransactionRpcDto> GetTransactionRpcAsync(Guid networkId)
+    {
+        AssertHost();
+        var network = await RequireNetworkAsync(await _dbContextProvider.GetDbContextAsync(), networkId);
+        return new TransactionRpcDto(await MaskUrlAsync(network.RpcCipher));
+    }
+
+    [Authorize(CollectionPermissions.Network.Admin)]
+    [DisableAuditing]
+    [HttpPost("api/app/collection-network-admin/transaction-rpc")]
+    public virtual async Task<TransactionRpcDto> ConfigureTransactionRpcAsync([FromBody] ConfigureTransactionRpcInput input)
+    {
+        AssertHost();
+        var rpcUrl = NormalizeRpcUrl(input.RpcUrl);
+        if (input.ClearRpcUrl && rpcUrl != null)
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidRpcUrl);
+        }
+
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var db = await _dbContextProvider.GetDbContextAsync();
+        var network = await RequireNetworkAsync(db, input.NetworkId);
+        if (rpcUrl != null)
+        {
+            network.RpcCipher = HdKeyService.Protect(rpcUrl, await RequireMasterKeyAsync(), _encryptor);
+        }
+        else if (input.ClearRpcUrl && !string.IsNullOrEmpty(network.RpcCipher))
+        {
+            var hasAnkrRpc = await db.ChainApiKeys.AnyAsync(key => key.NetworkId == network.Id
+                && key.Provider == ChainApiKeyProvider.RpcBsc && key.IsEnabled);
+            if (!hasAnkrRpc)
+            {
+                throw new BusinessException(CollectionErrorCodes.TransactionRpcRequired);
+            }
+
+            network.RpcCipher = null;
+        }
+
+        var result = new TransactionRpcDto(await MaskUrlAsync(network.RpcCipher));
+        await uow.CompleteAsync();
+        return result;
+    }
+
+    [Authorize(CollectionPermissions.Network.Admin)]
     [DisableAuditing]
     public virtual async Task ConfigureNetworkAsync(ConfigureNetworkInput input)
     {
@@ -888,11 +985,7 @@ public class CollectionNetworkAdminAppService : ApplicationService
         {
             throw new BusinessException(CollectionErrorCodes.InvalidAmount);
         }
-        if (!string.IsNullOrWhiteSpace(input.RpcUrl) &&
-            !ChainHttpTransport.IsAllowedEndpoint(input.RpcUrl.Trim()))
-        {
-            throw new BusinessException(CollectionErrorCodes.InvalidRpcUrl);
-        }
+        var rpcUrl = NormalizeRpcUrl(input.RpcUrl);
 
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var db = await _dbContextProvider.GetDbContextAsync();
@@ -911,10 +1004,13 @@ public class CollectionNetworkAdminAppService : ApplicationService
         }
         network.DepositFeeRate = fee;
         network.AutoCreditMaxAmount = maximum;
-        network.NodeLogResultCap = input.NodeLogResultCap;
-        if (!string.IsNullOrWhiteSpace(input.RpcUrl))
+        if (input.HasNodeLogResultCap)
         {
-            network.RpcCipher = '\u0001' + _encryptor.Encrypt(input.RpcUrl.Trim(), await RequireMasterKeyAsync());
+            network.NodeLogResultCap = input.NodeLogResultCap;
+        }
+        if (rpcUrl != null)
+        {
+            network.RpcCipher = HdKeyService.Protect(rpcUrl, await RequireMasterKeyAsync(), _encryptor);
         }
         await db.SaveChangesAsync();
         await uow.CompleteAsync();
@@ -957,17 +1053,13 @@ public class CollectionNetworkAdminAppService : ApplicationService
         var network = await RequireNetworkAsync(dbContext, networkId);
         var masterKey = await RequireMasterKeyAsync();
 
-        if (!string.IsNullOrEmpty(network.MnemonicCipher))
+        var hasAddresses = await dbContext.DepositAddresses.AnyAsync(a => a.NetworkId == network.Id);
+        var hasActiveSweeps = await dbContext.SweepTasks.AnyAsync(t =>
+            t.NetworkId == network.Id
+            && (t.Status == SweepTaskStatus.Queued || t.Status == SweepTaskStatus.Fueling || t.Status == SweepTaskStatus.Sweeping));
+        if (network.LegacyAddressIndexHighWaterMark.HasValue || hasAddresses || hasActiveSweeps)
         {
-            var hasAddresses = await dbContext.DepositAddresses.AnyAsync(a => a.NetworkId == network.Id);
-            var hasActiveSweeps = await dbContext.SweepTasks.AnyAsync(t =>
-                t.NetworkId == network.Id
-                && (t.Status == SweepTaskStatus.Queued || t.Status == SweepTaskStatus.Fueling || t.Status == SweepTaskStatus.Sweeping));
-            if (hasAddresses || hasActiveSweeps)
-            {
-                throw new BusinessException(CollectionErrorCodes.MnemonicResetRefused)
-                    .WithData("Reason", "已存在充值地址或未完成归集，重置助记词会导致资产不可达。");
-            }
+            throw new BusinessException(CollectionErrorCodes.MnemonicResetRefused);
         }
 
         var words = HdKeyService.GenerateMnemonic();
@@ -1227,6 +1319,18 @@ public class CollectionNetworkAdminAppService : ApplicationService
         {
             throw new BusinessException(CollectionErrorCodes.HostOnly);
         }
+    }
+
+    private static string? NormalizeRpcUrl(string? value)
+    {
+        var rpcUrl = value?.Trim();
+        if (string.IsNullOrEmpty(rpcUrl)) return null;
+        if (!ChainHttpTransport.IsAllowedEndpoint(rpcUrl))
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidRpcUrl);
+        }
+
+        return rpcUrl;
     }
 
     /// <summary>RPC 掩码仅显示协议、主机和端口，用户名、密码、路径和查询均隐藏。</summary>

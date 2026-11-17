@@ -31,12 +31,23 @@ public class ColNetwork : BasicAggregateRoot<Guid>
     /// <summary>助记词密文（版本前缀 + ABP StringEncryption，口令 = Collection:MasterKey）。null = 未设置。</summary>
     public string? MnemonicCipher { get; set; }
 
+    /// <summary>从旧系统迁入的钱包已分配的最大索引，包含退役和不可重新分配的历史索引。</summary>
+    public int? LegacyAddressIndexHighWaterMark { get; set; }
+
     /// <summary>RPC 连接串密文（URL 含项目密钥）。null = 未设置。</summary>
     public string? RpcCipher { get; set; }
 
     public string? AnkrPlatformAuthKeyCipher { get; set; }
 
     public string? AnkrGroup { get; set; }
+
+    /// <summary>One-time compatibility copy of a legacy deposit endpoint, independent of transaction RPC.</summary>
+    public string? LegacyDepositRpcCipher { get; set; }
+
+    /// <summary>Try the managed order first while retaining the migrated RPC until a managed scan succeeds.</summary>
+    public bool PreferManagedScanProviders { get; set; }
+
+    public bool ScanBillingClaimPending { get; set; }
 
     // ── 提现热钱包（M3）：独立于归集助记词的打款钱包，绝不与 MnemonicCipher 同源 ——
 

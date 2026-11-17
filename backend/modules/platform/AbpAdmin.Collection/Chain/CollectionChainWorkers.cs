@@ -47,7 +47,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
     protected override async Task RunRoundAsync(IServiceProvider scopedServices, CancellationToken ct)
     {
         var dbContext = scopedServices.GetRequiredService<IDbContextProvider<CollectionDbContext>>();
-        var factory = scopedServices.GetRequiredService<ChainGatewayFactory>();
+        var factory = scopedServices.GetRequiredService<BscDepositScanProviderFactory>();
         var scanManager = scopedServices.GetRequiredService<DepositScanManager>();
         var pusher = scopedServices.GetService<Contracts.IChainPushNotifier>();
         var uowManager = scopedServices.GetRequiredService<Volo.Abp.Uow.IUnitOfWorkManager>();
@@ -55,11 +55,11 @@ public class DepositScanWorker : CollectionChainWorkerBase
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var db = await dbContext.GetDbContextAsync();
-        var network = await db.Networks.OrderBy(n => n.CreationTime).ThenBy(n => n.Id).FirstOrDefaultAsync(ct);
+        var network = await db.Networks.FirstOrDefaultAsync(n => n.Name == CollectionConsts.BscNetworkName
+            && n.ChainId == CollectionConsts.BscMainnetChainId, ct);
         if (network == null) return;
 
-        var gateway = await CreateGatewayAsync(factory, db, network, Logger);
-        if (gateway == null) return;
+        var providers = await factory.CreateAsync(db, network, ct);
 
         var tokens = await db.Tokens
             .Where(t => t.NetworkId == network.Id)
@@ -84,7 +84,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
             try
             {
                 await scanManager.RunTokenRoundAsync(
-                    network, token, gateway,
+                    network, token, providers,
                     confirmations, blockRange, scanBehindBlocks,
                     skipWindow, skipThreshold,
                     ct);

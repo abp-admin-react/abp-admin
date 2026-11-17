@@ -1,20 +1,27 @@
-import { Navigate, useAccess, useLocation } from '@umijs/max';
+import { Navigate, useLocation } from '@umijs/max';
 
 export default function Web3Entry() {
-  const access = useAccess();
-  const { pathname, search } = useLocation();
+  const { pathname, search, hash } = useLocation();
 
-  if (pathname === '/web3/rules') {
+  if (pathname.replace(/\/+$/, '').toLowerCase() === '/web3/rules') {
     const view =
       new URLSearchParams(search).get('tab') === 'withdraw'
         ? 'withdraw'
         : 'deposit';
-    return <Navigate to={`/web3/config?view=${view}`} replace />;
+    const params = new URLSearchParams(search);
+    params.delete('tab');
+    params.set('settings', view);
+    if (view === 'withdraw') {
+      params.delete('view');
+      return <Navigate to={`/collection/withdrawals?${params}${hash}`} replace />;
+    }
+    params.set('view', 'deposits');
+    return <Navigate to={`/operations/payments?${params}${hash}`} replace />;
   }
 
   return (
     <Navigate
-      to={access.canViewWeb3Operations ? '/web3/operations' : '/web3/config'}
+      to={`/web3/operations${search}${hash}`}
       replace
     />
   );

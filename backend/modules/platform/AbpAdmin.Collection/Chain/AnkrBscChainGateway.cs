@@ -586,48 +586,14 @@ public class AnkrBscChainGateway : IBscChainGateway
 
     internal static string ToAddress(string topic) => "0x" + topic[^40..];
 
-    /// <summary>32 字节 hex 整数 → 十进制字符串（uint256，任意长度，不经过 double/long）。</summary>
-    internal static string HexToDecimalString(string hex)
-    {
-        var digits = hex.StartsWith("0x") ? hex[2..] : hex;
-        if (digits.Length == 0)
-        {
-            return "0";
-        }
-
-        // 大数转十进制：按字节进位（uint256 最多 78 位十进制）
-        var bytes = new byte[digits.Length / 2];
-        for (var i = 0; i < bytes.Length; i++)
-        {
-            bytes[i] = Convert.ToByte(digits.Substring(i * 2, 2), 16);
-        }
-
-        var result = new List<byte> { 0 }; // 反序的十进制位
-        foreach (var b in bytes)
-        {
-            var carry = (int)b;
-            for (var i = 0; i < result.Count; i++)
-            {
-                carry += result[i] << 8;
-                result[i] = (byte)(carry % 10);
-                carry /= 10;
-            }
-
-            while (carry > 0)
-            {
-                result.Add((byte)(carry % 10));
-                carry /= 10;
-            }
-        }
-
-        result.Reverse();
-        return new string(result.SkipWhile(b => b == 0 && result.Count > 1).Select(b => (char)(b + '0')).ToArray());
-    }
+    /// <summary>JSON-RPC 数量可能有奇数个十六进制数字。按无符号整数解析，保留全部位及 uint256 精度。</summary>
+    internal static string HexToDecimalString(string hex) =>
+        HexStringToBigInteger(hex).ToString(CultureInfo.InvariantCulture);
 
     internal static decimal HexWeiToEther(string hex)
     {
         var raw = HexToDecimalString(hex);
-        return decimal.Parse(raw) / 1_000_000_000_000_000_000m;
+        return decimal.Parse(raw, CultureInfo.InvariantCulture) / 1_000_000_000_000_000_000m;
     }
 }
 

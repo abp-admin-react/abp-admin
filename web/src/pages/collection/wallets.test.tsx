@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   getWalletStatus: vi.fn(),
   setVaultAddress: vi.fn(),
   generateMnemonic: vi.fn(),
+  importLegacyWallet: vi.fn(),
   setWithdrawVault: vi.fn(),
   useAccess: vi.fn(),
 }));
@@ -194,6 +195,80 @@ describe('收款钱包', () => {
     await waitFor(() =>
       expect(screen.queryAllByDisplayValue('test-only phrase')).toHaveLength(0),
     );
+  });
+
+  it('用原助记词迁入地址清单，保留历史索引并刷新配置', async () => {
+    api.getWalletStatus.mockResolvedValueOnce({
+      ...(await api.getWalletStatus()),
+      hasMnemonic: false,
+    });
+    api.getWalletStatus.mockClear();
+    api.importLegacyWallet.mockResolvedValue({
+      importedAddressCount: 1,
+      retiredAddressCount: 1,
+      addressIndexHighWaterMark: 9,
+      nextAddressIndex: 10,
+    });
+    const manifest = {
+      addressIndexHighWaterMark: 9,
+      addresses: [
+        {
+          userId: '3edcd405-c898-4724-ac28-763d8b1d399e',
+          address: `0x${'1'.repeat(40)}`,
+          addressIndex: 7,
+          isActive: true,
+        },
+        {
+          userId: null,
+          address: `0x${'2'.repeat(40)}`,
+          addressIndex: 9,
+          isActive: false,
+        },
+      ],
+    };
+    const file = new File([], 'legacy-wallet.json', {
+      type: 'application/json',
+    });
+    file.text = async () =>
+      JSON.stringify({ ...manifest, mnemonic: 'ignored file field' });
+    render(
+      <App>
+        <CollectionWalletsPage />
+      </App>,
+    );
+    fireEvent.click(await screen.findByText('充值总密钥', { exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '迁移旧充值钱包' }));
+    const fileInput = await screen.findByLabelText('旧地址清单');
+    const wordsInput = screen.getByLabelText('原充值助记词');
+    expect(wordsInput).toHaveAttribute('type', 'password');
+    fireEvent.change(wordsInput, { target: { value: 'test-only words' } });
+    fireEvent.change(fileInput, {
+      target: {
+        files: [
+          Object.assign(new File([], 'invalid.json'), {
+            text: async () => '{}',
+          }),
+        ],
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '校验并迁移' }));
+    await screen.findByText('请按说明检查地址清单的 JSON 格式。');
+    await waitFor(() => expect(fileInput).toHaveFocus());
+    expect(api.importLegacyWallet).not.toHaveBeenCalled();
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: '校验并迁移' }));
+    await waitFor(() =>
+      expect(api.importLegacyWallet).toHaveBeenCalledWith('selected-network', {
+        ...manifest,
+        mnemonic: 'test-only words',
+      }),
+    );
+    expect(await screen.findByText(/下一个派生索引为 10/)).toBeTruthy();
+    expect(screen.queryByDisplayValue('test-only words')).toBeNull();
+    expect(api.getWalletStatus.mock.calls).toEqual([
+      ['selected-network', false],
+      ['selected-network', false],
+    ]);
   });
 
   it('迟到的余额响应不会覆盖刚保存的钱包配置', async () => {

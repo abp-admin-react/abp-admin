@@ -1,5 +1,5 @@
 import { PageContainer } from '@ant-design/pro-components';
-import { useAccess } from '@umijs/max';
+import { Link, useAccess } from '@umijs/max';
 import {
   App,
   Button,
@@ -14,6 +14,7 @@ import {
 } from 'antd';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  getDepositOrders,
   getSweepTasks,
   retrySweepTask,
   SWEEP_STATUS_LABELS,
@@ -26,6 +27,8 @@ import {
   startChainSignalR,
 } from '@/abp/chainSignalR';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import { isValidRecordId, RecordFocus } from './record-focus';
+import { depositRecordsForSweepUrl } from './record-links';
 import { useChainRecordRefresh } from './use-chain-record-refresh';
 
 const { Text } = Typography;
@@ -34,16 +37,23 @@ const { Text } = Typography;
 export default function SweepsPage({
   embedded = false,
   initialStatus,
+  depositId,
+  sweepTaskId,
 }: {
   embedded?: boolean;
   initialStatus?: string;
+  depositId?: string;
+  sweepTaskId?: string;
 } = {}) {
   const { message } = App.useApp();
   const access = useAccess();
   const [data, setData] = useState<SweepTaskListDto[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const focusId = sweepTaskId ?? depositId;
+  const invalidId = !!focusId && !isValidRecordId(focusId);
+  const [loading, setLoading] = useState(!!focusId && !invalidId);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [statusFilter, setStatusFilter] = useState(
     initialStatus && Object.hasOwn(SWEEP_STATUS_LABELS, initialStatus)
       ? initialStatus
@@ -56,24 +66,53 @@ export default function SweepsPage({
 
   const reload = useCallback(
     async (background = false) => {
+      if (invalidId) return;
       const request = ++latestRequest.current;
-      if (!background) setLoading(true);
+      if (!background) {
+        setLoading(true);
+        setLoadFailed(false);
+      }
       try {
+        let taskId = sweepTaskId;
+        if (!taskId && depositId) {
+          const deposits = await getDepositOrders({
+            skipCount: 0,
+            maxResultCount: 1,
+            depositId,
+          });
+          if (request !== latestRequest.current) return;
+          taskId =
+            deposits.items.find(
+              (row) => row.id.toLowerCase() === depositId.toLowerCase(),
+            )?.sweepTaskId ?? undefined;
+          if (!taskId) {
+            setData([]);
+            setTotal(0);
+            return;
+          }
+        }
         const result = await getSweepTasks({
-          skipCount: (page - 1) * pageSize,
-          maxResultCount: pageSize,
+          skipCount: taskId ? 0 : (page - 1) * pageSize,
+          maxResultCount: taskId ? 1 : pageSize,
           status: statusFilter,
+          ...(taskId && { sweepTaskId: taskId }),
         });
         if (request !== latestRequest.current) return;
-        setData(result.items);
-        setTotal(result.totalCount);
+        const rows = taskId
+          ? result.items.filter(
+              ({ id }) => id.toLowerCase() === taskId.toLowerCase(),
+            )
+          : result.items;
+        setData(rows);
+        setTotal(taskId ? rows.length : result.totalCount);
       } catch {
-        /* interceptor */
+        if (focusId && !background && request === latestRequest.current)
+          setLoadFailed(true);
       } finally {
         if (request === latestRequest.current) setLoading(false);
       }
     },
-    [page, statusFilter],
+    [depositId, focusId, invalidId, page, statusFilter, sweepTaskId],
   );
 
   useEffect(() => {
@@ -191,30 +230,34 @@ export default function SweepsPage({
       width: 150,
       render: (v: string) => fmtTime(v),
     },
-    ...(access.canAdminNetwork
+    ...(access.canAdminNetwork || access.canViewDepositRecords
       ? [
           {
             title: '操作',
-            width: 90,
-            render: (_: unknown, row: SweepTaskListDto) =>
-              row.status === 'Failed' ? (
-                <Popconfirm
-                  title={`重试归集任务（${row.amount} ${row.symbol}）？${row.retryable ? '' : '该失败为「仅人工」类型，请先确认失败原因已排除。'}`}
-                  onConfirm={() => doRetry(row)}
-                  okText="重试"
-                  cancelText="取消"
-                >
-                  <Button
-                    size="small"
-                    type="primary"
-                    loading={retryingId === row.id}
+            width: 165,
+            render: (_: unknown, row: SweepTaskListDto) => (
+              <Space wrap>
+                {access.canViewDepositRecords && (
+                  <Link to={depositRecordsForSweepUrl(row.id)}>相关充值</Link>
+                )}
+                {access.canAdminNetwork && row.status === 'Failed' && (
+                  <Popconfirm
+                    title={`重试归集任务（${row.amount} ${row.symbol}）？${row.retryable ? '' : '该失败为「仅人工」类型，请先确认失败原因已排除。'}`}
+                    onConfirm={() => doRetry(row)}
+                    okText="重试"
+                    cancelText="取消"
                   >
-                    重试
-                  </Button>
-                </Popconfirm>
-              ) : (
-                <Text type="secondary">-</Text>
-              ),
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={retryingId === row.id}
+                    >
+                      重试
+                    </Button>
+                  </Popconfirm>
+                )}
+              </Space>
+            ),
           },
         ]
       : []),
@@ -248,6 +291,21 @@ export default function SweepsPage({
         </Space>
       }
     >
+      {focusId && (
+        <RecordFocus
+          kind="归集任务"
+          listPath="/web3/operations?view=sweeps"
+          invalid={invalidId}
+          failed={loadFailed}
+          loading={loading}
+          reload={reload}
+          summary={
+            data[0] && (
+              <Text copyable={{ text: data[0].id }}>任务 ID {data[0].id}</Text>
+            )
+          }
+        />
+      )}
       <Table<SweepTaskListDto>
         rowKey="id"
         loading={loading}
@@ -256,13 +314,17 @@ export default function SweepsPage({
         components={components}
         scroll={{ x: scrollX }}
         size="small"
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: false,
-          onChange: (p) => setPage(p),
-        }}
+        pagination={
+          focusId
+            ? false
+            : {
+                current: page,
+                pageSize,
+                total,
+                showSizeChanger: false,
+                onChange: (p) => setPage(p),
+              }
+        }
       />
     </Card>
   );

@@ -89,7 +89,7 @@ public static class HdKeyService
     }
 
     /// <summary>已定助记词的钱包（4.29 ctor：mnemonic/password/seedPassword/IRandom）。</summary>
-    private static Wallet MakeWallet(string words)
+    internal static Wallet MakeWallet(string words)
     {
         return new Wallet(words, string.Empty, string.Empty, null);
     }

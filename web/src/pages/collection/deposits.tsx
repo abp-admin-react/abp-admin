@@ -1,6 +1,7 @@
 import { PageContainer } from '@ant-design/pro-components';
-import { Link, useAccess } from '@umijs/max';
+import { Link, useAccess, useModel } from '@umijs/max';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -29,30 +30,46 @@ import {
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 import { depositVouchersUrl } from '@/pages/finance/vouchers/navigation';
 import { isValidRecordId, RecordFocus } from './record-focus';
+import {
+  depositRecordUrl,
+  memberFundsUrl,
+  sweepTaskUrl,
+  topUpOrderRecordsUrl,
+} from './record-links';
 import { useChainRecordRefresh } from './use-chain-record-refresh';
 
 const { Text } = Typography;
+const DEPOSIT_LIST_PATH = '/operations/payments?view=deposits';
 
 /**
- * 充值单页（/collection/deposits）：接收链上推送，并定时核对最终状态。
+ * 充值记录：接收链上推送，并定时核对最终状态。
  */
 export default function DepositsPage({
   embedded = false,
   depositId,
+  initialStatus,
+  sweepTaskId,
+  rulesHref = '/operations/payments?view=deposits&settings=deposit',
 }: {
   embedded?: boolean;
   depositId?: string;
+  initialStatus?: string;
+  sweepTaskId?: string;
+  rulesHref?: string;
 } = {}) {
   const { message } = App.useApp();
   const access = useAccess();
+  const { initialState } = useModel('@@initialState');
+  const currentUserId = initialState?.currentUser?.userid;
   const [data, setData] = useState<DepositOrderListDto[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const focused = depositId !== undefined;
   const invalidId = focused && !isValidRecordId(depositId);
+  const invalidSweepId = !focused && sweepTaskId !== undefined && !isValidRecordId(sweepTaskId);
   const [loading, setLoading] = useState(focused && !invalidId);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [symbolFilter, setSymbolFilter] = useState<string | undefined>();
   const [connState, setConnState] = useState<ChainConnState>('disconnected');
   const latestRequest = useRef(0);
@@ -60,7 +77,7 @@ export default function DepositsPage({
 
   const reload = useCallback(
     async (background = false) => {
-      if (invalidId) return;
+      if (invalidId || invalidSweepId) return;
       const request = ++latestRequest.current;
       if (!background) setLoading(true);
       try {
@@ -72,6 +89,7 @@ export default function DepositsPage({
                 maxResultCount: pageSize,
                 status: statusFilter,
                 symbol: symbolFilter,
+                ...(sweepTaskId ? { sweepTaskId } : {}),
               },
         );
         if (request !== latestRequest.current) return;
@@ -92,7 +110,7 @@ export default function DepositsPage({
         if (request === latestRequest.current) setLoading(false);
       }
     },
-    [depositId, focused, invalidId, page, statusFilter, symbolFilter],
+    [depositId, focused, invalidId, invalidSweepId, page, statusFilter, sweepTaskId, symbolFilter],
   );
 
   useEffect(() => {
@@ -130,6 +148,20 @@ export default function DepositsPage({
   };
 
   const columns = [
+    ...(!focused
+      ? [
+          {
+            title: '充值单号',
+            dataIndex: 'id',
+            width: 120,
+            render: (id: string) => (
+              <Link to={depositRecordUrl(id)} aria-label={`查看充值单 ${id}`}>
+                {id.slice(0, 8)}…
+              </Link>
+            ),
+          },
+        ]
+      : []),
     {
       title: '交易哈希',
       dataIndex: 'txHash',
@@ -270,12 +302,17 @@ export default function DepositsPage({
   } = useResizableColumns(columns);
 
   const record = focused ? data[0] : undefined;
+  const canViewTopUpOrder =
+    access.canViewAllOrders ||
+    (access.canViewOwnOrders &&
+      currentUserId &&
+      currentUserId.toLowerCase() === record?.userId.toLowerCase());
   const content = (
     <Card
       extra={
         <Space>
           <Tag color={connView.color}>{connView.text}</Tag>
-          {!focused && (
+          {!focused && !invalidSweepId && (
             <>
               <Select
                 placeholder="状态"
@@ -312,7 +349,7 @@ export default function DepositsPage({
       {focused && (
         <RecordFocus
           kind="充值"
-          listPath="/web3/operations?view=deposits"
+          listPath={DEPOSIT_LIST_PATH}
           invalid={invalidId}
           failed={loadFailed}
           loading={loading}
@@ -328,15 +365,60 @@ export default function DepositsPage({
                 </Text>
                 {renderStatus(record.status, record)}
                 <Text copyable>充值单号 {record.id}</Text>
+                {record.balanceTxnId && (
+                  access.canViewMemberFunds ? (
+                    <Link
+                      to={memberFundsUrl(record.userId, record.balanceTxnId)}
+                      aria-label={`查看充值余额流水 ${record.balanceTxnId}`}
+                    >
+                      查看余额流水
+                    </Link>
+                  ) : (
+                    <Text copyable={{ text: record.balanceTxnId }}>余额流水 {record.balanceTxnId}</Text>
+                  )
+                )}
+                {record.balanceTxnId && canViewTopUpOrder && (
+                  <Link
+                    to={topUpOrderRecordsUrl(record.userId, record.balanceTxnId)}
+                    aria-label={`查看充值单 ${record.id} 的充值入账记录`}
+                  >
+                    查看充值入账记录
+                  </Link>
+                )}
+                {record.sweepTaskId && (
+                  access.canViewWeb3Operations && (access.canViewCollections || access.canAdminNetwork) ? (
+                    <Link
+                      to={sweepTaskUrl(record.sweepTaskId)}
+                      aria-label={`查看归集任务 ${record.sweepTaskId}`}
+                    >
+                      查看归集任务
+                    </Link>
+                  ) : (
+                    <Text copyable={{ text: record.sweepTaskId }}>归集任务 {record.sweepTaskId}</Text>
+                  )
+                )}
                 {record.status === 'Swept' && access.canViewFinanceVouchers && (
-                  <Link to={depositVouchersUrl(record.id)}>查看会计凭证</Link>
+                  <Link
+                    to={depositVouchersUrl(record.id)}
+                    aria-label={`查看充值单 ${record.id} 的会计凭证`}
+                  >
+                    查看会计凭证
+                  </Link>
                 )}
               </Space>
             )
           }
         />
       )}
-      {(!focused || record) && (
+      {!focused && sweepTaskId !== undefined && (
+        <Alert
+          type={invalidSweepId ? 'warning' : 'info'}
+          title={invalidSweepId ? '无效的归集任务链接' : `归集任务 ${sweepTaskId} 的充值记录`}
+          action={<Link to={DEPOSIT_LIST_PATH}>查看全部充值</Link>}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {!invalidSweepId && (!focused || record) && (
         <Table<DepositOrderListDto>
           rowKey="id"
           loading={loading}
@@ -364,7 +446,7 @@ export default function DepositsPage({
       title="充值记录"
       extra={
         access.canConfigureCollectionNetwork && (
-          <Link to="/web3/config?view=deposit">充值规则</Link>
+          <Link to={rulesHref}>充值规则</Link>
         )
       }
     >

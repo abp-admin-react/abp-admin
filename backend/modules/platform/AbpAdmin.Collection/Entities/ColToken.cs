@@ -43,6 +43,16 @@ public class ColToken : BasicAggregateRoot<Guid>
     /// <summary>该币扫链心跳（扫链心跳超时告警的判据；分币记录便于定位哪条通道停了）。</summary>
     public DateTime? LastScanAt { get; set; }
 
+    /// <summary>First block that still needs a normal RPC replay after indexed API failover.</summary>
+    public long? ScanReplayFromBlock { get; set; }
+
+    /// <summary>Last block accepted from the indexed API and still subject to replay.</summary>
+    public long? ScanReplayToBlock { get; set; }
+
+    public string? LastScanProvider { get; set; }
+    public DateTime? LastScanProviderAt { get; set; }
+    public string? LastScanFailure { get; set; }
+
     public bool IsEnabled { get; set; }
 
     public DateTime CreationTime { get; set; }

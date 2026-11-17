@@ -56,18 +56,15 @@ public class CollectionDepositAppService : ApplicationService
 {
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly DepositAddressManager _depositAddressManager;
-    private readonly ChainKeyProvider _chainKeyProvider;
     private readonly IClock _clock;
 
     public CollectionDepositAppService(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         DepositAddressManager depositAddressManager,
-        ChainKeyProvider chainKeyProvider,
         IClock clock)
     {
         _dbContextProvider = dbContextProvider;
         _depositAddressManager = depositAddressManager;
-        _chainKeyProvider = chainKeyProvider;
         _clock = clock;
     }
 
@@ -75,11 +72,8 @@ public class CollectionDepositAppService : ApplicationService
     public virtual async Task<MyDepositAddressDto> GetMyDepositAddressAsync()
     {
         AssertHost();
-        var (networkId, estimatedArrivalMinutes) = await _depositAddressManager
-            .WithMasterKey(await _chainKeyProvider.GetAsync())
-            .ResolveBscDepositNetworkAsync();
-        var (address, enabled, notice) = await _depositAddressManager
-            .GetOrDeriveAsync(networkId, CurrentUser.Id!.Value);
+        var (address, enabled, notice, estimatedArrivalMinutes) =
+            await _depositAddressManager.GetBscAddressForDepositAsync(CurrentUser.Id!.Value);
         return new MyDepositAddressDto
         {
             Address = address,

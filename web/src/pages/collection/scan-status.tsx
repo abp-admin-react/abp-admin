@@ -9,19 +9,33 @@ import {
   Spin,
   Table,
   Tag,
+  Typography,
 } from 'antd';
 import { useEffect, useState } from 'react';
 import {
   type CollectionNetworkSummaryDto,
-  getNetworks,
   getNetworkStatus,
+  getNetworks,
   type NetworkStatusDto,
   type TokenStatusDto,
 } from '@/abp/chainAdmin';
 
-const formatBlock = (value?: number) => value?.toLocaleString() ?? '—';
-const formatTime = (value?: string) =>
+const formatBlock = (value?: number | null) => value?.toLocaleString() ?? '—';
+const formatTime = (value?: string | null) =>
   value ? new Date(value).toLocaleString() : '—';
+
+const scanFailureLabels: Record<string, string> = {
+  invalid: '凭据无效',
+  planRequired: '套餐未覆盖',
+  quota: '额度不足或限流',
+  timeout: '查询超时',
+  unavailable: '服务暂不可用',
+  rangeIncomplete: '区间数据未读全',
+  evidenceInvalid: '链上数据校验失败',
+  invalidConfiguration: '配置无效',
+  notConfigured: '没有适用的服务商',
+  stale: '服务商数据滞后',
+};
 
 function NetworkScanDetails({ networkId }: { networkId: string }) {
   const [status, setStatus] = useState<NetworkStatusDto>();
@@ -95,7 +109,7 @@ function NetworkScanDetails({ networkId }: { networkId: string }) {
         pagination={false}
         rowKey="id"
         dataSource={status.tokens}
-        scroll={{ x: 600 }}
+        scroll={{ x: 850 }}
         columns={[
           { title: '代币', dataIndex: 'symbol' },
           {
@@ -114,6 +128,42 @@ function NetworkScanDetails({ networkId }: { networkId: string }) {
           },
           { title: '落后块数', dataIndex: 'blocksBehind', render: formatBlock },
           { title: '最近扫描', dataIndex: 'lastScanAt', render: formatTime },
+          {
+            title: '最近成功来源',
+            key: 'lastScanProvider',
+            render: (_, row) =>
+              row.lastScanProvider ? (
+                <Space orientation="vertical" size={4}>
+                  {row.lastScanProvider}
+                  <Typography.Text type="secondary">
+                    {formatTime(row.lastScanProviderAt)}
+                  </Typography.Text>
+                </Space>
+              ) : (
+                '—'
+              ),
+          },
+          {
+            title: '扫链异常',
+            key: 'scanFailure',
+            render: (_, row) =>
+              row.lastScanFailure || row.scanReplayFromBlock != null ? (
+                <Space orientation="vertical" size={4}>
+                  {row.lastScanFailure && (
+                    <Tag color="warning">
+                      {scanFailureLabels[row.lastScanFailure] ?? '查询失败'}
+                    </Tag>
+                  )}
+                  {row.scanReplayFromBlock != null && (
+                    <Typography.Text type="secondary">
+                      待从区块 {formatBlock(row.scanReplayFromBlock)} 复扫
+                    </Typography.Text>
+                  )}
+                </Space>
+              ) : (
+                '—'
+              ),
+          },
         ]}
       />
     </Space>

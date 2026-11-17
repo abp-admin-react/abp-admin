@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -30,19 +31,25 @@ public class DepositAddressManager : DomainService
     private readonly Volo.Abp.DistributedLocking.IAbpDistributedLock _distributedLock;
     private readonly IClock _clock;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
+    private readonly IDeploymentModuleStateReader _moduleStates;
+    private readonly ChainKeyProvider _chainKeyProvider;
 
     public DepositAddressManager(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         IStringEncryptionService encryptor,
         Volo.Abp.DistributedLocking.IAbpDistributedLock distributedLock,
         IClock clock,
-        IUnitOfWorkManager unitOfWorkManager)
+        IUnitOfWorkManager unitOfWorkManager,
+        IDeploymentModuleStateReader moduleStates,
+        ChainKeyProvider chainKeyProvider)
     {
         _dbContextProvider = dbContextProvider;
         _encryptor = encryptor;
         _distributedLock = distributedLock;
         _clock = clock;
         _unitOfWorkManager = unitOfWorkManager;
+        _moduleStates = moduleStates;
+        _chainKeyProvider = chainKeyProvider;
     }
 
     private string? MasterKey => _masterKey;
@@ -76,10 +83,36 @@ public class DepositAddressManager : DomainService
 
     public async Task<Guid> ResolveBscNetworkIdAsync() => (await ResolveBscDepositNetworkAsync()).Id;
 
+    internal async Task<(string Address, bool Enabled, string? Notice, int? EstimatedArrivalMinutes)>
+        GetBscAddressForDepositAsync(Guid userId)
+    {
+        await CheckDepositAdmissionAsync();
+        var (networkId, estimatedArrivalMinutes) = await ResolveBscDepositNetworkAsync();
+        WithMasterKey(await _chainKeyProvider.GetAsync());
+        var (address, enabled, notice) = await GetOrDeriveCoreAsync(networkId, userId);
+        return (address, enabled, notice, estimatedArrivalMinutes);
+    }
+
     /// <summary>
-    /// 取或派生当前用户的充值地址。返回（地址, 充值是否开放, 未开放时的说明）。
+    /// 取或派生当前用户的充值地址。部署暂停受理时不重新提供地址。
+    /// 模块开启后返回（地址, 充值是否开放, 基础配置未就绪时的说明）。
     /// </summary>
     public virtual async Task<(string Address, bool Enabled, string? Notice)> GetOrDeriveAsync(Guid networkId, Guid userId)
+    {
+        await CheckDepositAdmissionAsync();
+        return await GetOrDeriveCoreAsync(networkId, userId);
+    }
+
+    private async Task CheckDepositAdmissionAsync()
+    {
+        if (!(await _moduleStates.GetAsync()).IsEnabled(DeploymentModuleIds.Chain))
+        {
+            throw new BusinessException(DeploymentModuleErrorCodes.Disabled)
+                .WithData("ModuleId", DeploymentModuleIds.Chain);
+        }
+    }
+
+    private async Task<(string Address, bool Enabled, string? Notice)> GetOrDeriveCoreAsync(Guid networkId, Guid userId)
     {
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
@@ -91,7 +124,7 @@ public class DepositAddressManager : DomainService
         }
 
         var existing = await dbContext.DepositAddresses
-            .FirstOrDefaultAsync(a => a.UserId == userId && a.NetworkId == network.Id);
+            .FirstOrDefaultAsync(a => a.UserId == userId && a.NetworkId == network.Id && !a.IsRetired);
 
         var scanEverRan = await dbContext.Tokens.AnyAsync(t => t.NetworkId == network.Id && t.LastScannedBlock != null);
 
@@ -134,7 +167,7 @@ public class DepositAddressManager : DomainService
 
         // 锁内再查一次（并发请求可能已派生）
         existing = await dbContext.DepositAddresses
-            .FirstOrDefaultAsync(a => a.UserId == userId && a.NetworkId == network.Id);
+            .FirstOrDefaultAsync(a => a.UserId == userId && a.NetworkId == network.Id && !a.IsRetired);
         if (existing != null)
         {
             await uow.CompleteAsync();
@@ -159,21 +192,23 @@ public class DepositAddressManager : DomainService
                     var maxIndex = await attemptDbContext.DepositAddresses
                         .Where(a => a.NetworkId == networkId)
                         .MaxAsync(a => (int?)a.AddressIndex);
-                    var nextIndex = Math.Max(HdKeyService.FirstUserAddressIndex, (maxIndex ?? 1) + 1);
-
-                    // 锁内列投影重读密文：外层的 network 是锁前快照——重置竞态下密文可能已
-                    // 轮换，用快照派生的首地址在重置后永远不可签名（TOCTOU）
-                    var cipherNow = await dbContext.Networks
+                    // 在持锁事务内读取种子及旧索引下界，避免地址使用迁移前的密钥。
+                    var keyState = await attemptDbContext.Networks
                         .Where(n => n.Id == networkId)
-                        .Select(n => n.MnemonicCipher)
+                        .Select(n => new { n.MnemonicCipher, n.LegacyAddressIndexHighWaterMark })
                         .FirstAsync();
-                    // 重置竞态下密文可能被清空：null 直接抛（外层 catch 走冷却重试）
-                    if (cipherNow == null)
+                    if (keyState.MnemonicCipher == null)
                     {
-                        throw new InvalidOperationException("Mnemonic cipher cleared by concurrent reset; retrying.");
+                        throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
                     }
 
-                    using var mnemonic = HdKeyService.Unprotect(cipherNow, MasterKey, _encryptor);
+                    var lastIndex = Math.Max(maxIndex ?? 1, keyState.LegacyAddressIndexHighWaterMark ?? 1);
+                    if (lastIndex == int.MaxValue)
+                    {
+                        throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
+                    }
+                    var nextIndex = lastIndex + 1;
+                    using var mnemonic = HdKeyService.Unprotect(keyState.MnemonicCipher, MasterKey, _encryptor);
                     var address = HdKeyService.DeriveAddress(mnemonic.Words, nextIndex);
 
                     var entity = new ColDepositAddress(GuidGenerator.Create())

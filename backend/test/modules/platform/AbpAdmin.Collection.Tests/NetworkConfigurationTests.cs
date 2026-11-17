@@ -3,6 +3,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Contracts;
@@ -10,10 +11,12 @@ using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Services;
 using AbpAdmin.Collection.Settings;
+using AbpAdmin.Modules;
 using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Volo.Abp;
 using Volo.Abp.Caching;
 using Volo.Abp.EntityFrameworkCore;
@@ -88,6 +91,14 @@ public class NetworkConfigurationTests : CollectionTestBase
         await CheckEstimateAsync(120);
         await service.ConfigureNetworkAsync(Request(bscId, ",\"EstimatedArrivalMinutes\":null"));
         await CheckEstimateAsync(CollectionConsts.DefaultEstimatedArrivalMinutes);
+
+        GetRequiredService<IDeploymentModuleStateReader>().GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new DeploymentModuleSnapshot(1, initialized: true, new Dictionary<string, bool>()));
+        (await Should.ThrowAsync<BusinessException>(() => customer.GetMyDepositAddressAsync()))
+            .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        (await Should.ThrowAsync<BusinessException>(() => integration.GetDepositAddressAsync(userId)))
+            .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        (await customer.GetMyDepositOrdersAsync(0, 20)).TotalCount.ShouldBe(0);
     }
 
     [Fact]
@@ -321,6 +332,68 @@ public class NetworkConfigurationTests : CollectionTestBase
             GetRequiredService<CollectionNetworkAdminAppService>().ConfigureNetworkAsync(new ConfigureNetworkInput { NetworkId = ids.First, RpcUrl = endpoint, DepositFeeRate = "0", AutoCreditMaxAmount = "0" }));
         error.Code.ShouldBe(CollectionErrorCodes.InvalidRpcUrl);
         System.Text.Json.JsonSerializer.Serialize(error.Data).ShouldNotContain("private-credential");
+    }
+
+    [Fact]
+    public async Task Transaction_Rpc_Is_Masked_And_Cannot_Clear_The_Only_Connection()
+    {
+        var ids = await SeedAsync();
+        var service = GetRequiredService<CollectionNetworkAdminAppService>();
+        var saved = await service.ConfigureTransactionRpcAsync(new ConfigureTransactionRpcInput
+        {
+            NetworkId = ids.Second,
+            RpcUrl = " https://rpc.example.test/private-credential?token=secret ",
+        });
+
+        saved.RpcUrlMasked.ShouldBe("https://rpc.example.test/***");
+        (await service.GetTransactionRpcAsync(ids.First)).RpcUrlMasked.ShouldBeNull();
+        (await service.GetTransactionRpcAsync(ids.Second)).ShouldBe(saved);
+        (await service.ConfigureTransactionRpcAsync(new ConfigureTransactionRpcInput
+        {
+            NetworkId = ids.Second,
+            RpcUrl = " ",
+        })).ShouldBe(saved);
+
+        var clear = new ConfigureTransactionRpcInput { NetworkId = ids.Second, ClearRpcUrl = true };
+        var error = await Should.ThrowAsync<BusinessException>(() => service.ConfigureTransactionRpcAsync(clear));
+        error.Code.ShouldBe(CollectionErrorCodes.TransactionRpcRequired);
+        (await service.GetTransactionRpcAsync(ids.Second)).ShouldBe(saved);
+
+        await service.AddApiKeyFromBodyAsync(new AddNetworkApiKeyInput
+        {
+            NetworkId = ids.Second,
+            Provider = nameof(ChainApiKeyProvider.RpcBsc),
+            Key = new string('a', 64),
+        });
+        (await service.ConfigureTransactionRpcAsync(clear)).RpcUrlMasked.ShouldBeNull();
+        (await service.GetTransactionRpcAsync(ids.Second)).RpcUrlMasked.ShouldBeNull();
+        (await service.GetNetworksAsync()).Single(network => network.Id == ids.Second).RpcConfigured.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Saving_Rules_Without_Legacy_Node_Settings_Preserves_Them()
+    {
+        var ids = await SeedAsync();
+        var service = GetRequiredService<CollectionNetworkAdminAppService>();
+        await service.ConfigureNetworkAsync(new ConfigureNetworkInput
+        {
+            NetworkId = ids.First,
+            RpcUrl = "https://rpc.example.test/private-credential",
+            NodeLogResultCap = 1000,
+            DepositFeeRate = "0",
+            AutoCreditMaxAmount = "0",
+        });
+        await service.ConfigureNetworkAsync(new ConfigureNetworkInput
+        {
+            NetworkId = ids.First,
+            DepositFeeRate = "0.02",
+            AutoCreditMaxAmount = "50",
+        });
+
+        var status = await service.GetStatusAsync(ids.First);
+        status.DepositFeeRate.ShouldBe(0.02m);
+        status.RpcUrlMasked.ShouldBe("https://rpc.example.test/***");
+        status.NodeLogResultCap.ShouldBe(1000);
     }
 
     [Fact]

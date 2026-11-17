@@ -354,6 +354,7 @@ public class AnkrPlatformBalanceClientTests
         services.AddLogging();
         services.AddHttpRemote();
         services.AddHttpClient(ChainProviderProbe.HttpClientName)
+            .AddHttpMessageHandler(() => new PrivateChainEndpointHandler())
             .ConfigurePrimaryHttpMessageHandler(() => handler);
         return services.BuildServiceProvider();
     }

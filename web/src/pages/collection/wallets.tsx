@@ -27,6 +27,7 @@ import {
   setVaultAddress,
 } from '@/abp/chainAdmin';
 import { setWithdrawVault } from '@/abp/withdrawal';
+import LegacyWalletImport from './legacy-wallet-import';
 
 const { Text, Paragraph } = Typography;
 
@@ -254,9 +255,18 @@ function WalletConfiguration({ networkId }: { networkId: string }) {
           <Tag color={status.hasMnemonic ? 'success' : 'warning'}>
             {status.hasMnemonic ? '已配置' : '未配置'}
           </Tag>
-          <Button danger onClick={createMnemonic}>
-            生成充值总密钥
-          </Button>
+          <Space wrap>
+            <Button danger onClick={createMnemonic}>
+              生成充值总密钥
+            </Button>
+            {status.networkName === 'BSC' && (
+              <LegacyWalletImport
+                networkId={networkId}
+                hasMnemonic={status.hasMnemonic}
+                onImported={() => void load(false, 'none')}
+              />
+            )}
+          </Space>
         </Space>
       ),
     });
@@ -335,7 +345,7 @@ function WalletConfiguration({ networkId }: { networkId: string }) {
           <Alert
             type="warning"
             showIcon
-            title="暂时无法读取链上余额，请检查节点配置后重试。"
+            title="暂时无法读取链上余额，请检查交易 RPC 后重试。"
           />
         )}
         <Row gutter={[16, 16]}>

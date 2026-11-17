@@ -12,9 +12,13 @@ export type Web3Section = {
 export function Web3Workspace({
   title,
   sections,
+  extra,
+  notice,
 }: {
   title: string;
   sections: Web3Section[];
+  extra?: ReactNode;
+  notice?: ReactNode;
 }) {
   const { pathname, search } = useLocation();
   const requested = new URLSearchParams(search).get('view');
@@ -22,7 +26,12 @@ export function Web3Workspace({
     sections.find((section) => section.key === requested) ?? sections[0];
 
   return (
-    <PageContainer title={title} breadcrumb={{ items: [{ title }] }}>
+    <PageContainer
+      title={title}
+      breadcrumb={{ items: [{ title }] }}
+      extra={extra}
+    >
+      {notice}
       {active ? (
         <Tabs
           activeKey={active.key}
@@ -33,6 +42,7 @@ export function Web3Workspace({
             query.delete('status');
             query.delete('depositId');
             query.delete('withdrawalId');
+            query.delete('sweepTaskId');
             history.push({ pathname, search: `?${query}` });
           }}
           items={sections.map((section) => ({

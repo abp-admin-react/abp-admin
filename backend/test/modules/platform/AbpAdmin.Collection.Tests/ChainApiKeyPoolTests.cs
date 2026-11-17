@@ -364,6 +364,36 @@ public class ChainApiKeyPoolTests : CollectionTestBase
     }
 
     [Fact]
+    public async Task Transaction_Gateway_Ignores_Deposit_Rpc_And_Provider_Order()
+    {
+        var urls = await WithUowAsync(async db =>
+        {
+            var network = await SeedNetworkAsync(db);
+            network.LegacyDepositRpcCipher = Protect("https://scanner.example.test/legacy");
+
+            var scanKey = NextAnkrKey();
+            var provider = new ColScanProvider(Guid.NewGuid())
+            {
+                Provider = ChainApiKeyProvider.RpcBsc,
+                KeyHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(scanKey))).ToLowerInvariant(),
+                KeyCipher = Protect(scanKey),
+                IsEnabled = true,
+                SortOrder = 1,
+            };
+            provider.Networks.Add(new ColScanProviderNetwork { NetworkId = network.Id, ProviderId = provider.Id });
+            db.ScanProviders.Add(provider);
+            await db.SaveChangesAsync();
+
+            var handler = new ChainApiKeyRotationTestsCapture();
+            var factory = NewFactory(handler);
+            await (await factory.CreateAsync(db, network, ChainGatewayFactory.TransactionLogResultCap)).GetLatestBlockNumberAsync();
+            return handler.Requests.ToList();
+        });
+
+        urls.ShouldBe(["https://rpc.ankr.com/bsc/legacykey"]);
+    }
+
+    [Fact]
     public async Task Factory_Throws_When_Pool_Empty_And_RpcCipher_Empty()
     {
         await WithUowAsync(async db =>

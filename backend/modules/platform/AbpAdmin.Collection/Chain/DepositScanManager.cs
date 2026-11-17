@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -34,6 +35,7 @@ public class DepositScanManager : DomainService
     // 管理器按轮创建，告警冷却存储在进程内，供各轮共用。
     private static readonly Dictionary<Guid, DateTime> SkipRatioAlertedAt = new();
     private static readonly Dictionary<Guid, DateTime> FallbackAlertedAt = new();
+    private static readonly ConcurrentDictionary<Guid, DateTime> AllProvidersFailedAlertedAt = new();
 
     public DepositScanManager(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
@@ -52,11 +54,24 @@ public class DepositScanManager : DomainService
     }
 
     /// <summary>扫一个代币通道；一种币连续失败不挡住另一种（调用方逐币 try/catch）。</summary>
-    public virtual async Task RunTokenRoundAsync(
+    public virtual Task RunTokenRoundAsync(
         ColNetwork network, ColToken token, IBscChainGateway gateway,
         int confirmations, int blockRange, int scanBehindBlocks,
         TimeSpan skipRatioWindow, decimal skipRatioThreshold,
-        CancellationToken ct)
+        CancellationToken ct) => RunTokenRoundCoreAsync(network, token, gateway, null, confirmations,
+            blockRange, scanBehindBlocks, skipRatioWindow, skipRatioThreshold, ct);
+
+    internal Task RunTokenRoundAsync(
+        ColNetwork network, ColToken token, IReadOnlyList<DepositScanProvider> providers,
+        int confirmations, int blockRange, int scanBehindBlocks,
+        TimeSpan skipRatioWindow, decimal skipRatioThreshold,
+        CancellationToken ct) => RunTokenRoundCoreAsync(network, token, null, providers, confirmations,
+            blockRange, scanBehindBlocks, skipRatioWindow, skipRatioThreshold, ct);
+
+    private async Task RunTokenRoundCoreAsync(
+        ColNetwork network, ColToken token, IBscChainGateway? legacyGateway, IReadOnlyList<DepositScanProvider>? providers,
+        int confirmations, int blockRange, int scanBehindBlocks,
+        TimeSpan skipRatioWindow, decimal skipRatioThreshold, CancellationToken ct)
     {
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
@@ -66,32 +81,50 @@ public class DepositScanManager : DomainService
         network = await dbContext.Networks.SingleAsync(n => n.Id == network.Id, ct);
         token = await dbContext.Tokens.SingleAsync(t => t.Id == token.Id, ct);
 
-        var head = await gateway.GetLatestBlockNumberAsync(ct);
-        network.LatestChainHead = head;
+        if (network.LegacyAddressIndexHighWaterMark.HasValue && !token.LastScannedBlock.HasValue)
+        {
+            Logger.LogWarning("旧钱包迁移后须先交接扫链游标，代币 {Symbol} 本轮跳过", token.Symbol);
+            return;
+        }
 
         // 后续归集用地址的派生索引签名，匹配日志时保留该索引。
         var watched = await dbContext.DepositAddresses.AsNoTracking()
-            .Where(a => a.NetworkId == network.Id)
+            .Where(a => a.NetworkId == network.Id && !a.IsRetired)
             .Select(a => new { a.Id, a.Address, a.UserId, a.AddressIndex })
             .ToListAsync(ct);
         var byAddress = watched.ToDictionary(
-            a => a.Address.ToLowerInvariant(),
-            a => (a.Id, a.UserId, a.AddressIndex));
+            a => a.Address,
+            a => (a.Id, a.UserId, a.AddressIndex), StringComparer.OrdinalIgnoreCase);
 
-        // ① 首次打开：游标 = 链头 - 确认数
-        var cursor = token.LastScannedBlock ?? head - confirmations;
-        var target = Math.Min(head - confirmations, cursor + blockRange);
-
-        if (target > cursor)
+        long head;
+        if (legacyGateway != null)
         {
-            await ScanRangeAsync(network, token, gateway, dbContext, byAddress,
-                cursor + 1, target, ct);
+            head = await legacyGateway.GetLatestBlockNumberAsync(ct);
+            var cursor = token.LastScannedBlock ?? head - confirmations;
+            var target = Math.Min(head - confirmations, cursor + blockRange);
+            if (target > cursor)
+            {
+                await ScanRangeAsync(network, token, legacyGateway, dbContext, byAddress, cursor + 1, target, ct);
+            }
+            else if (token.LastScannedBlock == null)
+            {
+                // 首轮只保存起始游标，即使尚无充值地址也不回扫历史区块。
+                token.LastScannedBlock = target;
+            }
         }
-        else if (token.LastScannedBlock == null)
+        else
         {
-            // 首轮只保存起始游标，即使尚无充值地址也不回扫历史区块。
-            token.LastScannedBlock = target;
+            var result = await ScanWithProvidersAsync(network, token, providers!, dbContext, byAddress, confirmations,
+                blockRange, ct);
+            if (!result.HasValue)
+            {
+                await dbContext.SaveChangesAsync(ct);
+                await uow.CompleteAsync(ct);
+                return;
+            }
+            head = result.Value;
         }
+        network.LatestChainHead = head;
 
         // 确认推进：块龄够的 PendingConfirm → Confirmed → 并入（或新建）Queued 归集任务
         await ConfirmPendingAsync(network, token, dbContext, head, confirmations, ct);
@@ -101,7 +134,7 @@ public class DepositScanManager : DomainService
         token.LastScanAt = now;
         network.ScanHeartbeatAt = now;
 
-        var behind = head - (token.LastScannedBlock ?? cursor);
+        var behind = head - (token.LastScannedBlock ?? (head - confirmations));
         if (behind > scanBehindBlocks
             && ChainAlertService.ShouldAlert(network.ScanBehindAlertedAt, TimeSpan.FromMinutes(30), now))
         {
@@ -114,6 +147,205 @@ public class DepositScanManager : DomainService
 
         await dbContext.SaveChangesAsync(ct);
         await uow.CompleteAsync();
+    }
+
+    private async Task<long?> ScanWithProvidersAsync(ColNetwork network, ColToken token,
+        IReadOnlyList<DepositScanProvider> providers, CollectionDbContext dbContext,
+        Dictionary<string, (Guid Id, Guid UserId, int AddressIndex)> byAddress, int confirmations, int blockRange,
+        CancellationToken ct)
+    {
+        var watched = byAddress.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        string? failure = null;
+        foreach (var provider in providers)
+        {
+            var now = _clock.Now;
+            if (provider.Health.GetFailure(provider.Id, now) is { } cooldown)
+            {
+                failure ??= cooldown;
+                continue;
+            }
+            if (provider.Source is not { } source)
+            {
+                failure ??= DepositScanFailure.InvalidConfiguration;
+                continue;
+            }
+
+            long head;
+            long cursor;
+            long from;
+            long end;
+            IReadOnlyList<TokenTransferLog> logs;
+            bool readLogs;
+            var replacingLegacy = !provider.IsLegacy && !source.RequiresReconciliation
+                && network.PreferManagedScanProviders && network.LegacyDepositRpcCipher != null;
+            using var providerBudget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            providerBudget.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                head = await source.GetHeadAsync(providerBudget.Token);
+                var safeHead = Math.Max(0, head - confirmations);
+                cursor = token.LastScannedBlock ?? safeHead;
+                if (safeHead < cursor)
+                {
+                    throw new DepositScanReadException(DepositScanFailure.Stale);
+                }
+                from = cursor + 1;
+                end = Math.Min(safeHead, from + blockRange - 1);
+                readLogs = end >= from;
+                if (!readLogs && safeHead > 0 && (replacingLegacy || failure != null
+                    || token.LastScanFailure != null || token.LastScanProvider == null))
+                {
+                    // A head response alone does not prove that a newly configured or recovered key can read logs.
+                    await ReadProviderWindowAsync(source, token.ContractAddress, watched, safeHead, safeHead,
+                        providerBudget.Token);
+                    readLogs = true;
+                }
+                (end, logs) = await ReadProviderWindowAsync(source, token.ContractAddress, watched, from, end,
+                    providerBudget.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                failure ??= DepositScanFailure.Timeout;
+                provider.Health.MarkFailure(provider.Id, DepositScanFailure.Timeout, _clock.Now);
+                continue;
+            }
+            catch (DepositScanReadException ex)
+            {
+                failure ??= ex.Code;
+                provider.Health.MarkFailure(provider.Id, ex.Code, _clock.Now);
+                Logger.LogWarning("扫链服务商 {ProviderId} 查询失败，代币 {Symbol}，原因 {Reason}",
+                    provider.Id, token.Symbol, ex.Code);
+                continue;
+            }
+
+            await RecordProviderDepositsAsync(network, token, dbContext, byAddress, logs, ct);
+
+            // Keep the legacy RPC available across failed saves, probes and scans until a managed log read succeeds.
+            if (replacingLegacy && readLogs)
+            {
+                network.LegacyDepositRpcCipher = null;
+                network.PreferManagedScanProviders = false;
+            }
+
+            if (source.RequiresReconciliation && end >= from)
+            {
+                token.ScanReplayFromBlock ??= from;
+                token.ScanReplayToBlock = end;
+            }
+            token.LastScannedBlock = Math.Max(cursor, end);
+            token.LastScanFailure = failure;
+            if (readLogs)
+            {
+                token.LastScanProvider = provider.Name;
+                token.LastScanProviderAt = _clock.Now;
+            }
+
+            if (token.ScanReplayFromBlock is long replayFrom && token.ScanReplayToBlock is long replayTo)
+            {
+                // The indexed provider may stay first indefinitely. A lower-ranked RPC can still reconcile history.
+                var replaySource = source.RequiresReconciliation
+                    ? providers.SkipWhile(candidate => candidate.Id != provider.Id).Skip(1)
+                        .FirstOrDefault(candidate => candidate.Source is { RequiresReconciliation: false }
+                            && candidate.Health.GetFailure(candidate.Id, _clock.Now) == null)?.Source
+                    : source;
+                if (replaySource != null)
+                {
+                    await ReplayProviderWindowAsync(replaySource, network, token, dbContext, byAddress, watched, replayFrom,
+                        replayTo, blockRange, source.RequiresReconciliation ? confirmations : null, ct);
+                }
+            }
+            return head;
+        }
+
+        token.LastScanFailure = failure ?? DepositScanFailure.NotConfigured;
+        if (providers.Count > 0)
+        {
+            var now = _clock.Now;
+            var last = AllProvidersFailedAlertedAt.GetOrAdd(token.Id, DateTime.MinValue);
+            if (ChainAlertService.ShouldAlert(last, TimeSpan.FromMinutes(30), now)
+                && AllProvidersFailedAlertedAt.TryUpdate(token.Id, now, last))
+            {
+                await _alerts.RaiseAsync(null, "充值扫链服务商全部不可用",
+                    $"代币 {token.Symbol} 的 {providers.Count} 个已启用扫链服务商均不可用，充值游标保留。错误类型：{token.LastScanFailure}。");
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Commits replay progress only after a trusted RPC returns a complete confirmed block range.</summary>
+    private async Task ReplayProviderWindowAsync(IBscDepositScanSource source, ColNetwork network, ColToken token,
+        CollectionDbContext dbContext, Dictionary<string, (Guid Id, Guid UserId, int AddressIndex)> byAddress,
+        IReadOnlySet<string> watched, long from, long to, int blockRange, int? verifyConfirmations, CancellationToken ct)
+    {
+        using var replayBudget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        replayBudget.CancelAfter(TimeSpan.FromSeconds(8));
+        long end;
+        IReadOnlyList<TokenTransferLog> logs;
+        try
+        {
+            var target = Math.Min(to, from + blockRange - 1);
+            if (verifyConfirmations is int confirmations)
+            {
+                var head = await source.GetHeadAsync(replayBudget.Token);
+                target = Math.Min(target, head - confirmations);
+                if (target < from)
+                {
+                    return;
+                }
+            }
+            (end, logs) = await ReadProviderWindowAsync(source, token.ContractAddress, watched, from,
+                target, replayBudget.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (DepositScanReadException ex)
+        {
+            Logger.LogWarning("代币 {Symbol} 复核区块 {From}..{To} 尚未完成，原因 {Reason}", token.Symbol, from, to, ex.Code);
+            return;
+        }
+
+        await RecordProviderDepositsAsync(network, token, dbContext, byAddress, logs, ct);
+        token.ScanReplayFromBlock = end < to ? end + 1 : null;
+        if (token.ScanReplayFromBlock == null) token.ScanReplayToBlock = null;
+    }
+
+    private async Task RecordProviderDepositsAsync(ColNetwork network, ColToken token, CollectionDbContext dbContext,
+        Dictionary<string, (Guid Id, Guid UserId, int AddressIndex)> byAddress, IReadOnlyList<TokenTransferLog> logs,
+        CancellationToken ct)
+    {
+        foreach (var log in logs)
+        {
+            if (byAddress.TryGetValue(log.To, out var address))
+            {
+                await UpsertDepositOrderAsync(dbContext, network, token, address.Id, address.UserId, log, ct);
+            }
+        }
+    }
+
+    private static async Task<(long End, IReadOnlyList<TokenTransferLog> Logs)> ReadProviderWindowAsync(
+        IBscDepositScanSource source, string contract, IReadOnlySet<string> watched, long from, long end,
+        CancellationToken ct)
+    {
+        while (from <= end)
+        {
+            try
+            {
+                var logs = await source.ReadLogsAsync(contract, from, end, watched, ct);
+                if (logs.Any(log => !IsInRange(log, from, end)))
+                {
+                    throw new DepositScanReadException(DepositScanFailure.EvidenceInvalid);
+                }
+                return (end, logs);
+            }
+            catch (DepositScanReadException ex) when (ex.Code == DepositScanFailure.RangeIncomplete && end > from)
+            {
+                end = from + (end - from - 1) / 2;
+            }
+        }
+
+        return (end, []);
     }
 
     /// <summary>扫 [from, to]；未读完就缩区间重试，缩到 1 块仍不行走按地址兜底（告警一次）。</summary>

@@ -28,7 +28,7 @@ public sealed class ChainProviderProbe(IHttpRemoteService http) : ITransientDepe
 
     internal async Task<string> TestAnkrRpcAsync(string key, CancellationToken cancellationToken)
     {
-        var request = HttpRequestBuilder.Post(AnkrBscChainGateway.AnkrBscRpcUrlBase + key)
+        var request = PrivateChainEndpointHandler.Post(AnkrBscChainGateway.AnkrBscRpcUrlBase + key)
             .SetJsonContent(new { jsonrpc = "2.0", method = "eth_chainId", @params = Array.Empty<object>(), id = 1 });
         var (status, body) = await ReadJsonAsync(http, request, cancellationToken);
         if (body is { } json && json.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object
@@ -53,7 +53,7 @@ public sealed class ChainProviderProbe(IHttpRemoteService http) : ITransientDepe
         var request = AnkrBscChainGateway.BuildEtherscanUrl(AnkrBscChainGateway.DefaultEtherscanV2Endpoint,
             "&address=0x0000000000000000000000000000000000000000&startblock=1&endblock=1&page=1&offset=1&sort=asc");
         var uri = QueryHelpers.AddQueryString(request, "apikey", key);
-        var (status, body) = await ReadJsonAsync(http, HttpRequestBuilder.Get(uri), cancellationToken);
+        var (status, body) = await ReadJsonAsync(http, PrivateChainEndpointHandler.Get(uri), cancellationToken);
         if (body is { } response && ReadString(response, "result") is { } reason
             && reason.StartsWith("Free API access is not supported for this chain", StringComparison.OrdinalIgnoreCase))
         {

@@ -1,6 +1,4 @@
-using System;
 using System.Threading.Tasks;
-using AbpAdmin.SignalR;
 using Contracts = AbpAdmin.Collection.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using Volo.Abp.DependencyInjection;
@@ -9,7 +7,7 @@ namespace AbpAdmin.SignalR;
 
 /// <summary>
 /// 收付款 SignalR 推送实现（宿主侧）。Collection 模块经 Contracts.IChainPushNotifier 接口调用，
-/// 本类把 ETO 转发给 ChainStatusHub 的 Host 组。事件名与 ChainHubGroups 保持一处定义。
+/// 本类按读取权限把 ETO 转发给 ChainStatusHub 的对应组。事件名与 ChainHubGroups 保持一处定义。
 /// </summary>
 public class SignalRChainPushNotifier : Contracts.IChainPushNotifier, ITransientDependency
 {
@@ -22,31 +20,31 @@ public class SignalRChainPushNotifier : Contracts.IChainPushNotifier, ITransient
 
     public async Task PushScanProgressAsync(Contracts.ChainScanProgressEto progress)
     {
-        await _hubContext.Clients.Group(ChainHubGroups.Host)
+        await _hubContext.Clients.Group(ChainHubGroups.ScanProgress)
             .SendAsync(ChainHubGroups.ScanProgressEvent, progress);
     }
 
     public async Task PushDepositChangedAsync(Contracts.ChainDepositChangedEto deposit)
     {
-        await _hubContext.Clients.Group(ChainHubGroups.Host)
+        await _hubContext.Clients.Group(ChainHubGroups.Operations)
             .SendAsync(ChainHubGroups.DepositChangedEvent, deposit);
     }
 
     public async Task PushSweepChangedAsync(Contracts.ChainSweepChangedEto sweep)
     {
-        await _hubContext.Clients.Group(ChainHubGroups.Host)
+        await _hubContext.Clients.Group(ChainHubGroups.Operations)
             .SendAsync(ChainHubGroups.SweepChangedEvent, sweep);
     }
 
     public async Task PushVaultCheckAsync(Contracts.ChainVaultCheckEto check)
     {
-        await _hubContext.Clients.Group(ChainHubGroups.Host)
+        await _hubContext.Clients.Group(ChainHubGroups.Operations)
             .SendAsync(ChainHubGroups.VaultCheckEvent, check);
     }
 
     public async Task PushHotWalletChangedAsync(Contracts.ChainHotWalletChangedEto txn)
     {
-        await _hubContext.Clients.Group(ChainHubGroups.Host)
+        await _hubContext.Clients.Group(ChainHubGroups.HotWallet)
             .SendAsync(ChainHubGroups.HotWalletChangedEvent, txn);
     }
 }

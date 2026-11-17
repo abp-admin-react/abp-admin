@@ -14,6 +14,7 @@ using Volo.Abp.DependencyInjection;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.EventBus.Distributed;
 using Volo.Abp.Guids;
+using Volo.Abp.Security.Encryption;
 using Volo.Abp.Timing;
 using Volo.Abp.Uow;
 using Xunit;
@@ -82,6 +83,225 @@ public class DepositScannerRegressionTests : CollectionTestBase
         result.Orders.Single().TxHash.ShouldBe("0xabc");
     }
 
+    [Fact]
+    public async Task Ordered_Failover_Persists_Replay_Across_Restart_While_Continuing_Forward()
+    {
+        var (network, token) = await SeedAsync();
+        var ankr = new RecordingDepositSource(requiresReconciliation: false);
+        var explorer = new RecordingDepositSource(requiresReconciliation: true);
+        var health = new DepositScanProviderHealth();
+        var ankrId = Guid.NewGuid();
+        var explorerId = Guid.NewGuid();
+        var first = new DepositScanProvider(ankrId, "Ankr", ankr, health);
+        var second = new DepositScanProvider(explorerId, "Etherscan", explorer, health);
+        var seen = new TokenTransferLog("0xaaa", 1, FromAddress, WatchAddress, "1", 101);
+        var missed = seen with { TxHash = "0xbbb", BlockNumber = 102 };
+        var current = seen with { TxHash = "0xccc", BlockNumber = 103 };
+        var alerts = new RecordingAlerts(GetRequiredService<IDistributedEventBus>());
+
+        ankr.ReadHead = () => 114;
+        ankr.ReadLogs = (_, _) => throw new DepositScanReadException(DepositScanFailure.Quota);
+        explorer.ReadHead = () => 114;
+        explorer.ReadLogs = (from, to) => (from, to) switch
+        {
+            (101, 102) => [seen],
+            (102, 102) => [],
+            _ => throw new InvalidOperationException($"Unexpected scan window {from}..{to}"),
+        };
+
+        await ScanAsync(NewScanner(alerts), network, token, [first, second]);
+
+        var backup = await ReadProviderStateAsync(token.Id);
+        backup.Cursor.ShouldBe(102);
+        backup.From.ShouldBe(101);
+        backup.To.ShouldBe(102);
+        backup.Provider.ShouldBe("Etherscan");
+        backup.Failure.ShouldBe(DepositScanFailure.Quota);
+        (await ReadAsync(token.Id)).Orders.Single().TxHash.ShouldBe(seen.TxHash);
+
+        await ScanAsync(NewScanner(alerts), network, token, [first, second]);
+        ankr.HeadCalls.ShouldBe(1);
+
+        // Cooldowns are process-local. The database survives the restart and still knows what needs replaying.
+        var restartedHealth = new DepositScanProviderHealth();
+        ankr.ReadHead = () => 115;
+        ankr.ReadLogs = (from, to) => (from, to) switch
+        {
+            (101, 102) => [seen, missed],
+            (103, 103) => [current],
+            _ => throw new InvalidOperationException($"Unexpected scan window {from}..{to}"),
+        };
+
+        await ScanAsync(NewScanner(alerts), network, token, [first with { Health = restartedHealth }, second with { Health = restartedHealth }]);
+
+        explorer.HeadCalls.ShouldBe(2);
+        var recovered = await ReadProviderStateAsync(token.Id);
+        recovered.Cursor.ShouldBe(103);
+        recovered.From.ShouldBeNull();
+        recovered.To.ShouldBeNull();
+        recovered.Provider.ShouldBe("Ankr");
+        recovered.Failure.ShouldBeNull();
+        (await ReadAsync(token.Id)).Orders.Select(order => order.TxHash).Order()
+            .ShouldBe(new[] { seen.TxHash, missed.TxHash, current.TxHash });
+    }
+
+    [Fact]
+    public async Task Legacy_Rpc_Remains_Available_Until_Managed_Ankr_Reads_Logs()
+    {
+        var (network, token) = await SeedAsync();
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true))
+        {
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            var row = await db.Networks.SingleAsync(item => item.Id == network.Id);
+            row.LegacyDepositRpcCipher = "retained";
+            row.PreferManagedScanProviders = true;
+            await uow.CompleteAsync();
+        }
+
+        var health = new DepositScanProviderHealth();
+        var unavailable = new RecordingDepositSource(true) { ReadHead = () => throw new DepositScanReadException(ProviderCredentialStatus.PlanRequired) };
+        var legacy = new RecordingDepositSource(false) { ReadHead = () => 113 };
+        var scanner = NewScanner(new RecordingAlerts(GetRequiredService<IDistributedEventBus>()));
+        var oldRpc = new DepositScanProvider(network.Id, "Legacy", legacy, health, IsLegacy: true);
+        await ScanAsync(scanner, network, token, [new(Guid.NewGuid(), "Etherscan", unavailable, health), oldRpc]);
+        (await ReadNetwork()).LegacyDepositRpcCipher.ShouldBe("retained");
+        (await ReadProviderStateAsync(token.Id)).Provider.ShouldBe("Legacy");
+
+        var verified = new RecordingDepositSource(false) { ReadHead = () => 113 };
+        await ScanAsync(scanner, network, token, [new(Guid.NewGuid(), "Ankr", verified, health), oldRpc]);
+        (await ReadNetwork()).LegacyDepositRpcCipher.ShouldBeNull();
+        (await ReadProviderStateAsync(token.Id)).Provider.ShouldBe("Ankr");
+
+        async Task<ColNetwork> ReadNetwork()
+        {
+            using var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            return await db.Networks.AsNoTracking().SingleAsync(item => item.Id == network.Id);
+        }
+    }
+
+    [Fact]
+    public async Task Etherscan_First_Continues_Scanning_And_Uses_Lower_Rpc_For_Replay()
+    {
+        var (network, token) = await SeedAsync();
+        var indexed = new RecordingDepositSource(requiresReconciliation: true) { ReadHead = () => 114 };
+        var rpc = new RecordingDepositSource(requiresReconciliation: false) { ReadHead = () => 113 };
+        var missed = new TokenTransferLog("0xaaa", 0, FromAddress, WatchAddress, "1", 101);
+        rpc.ReadLogs = (from, to) => (from, to) switch
+        {
+            (101, 101) => [missed],
+            (102, 102) => [],
+            _ => throw new InvalidOperationException($"Unexpected replay {from}..{to}"),
+        };
+        var health = new DepositScanProviderHealth();
+        DepositScanProvider[] providers = [new(Guid.NewGuid(), "Etherscan", indexed, health), new(Guid.NewGuid(), "Ankr", rpc, health)];
+        var scanner = NewScanner(new RecordingAlerts(GetRequiredService<IDistributedEventBus>()));
+
+        await ScanAsync(scanner, network, token, providers);
+
+        var partial = await ReadProviderStateAsync(token.Id);
+        partial.Provider.ShouldBe("Etherscan");
+        partial.Cursor.ShouldBe(102);
+        partial.From.ShouldBe(102);
+        partial.To.ShouldBe(102);
+
+        rpc.ReadHead = () => 114;
+        await ScanAsync(scanner, network, token, providers);
+
+        var recovered = await ReadProviderStateAsync(token.Id);
+        recovered.Provider.ShouldBe("Etherscan");
+        recovered.Cursor.ShouldBe(102);
+        recovered.From.ShouldBeNull();
+        recovered.To.ShouldBeNull();
+        (await ReadAsync(token.Id)).Orders.Single().TxHash.ShouldBe(missed.TxHash);
+    }
+
+    [Fact]
+    public async Task Idle_Head_Read_Does_Not_Replace_The_Last_Proven_Scanner()
+    {
+        var (network, token) = await SeedAsync();
+        var health = new DepositScanProviderHealth();
+        var original = new RecordingDepositSource(false) { ReadHead = () => 113 };
+        var newProvider = new RecordingDepositSource(false) { ReadHead = () => 113,
+            ReadLogs = (_, _) => throw new DepositScanReadException(DepositScanFailure.Quota) };
+        var scanner = NewScanner(new RecordingAlerts(GetRequiredService<IDistributedEventBus>()));
+        await ScanAsync(scanner, network, token, [new(Guid.NewGuid(), "Original", original, health)]);
+        var before = await ReadProviderStateAsync(token.Id);
+
+        await ScanAsync(scanner, network, token, [new(Guid.NewGuid(), "New", newProvider, health)]);
+
+        var after = await ReadProviderStateAsync(token.Id);
+        after.Provider.ShouldBe("Original");
+        after.ProviderAt.ShouldBe(before.ProviderAt);
+        after.Cursor.ShouldBe(before.Cursor);
+    }
+
+    [Fact]
+    public async Task Total_Failure_Preserves_Last_Success_And_Cursor()
+    {
+        var (network, token) = await SeedAsync();
+        var ankr = new RecordingDepositSource(requiresReconciliation: false) { ReadHead = () => 113 };
+        var health = new DepositScanProviderHealth();
+        var first = new DepositScanProvider(Guid.NewGuid(), "Main", ankr, health);
+        var alerts = new RecordingAlerts(GetRequiredService<IDistributedEventBus>());
+        var scanner = NewScanner(alerts);
+        await ScanAsync(scanner, network, token, [first]);
+        var success = await ReadProviderStateAsync(token.Id);
+
+        ankr.ReadHead = () => throw new DepositScanReadException(DepositScanFailure.Timeout);
+        await ScanAsync(scanner, network, token, [first]);
+        await ScanAsync(scanner, network, token, [first]);
+
+        var failed = await ReadProviderStateAsync(token.Id);
+        failed.Cursor.ShouldBe(101);
+        failed.Provider.ShouldBe("Main");
+        failed.ProviderAt.ShouldBe(success.ProviderAt);
+        failed.Failure.ShouldBe(DepositScanFailure.Timeout);
+        (await ReadAsync(token.Id)).Orders.ShouldBeEmpty();
+        alerts.Titles.ShouldBe(new[] { "充值扫链服务商全部不可用" });
+    }
+
+    [Fact]
+    public async Task Provider_Factory_Uses_Enabled_Network_Rows_In_Order_And_Leaves_Outgoing_Rpc_Separate()
+    {
+        var (network, _) = await SeedAsync();
+        var factory = GetRequiredService<BscDepositScanProviderFactory>();
+        var encryptor = GetRequiredService<IStringEncryptionService>();
+        using var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+        var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+        network = await db.Networks.SingleAsync(row => row.Id == network.Id);
+        network.RpcCipher = HdKeyService.Protect("https://rpc.example.com/transaction-only", "test-master-key", encryptor);
+        var ankr = AddProvider(ChainApiKeyProvider.RpcBsc, 10, new string('a', 64));
+        var explorer = AddProvider(ChainApiKeyProvider.EtherscanV2, 5, new string('b', 34));
+        AddProvider(ChainApiKeyProvider.RpcBsc, 1, new string('c', 64)).IsEnabled = false;
+        await db.SaveChangesAsync();
+
+        var available = await factory.CreateAsync(db, network, CancellationToken.None);
+
+        available.Select(provider => provider.Name).ShouldBe(new[] { "Etherscan", "Ankr" });
+        available.All(provider => provider.Source != null).ShouldBeTrue();
+
+        ankr.IsEnabled = explorer.IsEnabled = false;
+        await db.SaveChangesAsync();
+        (await factory.CreateAsync(db, network, CancellationToken.None)).ShouldBeEmpty();
+        await uow.CompleteAsync();
+
+        ColScanProvider AddProvider(ChainApiKeyProvider provider, int sortOrder, string key)
+        {
+            var row = new ColScanProvider(Guid.NewGuid())
+            {
+                Provider = provider,
+                SortOrder = sortOrder,
+                KeyHash = key,
+                KeyCipher = HdKeyService.Protect(key, "test-master-key", encryptor),
+                IsEnabled = true,
+            };
+            row.Networks.Add(new ColScanProviderNetwork { ProviderId = row.Id, NetworkId = network.Id });
+            db.ScanProviders.Add(row);
+            return row;
+        }
+    }
+
     private static IBscChainGateway NewGateway(ColToken token, IReadOnlyList<TokenTransferLog> logs, bool complete)
     {
         var gateway = Substitute.For<IBscChainGateway>();
@@ -100,6 +320,9 @@ public class DepositScannerRegressionTests : CollectionTestBase
 
     private static Task ScanAsync(DepositScanManager scanner, ColNetwork network, ColToken token, IBscChainGateway gateway) =>
         scanner.RunTokenRoundAsync(network, token, gateway, 12, 50, 2000, TimeSpan.FromMinutes(10), 0, CancellationToken.None);
+
+    private static Task ScanAsync(DepositScanManager scanner, ColNetwork network, ColToken token, IReadOnlyList<DepositScanProvider> providers) =>
+        scanner.RunTokenRoundAsync(network, token, providers, 12, 50, 2000, TimeSpan.FromMinutes(10), 0, CancellationToken.None);
 
     private async Task<(ColNetwork Network, ColToken Token)> SeedAsync()
     {
@@ -145,6 +368,33 @@ public class DepositScannerRegressionTests : CollectionTestBase
         var orders = await db.DepositOrders.Where(o => o.TokenId == tokenId).ToListAsync();
         await uow.CompleteAsync();
         return (token.LastScannedBlock, orders);
+    }
+
+    private async Task<(long? Cursor, long? From, long? To, string? Provider, DateTime? ProviderAt, string? Failure)> ReadProviderStateAsync(Guid tokenId)
+    {
+        using var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+        var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+        var token = await db.Tokens.SingleAsync(t => t.Id == tokenId);
+        await uow.CompleteAsync();
+        return (token.LastScannedBlock, token.ScanReplayFromBlock, token.ScanReplayToBlock, token.LastScanProvider,
+            token.LastScanProviderAt, token.LastScanFailure);
+    }
+
+    private sealed class RecordingDepositSource(bool requiresReconciliation) : IBscDepositScanSource
+    {
+        public bool RequiresReconciliation { get; } = requiresReconciliation;
+        public Func<long> ReadHead { get; set; } = () => throw new InvalidOperationException("Unexpected head call");
+        public Func<long, long, IReadOnlyList<TokenTransferLog>> ReadLogs { get; set; } = (_, _) => [];
+        public int HeadCalls { get; private set; }
+
+        public Task<long> GetHeadAsync(CancellationToken ct)
+        {
+            HeadCalls++;
+            return Task.FromResult(ReadHead());
+        }
+
+        public Task<IReadOnlyList<TokenTransferLog>> ReadLogsAsync(string contract, long from, long to,
+            IReadOnlySet<string> watched, CancellationToken ct) => Task.FromResult(ReadLogs(from, to));
     }
 
     private sealed class RecordingAlerts(IDistributedEventBus eventBus)

@@ -1,11 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Modules;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
@@ -54,6 +58,27 @@ public class DepositAddressDerivationTests : CollectionTestBase
     private DepositAddressManager NewManager()
     {
         return GetRequiredService<DepositAddressManager>().WithMasterKey("test-master-key");
+    }
+
+    [Fact]
+    public async Task Paused_Chain_Declines_Resending_Or_Deriving_Addresses_Without_Removing_The_Old_Record()
+    {
+        var networkId = await SeedNetworkAsync(scanRan: true);
+        var manager = NewManager();
+        var original = await manager.GetOrDeriveAsync(networkId, User1);
+        GetRequiredService<IDeploymentModuleStateReader>().GetAsync(Arg.Any<CancellationToken>())
+            .Returns(new DeploymentModuleSnapshot(1, initialized: true, new Dictionary<string, bool>()));
+
+        (await Should.ThrowAsync<BusinessException>(() => manager.GetOrDeriveAsync(networkId, User1)))
+            .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        (await Should.ThrowAsync<BusinessException>(() => manager.GetOrDeriveAsync(networkId, User2)))
+            .Code.ShouldBe(DeploymentModuleErrorCodes.Disabled);
+        using var uow = GetRequiredService<IUnitOfWorkManager>().Begin();
+        var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+        var stored = await db.DepositAddresses.AsNoTracking().SingleAsync(row => row.NetworkId == networkId);
+        stored.Address.ShouldBe(original.Address);
+        stored.UserId.ShouldBe(User1);
+        await uow.CompleteAsync();
     }
 
     [Fact]

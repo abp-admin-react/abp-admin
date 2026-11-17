@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Space, Statistic, Typography } from 'antd';
 import { type ReactNode, useEffect, useState } from 'react';
-import { type AnkrBalanceDto, getAnkrBalance } from '@/abp/chainAdmin';
+import type { AnkrBalanceDto } from '@/abp/chainAdmin';
+import { getDashboardAnkrBalance } from '@/abp/scanProviders';
 
 export function AnkrBalanceAmounts({
   credits,
@@ -19,21 +20,18 @@ export function AnkrBalanceAmounts({
 }
 
 export default function AnkrBalanceCard({
-  networkId,
-  savedGroup,
   unconfiguredAction,
 }: {
-  networkId?: string;
-  savedGroup?: string | null;
   unconfiguredAction?: ReactNode;
 }) {
-  const [balance, setBalance] = useState<AnkrBalanceDto | null>();
+  const [balance, setBalance] = useState<
+    (AnkrBalanceDto & { label: string | null }) | null
+  >();
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
-    const request = networkId ? getAnkrBalance(networkId) : getAnkrBalance();
-    request.then(
+    getDashboardAnkrBalance().then(
       (result) => {
         if (active) setBalance(result);
       },
@@ -44,10 +42,10 @@ export default function AnkrBalanceCard({
     return () => {
       active = false;
     };
-  }, [networkId, revision]);
+  }, [revision]);
 
   const loading = balance === undefined;
-  const title = savedGroup === undefined ? 'Ankr 账户余额' : '已保存账户的余额';
+  const title = 'Ankr 账户余额';
   return (
     <Card
       title={title}
@@ -68,15 +66,15 @@ export default function AnkrBalanceCard({
       }
     >
       <div role="status">
+        {balance?.label && (
+          <Typography.Paragraph type="secondary">
+            {balance.label}
+          </Typography.Paragraph>
+        )}
         {loading ? (
           <Typography.Text type="secondary">正在查询余额…</Typography.Text>
         ) : balance?.status === 'available' ? (
           <Space orientation="vertical" size={12}>
-            {savedGroup !== undefined && (
-              <Typography.Text type="secondary">
-                {savedGroup ? `团队账户 · ${savedGroup}` : '个人账户'}
-              </Typography.Text>
-            )}
             <AnkrBalanceAmounts
               credits={balance.credits}
               balanceUsd={balance.balanceUsd}

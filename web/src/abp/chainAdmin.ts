@@ -15,6 +15,10 @@ export interface TokenStatusDto {
   lastScanAt?: string;
   isEnabled: boolean;
   blocksBehind?: number;
+  lastScanProvider: string | null;
+  lastScanProviderAt: string | null;
+  lastScanFailure: string | null;
+  scanReplayFromBlock: number | null;
 }
 
 export interface NetworkStatusDto {
@@ -65,6 +69,7 @@ export interface DepositOrderListDto {
   blockNumber: number;
   status: string;
   sweepTaskId?: string;
+  balanceTxnId: string | null;
   manuallyReleased: boolean;
   creationTime: string;
 }
@@ -115,12 +120,6 @@ export interface ChainApiKeysDto {
   rpcFallbackMasked?: string;
   /** Etherscan 池为空时是否配置了宿主回退端点 */
   etherscanFallbackPresent: boolean;
-}
-
-export interface AnkrSettingsDto {
-  platformAuthKeyMasked: string | null;
-  group: string | null;
-  scanIntervalSeconds: number;
 }
 
 export interface AnkrBalanceDto {
@@ -178,7 +177,7 @@ export interface CollectionWalletStatusDto {
 export interface ConfigureNetworkInput {
   networkId: string;
   rpcUrl?: string | null;
-  nodeLogResultCap: number | null;
+  nodeLogResultCap?: number | null;
   depositFeeRate: string;
   autoCreditMaxAmount: string;
   estimatedArrivalMinutes?: number | null;
@@ -232,6 +231,22 @@ export function configureNetwork(input: ConfigureNetworkInput): Promise<void> {
   return request(`${BASE}/configure-network`, { method: 'POST', data: input });
 }
 
+export interface TransactionRpcDto {
+  rpcUrlMasked: string | null;
+}
+
+export function getTransactionRpc(networkId: string): Promise<TransactionRpcDto> {
+  return request(`${BASE}/transaction-rpc`, { params: { NetworkId: networkId } });
+}
+
+export function configureTransactionRpc(input: {
+  networkId: string;
+  rpcUrl?: string | null;
+  clearRpcUrl?: boolean;
+}): Promise<TransactionRpcDto> {
+  return request(`${BASE}/transaction-rpc`, { method: 'POST', data: input });
+}
+
 export function configureNetworkToken(input: {
   networkId: string;
   tokenId: string;
@@ -256,27 +271,6 @@ export async function getNetworkStatus(
   return request(`${BASE}/status`, { params: { NetworkId: networkId } });
 }
 
-export function getAnkrSettings(networkId: string): Promise<AnkrSettingsDto> {
-  return request(`${BASE}/ankr-settings`, { params: { NetworkId: networkId } });
-}
-
-export function configureAnkr(input: {
-  networkId: string;
-  platformAuthKey?: string;
-  clearPlatformAuthKey?: boolean;
-  group?: string | null;
-  scanIntervalSeconds?: number;
-}): Promise<void> {
-  return request(`${BASE}/configure-ankr`, { method: 'POST', data: input });
-}
-
-export function getAnkrBalance(networkId?: string): Promise<AnkrBalanceDto> {
-  return request(`${BASE}/ankr-balance`, {
-    params: { NetworkId: networkId },
-    skipErrorHandler: true,
-  });
-}
-
 export function testNodeCredential(input: {
   networkId: string;
   provider: 'RpcBsc' | 'AnkrPlatform' | 'EtherscanV2';
@@ -297,6 +291,7 @@ export async function getDepositOrders(params: {
   status?: string;
   symbol?: string;
   depositId?: string;
+  sweepTaskId?: string;
 }): Promise<{ totalCount: number; items: DepositOrderListDto[] }> {
   return request(`${BASE}/deposit-orders`, {
     params: {
@@ -305,6 +300,7 @@ export async function getDepositOrders(params: {
       Status: params.status,
       Symbol: params.symbol,
       DepositId: params.depositId,
+      ...(params.sweepTaskId ? { SweepTaskId: params.sweepTaskId } : {}),
     },
   });
 }
@@ -313,8 +309,16 @@ export async function getSweepTasks(params: {
   skipCount?: number;
   maxResultCount?: number;
   status?: string;
+  sweepTaskId?: string;
 }): Promise<{ totalCount: number; items: SweepTaskListDto[] }> {
-  return request(`${BASE}/sweep-tasks`, { params });
+  return request(`${BASE}/sweep-tasks`, {
+    params: {
+      SkipCount: params.skipCount,
+      MaxResultCount: params.maxResultCount,
+      Status: params.status,
+      ...(params.sweepTaskId ? { SweepTaskId: params.sweepTaskId } : {}),
+    },
+  });
 }
 
 /** 保存人工放行资格并加入归集队列。已有任务时重复请求成功。 */
@@ -396,6 +400,36 @@ export async function generateMnemonic(networkId?: string): Promise<string> {
   return request(`${BASE}/generate-mnemonic`, {
     method: 'POST',
     params: { NetworkId: networkId },
+  });
+}
+
+export interface ImportLegacyWalletInput {
+  mnemonic: string;
+  addressIndexHighWaterMark: number;
+  addresses: {
+    userId: string | null;
+    address: string;
+    addressIndex: number;
+    isActive: boolean | null;
+  }[];
+}
+
+export interface ImportLegacyWalletResultDto {
+  importedAddressCount: number;
+  retiredAddressCount: number;
+  addressIndexHighWaterMark: number;
+  nextAddressIndex: number | null;
+}
+
+export function importLegacyWallet(
+  networkId: string,
+  data: ImportLegacyWalletInput,
+): Promise<ImportLegacyWalletResultDto> {
+  return request(`${BASE}/import-legacy-wallet`, {
+    method: 'POST',
+    params: { NetworkId: networkId },
+    data,
+    skipErrorHandler: true,
   });
 }
 

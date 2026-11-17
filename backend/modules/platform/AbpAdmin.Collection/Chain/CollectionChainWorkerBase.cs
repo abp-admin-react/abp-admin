@@ -181,30 +181,22 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
     }
 
     /// <summary>
-    /// 需要明确的节点日志上限。RPC 优先使用启用的密钥池，池空时使用网络设置的 RPC 地址。
+    /// 交易 RPC 优先使用启用的密钥池，池空时使用网络设置的 RPC 地址。
     /// </summary>
     protected static async Task<IBscChainGateway?> CreateGatewayAsync(ChainGatewayFactory factory,
         CollectionDbContext dbContext, Entities.ColNetwork network, Microsoft.Extensions.Logging.ILogger logger)
     {
-        if (network.NodeLogResultCap is not int cap || cap <= 0)
-        {
-            logger.LogError(
-                "网络 {Network} 未配置有效的节点日志上限，链上任务本轮跳过。请按实测或节点文档填写",
-                network.Name);
-            return null;
-        }
-
         var hasPool = await dbContext.ChainApiKeys.AsNoTracking().AnyAsync(
             k => k.NetworkId == network.Id && k.Provider == Entities.ChainApiKeyProvider.RpcBsc && k.IsEnabled);
         if (!hasPool && string.IsNullOrEmpty(network.RpcCipher))
         {
-            logger.LogError("网络 {Network} 没有启用的 RPC 密钥或备用 RPC 地址，链上任务本轮跳过", network.Name);
+            logger.LogError("网络 {Network} 没有配置可用的交易 RPC，链上任务本轮跳过", network.Name);
             return null;
         }
 
         try
         {
-            return await factory.CreateAsync(dbContext, network, cap);
+            return await factory.CreateAsync(dbContext, network, ChainGatewayFactory.TransactionLogResultCap);
         }
         catch (Exception ex)
         {
@@ -220,6 +212,8 @@ public abstract class CollectionChainWorkerBase : Microsoft.Extensions.Hosting.B
 /// </summary>
 public class ChainGatewayFactory
 {
+    internal const int TransactionLogResultCap = 10_000;
+
     private readonly System.Net.Http.HttpClient _http;
     private readonly Volo.Abp.Security.Encryption.IStringEncryptionService _encryptor;
     private readonly string _etherscanEndpoint;
