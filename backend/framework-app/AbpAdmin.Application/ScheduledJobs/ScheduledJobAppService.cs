@@ -46,6 +46,9 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
     {
         var queryable = await _jobRepository.GetQueryableAsync();
         var query = queryable
+            // Legacy seeds may contain host-only jobs in tenant databases. Keep the rows and
+            // execution history intact, but do not offer a task that this tenant cannot operate.
+            .WhereIf(CurrentTenant.Id != null, x => !HostOnlyScheduledJobTypes.All.Contains(x.JobType))
             .WhereIf(!input.Name.IsNullOrWhiteSpace(), x => x.Name.Contains(input.Name!))
             .WhereIf(!input.JobType.IsNullOrWhiteSpace(), x => x.JobType == input.JobType)
             .WhereIf(input.IsEnabled.HasValue, x => x.IsEnabled == input.IsEnabled);

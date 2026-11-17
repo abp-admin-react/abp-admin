@@ -388,6 +388,52 @@ public abstract class ScheduledJobAppServiceTests<TStartupModule> : AbpAdminAppl
         hostList.Items[0].Id.ShouldBe(hostJob.Id);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Job_List_Respects_Host_Only_Types_Without_Removing_Stored_Jobs_Or_History(bool tenant)
+    {
+        using (_currentTenant.Change(tenant ? Guid.NewGuid() : null))
+        {
+            await CleanupAsync();
+            var normal = await _appService.CreateAsync(CreateInput("normal-job"));
+            var watchdogId = Guid.Empty;
+            await WithUnitOfWorkAsync(async () =>
+            {
+                foreach (var type in HostOnlyScheduledJobTypes.All)
+                {
+                    var job = new ScheduledJob(Guid.NewGuid(), _currentTenant.Id, type, type,
+                        "0 */15 * * * ?", "legacy host-only seed", false);
+                    await _jobRepository.InsertAsync(job);
+                    if (type == ScheduledJobConsts.BroadcastNotificationWatchdogJobType) watchdogId = job.Id;
+                }
+                await _executionRepository.InsertAsync(new ScheduledJobExecution(Guid.NewGuid(), _currentTenant.Id,
+                    watchdogId, DateTime.UtcNow.AddSeconds(-1), DateTime.UtcNow, true, "legacy execution", 1000, DateTime.UtcNow));
+            });
+
+            var list = await _appService.GetListAsync(new GetScheduledJobsInput { MaxResultCount = 100 });
+            list.Items.ShouldContain(x => x.Id == normal.Id);
+            list.TotalCount.ShouldBe(tenant ? 1 : HostOnlyScheduledJobTypes.All.Count + 1);
+            if (tenant) list.Items.ShouldNotContain(x => HostOnlyScheduledJobTypes.All.Contains(x.JobType));
+            else list.Items.Count(x => HostOnlyScheduledJobTypes.All.Contains(x.JobType)).ShouldBe(HostOnlyScheduledJobTypes.All.Count);
+
+            // Filtering and pagination must use the same scope as TotalCount.
+            var filtered = await _appService.GetListAsync(new GetScheduledJobsInput
+            {
+                JobType = ScheduledJobConsts.BroadcastNotificationWatchdogJobType, MaxResultCount = 10
+            });
+            filtered.TotalCount.ShouldBe(tenant ? 0 : 1);
+            var secondPage = await _appService.GetListAsync(new GetScheduledJobsInput { SkipCount = 1, MaxResultCount = 1 });
+            secondPage.Items.Count.ShouldBe(tenant ? 0 : 1);
+
+            (await _jobRepository.GetCountAsync()).ShouldBe(HostOnlyScheduledJobTypes.All.Count + 1);
+            (await _appService.GetAsync(watchdogId)).Id.ShouldBe(watchdogId);
+            var history = await _appService.GetExecutionsAsync(watchdogId, new PagedAndSortedResultRequestDto { MaxResultCount = 10 });
+            history.TotalCount.ShouldBe(1);
+            history.Items.Single().Message.ShouldBe("legacy execution");
+        }
+    }
+
     [Fact]
     public async Task Tenant_Should_Be_Rejected_On_All_Four_Entry_Points_For_Host_Only_Job_Type()
     {
