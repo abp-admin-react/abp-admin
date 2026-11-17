@@ -8,6 +8,7 @@
     "RateLimited": "請求過於頻繁，請稍後再試。",
     "Conflict": "資料已變化，請重新整理後重試。",
     "OperationFailed": "操作失敗，請稍後重試。",
+    "ModuleDisabled": "此功能目前暫停受理新業務。",
     "Unexpected": "系統繁忙，請稍後重試。",
     "FileContentMismatch": "上傳被拒絕：檔案內容與其副檔名不符，或包含不允許的指令碼內容。",
     "SyncExportThresholdExceeded": "結果集超過同步匯出上限，請使用非同步匯出。",

@@ -27,5 +27,6 @@ public static class SensitiveEntityProperties
         "Payload", "ReferenceId", "ClientSecret",
         // 按属性名排除链网、提现钱包、节点密钥池和 Ankr 账户凭据的密文。
         "MnemonicCipher", "RpcCipher", "KeyCipher", "WithdrawVaultKeyCipher", "AnkrPlatformAuthKeyCipher",
+        "LegacyDepositRpcCipher", "PlatformAuthKeyCipher",
     };
 }

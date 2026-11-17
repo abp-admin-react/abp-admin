@@ -8,6 +8,7 @@
     "RateLimited": "Too many requests. Please try again later.",
     "Conflict": "The resource has been modified. Please refresh and try again.",
     "OperationFailed": "The operation failed. Please try again.",
+    "ModuleDisabled": "New work is currently paused for this feature.",
     "Unexpected": "An unexpected error occurred. Please try again later.",
     "FileContentMismatch": "Upload rejected: the file content does not match its extension, or contains disallowed script content.",
     "SyncExportThresholdExceeded": "The result set exceeds the synchronous export limit. Please use asynchronous export.",

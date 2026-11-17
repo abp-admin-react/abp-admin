@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using AbpAdmin.ClientErrors;
 using AbpAdmin.Imaging;
+using AbpAdmin.Modules;
 using Volo.Abp.DependencyInjection;
 
 namespace AbpAdmin.Domain.ClientErrors;
@@ -67,6 +68,15 @@ public class PublicErrorDefinitionRegistry : IPublicErrorDefinitionProvider, ISi
             },
         };
 
+        Register(new PublicErrorDefinition
+        {
+            InternalCode = DeploymentModuleErrorCodes.Disabled,
+            PublicCode = "Client:ModuleDisabled",
+            ResourceType = typeof(ClientErrorResource),
+            MessageKey = "ModuleDisabled",
+            Kind = PublicErrorKind.Business,
+            PublicHttpStatuses = [409],
+        });
         Register(new PublicErrorDefinition
         {
             InternalCode = ClientErrorCodes.AuthenticationRequired,

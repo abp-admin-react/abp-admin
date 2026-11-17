@@ -542,6 +542,55 @@
       }
     }
   },
+  "AbpAdmin.Collection.Services.BalanceTxnDto": {
+    "kind": "dto",
+    "properties": {
+      "Action": {
+        "type": "string",
+        "nullable": false
+      },
+      "Amount": {
+        "type": "string",
+        "nullable": false
+      },
+      "BalanceAfter": {
+        "type": "string",
+        "nullable": false
+      },
+      "BusinessId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "BusinessType": {
+        "type": "string",
+        "nullable": true
+      },
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Currency": {
+        "type": "string",
+        "nullable": false
+      },
+      "DepositOrderId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "RefTxnId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "TxHash": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
   "AbpAdmin.Collection.Services.CollectionNetworkSummaryDto": {
     "kind": "dto",
     "properties": {
@@ -711,6 +760,188 @@
       }
     }
   },
+  "AbpAdmin.Collection.Services.ConfigureTransactionRpcInput": {
+    "kind": "dto",
+    "properties": {
+      "ClearRpcUrl": {
+        "type": "bool",
+        "nullable": false
+      },
+      "NetworkId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "RpcUrl": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.DepositOrderListDto": {
+    "kind": "dto",
+    "properties": {
+      "ActualAmount": {
+        "type": "string",
+        "nullable": true
+      },
+      "Amount": {
+        "type": "string",
+        "nullable": true
+      },
+      "BalanceTxnId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "BlockNumber": {
+        "type": "long",
+        "nullable": false
+      },
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Fee": {
+        "type": "string",
+        "nullable": true
+      },
+      "FromAddress": {
+        "type": "string",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "LogIndex": {
+        "type": "int",
+        "nullable": false
+      },
+      "ManuallyReleased": {
+        "type": "bool",
+        "nullable": false
+      },
+      "NetworkName": {
+        "type": "string",
+        "nullable": false
+      },
+      "RawAmount": {
+        "type": "string",
+        "nullable": false
+      },
+      "Status": {
+        "type": "string",
+        "nullable": false
+      },
+      "SweepTaskId": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "Symbol": {
+        "type": "string",
+        "nullable": false
+      },
+      "ToAddress": {
+        "type": "string",
+        "nullable": false
+      },
+      "TxHash": {
+        "type": "string",
+        "nullable": false
+      },
+      "UserId": {
+        "type": "Guid",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ImportLegacyWalletAddressInput": {
+    "kind": "dto",
+    "properties": {
+      "Address": {
+        "type": "string",
+        "nullable": false
+      },
+      "AddressIndex": {
+        "type": "int",
+        "nullable": false
+      },
+      "IsActive": {
+        "type": "bool?",
+        "nullable": true
+      },
+      "UserId": {
+        "type": "Guid?",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ImportLegacyWalletInput": {
+    "kind": "dto",
+    "properties": {
+      "Addresses": {
+        "type": "List\u003CImportLegacyWalletAddressInput\u003E",
+        "nullable": false
+      },
+      "AddressIndexHighWaterMark": {
+        "type": "int",
+        "nullable": false
+      },
+      "Mnemonic": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ImportLegacyWalletResultDto": {
+    "kind": "dto",
+    "properties": {
+      "AddressIndexHighWaterMark": {
+        "type": "int",
+        "nullable": false
+      },
+      "ImportedAddressCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "NextAddressIndex": {
+        "type": "int?",
+        "nullable": true
+      },
+      "RetiredAddressCount": {
+        "type": "int",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.MemberBalanceAccountDto": {
+    "kind": "dto",
+    "properties": {
+      "UpdatedAt": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "UsdcBalance": {
+        "type": "string",
+        "nullable": false
+      },
+      "UsdcFrozen": {
+        "type": "string",
+        "nullable": false
+      },
+      "UsdtBalance": {
+        "type": "string",
+        "nullable": false
+      },
+      "UsdtFrozen": {
+        "type": "string",
+        "nullable": false
+      },
+      "UserId": {
+        "type": "Guid",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Collection.Services.NetworkStatusDto": {
     "kind": "dto",
     "properties": {
@@ -800,6 +1031,161 @@
       }
     }
   },
+  "AbpAdmin.Collection.Services.ReorderScanProvidersInput": {
+    "kind": "dto",
+    "properties": {
+      "Ids": {
+        "type": "Guid[]",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.SaveScanProviderInput": {
+    "kind": "dto",
+    "properties": {
+      "ApiKey": {
+        "type": "string",
+        "nullable": true
+      },
+      "ClearPlatformAuthKey": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Group": {
+        "type": "string",
+        "nullable": true
+      },
+      "IsEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Label": {
+        "type": "string",
+        "nullable": true
+      },
+      "Networks": {
+        "type": "ScanProviderNetworkDto[]",
+        "nullable": false
+      },
+      "PlatformAuthKey": {
+        "type": "string",
+        "nullable": true
+      },
+      "Provider": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ScanDashboardBalanceDto": {
+    "kind": "dto",
+    "properties": {
+      "BalanceUsd": {
+        "type": "string",
+        "nullable": true
+      },
+      "CheckedAt": {
+        "type": "DateTime?",
+        "nullable": true
+      },
+      "Credits": {
+        "type": "string",
+        "nullable": true
+      },
+      "Label": {
+        "type": "string",
+        "nullable": true
+      },
+      "Status": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ScanProviderDto": {
+    "kind": "dto",
+    "properties": {
+      "Group": {
+        "type": "string",
+        "nullable": true
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "IsEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "KeyMasked": {
+        "type": "string",
+        "nullable": false
+      },
+      "Label": {
+        "type": "string",
+        "nullable": true
+      },
+      "Networks": {
+        "type": "IReadOnlyList\u003CScanProviderNetworkDto\u003E",
+        "nullable": false
+      },
+      "PlatformKeyMasked": {
+        "type": "string",
+        "nullable": true
+      },
+      "Provider": {
+        "type": "string",
+        "nullable": false
+      },
+      "SortOrder": {
+        "type": "int",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ScanProviderNetworkDto": {
+    "kind": "dto",
+    "properties": {
+      "LogResultCap": {
+        "type": "int?",
+        "nullable": true
+      },
+      "NetworkId": {
+        "type": "Guid",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ScanProvidersDto": {
+    "kind": "dto",
+    "properties": {
+      "LegacyBalancePending": {
+        "type": "bool",
+        "nullable": false
+      },
+      "LegacyRpcActive": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Providers": {
+        "type": "IReadOnlyList\u003CScanProviderDto\u003E",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.ScanProviderTestDto": {
+    "kind": "dto",
+    "properties": {
+      "Message": {
+        "type": "string",
+        "nullable": false
+      },
+      "Passed": {
+        "type": "bool",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Collection.Services.SetWithdrawVaultInput": {
     "kind": "dto",
     "properties": {
@@ -863,6 +1249,44 @@
       }
     }
   },
+  "AbpAdmin.Collection.Services.TestScanBalanceInput": {
+    "kind": "dto",
+    "properties": {
+      "Group": {
+        "type": "string",
+        "nullable": true
+      },
+      "Id": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "PlatformAuthKey": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.TestScanProviderInput": {
+    "kind": "dto",
+    "properties": {
+      "ApiKey": {
+        "type": "string",
+        "nullable": true
+      },
+      "Id": {
+        "type": "Guid?",
+        "nullable": true
+      },
+      "NetworkId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "Provider": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Collection.Services.TokenStatusDto": {
     "kind": "dto",
     "properties": {
@@ -886,19 +1310,44 @@
         "type": "DateTime?",
         "nullable": true
       },
+      "LastScanFailure": {
+        "type": "string",
+        "nullable": true
+      },
       "LastScannedBlock": {
         "type": "long?",
+        "nullable": true
+      },
+      "LastScanProvider": {
+        "type": "string",
+        "nullable": true
+      },
+      "LastScanProviderAt": {
+        "type": "DateTime?",
         "nullable": true
       },
       "MinDeposit": {
         "type": "string",
         "nullable": false
       },
+      "ScanReplayFromBlock": {
+        "type": "long?",
+        "nullable": true
+      },
       "Symbol": {
         "type": "string",
         "nullable": false
       },
       "VaultAddress": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.TransactionRpcDto": {
+    "kind": "dto",
+    "properties": {
+      "RpcUrlMasked": {
         "type": "string",
         "nullable": true
       }
