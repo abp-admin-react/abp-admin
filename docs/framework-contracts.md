@@ -147,3 +147,7 @@
   （`TenantRegionExtensions.GetRegion`）缺省回落——存量租户零迁移。方案一只标记不路由；
   方案二据此 + 每租户连接串（`TenantConfiguration.ConnectionStrings`，解析链路已就绪）
   做归属路由（持久化往返与回落由 `TenantRegionStoreTests` 钉住）。
+
+## 后台导航与模块启停
+
+宿主模块状态由 ABP Setting 的 `G` 层保存，后台使用 `/api/admin/module-management` 预览或变更，现有 Feature 继续表示租户功能。业务入口以服务端读取的部署状态为准，历史查询和已受理事项沿用原权限。版本化模板升级沿用原菜单 ID 并保留管理员定制，租户升级只搬移已存在的叶节点。模块可通过 `IMenuTemplateContributor` 提供默认菜单，工作区设置继续使用相应设置的读写权限和 provider 范围。[开发备忘](admin-navigation-module-development-plan.md)

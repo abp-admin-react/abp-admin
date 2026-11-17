@@ -1,3 +1,5 @@
+param([switch]$NewDatabase)
+
 $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $solutionRoot = Join-Path $scriptRoot "../../"
@@ -23,8 +25,12 @@ $jobs += Start-Job -Name "InstallLibs" -ScriptBlock {
     }
 }
 
+$initializeNewDatabase = $NewDatabase.IsPresent
 $jobs += Start-Job -Name "DbMigrator" -ScriptBlock {
     $ErrorActionPreference = "Stop"
+    if ($using:initializeNewDatabase) {
+        $env:Modules__InitializationMode = "New"
+    }
     Set-Location (Join-Path $using:scriptRoot "../../framework-app/AbpAdmin.DbMigrator")
     dotnet run
 

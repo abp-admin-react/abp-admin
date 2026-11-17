@@ -80,6 +80,7 @@ services:
       # 不配则失效只落在迁移进程内存，Host 一直读旧值（E2E 实测踩过：开关种了 true Host 读 false）
       Redis__IsEnabled: "true"
       Redis__Configuration: "redis:6379"
+      Modules__InitializationMode: ${MODULES_INITIALIZATION_MODE:-Upgrade}
       # ABP 设置项加密口令（种子落库的 isEncrypted 设置项用它加密，Host 侧必须同值才能解）
       StringEncryption__DefaultPassPhrase: ${STRING_ENCRYPTION_PASSPHRASE:-dev-only-change-me}
       # OIDC 客户端回调地址种到数据库：SPA/Swagger 的回调都指前端源（浏览器可达的唯一入口）。
@@ -104,6 +105,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: "no"
 
   # ---- 后端宿主（仅内网）：容器内 https:44395（自签，仅证书挂载用）/ http:8080（前端反代上游） ----
@@ -118,6 +121,7 @@ services:
       # Production 姿态（appsettings.Production.json）Redis:IsEnabled=true、SignalR backplane、
       # Quartz 持久化（qrtz_* 表由迁移器幂等建表）都在这条连接上工作
       Redis__Configuration: "redis:6379"
+      Modules__InitializationMode: ${MODULES_INITIALIZATION_MODE:-Upgrade}
       StringEncryption__DefaultPassPhrase: ${STRING_ENCRYPTION_PASSPHRASE:-dev-only-change-me}
       AuthServer__CertificatePassPhrase: ${OPENIDDICT_CERT_PASSPHRASE:-dev-only-change-me}
       ASPNETCORE_Kestrel__Certificates__Default__Password: ${OPENIDDICT_CERT_PASSPHRASE:-dev-only-change-me}

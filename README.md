@@ -1,6 +1,6 @@
 # abp-admin
 
-基于 [ABP Framework](https://abp.io)(vNext 10.6 / .NET 10)+ Ant Design Pro v6(React 19 · Umi Max)的中后台管理**模板主仓库**。
+基于 [ABP Framework](https://abp.io)(vNext 10.7.1 / .NET 10)+ Ant Design Pro v6(React 19 · Umi Max)的中后台管理**模板主仓库**。
 
 **定位**:这是我的"框架底座"仓库——只放框架层与公共能力,不带任何业务。新项目从这里派生:业务代码在各项目仓库中以独立模块工程开发;框架的修复与升级在本仓库进行,派生项目通过 git 血缘合并跟随,长期低成本同步。
 
@@ -15,7 +15,7 @@
 
 | 端 | 技术 |
 | --- | --- |
-| 后端 | .NET 10 · ABP Framework 10.6 · EF Core(PostgreSQL 单提供程序)· Redis · Quartz · SignalR |
+| 后端 | .NET 10 · ABP Framework 10.7.1 · EF Core(PostgreSQL 单提供程序)· Redis · Quartz · SignalR |
 | 前端 | React 19 · antd 6 · Ant Design Pro v6 · Umi Max 4 · pnpm 10 · Vitest · Biome |
 | 认证 | OpenIddict(OIDC,前后端分离,SPA 独立部署) |
 
@@ -77,7 +77,9 @@ pnpm start                                             # http://localhost:8000
 说明:
 
 - 开发环境 Host 启动时会自动判断并执行待应用的迁移(`Database:AutoMigrateOnStartup`,默认 true);显式跑 DbMigrator / 生产环境(置 false)走迁移器。
-- 一次性初始化可执行 `./backend/etc/scripts/initialize-solution.ps1`(编译 + install-libs + 迁移)。
+- 一次性初始化可执行 `./backend/etc/scripts/initialize-solution.ps1`(编译 + install-libs + 迁移)，新库首次运行附加 `-NewDatabase`。
+- 新项目建库首次运行迁移器时，设置环境变量 `Modules__InitializationMode=New`。Docker 的 `.env.example` 已为新库设置 `MODULES_INITIALIZATION_MODE=New`。该值在初始化成功前持续保留。连接已有数据库时使用 `Upgrade`，省略该值也按升级模式处理。
+- 宿主管理员可从「平台管理 → 模块管理」调整已装配的可选模块。初始化完成后，重复执行迁移不会覆盖后台已保存的状态。运行期参数在相应功能页维护。
 - 改框架表:改 `AbpAdminDbContext` 后执行 `dotnet ef migrations add`(命令见 `docs/pg-migration-runbook.md`),再跑一次 Migrator。业务模块(样板)同法。已应用的迁移不要改。
 
 ### Docker 一键起栈(全栈,前端唯一对外)
@@ -151,13 +153,15 @@ docker compose down                # 停栈(数据卷保留); -v 连数据一起
 
 框架迁移循环(`AbpAdminDbMigrationService`)自动枚举所有 `IAbpAdminDbSchemaMigrator` 实现,模块迁移器显式注册一行即被扫到——**业务建表不产生任何框架仓库改动**。
 
-**数据权限示例**:模块内 `BizDataScopeDemo`(实体/服务/迁移)演示业务模块如何消费框架数据权限基建——实体实现 `IHasDataScope` + 模块 DbContext 带同款数据范围筛选器,业务查询零过滤代码,写入侧校验显式归属组织必须在当前数据范围内;可运行页面在 `web/src/pages/biz-template/data-scope`(路由 `/biz-template/data-scope`,权限 `BizTemplate.DataScopeDemo`),过滤契约测试在 `backend/test/modules/biz/AbpAdmin.Biz.Template.Tests/DataScopes/`。框架侧 `/data-scope-demo` 演示页退役时,引用改指本示例。**整模块移除时的前端足迹清单**:`web/config/routes.ts`、`web/src/access.ts`(canManageBizDataScopeDemo)、`web/src/locales/{zh-CN,en-US}/menu.ts`、`web/src/pages/menus/routeRegistry.ts`、`MenuTemplateDefinition.cs` 的 `biz-template-data-scope` 节点、`web/src/abp/bizDataScopeDemo.ts` 与页面目录本身。
+**数据权限示例**:模块内 `BizDataScopeDemo`(实体/服务/迁移)演示业务模块如何消费框架数据权限基建——实体实现 `IHasDataScope` + 模块 DbContext 带同款数据范围筛选器,业务查询零过滤代码,写入侧校验显式归属组织必须在当前数据范围内;可运行页面在 `web/src/pages/biz-template/data-scope`(路由 `/biz-template/data-scope`,权限 `BizTemplate.DataScopeDemo`),过滤契约测试在 `backend/test/modules/biz/AbpAdmin.Biz.Template.Tests/DataScopes/`。框架侧 `/data-scope-demo` 演示页退役时,引用改指本示例。**整模块移除时的前端足迹清单**:`web/config/routes.ts`、`web/src/access.ts`(canManageBizDataScopeDemo)、`web/src/locales/{zh-CN,en-US}/menu.ts`、`web/src/pages/menus/routeRegistry.ts`、`web/src/abp/bizDataScopeDemo.ts` 与页面目录本身。
 
 配置按三层落位(样板模块内三层都有带注释的实例,照着扩):
 
 1. 基础设施配置(连接串/Redis/端口)只进宿主 `appsettings.json`——框架配置唯一来源,业务模块只读不写
 2. 模块部署期配置(换环境要变、改完要重启:第三方密钥、业务开关)放模块内 `Configuration/`——强类型 Options + 模块自带 JSON,Content 复制随模块走,宿主零改动;宿主同名节/secrets/环境变量可覆盖
-3. 运行期业务参数(管理员日常调)用模块自带 `SettingDefinitionProvider`——设置页可改、免重启,存储复用框架 SettingManagement,不建参数表;设置页 Tab 按 Group1 动态生成,模块自带分组不改前端。**必须 `WithProviders("G","D")` 双声明**:G 钉住 host 保存/重置的写路由(不声明会落 T 层导致值搁浅),D 保住默认值读链(不声明无存储值时读到 null)——且 reset 的层清理按声明过滤,详见样板模块注释
+3. 运行期业务参数用模块自带 `SettingDefinitionProvider`，由所属功能页复用设置表单，存储走框架 SettingManagement。仅声明 Group1 的已有扩展继续从「平台管理 → 扩展配置」进入。宿主专用参数使用 `WithProviders("G","D")` 声明全局写入和默认回退，表单会标出在当前作用域无法修改的字段。
+
+需要支持整套部署启停的模块自行注册 `IDeploymentModuleDefinitionProvider`，提供稳定 ID、启用依赖和配置入口。业务准入检查放在创建新业务副作用之前，历史、回调与已受理流程按领域规则处理。模块可参考 `BizTemplateMenuContributor` 自行登记带稳定 Key 的默认菜单。框架的菜单模板升级保留原菜单 ID 与自定义字段。升级带有租户快照的存量部署时运行 DbMigrator。详见[后台导航与模块启停开发计划](docs/admin-navigation-module-development-plan.md)。
 
 约定:模块内不建跨上下文外键/导航(跨模块用 Id + 应用层组合);权限 Provider 与本地化资源随模块自持,不写进框架集中文件。凭证类敏感值不进模块 JSON 基线(随源码入库),走 secrets 文件或环境变量。
 
