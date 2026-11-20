@@ -5,6 +5,7 @@ import {
   postApiAppAuditLogIdMarkHandled,
   postApiAppAuditLogIdUnmarkHandled,
 } from '@/services/abpadmin/auditLog';
+import { type GridQuery, postGridQuery } from './gridQuery';
 import type { PagedResult } from './identity';
 
 export async function getAuditLogs(params: {
@@ -51,6 +52,7 @@ export async function unmarkAuditLogHandled(id: string) {
 
 /** 导出审计日志。同步返回 Blob，异步返回 { isQueued: true }。 */
 export async function exportAuditLogs(params: {
+  grid?: GridQuery;
   httpMethod?: string;
   url?: string;
   userName?: string;
@@ -64,6 +66,7 @@ export async function exportAuditLogs(params: {
   // 过滤掉 undefined 值，避免序列化成空对象
   const queryParams = Object.fromEntries(
     Object.entries({
+      Grid: params.grid,
       HttpMethod: params.httpMethod,
       Url: params.url,
       UserName: params.userName,
@@ -78,14 +81,20 @@ export async function exportAuditLogs(params: {
   // 先尝试同步导出（GET，返回文件流）
   try {
     // getResponse: true 时 umi request 返回完整 AxiosResponse
-    const res = await request<Blob>('/api/app/audit-log/export', {
-      method: 'GET',
-      params: queryParams,
-      responseType: 'blob',
-      getResponse: true,
-      // 同步导出返回文件流，跳过统一 JSON 解析
-      skipErrorHandler: true,
-    });
+    const res = await request<Blob>(
+      params.grid
+        ? '/api/app/audit-log/export-query'
+        : '/api/app/audit-log/export',
+      {
+        ...(params.grid
+          ? { method: 'POST', data: params.grid }
+          : { method: 'GET', params: queryParams }),
+        responseType: 'blob',
+        getResponse: true,
+        // 同步导出返回文件流，跳过统一 JSON 解析
+        skipErrorHandler: true,
+      },
+    );
     const headers = res.headers as
       | (Record<string, any> & { get?: (name: string) => string | undefined })
       | undefined;
@@ -149,14 +158,17 @@ export async function restoreEntityChange(params: {
   entityId: string;
   entityTypeFullName: string;
 }): Promise<EntityRestoreResult> {
-  return request<EntityRestoreResult>('/api/app/audit-log/restore-entity-change', {
-    method: 'POST',
-    data: {
-      EntityChangeId: params.entityChangeId,
-      EntityId: params.entityId,
-      EntityTypeFullName: params.entityTypeFullName,
+  return request<EntityRestoreResult>(
+    '/api/app/audit-log/restore-entity-change',
+    {
+      method: 'POST',
+      data: {
+        EntityChangeId: params.entityChangeId,
+        EntityId: params.entityId,
+        EntityTypeFullName: params.entityTypeFullName,
+      },
     },
-  });
+  );
 }
 
 type AuditLogErrorRateDto = {
@@ -417,4 +429,65 @@ export async function refreshCacheKey(input: {
     method: 'POST',
     data: input,
   });
+}
+
+export function queryBackgroundJobs(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<BackgroundJobDto>(
+    '/api/app/background-job/query',
+    input,
+    signal,
+  );
+}
+
+export function queryCacheKeys(
+  prefix: string,
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<CacheKeyDto>(
+    `/api/app/cache-monitor/query?prefix=${encodeURIComponent(prefix)}`,
+    input,
+    signal,
+  );
+}
+
+export function queryEditions(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<{ id: string; displayName: string }>(
+    '/api/app/edition/query',
+    input,
+    signal,
+  );
+}
+
+export function queryAuditLogs(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<API.AuditLogDto>(
+    '/api/app/audit-log/query',
+    input,
+    signal,
+  );
+}
+
+export interface EntityHistoryRow {
+  id: string;
+  changeTime: string;
+  changeType: number;
+  userName?: string;
+  propertyChanges: {
+    propertyName?: string;
+    originalValue?: string;
+    newValue?: string;
+  }[];
+}
+
+export function queryEntityHistory(
+  entityTypeFullName: string,
+  entityId: string,
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<EntityHistoryRow>(
+    `/api/app/audit-log/query-history?${new URLSearchParams({ entityTypeFullName, entityId })}`,
+    input,
+    signal,
+  );
 }

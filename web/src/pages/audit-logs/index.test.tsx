@@ -1,5 +1,4 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { message } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as proModules from '@/abp/proModules';
 
@@ -12,7 +11,10 @@ let mockSearchParams = new URLSearchParams();
 
 vi.mock('@umijs/max', () => ({
   useAccess: () => mockAccess,
-  useLocation: () => ({ pathname: '/administration/audit-logs', search: `?${mockSearchParams}` }),
+  useLocation: () => ({
+    pathname: '/administration/audit-logs',
+    search: `?${mockSearchParams}`,
+  }),
   useNavigate: () => vi.fn(),
   useSearchParams: () => [mockSearchParams, vi.fn()],
 }));
@@ -43,175 +45,72 @@ vi.mock('./EntityChangeHistoryDrawer', () => ({
 }));
 
 // Mock ProComponents：保留语义化 testid，便于断言
-let capturedAuditRequest:
-  | ((
-      params: Record<string, unknown>,
-      sorter?: unknown,
-      filter?: Record<string, unknown[]>,
-    ) => Promise<unknown>)
-  | undefined;
-let capturedAuditOnChange:
-  | ((pagination: unknown, filters: Record<string, unknown[]>) => void)
-  | undefined;
-
+const queries = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock('@/abp/gridQuery', () => ({ postGridQuery: queries.read }));
+vi.mock('ag-grid-react', () => import('../../../tests/gridTestDouble'));
 vi.mock('@ant-design/pro-components', () => ({
-  PageContainer: ({ children }: any) => (
-    <div data-testid="page-container">{children}</div>
-  ),
-  ProDescriptions: () => <div data-testid="pro-descriptions" />,
-  ProTable: ({ columns, toolbar, request, onChange }: any) => {
-    // 捕获 request / onChange 供筛选与导出用例直接驱动（列头筛选流程）
-    capturedAuditRequest = request;
-    capturedAuditOnChange = onChange;
-    // 模拟 ProTable 挂载即请求数据（列头筛选值经 request 第三参 filter 传入）
-    request?.({ current: 1, pageSize: 10 }, {}, {});
-    return (
-      <div data-testid="pro-table">
-        <div data-testid="table-columns">
-          {columns?.map((col: any, i: number) => (
-            <div key={col.dataIndex ?? col.key ?? i} data-testid="column">
-              {col.title}
-            </div>
-          ))}
-        </div>
-        <div data-testid="toolbar">{toolbar?.actions}</div>
-      </div>
-    );
-  },
+  PageContainer: ({ children }: any) => <main>{children}</main>,
+  ProDescriptions: () => null,
 }));
 
-describe('AuditLogsPage', () => {
+describe('审计日志', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSearchParams = new URLSearchParams();
     mockAccess = { canExportAuditLogs: true };
-    vi.mocked(proModules.getAuditLogs).mockResolvedValue({
-      items: [],
-      totalCount: 0,
-    } as never);
-    vi.mocked(proModules.exportAuditLogs).mockResolvedValue({
-      isQueued: true,
-    } as never);
+    queries.read.mockResolvedValue({ items: [], totalCount: 0 });
+    vi.mocked(proModules.exportAuditLogs).mockResolvedValue({ isQueued: true });
   });
 
-  it('挂载即请求审计日志列表', async () => {
+  it('加载全量查询接口并将深链关联 ID 作为可清除的初始列条件', async () => {
+    mockSearchParams.set('correlationId', 'trace-123');
     const { default: Page } = await import('./index');
     render(<Page />);
-
-    await waitFor(() => {
-      expect(proModules.getAuditLogs).toHaveBeenCalledWith(
-        expect.objectContaining({ current: 1, pageSize: 10 }),
-      );
-    });
-  });
-
-  it('「仅未处理错误」把 select 字符串值转成布尔，清空时不传', async () => {
-    const { default: Page } = await import('./index');
-    render(<Page />);
-    await waitFor(() => expect(capturedAuditRequest).toBeDefined());
-
-    // 列头筛选择的值以数组形式经 request 第三参 filter 传入（字符串 'true' → 布尔 true）。
-    // 注意键是列的 dataIndex：「仅未处理错误」筛选挂在处理状态列（isHandled）上
-    await capturedAuditRequest?.(
-      { current: 1, pageSize: 10 },
-      {},
-      { isHandled: ['true'], correlationId: ['corr-abc'] },
+    await waitFor(() =>
+      expect(queries.read).toHaveBeenCalledWith(
+        '/api/app/audit-log/query',
+        expect.objectContaining({
+          filters: [
+            {
+              field: 'correlationId',
+              join: 'and',
+              conditions: [{ op: 'eq', value: 'trace-123' }],
+            },
+          ],
+        }),
+        expect.any(AbortSignal),
+      ),
     );
-    expect(proModules.getAuditLogs).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        unhandledErrorOnly: true,
-        correlationId: 'corr-abc',
-      }),
-    );
-
-    // 「是否异常」筛选挂在状态列（httpStatusCode）上：字符串三态 → 布尔
-    await capturedAuditRequest?.(
-      { current: 1, pageSize: 10 },
-      {},
-      { httpStatusCode: ['true'] },
-    );
-    expect(proModules.getAuditLogs).toHaveBeenLastCalledWith(
-      expect.objectContaining({ hasException: true }),
-    );
-
-    // 清空筛选（filter 无该键）→ 不携带该参数（不回落到 URL 初始值）
-    await capturedAuditRequest?.({ current: 1, pageSize: 10 }, {}, {});
-    expect(proModules.getAuditLogs).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        unhandledErrorOnly: undefined,
-        correlationId: undefined,
-      }),
+    fireEvent.click(screen.getByRole('button', { name: '清空筛选' }));
+    await waitFor(() =>
+      expect(queries.read).toHaveBeenLastCalledWith(
+        '/api/app/audit-log/query',
+        expect.objectContaining({ filters: [] }),
+        expect.any(AbortSignal),
+      ),
     );
   });
 
-  it('深链 ?correlationId= 预填关联 ID 列头筛选（受控初值，清空不粘）', async () => {
-    mockSearchParams = new URLSearchParams('?correlationId=corr-9');
+  it('仅授权用户可导出，导出收到与列表相同的列条件', async () => {
+    mockSearchParams.set('correlationId', 'trace-123');
     const { default: Page } = await import('./index');
-    render(<Page />);
-
-    // 受控初值作用于请求：挂载请求应带 CorrelationId（首请求 filter 非空）
-    await waitFor(() => {
-      expect(proModules.getAuditLogs).toHaveBeenCalledWith(
-        expect.objectContaining({ correlationId: 'corr-9' }),
-      );
-    });
-  });
-
-  it('无导出权限时按钮隐藏', async () => {
-    mockAccess = { canExportAuditLogs: false };
-    const { default: Page } = await import('./index');
-    render(<Page />);
-
-    await screen.findByTestId('toolbar');
-    expect(screen.queryByText('导出 Excel')).toBeNull();
-  });
-
-  it('有导出权限时显示导出按钮', async () => {
-    const { default: Page } = await import('./index');
-    render(<Page />);
-
-    expect(await screen.findByText('导出 Excel')).toBeTruthy();
-  });
-
-  it('点击导出带当前筛选条件调用导出接口，202 时提示转后台', async () => {
-    const infoSpy = vi
-      .spyOn(message, 'info')
-      .mockImplementation(() => ({}) as never);
-    const { default: Page } = await import('./index');
-    render(<Page />);
-
-    // 模拟列头筛选：受控 onChange 更新页面 filters 状态，导出读同一份状态。
-    // 「关联 ID」「仅未处理错误」「是否异常」同口径作用于导出（同步与异步链路）
-    capturedAuditOnChange?.(
-      {},
-      {
-        httpMethod: ['GET'],
-        url: ['/api/test'],
-        correlationId: ['corr-1'],
-        isHandled: ['true'],
-        httpStatusCode: ['true'],
-      },
-    );
-    fireEvent.click(await screen.findByText('导出 Excel'));
-
-    await waitFor(() => {
-      // 正确的接口：exportAuditLogs；正确的参数：列头筛选的当前筛选条件
+    const view = render(<Page />);
+    fireEvent.click(screen.getByRole('button', { name: /导出 Excel/ }));
+    await waitFor(() =>
       expect(proModules.exportAuditLogs).toHaveBeenCalledWith({
-        httpMethod: 'GET',
-        url: '/api/test',
-        correlationId: 'corr-1',
-        unhandledErrorOnly: true,
-        userName: undefined,
-        startTime: undefined,
-        endTime: undefined,
-        hasException: true,
-      });
-    });
-    await waitFor(() => {
-      expect(infoSpy).toHaveBeenCalledWith(
-        '结果集较大，已转为后台任务，完成后将邮件通知',
-      );
-    });
-    infoSpy.mockRestore();
+        grid: expect.objectContaining({
+          filters: [
+            {
+              field: 'correlationId',
+              join: 'and',
+              conditions: [{ op: 'eq', value: 'trace-123' }],
+            },
+          ],
+        }),
+      }),
+    );
+    mockAccess = {};
+    view.rerender(<Page />);
+    expect(screen.queryByRole('button', { name: /导出 Excel/ })).toBeNull();
   });
 });

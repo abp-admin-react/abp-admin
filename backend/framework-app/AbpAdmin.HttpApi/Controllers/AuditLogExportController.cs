@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using AbpAdmin.ClientErrors;
+using AbpAdmin.Grids;
 using AbpAdmin.HttpApi.ClientErrors;
 using AbpAdmin.Localization;
 using AbpAdmin.Permissions;
@@ -9,12 +10,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
-using Volo.Abp;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.AuditLogging;
 using Volo.Abp.BlobStoring;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Users;
+using Volo.Abp;
 
 namespace AbpAdmin.AuditLogs;
 
@@ -71,6 +72,10 @@ public class AuditLogExportController : AbpController
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             fileName);
     }
+
+    [HttpPost("export-query")]
+    public Task<IActionResult> ExportQueryAsync([FromBody] GridQueryInput input)
+        => ExportAsync(new GetAuditLogListInput { Grid = input });
 
     [HttpGet("export-file/{id}")]
     public async Task<IActionResult> GetExportFileAsync(Guid id)

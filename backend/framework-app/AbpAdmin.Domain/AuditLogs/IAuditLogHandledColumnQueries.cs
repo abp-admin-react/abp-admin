@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Linq;
 using System.Threading.Tasks;
 using Volo.Abp.AuditLogging;
@@ -19,6 +20,8 @@ namespace AbpAdmin.AuditLogs;
 /// </summary>
 public interface IAuditLogHandledColumnQueries
 {
+    Expression<Func<AuditLog, bool>> IsHandled { get; }
+
     /// <summary>向查询追加「未处理」条件（HandledAt IS NULL）。</summary>
     IQueryable<AuditLog> ApplyUnhandled(IQueryable<AuditLog> queryable);
 

@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Linq.Expressions;
+using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.AuditLogging;
 using Volo.Abp.Domain.Repositories;
 
@@ -23,6 +24,22 @@ public static class AuditLogQueryExtensions
     public static Expression<Func<AuditLog, bool>> IsErrorPredicate()
         => x => (x.HttpStatusCode.HasValue && (int)x.HttpStatusCode.Value >= 400)
                 || !string.IsNullOrEmpty(x.Exceptions);
+
+    internal static GridQueryDefinition<AuditLog> Grid(IAuditLogHandledColumnQueries handled, IQueryable<AuditLog> source)
+    {
+        var errors = handled.ApplyUnhandled(source).Where(IsErrorPredicate());
+        return new GridQueryDefinition<AuditLog>()
+            .Field("executionTime", x => x.ExecutionTime)
+            .SearchableField("userName", x => x.UserName)
+            .SearchableField("httpMethod", x => x.HttpMethod)
+            .SearchableField("url", x => x.Url)
+            .Field("httpStatusCode", x => x.HttpStatusCode)
+            .SearchableField("correlationId", x => x.CorrelationId)
+            .Field("executionDuration", x => x.ExecutionDuration)
+            .Field("isHandled", handled.IsHandled)
+            .Field("unhandledError", x => errors.Any(error => error.Id == x.Id))
+            .Field("hasException", x => !string.IsNullOrEmpty(x.Exceptions));
+    }
 
     /// <summary>
     /// 「仅未处理错误」组合筛选：错误口径 + 未处理 + 常规筛选。

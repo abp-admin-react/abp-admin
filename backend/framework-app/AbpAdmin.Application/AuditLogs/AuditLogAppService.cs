@@ -2,27 +2,29 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Linq.Dynamic.Core;
+using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.IpRegions;
 using AbpAdmin.OperationLogs;
 using AbpAdmin.Permissions;
 using AbpAdmin.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
-using Volo.Abp;
+using Microsoft.AspNetCore.Mvc;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.AuditLogging;
+using Volo.Abp.Auditing;
 using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.BackgroundJobs;
-using Volo.Abp.Auditing;
 using Volo.Abp.Data;
 using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Users;
 using Volo.Abp.Validation;
+using Volo.Abp;
 
 namespace AbpAdmin.AuditLogs;
 
@@ -74,6 +76,50 @@ public class AuditLogAppService : AbpAdminAppService, IAuditLogAppService
         _backgroundJobManager = backgroundJobManager;
     }
 
+    private async Task CheckChangeHistoryPermissionAsync(string entityTypeFullName)
+    {
+        var permissionChecker = LazyServiceProvider.LazyGetRequiredService<IPermissionChecker>();
+        var specific = AbpAdminPermissions.AuditLogging.ViewChangeHistory(entityTypeFullName);
+        if (await permissionChecker.IsGrantedAsync(specific) == false)
+        {
+            await AuthorizationService.CheckAsync(AbpAdminPermissions.AuditLogs.Default);
+        }
+    }
+
+    [HttpPost("/api/app/audit-log/query-history")]
+    public virtual async Task<PagedResultDto<EntityChangeHistoryDto>> QueryHistoryAsync(string entityTypeFullName, string entityId, GridQueryInput input)
+    {
+        await CheckChangeHistoryPermissionAsync(entityTypeFullName);
+        var logs = await _auditLogRepository.GetQueryableAsync();
+        var rows = from log in logs
+                   from change in log.EntityChanges
+                   where change.EntityId == entityId && change.EntityTypeFullName == entityTypeFullName
+                   select new EntityChangeHistoryDto
+                   {
+                       Id = change.Id, AuditLogId = log.Id, UserName = log.UserName,
+                       EntityId = change.EntityId, EntityTypeFullName = change.EntityTypeFullName,
+                       ChangeTime = change.ChangeTime, ChangeType = (byte)change.ChangeType,
+                       PropertyChanges = change.PropertyChanges.Select(p => new EntityPropertyChangeDto
+                       {
+                           PropertyName = p.PropertyName, OriginalValue = p.OriginalValue, NewValue = p.NewValue
+                       }).ToList()
+                   };
+        var grid = new GridQueryDefinition<EntityChangeHistoryDto>()
+            .Field("changeTime", x => x.ChangeTime)
+            .Field("changeType", x => (int)x.ChangeType)
+            .SearchableField("userName", x => x.UserName);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "changeTime", true, x => x.Id, x => x);
+        return new(page.TotalCount, page.Items);
+    }
+
+    public virtual async Task<PagedResultDto<AuditLogDto>> QueryAsync(GridQueryInput input)
+    {
+        var query = await _auditLogRepository.GetQueryableAsync();
+        var grid = AuditLogQueryExtensions.Grid(_handledColumnQueries, query);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "executionTime", true, x => x.Id, x => Map(x));
+        return await WithDetailsAsync(page.TotalCount, page.Items);
+    }
+
     public virtual async Task<PagedResultDto<AuditLogDto>> GetListAsync(GetAuditLogListInput input)
     {
         // Sorting 白名单对两个分支一体生效：普通分支的 input.Sorting 经 GetListByInputAsync
@@ -103,7 +149,11 @@ public class AuditLogAppService : AbpAdminAppService, IAuditLogAppService
                 input, input.MaxResultCount, input.SkipCount);
         }
 
-        var dtos = items.Select(x => Map(x)).ToList();
+        return await WithDetailsAsync(count, items.Select(x => Map(x)).ToList());
+    }
+
+    private async Task<PagedResultDto<AuditLogDto>> WithDetailsAsync(long count, List<AuditLogDto> dtos)
+    {
         await AttachHandledStatesAsync(dtos);
 
         // IP 归属地按当页去重解析（内部走缓存），不在查询里 join
@@ -276,13 +326,7 @@ public class AuditLogAppService : AbpAdminAppService, IAuditLogAppService
     public virtual async Task<PagedResultDto<EntityChangeHistoryDto>> GetEntityChangeHistoryAsync(
         GetEntityChangeHistoryInput input)
     {
-        // 实体级权限检查：未定义或未授予时回退到 AbpAdmin.AuditLogs
-        var permissionChecker = LazyServiceProvider.LazyGetRequiredService<IPermissionChecker>();
-        var specific = AbpAdminPermissions.AuditLogging.ViewChangeHistory(input.EntityTypeFullName);
-        if (await permissionChecker.IsGrantedAsync(specific) == false)
-        {
-            await AuthorizationService.CheckAsync(AbpAdminPermissions.AuditLogs.Default);
-        }
+        await CheckChangeHistoryPermissionAsync(input.EntityTypeFullName);
 
         // 变更历史的 Sorting 同样直达 Dynamic LINQ，须过白名单（null/空白合法，走默认 ChangeTime DESC）
         if (!SortingWhitelist.IsValid(input.Sorting, EntityChangeSortableFields))
@@ -812,12 +856,14 @@ public class AuditLogAppService : AbpAdminAppService, IAuditLogAppService
         {
             dto.Actions = log.Actions.Select(x => new AuditLogActionDto
             {
+                Id = x.Id,
                 ServiceName = x.ServiceName,
                 MethodName = x.MethodName,
                 ExecutionDuration = x.ExecutionDuration
             }).ToList();
             dto.EntityChanges = log.EntityChanges.Select(x => new EntityChangeDto
             {
+                Id = x.Id,
                 EntityTypeFullName = x.EntityTypeFullName,
                 EntityId = x.EntityId,
                 ChangeType = (byte)x.ChangeType,

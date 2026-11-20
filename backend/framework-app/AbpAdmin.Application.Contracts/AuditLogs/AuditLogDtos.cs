@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Net;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 
@@ -10,6 +11,10 @@ namespace AbpAdmin.AuditLogs;
 
 public interface IAuditLogAppService : IApplicationService
 {
+    Task<PagedResultDto<EntityChangeHistoryDto>> QueryHistoryAsync(string entityTypeFullName, string entityId, GridQueryInput input);
+
+    Task<PagedResultDto<AuditLogDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<AuditLogDto>> GetListAsync(GetAuditLogListInput input);
 
     Task<AuditLogDto> GetAsync(Guid id);
@@ -41,6 +46,8 @@ public interface IAuditLogAppService : IApplicationService
 
 public class GetAuditLogListInput : PagedAndSortedResultRequestDto
 {
+    public GridQueryInput? Grid { get; set; }
+
     public DateTime? StartTime { get; set; }
 
     public DateTime? EndTime { get; set; }
@@ -118,6 +125,8 @@ public class AuditLogDto : EntityDto<Guid>
 
 public class AuditLogActionDto
 {
+    public Guid Id { get; set; }
+
     public string? ServiceName { get; set; }
 
     public string? MethodName { get; set; }
@@ -127,6 +136,8 @@ public class AuditLogActionDto
 
 public class EntityChangeDto
 {
+    public Guid Id { get; set; }
+
     public string? EntityTypeFullName { get; set; }
 
     public string? EntityId { get; set; }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using MiniExcelLibs;
 using Volo.Abp.AuditLogging;
 using Volo.Abp.DependencyInjection;
@@ -28,6 +29,9 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
     /// <summary>按筛选条件计数（与 BuildAsync 同一筛选扩展，见接口注释）。</summary>
     public virtual Task<long> CountAsync(GetAuditLogListInput input)
     {
+        if (input.Grid != null)
+            return CountGridAsync(input.Grid);
+
         // 「仅未处理错误」筛选必须在导出链路同样生效，否则复现
         // 「列表有筛选、导出没有」的分叉（AuditLogQueryExtensions 类注释立的规约）
         if (input.UnhandledErrorOnly == true)
@@ -36,6 +40,13 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
         }
 
         return _auditLogRepository.GetCountByInputAsync(input);
+    }
+
+    private async Task<long> CountGridAsync(GridQueryInput input)
+    {
+        var rows = await _auditLogRepository.GetQueryableAsync();
+        return await _auditLogRepository.AsyncExecuter.LongCountAsync(
+            AuditLogQueryExtensions.Grid(_handledColumnQueries, rows).Filter(rows, input));
     }
 
     /// <summary>
@@ -55,6 +66,13 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
         // 起始游标降序哨兵取 Guid.MaxValue：首个 Id 必小于它，首批即全量起点
         var afterId = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
 
+        IQueryable<AuditLog>? gridRows = null;
+        if (input.Grid != null)
+        {
+            var source = await _auditLogRepository.GetQueryableAsync();
+            gridRows = AuditLogQueryExtensions.Grid(_handledColumnQueries, source).Filter(source, input.Grid);
+        }
+
         while (logs.Count < maxResultCount)
         {
             var remaining = maxResultCount - logs.Count;
@@ -62,7 +80,10 @@ public class AuditLogExcelBuilder : IAuditLogExcelBuilder, ITransientDependency
 
             // 「仅未处理错误」在导出 keyset 批次同样生效（与列表/计数同口径，
             // 未处理 = HandledAt 映射列 IS NULL，经 IAuditLogHandledColumnQueries 注入）
-            var batch = input.UnhandledErrorOnly == true
+            var batch = gridRows != null
+                ? await _auditLogRepository.AsyncExecuter.ToListAsync(gridRows.Where(x => x.Id < afterId)
+                    .OrderByDescending(x => x.Id).Take(currentBatchSize))
+                : input.UnhandledErrorOnly == true
                 ? await _auditLogRepository.GetUnhandledErrorListByKeysetAsync(
                     input, currentBatchSize, afterId, _handledColumnQueries)
                 : await _auditLogRepository.GetListByInputAsync(

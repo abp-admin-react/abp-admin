@@ -1,53 +1,47 @@
-import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import { DownloadOutlined } from '@ant-design/icons';
 import { PageContainer, ProDescriptions } from '@ant-design/pro-components';
 import { useAccess, useSearchParams } from '@umijs/max';
-import { Button, Drawer, Input, Modal, message, Tag, Tooltip } from 'antd';
-import dayjs, { type Dayjs } from 'dayjs';
-import React, { useRef, useState } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  Button,
+  Drawer,
+  Button as GridButton,
+  Space as GridControls,
+  Input,
+  Modal,
+  message,
+  Tag,
+  Tooltip,
+} from 'antd';
+import React, { useState } from 'react';
 import {
   exportAuditLogs,
   getAuditLog,
-  getAuditLogs,
   markAuditLogHandled,
+  queryAuditLogs,
   unmarkAuditLogHandled,
 } from '@/abp/proModules';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import CorrelationIdText from '@/components/CorrelationIdText';
 import {
-  dateRangeFilter,
-  enumFilters,
-  firstFilterValue,
-  textFilter,
-} from '@/components/tableColumnFilters';
+  toGridColumns,
+  useSearchableLocalGrid,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import { dictionaryRequest } from '@/utils/dictionary';
-import { toDayEnd, toDayStart } from '@/utils/format';
 import { changeTypeText } from './changeType';
-import PropertyChangesTable from './components/PropertyChangesTable';
+import PropertyChangesTable, {
+  type PropertyChangeRow,
+} from './components/PropertyChangesTable';
 import EntityChangeHistoryDrawer from './EntityChangeHistoryDrawer';
 
 const formatHandledAt = (value?: string | null) =>
   value ? new Date(value).toLocaleString() : '';
 
-// dateRange 只给到日期（YYYY-MM-DD）：补齐到整天边界，避免结束日整段被排除（共享工具 toDayStart/toDayEnd）
-const splitExecutionTimeRange = (
-  range?: unknown[] | null,
-): { startTime?: string; endTime?: string } => {
-  if (range?.length !== 2 || !range.every(dayjs.isDayjs)) {
-    return {};
-  }
-  const [start, end] = range as [Dayjs, Dayjs];
-  return {
-    startTime: toDayStart(start.format('YYYY-MM-DD')),
-    endTime: toDayEnd(end.format('YYYY-MM-DD')),
-  };
-};
-
-// 「是否异常」下拉存的是字符串，与 unhandledErrorOnly 同一套约定
-const parseTriBool = (value: unknown): boolean | undefined =>
-  value === 'true' ? true : value === 'false' ? false : undefined;
-
-const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ configurationEntry }) => {
+const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
+  configurationEntry,
+}) => {
+  const [propertyTarget, setPropertyTarget] = useState<PropertyChangeRow[]>();
   const [detail, setDetail] = useState<any>();
   const [historyDrawer, setHistoryDrawer] = useState<{
     open: boolean;
@@ -55,7 +49,6 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
     entityId?: string;
   }>({ open: false });
   const [exporting, setExporting] = useState(false);
-  const tableRef = useRef<any>(null);
   const access = useAccess();
   // 支持从操作日志详情跳转过来（?correlationId=xxx 串联同一次请求的两类日志）
   const [searchParams] = useSearchParams();
@@ -63,10 +56,6 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
   // 列头筛选走官网「可控的筛选」模式（columns.filteredValue + onChange）：
   // 导出与列表同口径，直接读这份状态。
   const initialCorrelationId = searchParams.get('correlationId') ?? undefined;
-  const [filters, setFilters] = useState<Record<string, React.Key[] | null>>(
-    initialCorrelationId ? { correlationId: [initialCorrelationId] } : {},
-  );
-
   // 「方法」筛选选项来自数据字典（异步），落到列头 filters 需要同步数组
   const [methodFilters, setMethodFilters] = useState<
     { text: string; value: string }[]
@@ -135,7 +124,7 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
       message.success('已标记为已处理');
       setHandleTarget(undefined);
       setHandleNote('');
-      tableRef.current?.reload();
+      auditGrid.refresh();
       if (detail?.id === handleTarget.id) {
         await openDetail(handleTarget.id);
       }
@@ -150,7 +139,7 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
     try {
       await unmarkAuditLogHandled(record.id);
       message.success('已取消已处理标记');
-      tableRef.current?.reload();
+      auditGrid.refresh();
       if (detail?.id === record.id) {
         await openDetail(record.id);
       }
@@ -162,20 +151,9 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
   const handleExport = async () => {
     setExporting(true);
     try {
-      // 从列头筛选的受控状态取当前筛选条件（与列表同口径）
-      const timeRange = splitExecutionTimeRange(filters.executionTime);
-      const result = await exportAuditLogs({
-        httpMethod: firstFilterValue(filters, 'httpMethod'),
-        url: firstFilterValue(filters, 'url'),
-        // 导出与列表同口径：关联 ID 与「仅未处理错误」筛选同样作用于导出（同步与异步链路）
-        correlationId: firstFilterValue(filters, 'correlationId'),
-        unhandledErrorOnly:
-          firstFilterValue(filters, 'isHandled') === 'true' || undefined,
-        userName: firstFilterValue(filters, 'userName'),
-        startTime: timeRange.startTime,
-        endTime: timeRange.endTime,
-        hasException: parseTriBool(firstFilterValue(filters, 'httpStatusCode')),
-      });
+      const gridQuery = auditGrid.getQuery();
+      if (!gridQuery) return;
+      const result = await exportAuditLogs({ grid: gridQuery });
 
       if (result.isQueued) {
         message.info('结果集较大，已转为后台任务，完成后将邮件通知');
@@ -201,155 +179,216 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
     }
   };
 
+  const auditGrid = useSearchableRemoteGrid<any>({
+    columnDefs: toGridColumns<any>(
+      [
+        {
+          title: '时间',
+          dataIndex: 'executionTime',
+          valueType: 'dateTime',
+        },
+        {
+          title: '用户',
+          dataIndex: 'userName',
+        },
+        {
+          title: '方法',
+          dataIndex: 'httpMethod',
+
+          valueEnum: Object.fromEntries(
+            methodFilters.map((x) => [x.value, x.text]),
+          ),
+        },
+        {
+          title: 'URL',
+          dataIndex: 'url',
+          ellipsis: true,
+        },
+        {
+          title: '状态',
+          dataIndex: 'httpStatusCode',
+        },
+        {
+          title: '关联 ID',
+          dataIndex: 'correlationId',
+          width: 130,
+          copyable: true,
+          ellipsis: true,
+
+          render: (_, record) => (
+            <CorrelationIdText
+              value={record.correlationId}
+              linkTo={
+                access.canManageOperationLogs
+                  ? '/administration/operation-logs'
+                  : undefined
+              }
+              linkText="查关联操作日志"
+            />
+          ),
+        },
+        {
+          title: '处理状态',
+          dataIndex: 'isHandled',
+          width: 110,
+
+          render: renderHandleState,
+        },
+        {
+          title: '未处理错误',
+          dataIndex: 'unhandledError',
+          render: (_, row) =>
+            !row.isHandled && isAuditLogError(row) ? '是' : '否',
+        },
+        {
+          title: '有异常',
+          dataIndex: 'hasException',
+          render: (_, record) => (record.exceptions ? '是' : '否'),
+        },
+        { title: '耗时(ms)', dataIndex: 'executionDuration' },
+        {
+          title: '操作',
+          valueType: 'option',
+          render: (_, record) => [
+            <a key="detail" onClick={() => openDetail(record.id)}>
+              详情
+            </a>,
+            ...(access.canHandleAuditLogErrors
+              ? [
+                  record.isHandled ? (
+                    <a
+                      key="unhandle"
+                      onClick={() => handleUnmarkHandled(record)}
+                    >
+                      取消处理
+                    </a>
+                  ) : (
+                    <a
+                      key="handle"
+                      onClick={() => {
+                        setHandleNote('');
+                        setHandleTarget(record);
+                      }}
+                    >
+                      标记已处理
+                    </a>
+                  ),
+                ]
+              : []),
+          ],
+        },
+      ],
+      {
+        pro: true,
+        kinds: {
+          executionDuration: 'number',
+          httpStatusCode: 'number',
+          isHandled: 'boolean',
+          hasException: 'boolean',
+          unhandledError: 'boolean',
+        },
+      },
+    ),
+    ariaLabel: '接口审计日志',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    initialState: initialCorrelationId
+      ? {
+          filter: {
+            filterModel: {
+              correlationId: {
+                filterType: 'text',
+                type: 'equals',
+                filter: initialCorrelationId,
+              },
+            },
+          },
+        }
+      : undefined,
+    query: queryAuditLogs,
+  });
+  const actionGrid = useSearchableLocalGrid<any>({
+    columnDefs: toGridColumns<any>(
+      [
+        { title: '服务', dataIndex: 'serviceName', ellipsis: true },
+        { title: '方法', dataIndex: 'methodName' },
+        { title: '耗时(ms)', dataIndex: 'executionDuration', width: 120 },
+      ],
+      { pro: true, kinds: { executionDuration: 'number' } },
+    ),
+    ariaLabel: '调用',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    rowData: detail?.actions || [],
+    pagination: false,
+    keywordFields: ['serviceName', 'methodName'],
+  });
+  const changesGrid = useSearchableLocalGrid<any>({
+    columnDefs: toGridColumns<any>(
+      [
+        { title: '实体', dataIndex: 'entityTypeFullName', ellipsis: true },
+        { title: '实体 Id', dataIndex: 'entityId' },
+        {
+          title: '类型',
+          dataIndex: 'changeType',
+          render: (_, record) => changeTypeText(record.changeType),
+        },
+        {
+          title: '操作',
+          valueType: 'option',
+          width: 100,
+          render: (_, record) => [
+            <a
+              key="properties"
+              onClick={() => setPropertyTarget(record.propertyChanges)}
+            >
+              属性变更
+            </a>,
+            <a
+              key="history"
+              onClick={() =>
+                setHistoryDrawer({
+                  open: true,
+                  entityTypeFullName: record.entityTypeFullName,
+                  entityId: record.entityId,
+                })
+              }
+            >
+              完整历史
+            </a>,
+          ],
+        },
+      ],
+      { pro: true, kinds: { changeType: 'number' } },
+    ),
+    ariaLabel: '实体变更',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    rowData: detail?.entityChanges || [],
+    pagination: false,
+    keywordFields: ['entityTypeFullName', 'entityId'],
+  });
+
   return (
     <PageContainer title="接口审计日志" extra={configurationEntry}>
-      <AutoHeightProTable
-        actionRef={tableRef}
-        rowKey="id"
-        search={false}
-        columns={[
-          {
-            title: '时间',
-            dataIndex: 'executionTime',
-            valueType: 'dateTime',
-            filteredValue: filters.executionTime as React.Key[] | undefined,
-            ...dateRangeFilter(),
-          },
-          {
-            title: '用户',
-            dataIndex: 'userName',
-            filteredValue: filters.userName as React.Key[] | undefined,
-            ...textFilter(),
-          },
-          {
-            title: '方法',
-            dataIndex: 'httpMethod',
-            // T3.4：筛选下拉读数据字典（AuditLogHttpMethod），不再靠手输文本；
-            // 单选：页面按首值下发，多选两项会静默只按第一项过滤
-            filterMultiple: false,
-            filters: methodFilters,
-            filteredValue: filters.httpMethod as React.Key[] | undefined,
-          },
-          {
-            title: 'URL',
-            dataIndex: 'url',
-            ellipsis: true,
-            filteredValue: filters.url as React.Key[] | undefined,
-            ...textFilter('按 URL 筛选'),
-          },
-          {
-            title: '状态',
-            dataIndex: 'httpStatusCode',
-            // 「是否异常」筛选挂在状态列：两者同属请求结果维度
-            filterMultiple: false,
-            filters: enumFilters({ 有异常: 'true', 无异常: 'false' }),
-            filteredValue: filters.httpStatusCode as React.Key[] | undefined,
-          },
-          {
-            title: '关联 ID',
-            dataIndex: 'correlationId',
-            width: 130,
-            copyable: true,
-            ellipsis: true,
-            filteredValue: filters.correlationId as React.Key[] | undefined,
-            ...textFilter('与操作日志串联的关联 ID'),
-            render: (_, record) => (
-              <CorrelationIdText
-                value={record.correlationId}
-                linkTo={access.canManageOperationLogs ? '/administration/operation-logs' : undefined}
-                linkText="查关联操作日志"
-              />
-            ),
-          },
-          {
-            title: '处理状态',
-            dataIndex: 'isHandled',
-            width: 110,
-            // 「仅未处理错误」筛选挂在处理状态列（错误认领工作流口径）
-            filterMultiple: false,
-            filters: enumFilters({ 仅未处理错误: 'true' }),
-            filteredValue: filters.isHandled as React.Key[] | undefined,
-            render: renderHandleState,
-          },
-          { title: '耗时(ms)', dataIndex: 'executionDuration' },
-          {
-            title: '操作',
-            valueType: 'option',
-            render: (_, record) => [
-              <a key="detail" onClick={() => openDetail(record.id)}>
-                详情
-              </a>,
-              ...(access.canHandleAuditLogErrors
-                ? [
-                    record.isHandled ? (
-                      <a
-                        key="unhandle"
-                        onClick={() => handleUnmarkHandled(record)}
-                      >
-                        取消处理
-                      </a>
-                    ) : (
-                      <a
-                        key="handle"
-                        onClick={() => {
-                          setHandleNote('');
-                          setHandleTarget(record);
-                        }}
-                      >
-                        标记已处理
-                      </a>
-                    ),
-                  ]
-                : []),
-            ],
-          },
-        ]}
-        toolbar={{
-          actions: access.canExportAuditLogs
-            ? [
-                <Button
-                  key="export"
-                  type="primary"
-                  icon={<DownloadOutlined />}
-                  loading={exporting}
-                  onClick={handleExport}
-                >
-                  导出 Excel
-                </Button>,
-              ]
-            : [],
-        }}
-        request={async (params, _sorter, filter) => {
-          const f = (filter ?? {}) as Record<string, unknown[] | undefined>;
-          // 列头受控筛选是单一事实源；第三参 f 在挂载/未交互时不含
-          // filterDropdown 列（ProTable 初值只收配了 filters 的列），
-          // 故 f 缺失时回退受控状态——深链初值才能作用于首请求
-          const read = (key: string): string | undefined =>
-            firstFilterValue(f, key) ?? firstFilterValue(filters, key);
-          const timeRange = splitExecutionTimeRange(f.executionTime);
-          const result = await getAuditLogs({
-            current: params.current,
-            pageSize: params.pageSize,
-            httpMethod: read('httpMethod'),
-            url: read('url'),
-            userName: read('userName'),
-            correlationId: read('correlationId'),
-            unhandledErrorOnly:
-              firstFilterValue(f, 'isHandled') === 'true' || undefined,
-            startTime: timeRange.startTime,
-            endTime: timeRange.endTime,
-            hasException: parseTriBool(firstFilterValue(f, 'httpStatusCode')),
-          });
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        onChange={(_pagination, nextFilters) => {
-          setFilters(nextFilters as Record<string, React.Key[] | null>);
-        }}
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {auditGrid.searchBox}
+        {auditGrid.hasFilters && (
+          <GridButton onClick={auditGrid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {access.canExportAuditLogs && (
+          <Button
+            type="primary"
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            onClick={handleExport}
+          >
+            导出 Excel
+          </Button>
+        )}
+      </GridControls>
+      <AgGridReact<any> {...auditGrid.gridProps} />
+
       <Drawer
         title="审计详情"
         open={!!detail}
@@ -387,7 +426,11 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
               render: (_, record) => (
                 <CorrelationIdText
                   value={record?.correlationId}
-                  linkTo={access.canManageOperationLogs ? '/administration/operation-logs' : undefined}
+                  linkTo={
+                    access.canManageOperationLogs
+                      ? '/administration/operation-logs'
+                      : undefined
+                  }
                   linkText="查关联操作日志"
                 />
               ),
@@ -408,66 +451,33 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
             },
           ]}
         />
-        <AutoHeightProTable
-          headerTitle="调用"
-          rowKey={(row) =>
-            `${row.serviceName}-${row.methodName}-${row.executionDuration}`
-          }
-          search={false}
-          /* 抽屉内嵌套布局，不撑满视口 */
-          fillViewport={false}
-          pagination={false}
-          dataSource={detail?.actions || []}
-          columns={[
-            { title: '服务', dataIndex: 'serviceName', ellipsis: true },
-            { title: '方法', dataIndex: 'methodName' },
-            { title: '耗时(ms)', dataIndex: 'executionDuration', width: 120 },
-          ]}
-        />
-        <AutoHeightProTable
-          headerTitle="实体变更"
-          rowKey={(row) =>
-            `${row.entityTypeFullName}-${row.entityId}-${row.changeType}`
-          }
-          search={false}
-          /* 抽屉内嵌套布局，不撑满视口 */
-          fillViewport={false}
-          pagination={false}
-          dataSource={detail?.entityChanges || []}
-          columns={[
-            { title: '实体', dataIndex: 'entityTypeFullName', ellipsis: true },
-            { title: '实体 Id', dataIndex: 'entityId' },
-            {
-              title: '类型',
-              dataIndex: 'changeType',
-              render: (_, record) => changeTypeText(record.changeType),
-            },
-            {
-              title: '操作',
-              valueType: 'option',
-              width: 100,
-              render: (_, record) => [
-                <a
-                  key="history"
-                  onClick={() =>
-                    setHistoryDrawer({
-                      open: true,
-                      entityTypeFullName: record.entityTypeFullName,
-                      entityId: record.entityId,
-                    })
-                  }
-                >
-                  完整历史
-                </a>,
-              ],
-            },
-          ]}
-          expandable={{
-            expandedRowRender: (record) => (
-              <PropertyChangesTable propertyChanges={record.propertyChanges} />
-            ),
-          }}
-        />
+
+        <strong>{'调用'}</strong>
+        <GridControls wrap style={{ marginBottom: 8 }}>
+          {actionGrid.searchBox}
+          {actionGrid.hasFilters && (
+            <GridButton onClick={actionGrid.clearFilters}>清空筛选</GridButton>
+          )}
+        </GridControls>
+        <AgGridReact<any> {...actionGrid.gridProps} />
+
+        <strong>{'实体变更'}</strong>
+        <GridControls wrap style={{ marginBottom: 8 }}>
+          {changesGrid.searchBox}
+          {changesGrid.hasFilters && (
+            <GridButton onClick={changesGrid.clearFilters}>清空筛选</GridButton>
+          )}
+        </GridControls>
+        <AgGridReact<any> {...changesGrid.gridProps} />
+      </Drawer>
+      <Drawer
+        open={!!propertyTarget}
+        onClose={() => setPropertyTarget(undefined)}
+        title="属性变更"
+        size={720}
+        destroyOnHidden
+      >
+        <PropertyChangesTable propertyChanges={propertyTarget} />
       </Drawer>
       <Modal
         title="标记为已处理"
@@ -491,7 +501,7 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
         />
       </Modal>
       <EntityChangeHistoryDrawer
-        key={historyDrawer.entityId ?? "none"}
+        key={historyDrawer.entityId ?? 'none'}
         open={historyDrawer.open}
         onClose={() => setHistoryDrawer({ open: false })}
         entityTypeFullName={historyDrawer.entityTypeFullName}
@@ -504,7 +514,9 @@ const AuditLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ con
 export default function Page() {
   return (
     <FrameworkConfiguration owner="audit">
-      {(configurationEntry) => <AuditLogsPage configurationEntry={configurationEntry} />}
+      {(configurationEntry) => (
+        <AuditLogsPage configurationEntry={configurationEntry} />
+      )}
     </FrameworkConfiguration>
   );
 }

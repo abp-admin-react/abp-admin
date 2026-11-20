@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.AuditLogs;
@@ -23,6 +24,9 @@ public class EfCoreAuditLogHandledColumnQueries : IAuditLogHandledColumnQueries,
     {
         _dbContextProvider = dbContextProvider;
     }
+
+    public Expression<Func<AuditLog, bool>> IsHandled =>
+        x => EF.Property<DateTime?>(x, AuditLogHandleConsts.HandledAtPropertyName) != null;
 
     /// <summary>
     /// 追加「HandledAt IS NULL」条件。必须用 EF.Property 而不是 x.GetProperty：

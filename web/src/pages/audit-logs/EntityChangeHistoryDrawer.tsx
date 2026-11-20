@@ -1,13 +1,24 @@
-import { ProTable } from '@ant-design/pro-components';
-import { App, Button, Drawer, Popconfirm } from 'antd';
-import React, { useRef, useState } from 'react';
-import type { ActionType } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
-  getEntityChangeHistory,
-  restoreEntityChange,
+  App,
+  Button,
+  Drawer,
+  Button as GridButton,
+  Space as GridControls,
+  Popconfirm,
+} from 'antd';
+import React, { useState } from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
+import {
   type EntityRestoreResult,
+  queryEntityHistory,
+  restoreEntityChange,
 } from '@/abp/proModules';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 import type { PropertyChangeRow } from './components/PropertyChangesTable';
 
@@ -17,6 +28,7 @@ interface EntityChangeHistoryItem {
   userName?: string;
   propertyChanges: PropertyChangeRow[];
 }
+
 import { changeTypeText } from './changeType';
 import PropertyChangesTable from './components/PropertyChangesTable';
 
@@ -39,8 +51,8 @@ const EntityChangeHistoryDrawer: React.FC<EntityChangeHistoryDrawerProps> = ({
 }) => {
   const access = useAccess();
   const { message } = App.useApp();
-  const actionRef = useRef<ActionType>(undefined);
 
+  const [propertyTarget, setPropertyTarget] = useState<PropertyChangeRow[]>();
   const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const handleRestore = async (entityChangeId: string) => {
@@ -59,13 +71,91 @@ const EntityChangeHistoryDrawer: React.FC<EntityChangeHistoryDrawerProps> = ({
             .map((x) => x.propertyName)
             .join('、')}`
         : '';
-      message.success(`已回滚 ${result.restoredProperties.length} 项属性${skippedNote}`);
-      actionRef.current?.reload();
+      message.success(
+        `已回滚 ${result.restoredProperties.length} 项属性${skippedNote}`,
+      );
+      grid.refresh();
     } finally {
       // 失败时全局 errorHandler 已 toast 服务端真实原因（避免 modal + toast 双重提示）
       setRestoringId(null);
     }
   };
+
+  const grid = useSearchableRemoteGrid<EntityChangeHistoryItem>({
+    columnDefs: toGridColumns<EntityChangeHistoryItem>(
+      [
+        {
+          title: '变更时间',
+          dataIndex: 'changeTime',
+          valueType: 'dateTime',
+          width: 160,
+        },
+        {
+          title: '变更类型',
+          dataIndex: 'changeType',
+          width: 80,
+          render: (_, record) => changeTypeText(record.changeType),
+        },
+        {
+          title: '操作人',
+          dataIndex: 'userName',
+          width: 100,
+          render: (_, record) => record.userName || '-',
+        },
+        {
+          title: '属性变更',
+          dataIndex: 'propertyChanges',
+          render: (_, record) => (
+            <Button
+              type="link"
+              onClick={() => setPropertyTarget(record.propertyChanges)}
+            >
+              查看属性 ({record.propertyChanges.length})
+            </Button>
+          ),
+        },
+        ...(access.canRestoreEntityChange
+          ? [
+              {
+                title: '操作',
+                width: 80,
+                render: (_dom: unknown, record: EntityChangeHistoryItem) =>
+                  // 仅 Updated（1）型变更可回滚；回滚会写回该次变更前的旧值
+                  record.changeType === 1 ? (
+                    <Popconfirm
+                      title="回滚此变更？"
+                      description="会把该次变更涉及的属性恢复为变更前的值，回滚本身会生成一条新的变更记录。"
+                      onConfirm={() => handleRestore(record.id)}
+                    >
+                      <Button
+                        size="small"
+                        type="link"
+                        disabled={restoringId === record.id}
+                      >
+                        回滚
+                      </Button>
+                    </Popconfirm>
+                  ) : null,
+              },
+            ]
+          : []),
+      ],
+      {
+        pro: true,
+        kinds: { changeType: 'number', propertyChanges: 'display' },
+      },
+    ),
+    ariaLabel: '实体变更历史',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: React.useCallback(
+      (input: GridQuery, signal: AbortSignal) =>
+        entityId && entityTypeFullName
+          ? queryEntityHistory(entityTypeFullName, entityId, input, signal)
+          : Promise.resolve({ items: [], totalCount: 0 }),
+      [entityId, entityTypeFullName],
+    ),
+  });
 
   return (
     <Drawer
@@ -75,79 +165,23 @@ const EntityChangeHistoryDrawer: React.FC<EntityChangeHistoryDrawerProps> = ({
       size={720}
       destroyOnHidden
     >
-      <ProTable
-        rowKey="id"
-        search={false}
-        options={false}
-        actionRef={actionRef}
-        request={async (params) => {
-          if (!entityTypeFullName || !entityId) {
-            return { data: [], total: 0, success: true };
-          }
-          const result = await getEntityChangeHistory({
-            entityTypeFullName,
-            entityId,
-            current: params.current,
-            pageSize: params.pageSize,
-          });
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        columns={[
-          {
-            title: '变更时间',
-            dataIndex: 'changeTime',
-            valueType: 'dateTime',
-            width: 160,
-          },
-          {
-            title: '变更类型',
-            dataIndex: 'changeType',
-            width: 80,
-            render: (_, record) => changeTypeText(record.changeType),
-          },
-          {
-            title: '操作人',
-            dataIndex: 'userName',
-            width: 100,
-            render: (_, record) => record.userName || '-',
-          },
-          {
-            title: '属性变更',
-            dataIndex: 'propertyChanges',
-            render: (_, record) => (
-              <PropertyChangesTable
-                propertyChanges={record.propertyChanges}
-                showHeader={false}
-              />
-            ),
-          },
-          ...(access.canRestoreEntityChange
-            ? [
-                {
-                  title: '操作',
-                  width: 80,
-                  render: (_dom: unknown, record: EntityChangeHistoryItem) =>
-                    // 仅 Updated（1）型变更可回滚；回滚会写回该次变更前的旧值
-                    record.changeType === 1 ? (
-                      <Popconfirm
-                        title="回滚此变更？"
-                        description="会把该次变更涉及的属性恢复为变更前的值，回滚本身会生成一条新的变更记录。"
-                        onConfirm={() => handleRestore(record.id)}
-                      >
-                        <Button size="small" type="link" disabled={restoringId === record.id}>
-                          回滚
-                        </Button>
-                      </Popconfirm>
-                    ) : null,
-                },
-              ]
-            : []),
-        ]}
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}
+      </GridControls>
+      <AgGridReact<EntityChangeHistoryItem> {...grid.gridProps} />
+
+      <Drawer
+        open={!!propertyTarget}
+        onClose={() => setPropertyTarget(undefined)}
+        title="属性变更"
+        size={640}
+        destroyOnHidden
+      >
+        <PropertyChangesTable propertyChanges={propertyTarget} />
+      </Drawer>
     </Drawer>
   );
 };
