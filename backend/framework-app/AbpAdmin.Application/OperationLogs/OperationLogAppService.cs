@@ -18,11 +18,11 @@ public class OperationLogAppService : AbpAdminAppService, IOperationLogAppServic
 {
     private static readonly GridQueryDefinition<OperationLog> Grid = new GridQueryDefinition<OperationLog>()
         .Field("executionTime", row => row.ExecutionTime)
-        .Field("userName", row => row.UserName)
+        .SearchableField("userName", row => row.UserName)
         .Field("type", row => row.Type)
-        .Field("subType", row => row.SubType)
-        .Field("bizId", row => row.BizId)
-        .Field("action", row => row.Action)
+        .SearchableField("subType", row => row.SubType)
+        .SearchableField("bizId", row => row.BizId)
+        .SearchableField("action", row => row.Action)
         .Field("correlationId", row => row.CorrelationId, "eq", "ne")
         .Field("success", row => row.Success)
         .Field("duration", row => row.Duration);
@@ -53,7 +53,7 @@ public class OperationLogAppService : AbpAdminAppService, IOperationLogAppServic
     {
         ValidateSorting(input.Sorting);
 
-        var queryable = WithKeyword(await _repository.GetQueryableAsync(), input.Filter);
+        var queryable = Grid.FilterKeyword(await _repository.GetQueryableAsync(), input.Filter, caseSensitive: true);
 
         if (!string.IsNullOrWhiteSpace(input.Type))
         {
@@ -103,16 +103,11 @@ public class OperationLogAppService : AbpAdminAppService, IOperationLogAppServic
 
     public virtual async Task<PagedResultDto<OperationLogDto>> QueryAsync(GridQueryInput input)
     {
-        var filtered = Grid.Filter(WithKeyword(await _repository.GetQueryableAsync(), input.Keyword), input);
+        var filtered = Grid.Filter(await _repository.GetQueryableAsync(), input);
         var total = await AsyncExecuter.CountAsync(filtered);
         var ordered = Grid.OrderBy(filtered, input, "executionTime", true, log => log.Id);
         return await ReadPageAsync(ordered, total, input.SkipCount, input.MaxResultCount);
     }
-
-    private static IQueryable<OperationLog> WithKeyword(IQueryable<OperationLog> query, string? filter) =>
-        string.IsNullOrWhiteSpace(filter) ? query : query.Where(x =>
-            x.SubType.Contains(filter) || x.Action!.Contains(filter) ||
-            x.BizId!.Contains(filter) || x.UserName!.Contains(filter));
 
     private async Task<PagedResultDto<OperationLogDto>> ReadPageAsync(IQueryable<OperationLog> queryable,
         int totalCount, int skipCount, int maxResultCount)

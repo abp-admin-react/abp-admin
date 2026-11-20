@@ -102,8 +102,8 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
 
             var query = new GridQueryInput
             {
-                SkipCount = 1, MaxResultCount = 1,
-                Filters = [new() { Field = "userName", Conditions = [new() { Op = "startsWith", Value = prefix }] }],
+                SkipCount = 1, MaxResultCount = 1, Keyword = prefix.ToUpperInvariant(),
+                Filters = [new() { Field = "isActive", Conditions = [new() { Op = "eq", Value = "true" }] }],
                 Sort = [new() { Field = "userName", Direction = "desc" }]
             };
             var builder = GetRequiredService<IUserExcelBuilder>();

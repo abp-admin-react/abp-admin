@@ -143,6 +143,39 @@ public abstract class OperationLogAppServiceTests<TStartupModule> : AbpAdminAppl
     }
 
     [Fact]
+    public async Task Grid_keyword_should_match_literal_text_across_only_the_configured_fields()
+    {
+        const string term = @"Op%_\Key";
+        const string decoy = @"OpXYZ\Key";
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var repo = GetRequiredService<IRepository<OperationLog, Guid>>();
+            foreach (var (subType, user, biz, action) in new (string, string?, string?, string?)[]
+            {
+                (term, null, null, null),
+                ("查看", term, null, null),
+                ("修改", null, term, null),
+                ("创建", null, null, term),
+                ("忽略", null, null, decoy)
+            })
+            {
+                await repo.InsertAsync(new OperationLog(_guidGenerator.Create(), term, subType,
+                    null, user, null, biz, action, null, true, null, null, null, null, null, null, 1, DateTime.UtcNow));
+            }
+        });
+
+        var query = new GridQueryInput { Keyword = $"  {term.ToUpperInvariant()}  ", MaxResultCount = 1 };
+        var first = await _appService.QueryAsync(query);
+        first.TotalCount.ShouldBe(4);
+        query.SkipCount = 3;
+        (await _appService.QueryAsync(query)).Items.ShouldHaveSingleItem().Id.ShouldNotBe(first.Items[0].Id);
+
+        var legacy = await _appService.GetListAsync(new GetOperationLogListInput { Filter = term.ToUpperInvariant() });
+        legacy.TotalCount.ShouldBe(0);
+        (await _appService.GetListAsync(new GetOperationLogListInput { Filter = term })).TotalCount.ShouldBe(4);
+    }
+
+    [Fact]
     public async Task Grid_query_rejects_unknown_sort_and_incompatible_filter_types()
     {
         await Should.ThrowAsync<AbpValidationException>(() => _appService.QueryAsync(new GridQueryInput

@@ -14,11 +14,58 @@ public sealed partial class GridQueryDefinition<T>
 {
     private sealed record Column(LambdaExpression Selector, string[] Operators);
     private readonly Dictionary<string, Column> _columns = new(StringComparer.Ordinal);
+    private readonly ParameterExpression _keywordRow = Expression.Parameter(typeof(T), "row");
+    private readonly List<Expression> _keywordFields = [];
 
     public GridQueryDefinition<T> Field<TKey>(string key, Expression<Func<T, TKey>> selector, params string[] allowedOperators)
     {
         _columns.Add(key, new Column(selector, allowedOperators));
         return this;
+    }
+
+    /// <summary>登记可参与跨列关键词匹配，同时可按列筛选和排序的字段。</summary>
+    public GridQueryDefinition<T> SearchableField<TKey>(string key, Expression<Func<T, TKey>> selector, params string[] allowedOperators)
+    {
+        Field(key, selector, allowedOperators);
+        return KeywordOnly(selector);
+    }
+
+    /// <summary>只登记关键词匹配表达式，不开放独立的列筛选或排序。字段由服务端根据权限选择。</summary>
+    public GridQueryDefinition<T> KeywordOnly<TKey>(Expression<Func<T, TKey>> selector)
+    {
+        Expression field = new BindRow(selector.Parameters[0], _keywordRow).Visit(selector.Body);
+        if ((Nullable.GetUnderlyingType(field.Type) ?? field.Type) == typeof(Guid))
+            field = Expression.Call(field, nameof(Guid.ToString), Type.EmptyTypes);
+        else if (field.Type != typeof(string))
+            throw new ArgumentException("跨列模糊搜索仅支持文本和 UUID 表达式。", nameof(selector));
+        _keywordFields.Add(field);
+        return this;
+    }
+
+    private sealed class BindRow(ParameterExpression source, ParameterExpression target) : ExpressionVisitor
+    {
+        protected override Expression VisitParameter(ParameterExpression node) => node == source ? target : base.VisitParameter(node);
+    }
+
+    /// <summary>任一登记字段包含完整关键词即命中。旧接口可选择区分大小写以保持其原有行为。</summary>
+    public IQueryable<T> FilterKeyword(IQueryable<T> query, string? keyword, bool caseSensitive = false)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+            return query;
+        if (_keywordFields.Count == 0)
+            throw Invalid("keyword", "此表未配置可搜索的字段。");
+
+        var term = Parameter(caseSensitive ? keyword : keyword.ToLowerInvariant());
+        Expression? matches = null;
+        foreach (var field in _keywordFields)
+        {
+            var text = caseSensitive ? field : Expression.Call(field, nameof(string.ToLower), Type.EmptyTypes);
+            var contains = Expression.AndAlso(
+                Expression.NotEqual(field, Expression.Constant(null, typeof(string))),
+                Expression.Call(text, nameof(string.Contains), Type.EmptyTypes, term));
+            matches = matches == null ? contains : Expression.OrElse(matches, contains);
+        }
+        return query.Where(Expression.Lambda<Func<T, bool>>(matches!, _keywordRow));
     }
 
     public IQueryable<T> Filter(IQueryable<T> query, GridQueryInput input)
@@ -44,6 +91,7 @@ public sealed partial class GridQueryDefinition<T>
             }
         }
 
+        query = FilterKeyword(query, input.Keyword?.Trim());
         foreach (var group in input.Filters)
         {
             if (group is null || string.IsNullOrEmpty(group.Field) || !_columns.TryGetValue(group.Field, out var column))
