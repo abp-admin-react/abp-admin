@@ -35,6 +35,7 @@ import {
   RuntimeStatus,
   VersionDropdown,
 } from '@/components';
+import renderPinnedSidebarMenu from '@/components/PinnedSidebarMenu';
 import { queryClient } from '@/queryClient';
 import { ModuleAvailabilityContext } from '@/hooks/useModuleAvailability';
 import { setNotificationInstance } from '@/requestErrorConfig';
@@ -89,6 +90,7 @@ function toMenuData(
         key: path ?? `catalog-${catalogKey}`,
         name: chainHistory ? '链上历史与收尾' : item.title,
         locale,
+        templateKey: item.templateKey,
         icon: toMenuIcon(item.icon),
         children,
         runtimeMenu: true,
@@ -228,6 +230,8 @@ export const layout: RunTimeLayoutConfig = ({
   initialState,
   setInitialState,
 }) => {
+  const settings = initialState?.settings;
+  const pinSidebarMenus = settings?.layout !== 'top' && !settings?.splitMenus;
   return {
     // 运行时菜单统一使用服务端的权限、套餐和模块状态结果。
     menu: {
@@ -244,6 +248,7 @@ export const layout: RunTimeLayoutConfig = ({
     },
     menuDataRender: (items) =>
       items.filter((item) => item.runtimeMenu || item.path === '/welcome'),
+    menuContentRender: pinSidebarMenus ? renderPinnedSidebarMenu : undefined,
     // 目录无路由，面包屑只剩当前页时仍用它显示页头标题。
     breadcrumbProps: { minLength: 1 },
     menuItemRender: (item, dom) => {
@@ -358,7 +363,7 @@ export const layout: RunTimeLayoutConfig = ({
         </>
       );
     },
-    ...initialState?.settings,
+    ...settings,
   };
 };
 
