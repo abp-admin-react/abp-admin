@@ -34,3 +34,7 @@ openapi 生成器已退役，前端 API 层不再有「生成物」，全部由 
 - **客户错误路径**：客户调用只走 `src/abp/customer`（独立 fetch，禁止导入 Umi `request` / `requestErrorConfig` / antd）。`skipErrorHandler` 只关闭展示，不能绕过归一。公开码快照是 `public-error-catalog.json`，由后端 `PublicErrorContractSnapshotTests` 写入；不要手改内部映射。示例页 `pages/framework/customer-errors-demo` 只在非 production 路由注册，生产构建产物不得包含该页。管理 404 静默不适用于客户库。
 - 契约漂移以**后端 Contracts 为事实源**：改后端接口时同步改 `src/abp` 对应函数；`pnpm tsc` 只兜底类型层面的不一致，不再承担生成物漂移检测（该机制随生成器退役）。
 - **可空性镜像规则（机器强制）**：镜像字段可空性必须逐字段对齐后端 C#——`T?` / 可空引用 ⇔ TS 的 `T | null`，非空 ⇔ 不加 `| null`。任何生成器都不可信（umi `nullable` 是「可选即 null」的粗开关；ABP 官方 Angular 代理也丢可空性，见 abp#22798/#25176）。后端 `FrontendContractSnapshotTests`（Contracts/Snapshots/frontend-contract-shapes.json）会把前端消费的 DTO 形状反射为快照：改后端契约该测试必红，此时同步镜像后用 `FRONTEND_CONTRACT_SNAPSHOT_UPDATE=1` 重跑刷新快照、与镜像变更同提交。前端新消费一个 DTO 时，把类型加进该测试的 `SeedTypes`（嵌套 DTO 自动递归）。
+
+## 业务表格
+
+列表和明细直接渲染 AG Grid Community 的 `AgGridReact`。服务端分页使用 `useSearchableRemoteGrid`，在原资源的权限和数据范围内先筛选和排序，再分页。完整的本地明细或编辑草稿使用 `useSearchableLocalGrid`，声明 `keywordFields`。两者都返回可放入现有工具栏的 Ant Design 搜索框。新增业务表的接入与验证步骤见 [管理端表格设计](../docs/admin-web-grid-design.md)。
