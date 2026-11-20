@@ -1,5 +1,4 @@
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   type ProColumns,
@@ -7,25 +6,34 @@ import {
   ProFormText,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { Alert, App, Button } from 'antd';
-import React, { useRef, useState } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  Alert,
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+} from 'antd';
+import React, { useState } from 'react';
 import {
   createEdition,
   deleteEdition,
   getAllEditions,
-  getEditions,
   getEditionTenantCount,
+  queryEditions,
   updateEdition,
 } from '@/abp/proModules';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import FeatureModal from '@/components/FeatureModal';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 type EditionItem = { id: string; displayName: string };
 
 const EditionsPage: React.FC = () => {
   const { message } = App.useApp();
   const access = useAccess();
-  const actionRef = useRef<ActionType>(undefined);
   const [featureTarget, setFeatureTarget] = useState<EditionItem>();
 
   const columns: ProColumns<EditionItem>[] = [
@@ -45,7 +53,7 @@ const EditionsPage: React.FC = () => {
                 displayName: values.displayName,
               });
               message.success('已更新');
-              actionRef.current?.reload();
+              grid.refresh();
               return true;
             }}
           >
@@ -65,52 +73,52 @@ const EditionsPage: React.FC = () => {
           <DeleteEditionForm
             key="delete"
             record={record}
-            onSuccess={() => actionRef.current?.reload()}
+            onSuccess={() => grid.refresh()}
           />
         ) : null,
       ],
     },
   ];
 
+  const grid = useSearchableRemoteGrid<EditionItem>({
+    columnDefs: toGridColumns<EditionItem>(columns, { pro: true, kinds: {} }),
+    ariaLabel: '版本',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: queryEditions,
+  });
+
   return (
     <PageContainer title="租户功能版本">
-      <AutoHeightProTable<EditionItem>
-        rowKey="id"
-        actionRef={actionRef}
-        search={false}
-        columns={columns}
-        request={async (params) => {
-          const result = await getEditions(params);
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        toolBarRender={
-          access.canCreateEditions
-            ? () => [
-                <ModalForm
-                  key="create"
-                  title="新建版本"
-                  trigger={<Button type="primary">新建</Button>}
-                  onFinish={async (values) => {
-                    await createEdition({ displayName: values.displayName });
-                    message.success('已创建');
-                    actionRef.current?.reload();
-                    return true;
-                  }}
-                >
-                  <ProFormText
-                    name="displayName"
-                    label="名称"
-                    rules={[{ required: true }]}
-                  />
-                </ModalForm>,
-              ]
-            : undefined
-        }
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {access.canCreateEditions
+          ? [
+              <ModalForm
+                key="create"
+                title="新建版本"
+                trigger={<Button type="primary">新建</Button>}
+                onFinish={async (values) => {
+                  await createEdition({ displayName: values.displayName });
+                  message.success('已创建');
+                  grid.refresh();
+                  return true;
+                }}
+              >
+                <ProFormText
+                  name="displayName"
+                  label="名称"
+                  rules={[{ required: true }]}
+                />
+              </ModalForm>,
+            ]
+          : undefined}
+      </GridControls>
+      <AgGridReact<EditionItem> {...grid.gridProps} />
+
       <FeatureModal
         open={!!featureTarget}
         title={`功能 - ${featureTarget?.displayName || ''}`}

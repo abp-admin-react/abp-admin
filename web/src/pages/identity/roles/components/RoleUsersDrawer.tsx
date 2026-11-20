@@ -1,7 +1,20 @@
-import { App, Drawer, type TableColumnsType, Tag } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
-import { getRoleUsers, type IdentityRoleDto, type RoleUserDto } from '@/abp/identity';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
+import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  Drawer,
+  Button as GridButton,
+  Space as GridControls,
+  type TableColumnsType,
+  Tag,
+} from 'antd';
+import React from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
+import type { IdentityRoleDto, RoleUserDto } from '@/abp/identity';
+import { queryRoleUsers } from '@/abp/identity';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 type RoleUsersDrawerProps = {
   role: IdentityRoleDto | undefined;
@@ -17,42 +30,7 @@ function isLocked(user: RoleUserDto) {
  * 这里只回答「谁拥有这个角色」——排查权限问题时的反向视角。
  */
 const RoleUsersDrawer: React.FC<RoleUsersDrawerProps> = ({ role, onClose }) => {
-  const { message } = App.useApp();
-  const [items, setItems] = useState<RoleUserDto[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
-
-  const load = useCallback(
-    async (roleId: string, current: number, pageSize: number) => {
-      setLoading(true);
-      try {
-        const res = await getRoleUsers({
-          roleId,
-          current,
-          pageSize,
-          sorting: 'UserName',
-        });
-        setItems(res.items);
-        setTotal(res.totalCount);
-      } catch {
-        message.error('加载角色下用户失败');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [message],
-  );
-
-  useEffect(() => {
-    if (!role) {
-      return;
-    }
-    // 切换角色时重置到第一页，避免停留在越界页码
-    setPagination({ current: 1, pageSize: 10 });
-    load(role.id, 1, 10);
-  }, [role?.id, load]);
-
+  const access = useAccess();
   const columns: TableColumnsType<RoleUserDto> = [
     { title: '用户名', dataIndex: 'userName', width: 180 },
     { title: '姓名', dataIndex: 'name', width: 120 },
@@ -62,19 +40,42 @@ const RoleUsersDrawer: React.FC<RoleUsersDrawerProps> = ({ role, onClose }) => {
       dataIndex: 'isActive',
       width: 90,
       render: (_, record) =>
-        !record.isActive
-          ? <Tag>禁用</Tag>
-          : isLocked(record)
-            ? <Tag color="orange">已锁定</Tag>
-            : <Tag color="green">正常</Tag>,
+        !record.isActive ? (
+          <Tag>禁用</Tag>
+        ) : isLocked(record) ? (
+          <Tag color="orange">已锁定</Tag>
+        ) : (
+          <Tag color="green">正常</Tag>
+        ),
     },
     {
-      title: '加入时间',
+      title: '账号创建时间',
       dataIndex: 'creationTime',
       width: 170,
       render: (v: string) => new Date(v).toLocaleString(),
     },
   ];
+
+  const grid = useSearchableRemoteGrid<RoleUserDto>({
+    columnDefs: toGridColumns<RoleUserDto>(columns, {
+      pro: false,
+      kinds: {
+        email: access.canUpdateUsers ? 'text' : 'display',
+        isActive: 'boolean',
+        creationTime: 'date',
+      },
+    }),
+    ariaLabel: '角色成员',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: React.useCallback(
+      (input: GridQuery, signal: AbortSignal) =>
+        role
+          ? queryRoleUsers(role.id, input, signal)
+          : Promise.resolve({ items: [], totalCount: 0 }),
+      [role?.id],
+    ),
+  });
 
   return (
     <Drawer
@@ -84,26 +85,13 @@ const RoleUsersDrawer: React.FC<RoleUsersDrawerProps> = ({ role, onClose }) => {
       size={720}
       destroyOnHidden
     >
-      <ResizableTable<RoleUserDto>
-        rowKey="id"
-        size="middle"
-        loading={loading}
-        columns={columns}
-        dataSource={items}
-        pagination={{
-          current: pagination.current,
-          pageSize: pagination.pageSize,
-          total,
-          showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 人`,
-          onChange: (current, pageSize) => {
-            setPagination({ current, pageSize });
-            if (role) {
-              load(role.id, current, pageSize);
-            }
-          },
-        }}
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}
+      </GridControls>
+      <AgGridReact<RoleUserDto> {...grid.gridProps} />
     </Drawer>
   );
 };

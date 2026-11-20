@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 
@@ -7,6 +8,8 @@ namespace AbpAdmin.Editions;
 
 public interface IEditionAppService : IApplicationService
 {
+    Task<PagedResultDto<EditionDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<EditionDto>> GetListAsync(PagedAndSortedResultRequestDto input);
 
     Task<ListResultDto<EditionDto>> GetLookupAsync();

@@ -1,5 +1,7 @@
 using System;
+using AbpAdmin.Desensitization;
 using Volo.Abp.Application.Dtos;
+using Volo.Abp.Identity;
 
 namespace AbpAdmin.Identity;
 
@@ -13,8 +15,10 @@ public class RoleUserDto : EntityDto<Guid>
 
     public string? Name { get; set; }
 
+    [Masked(MaskKindEnum.Email, PlaintextPermission = IdentityPermissions.Users.Update)]
     public string? Email { get; set; }
 
+    [Masked(MaskKindEnum.Mobile, PlaintextPermission = IdentityPermissions.Users.Update)]
     public string? PhoneNumber { get; set; }
 
     /// <summary>账号启用状态。禁用用户的角色仍在，但无法登录。</summary>

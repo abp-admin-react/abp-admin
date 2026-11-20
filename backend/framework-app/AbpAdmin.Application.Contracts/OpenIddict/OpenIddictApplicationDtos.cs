@@ -1,15 +1,18 @@
-using Volo.Abp.Auditing;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
+using Volo.Abp.Auditing;
 
 namespace AbpAdmin.OpenIddict;
 
 public interface IOpenIddictApplicationAppService : IApplicationService
 {
+    Task<PagedResultDto<OpenIddictApplicationDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<OpenIddictApplicationDto>> GetListAsync(PagedAndSortedResultRequestDto input);
 
     Task<OpenIddictApplicationDto> GetAsync(Guid id);

@@ -1,12 +1,13 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
-using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.TenantManagement;
+using Volo.Abp;
 
 namespace AbpAdmin.Editions;
 
@@ -25,6 +26,16 @@ public class EditionAppService : AbpAdminAppService, IEditionAppService
         _editionRepository = editionRepository;
         _tenantRepository = tenantRepository;
         _editionTenantManager = editionTenantManager;
+    }
+
+    public virtual async Task<PagedResultDto<EditionDto>> QueryAsync(GridQueryInput input)
+    {
+        EnsureHostSide();
+        var query = await _editionRepository.GetQueryableAsync();
+        var grid = new GridQueryDefinition<Edition>()
+            .SearchableField("displayName", x => x.DisplayName);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "displayName", false, x => x.Id, Map);
+        return new(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<EditionDto>> GetListAsync(PagedAndSortedResultRequestDto input)

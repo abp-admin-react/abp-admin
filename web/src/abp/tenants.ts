@@ -5,6 +5,7 @@
  * - 与「当前会话租户」tenant.ts 无关：那边是切换上下文，这里是 CRUD 租户实体。
  */
 import { request } from '@umijs/max';
+import { type GridQuery, postGridQuery } from './gridQuery';
 import type { CreateTenantInput, TenantDto, TenantListResult } from './types';
 
 export async function getTenants(params: {
@@ -105,4 +106,8 @@ export async function checkTenantConnectionString(
     `/api/app/tenant/${id}/check-connection-string`,
     { method: 'POST', data: { connectionString } },
   );
+}
+
+export function queryTenants(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<TenantDto>('/api/app/tenant/query', input, signal);
 }

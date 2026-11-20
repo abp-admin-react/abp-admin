@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
+using AbpAdmin.Desensitization;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Identity;
@@ -10,6 +12,10 @@ namespace AbpAdmin.Identity;
 
 public interface IOrganizationUnitAppService : IApplicationService
 {
+    Task<PagedResultDto<OrganizationUnitRoleDto>> QueryRolesAsync(Guid id, GridQueryInput input);
+
+    Task<PagedResultDto<OrganizationUnitUserDto>> QueryMembersAsync(Guid id, GridQueryInput input);
+
     Task<List<OrganizationUnitDto>> GetListAsync();
 
     Task<OrganizationUnitDto> CreateAsync(CreateOrganizationUnitDto input);
@@ -75,6 +81,7 @@ public class OrganizationUnitUserDto : EntityDto<Guid>
 {
     public string UserName { get; set; } = default!;
 
+    [Masked(MaskKindEnum.Email, PlaintextPermission = IdentityPermissions.Users.Update)]
     public string? Email { get; set; }
 }
 

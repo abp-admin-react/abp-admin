@@ -1,5 +1,4 @@
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   type ProColumns,
@@ -7,20 +6,28 @@ import {
   ProFormText,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm } from 'antd';
-import React, { useRef } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+  Popconfirm,
+} from 'antd';
+import React from 'react';
 import { getUsers } from '@/abp/identity';
 import {
-  getSessions,
   type IdentitySessionDto,
+  querySessions,
   revokeAllSessionsByUser,
   revokeSession,
 } from '@/abp/identityAdmin';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
-import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 const SessionsPage: React.FC = () => {
-  const actionRef = useRef<ActionType>(undefined);
   // App.useApp() 消费 ConfigProvider 主题上下文，替代不推荐的静态 message（重构报告问题 20）
   const { message } = App.useApp();
   const access = useAccess();
@@ -31,11 +38,9 @@ const SessionsPage: React.FC = () => {
       dataIndex: 'userId',
       copyable: true,
       ellipsis: true,
-      // 非法 GUID 会被后端绑定拒绝（400）：改在 request 里校验并提示
-      ...textFilter('用户 Id（GUID）'),
     },
-    { title: '设备', dataIndex: 'device', ...textFilter() },
-    { title: '客户端', dataIndex: 'clientId', ...textFilter() },
+    { title: '设备', dataIndex: 'device' },
+    { title: '客户端', dataIndex: 'clientId' },
     {
       title: '会话 Id',
       dataIndex: 'sessionId',
@@ -77,7 +82,7 @@ const SessionsPage: React.FC = () => {
                 onConfirm={async () => {
                   await revokeSession(record.id);
                   message.success('已撤销');
-                  actionRef.current?.reload();
+                  grid.refresh();
                 }}
               >
                 <a>撤销</a>
@@ -88,100 +93,84 @@ const SessionsPage: React.FC = () => {
       : []),
   ];
 
+  const grid = useSearchableRemoteGrid<IdentitySessionDto>({
+    columnDefs: toGridColumns<IdentitySessionDto>(columns, {
+      pro: true,
+      kinds: { userId: 'uuid', ipRegion: 'display' },
+    }),
+    ariaLabel: '在线会话',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: querySessions,
+  });
+
   return (
     <PageContainer>
-      <AutoHeightProTable<IdentitySessionDto>
-        rowKey="id"
-        actionRef={actionRef}
-        columns={columns}
-        search={false}
-        request={async (params, _sorter, filter) => {
-          const userId = firstFilterValue(filter, 'userId');
-          // 非法 GUID 会被后端绑定拒绝（400 报错而非空结果）：前端拦截并明确提示，
-          // 避免用户把「输入错误」误读成「无会话」
-          if (
-            userId &&
-            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-              userId,
-            )
-          ) {
-            message.warning('请输入有效的用户 Id（GUID）');
-            return { data: [], total: 0, success: true };
-          }
-          const result = await getSessions({
-            current: params.current,
-            pageSize: params.pageSize,
-            userId,
-            device: firstFilterValue(filter, 'device'),
-            clientId: firstFilterValue(filter, 'clientId'),
-          });
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        toolBarRender={
-          access.canRevokeSessions
-            ? () => [
-                <ModalForm
-                  key="revoke-all"
-                  title="按用户吊销全部会话"
-                  trigger={<Button danger>按用户吊销全部</Button>}
-                  width={480}
-                  onFinish={async (values) => {
-                    await revokeAllSessionsByUser(values.userId);
-                    message.success('已吊销该用户全部会话');
-                    actionRef.current?.reload();
-                    return true;
-                  }}
-                >
-                  {access.canManageUsers ? (
-                    <ProFormSelect
-                      name="userId"
-                      label="用户"
-                      showSearch
-                      debounceTime={300}
-                      rules={[{ required: true, message: '请选择用户' }]}
-                      request={async ({ keyWords }) => {
-                        const result = await getUsers({
-                          current: 1,
-                          pageSize: 20,
-                          filter: keyWords,
-                        });
-                        return (result.items || []).map((item) => ({
-                          label: `${item.userName}${
-                            item.email ? ` (${item.email})` : ''
-                          }`,
-                          value: item.id,
-                        }));
-                      }}
-                    />
-                  ) : (
-                    <ProFormText
-                      name="userId"
-                      label="用户 ID"
-                      placeholder="可从会话表复制完整的用户 ID"
-                      rules={[
-                        { required: true, message: '请输入用户 ID' },
-                        {
-                          pattern:
-                            /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,
-                          message: '请输入带连字符的完整用户 ID',
-                        },
-                      ]}
-                      fieldProps={{
-                        autoCapitalize: 'none',
-                        autoCorrect: 'off',
-                        spellCheck: false,
-                      }}
-                    />
-                  )}
-                </ModalForm>,
-              ]
-            : undefined
-        }
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {access.canRevokeSessions
+          ? [
+              <ModalForm
+                key="revoke-all"
+                title="按用户吊销全部会话"
+                trigger={<Button danger>按用户吊销全部</Button>}
+                width={480}
+                onFinish={async (values) => {
+                  await revokeAllSessionsByUser(values.userId);
+                  message.success('已吊销该用户全部会话');
+                  grid.refresh();
+                  return true;
+                }}
+              >
+                {access.canManageUsers ? (
+                  <ProFormSelect
+                    name="userId"
+                    label="用户"
+                    showSearch
+                    debounceTime={300}
+                    rules={[{ required: true, message: '请选择用户' }]}
+                    request={async ({ keyWords }) => {
+                      const result = await getUsers({
+                        current: 1,
+                        pageSize: 20,
+                        filter: keyWords,
+                      });
+                      return (result.items || []).map((item) => ({
+                        label: `${item.userName}${
+                          item.email ? ` (${item.email})` : ''
+                        }`,
+                        value: item.id,
+                      }));
+                    }}
+                  />
+                ) : (
+                  <ProFormText
+                    name="userId"
+                    label="用户 ID"
+                    placeholder="可从会话表复制完整的用户 ID"
+                    rules={[
+                      { required: true, message: '请输入用户 ID' },
+                      {
+                        pattern:
+                          /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,
+                        message: '请输入带连字符的完整用户 ID',
+                      },
+                    ]}
+                    fieldProps={{
+                      autoCapitalize: 'none',
+                      autoCorrect: 'off',
+                      spellCheck: false,
+                    }}
+                  />
+                )}
+              </ModalForm>,
+            ]
+          : undefined}
+      </GridControls>
+      <AgGridReact<IdentitySessionDto> {...grid.gridProps} />
     </PageContainer>
   );
 };

@@ -2,13 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using OpenIddict.Abstractions;
-using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Domain.Entities;
+using Volo.Abp.Domain.Repositories;
 using Volo.Abp.OpenIddict.Applications;
+using Volo.Abp;
 
 namespace AbpAdmin.OpenIddict;
 
@@ -27,6 +29,18 @@ public class OpenIddictApplicationAppService : AbpAdminAppService, IOpenIddictAp
         _applicationRepository = applicationRepository;
         _applicationManager = applicationManager;
         _tokenExchanger = tokenExchanger;
+    }
+
+    public virtual async Task<PagedResultDto<OpenIddictApplicationDto>> QueryAsync(GridQueryInput input)
+    {
+        var query = await LazyServiceProvider.LazyGetRequiredService<IReadOnlyRepository<OpenIddictApplication, Guid>>().GetQueryableAsync();
+        var grid = new GridQueryDefinition<OpenIddictApplication>()
+            .SearchableField("clientId", x => x.ClientId)
+            .SearchableField("displayName", x => x.DisplayName)
+            .SearchableField("clientType", x => x.ClientType)
+            .SearchableField("consentType", x => x.ConsentType);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "clientId", false, x => x.Id, Map);
+        return new(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<OpenIddictApplicationDto>> GetListAsync(

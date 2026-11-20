@@ -1,6 +1,5 @@
 import { ClearOutlined, StopOutlined } from '@ant-design/icons';
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   type ProColumns,
@@ -9,20 +8,35 @@ import {
   QueryFilter,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm, Space, Tabs, Tag, theme } from 'antd';
-import React, { useRef, useState } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+  Popconfirm,
+  Space,
+  Tabs,
+  Tag,
+  theme,
+} from 'antd';
+import React, { useState } from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
 import { getOpenIddictApplications } from '@/abp/openIddictApplications';
 import {
-  getOpenIddictAuthorizations,
-  getOpenIddictTokens,
   type OpenIddictAuthorizationDto,
   type OpenIddictTokenDto,
   pruneOpenIddictTokens,
+  queryOpenIddictAuthorizations,
+  queryOpenIddictTokens,
   revokeOpenIddictAuthorization,
   revokeOpenIddictToken,
   revokeOpenIddictTokensBySubject,
 } from '@/abp/openIddictTokens';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 const STATUS_COLORS: Record<string, string> = {
   valid: 'success',
@@ -41,8 +55,6 @@ const TokenManagement: React.FC = () => {
   const { message } = App.useApp();
   const { token } = theme.useToken();
   const access = useAccess();
-  const tokenTableRef = useRef<ActionType>(undefined);
-  const authTableRef = useRef<ActionType>(undefined);
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [filter, setFilter] = useState<{
     subject?: string;
@@ -114,7 +126,7 @@ const TokenManagement: React.FC = () => {
                 onConfirm={async () => {
                   await revokeOpenIddictToken(record.id);
                   message.success('已吊销');
-                  tokenTableRef.current?.reload();
+                  tokenGrid.refresh();
                 }}
               >
                 <a style={{ color: token.colorError }}>吊销</a>
@@ -154,8 +166,8 @@ const TokenManagement: React.FC = () => {
                 onConfirm={async () => {
                   await revokeOpenIddictAuthorization(record.id);
                   message.success('已吊销');
-                  authTableRef.current?.reload();
-                  tokenTableRef.current?.reload();
+                  authGrid.refresh();
+                  tokenGrid.refresh();
                 }}
               >
                 <a style={{ color: token.colorError }}>吊销</a>
@@ -206,8 +218,8 @@ const TokenManagement: React.FC = () => {
             message.success(
               `已清理 ${result.prunedTokens} 个令牌、${result.prunedAuthorizations} 个授权`,
             );
-            tokenTableRef.current?.reload();
-            authTableRef.current?.reload();
+            tokenGrid.refresh();
+            authGrid.refresh();
           }}
         >
           <Button icon={<ClearOutlined />}>清理过期</Button>
@@ -215,6 +227,35 @@ const TokenManagement: React.FC = () => {
       ) : null}
     </Space>
   );
+
+  const tokenGrid = useSearchableRemoteGrid<OpenIddictTokenDto>({
+    columnDefs: toGridColumns<OpenIddictTokenDto>(tokenColumns, {
+      pro: true,
+      kinds: {},
+    }),
+    ariaLabel: '令牌',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: React.useCallback(
+      (input: GridQuery, signal: AbortSignal) =>
+        queryOpenIddictTokens(filter, input, signal),
+      [filter],
+    ),
+  });
+  const authGrid = useSearchableRemoteGrid<OpenIddictAuthorizationDto>({
+    columnDefs: toGridColumns<OpenIddictAuthorizationDto>(authColumns, {
+      pro: true,
+      kinds: {},
+    }),
+    ariaLabel: '授权',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: React.useCallback(
+      (input: GridQuery, signal: AbortSignal) =>
+        queryOpenIddictAuthorizations(filter, input, signal),
+      [filter],
+    ),
+  });
 
   return (
     <PageContainer>
@@ -234,8 +275,8 @@ const TokenManagement: React.FC = () => {
           }
           const count = await revokeOpenIddictTokensBySubject(subject);
           message.success(`已吊销 ${count} 个令牌`);
-          tokenTableRef.current?.reload();
-          authTableRef.current?.reload();
+          tokenGrid.refresh();
+          authGrid.refresh();
           return true;
         }}
       >
@@ -258,22 +299,15 @@ const TokenManagement: React.FC = () => {
             label: '令牌',
             children: (
               <>
-                <AutoHeightProTable<OpenIddictTokenDto>
-                  rowKey="id"
-                  actionRef={tokenTableRef}
-                  columns={tokenColumns}
-                  search={false}
-                  params={filter}
-                  pagination={{ defaultPageSize: 10 }}
-                  request={async (params) => {
-                    const res = await getOpenIddictTokens(params);
-                    return {
-                      data: res.items,
-                      total: res.totalCount,
-                      success: true,
-                    };
-                  }}
-                />
+                <GridControls wrap style={{ marginBottom: 8 }}>
+                  {tokenGrid.searchBox}
+                  {tokenGrid.hasFilters && (
+                    <GridButton onClick={tokenGrid.clearFilters}>
+                      清空筛选
+                    </GridButton>
+                  )}
+                </GridControls>
+                <AgGridReact<OpenIddictTokenDto> {...tokenGrid.gridProps} />
               </>
             ),
           },
@@ -282,21 +316,16 @@ const TokenManagement: React.FC = () => {
             label: '授权',
             children: (
               <>
-                <AutoHeightProTable<OpenIddictAuthorizationDto>
-                  rowKey="id"
-                  actionRef={authTableRef}
-                  columns={authColumns}
-                  search={false}
-                  params={filter}
-                  pagination={{ defaultPageSize: 10 }}
-                  request={async (params) => {
-                    const res = await getOpenIddictAuthorizations(params);
-                    return {
-                      data: res.items,
-                      total: res.totalCount,
-                      success: true,
-                    };
-                  }}
+                <GridControls wrap style={{ marginBottom: 8 }}>
+                  {authGrid.searchBox}
+                  {authGrid.hasFilters && (
+                    <GridButton onClick={authGrid.clearFilters}>
+                      清空筛选
+                    </GridButton>
+                  )}
+                </GridControls>
+                <AgGridReact<OpenIddictAuthorizationDto>
+                  {...authGrid.gridProps}
                 />
               </>
             ),

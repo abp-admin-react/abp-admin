@@ -1,4 +1,5 @@
 import { request } from '@umijs/max';
+import { type GridQuery, postGridQuery } from './gridQuery';
 
 export type OpenIddictTokenDto = {
   id: string;
@@ -94,5 +95,55 @@ export async function pruneOpenIddictTokens() {
   return request<{ prunedTokens: number; prunedAuthorizations: number }>(
     `${BASE}/prune`,
     { method: 'POST' },
+  );
+}
+
+type OpenIddictGridScope = {
+  applicationId?: string;
+  subject?: string;
+  status?: string;
+  type?: string;
+};
+
+function applyGridScope(
+  input: GridQuery,
+  scope: OpenIddictGridScope,
+): GridQuery {
+  return {
+    ...input,
+    filters: [
+      ...input.filters,
+      ...Object.entries(scope)
+        .filter(([, value]) => Boolean(value))
+        .map(([field, value]) => ({
+          field,
+          join: 'and' as const,
+          conditions: [{ op: 'eq' as const, value: String(value) }],
+        })),
+    ],
+  };
+}
+
+export function queryOpenIddictTokens(
+  filter: OpenIddictGridScope,
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<OpenIddictTokenDto>(
+    '/api/app/open-iddict-token-admin/query-tokens',
+    applyGridScope(input, filter),
+    signal,
+  );
+}
+
+export function queryOpenIddictAuthorizations(
+  filter: OpenIddictGridScope,
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<OpenIddictAuthorizationDto>(
+    '/api/app/open-iddict-token-admin/query-authorizations',
+    applyGridScope(input, filter),
+    signal,
   );
 }

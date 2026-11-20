@@ -1,5 +1,4 @@
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   type ProColumns,
@@ -8,22 +7,33 @@ import {
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Dropdown, type MenuProps, Space, Tag } from 'antd';
-import React, { useRef, useState } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  Dropdown,
+  Button as GridButton,
+  Space as GridControls,
+  type MenuProps,
+  Space,
+  Tag,
+} from 'antd';
+import React, { useState } from 'react';
 import {
   createRole,
   deleteRole,
-  getRoles,
   type IdentityRoleDto,
+  queryRoles,
   updateRole,
 } from '@/abp/identity';
-import { sorterToAbpSorting } from '@/abp/sorting';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import ClaimModal from '@/components/ClaimModal';
 import DataScopeModal from '@/components/DataScopeModal';
 import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import PermissionModal from '@/components/PermissionModal';
-import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import RoleUsersDrawer from './components/RoleUsersDrawer';
 
 const ROLE_REMARK_MAX_LENGTH = 300;
@@ -105,7 +115,6 @@ const RoleForm: React.FC<{
 
 const RolesPage: React.FC = () => {
   const { message, modal } = App.useApp();
-  const actionRef = useRef<ActionType>(undefined);
   const [permissionTarget, setPermissionTarget] = useState<IdentityRoleDto>();
   const [claimTarget, setClaimTarget] = useState<IdentityRoleDto>();
   const [usersTarget, setUsersTarget] = useState<IdentityRoleDto>();
@@ -117,8 +126,6 @@ const RolesPage: React.FC = () => {
       title: '名称',
       dataIndex: 'name',
       width: 240,
-      sorter: 'Name',
-      ...textFilter('按角色名称筛选'),
       render: (_, record) => (
         <Space>
           <span>{record.name}</span>
@@ -163,7 +170,7 @@ const RolesPage: React.FC = () => {
                 onOk: async () => {
                   await deleteRole(record.id);
                   message.success('已删除');
-                  actionRef.current?.reload();
+                  grid.refresh();
                 },
               }),
           });
@@ -173,7 +180,7 @@ const RolesPage: React.FC = () => {
             <RoleForm
               key="edit"
               record={record}
-              onSuccess={() => actionRef.current?.reload()}
+              onSuccess={() => grid.refresh()}
             />
           ),
           access.canManageRolePermissions && (
@@ -194,35 +201,31 @@ const RolesPage: React.FC = () => {
     },
   ];
 
+  const grid = useSearchableRemoteGrid<IdentityRoleDto>({
+    columnDefs: toGridColumns<IdentityRoleDto>(columns, {
+      pro: true,
+    }),
+    ariaLabel: '角色',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: queryRoles,
+  });
+
   return (
     <PageContainer {...identityOrgHelpHeader('roles', '角色')}>
-      <AutoHeightProTable<IdentityRoleDto>
-        rowKey="id"
-        actionRef={actionRef}
-        columns={columns}
-        search={false}
-        request={async (params, sorter, filter) => {
-          const result = await getRoles({
-            current: params.current,
-            pageSize: params.pageSize,
-            filter: firstFilterValue(filter, 'name'),
-            sorting: sorterToAbpSorting(sorter),
-          });
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        toolBarRender={() => [
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {[
           access.canCreateRoles && (
-            <RoleForm
-              key="create"
-              onSuccess={() => actionRef.current?.reload()}
-            />
+            <RoleForm key="create" onSuccess={() => grid.refresh()} />
           ),
         ]}
-      />
+      </GridControls>
+      <AgGridReact<IdentityRoleDto> {...grid.gridProps} />
+
       <PermissionModal
         open={!!permissionTarget}
         title={`功能权限 - ${permissionTarget?.name || ''}`}

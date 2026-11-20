@@ -1,76 +1,57 @@
-import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import type { ProColumns } from '@ant-design/pro-components';
 import { PageContainer } from '@ant-design/pro-components';
-import dayjs, { type Dayjs } from 'dayjs';
+import { AgGridReact } from 'ag-grid-react';
+import { Button as GridButton, Space as GridControls } from 'antd';
 import React from 'react';
-import { getSecurityLogs, type SecurityLogDto } from '@/abp/identityAdmin';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import type { SecurityLogDto } from '@/abp/identityAdmin';
+import { querySecurityLogs } from '@/abp/identityAdmin';
 import {
-  dateRangeFilter,
-  enumFilters,
-  firstFilterValue,
-  textFilter,
-} from '@/components/tableColumnFilters';
-import { toDayEnd, toDayStart } from '@/utils/format';
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 
-const SecurityLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ configurationEntry }) => {
-  // 后端 GetSecurityLogListInput 支持时间/应用/身份/操作/用户/客户端全量筛选。
-  // 筛选 UI 全部走官网列头 filterDropdown / filters，值经 request 第三参 filter 交给服务端。
+const SecurityLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
+  configurationEntry,
+}) => {
   const columns: ProColumns<SecurityLogDto>[] = [
     {
       title: '时间',
       dataIndex: 'creationTime',
       valueType: 'dateTime',
-      ...dateRangeFilter(),
     },
-    { title: '操作', dataIndex: 'action', ...textFilter('如 LoginSucceeded') },
-    { title: '用户', dataIndex: 'userName', ...textFilter() },
-    { title: '应用', dataIndex: 'applicationName', ...textFilter() },
+    { title: '操作', dataIndex: 'action' },
+    { title: '用户', dataIndex: 'userName' },
+    { title: '应用', dataIndex: 'applicationName' },
     {
       title: '身份',
       dataIndex: 'identity',
-      filterMultiple: false,
-      filters: enumFilters({ Identity: 'Identity', OpenIddict: 'OpenIddict' }),
+      valueEnum: { Identity: 'Identity', OpenIddict: 'OpenIddict' },
     },
-    { title: '客户端', dataIndex: 'clientId', ...textFilter() },
+    { title: '客户端', dataIndex: 'clientId' },
     { title: 'IP', dataIndex: 'clientIpAddress' },
   ];
 
+  const grid = useSearchableRemoteGrid<SecurityLogDto>({
+    columnDefs: toGridColumns<SecurityLogDto>(columns, {
+      pro: true,
+      kinds: {},
+    }),
+    ariaLabel: '安全日志',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: querySecurityLogs,
+  });
+
   return (
     <PageContainer title="登录安全日志" extra={configurationEntry}>
-      <AutoHeightProTable<SecurityLogDto>
-        rowKey="id"
-        columns={columns}
-        search={false}
-        request={async (params, _sorter, filter) => {
-          const f = (filter ?? {}) as Record<string, unknown[] | undefined>;
-          // 纯日期 RangePicker 的结束日是 00:00:00，后端为 <= 精确比较：
-          // 补齐到整天边界，避免结束日整段被排除（共享 toDayStart/toDayEnd 约定）
-          const range = (f.creationTime ?? []) as unknown[];
-          const start = dayjs.isDayjs(range[0])
-            ? (range[0] as Dayjs).format('YYYY-MM-DD')
-            : undefined;
-          const end = dayjs.isDayjs(range[1])
-            ? (range[1] as Dayjs).format('YYYY-MM-DD')
-            : undefined;
-          const result = await getSecurityLogs({
-            current: params.current,
-            pageSize: params.pageSize,
-            userName: firstFilterValue(f, 'userName'),
-            action: firstFilterValue(f, 'action'),
-            applicationName: firstFilterValue(f, 'applicationName'),
-            identity: firstFilterValue(f, 'identity'),
-            clientId: firstFilterValue(f, 'clientId'),
-            startTime: toDayStart(start),
-            endTime: toDayEnd(end),
-          });
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}
+      </GridControls>
+      <AgGridReact<SecurityLogDto> {...grid.gridProps} />
     </PageContainer>
   );
 };
@@ -78,7 +59,9 @@ const SecurityLogsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({ 
 export default function Page() {
   return (
     <FrameworkConfiguration owner="login">
-      {(configurationEntry) => <SecurityLogsPage configurationEntry={configurationEntry} />}
+      {(configurationEntry) => (
+        <SecurityLogsPage configurationEntry={configurationEntry} />
+      )}
     </FrameworkConfiguration>
   );
 }

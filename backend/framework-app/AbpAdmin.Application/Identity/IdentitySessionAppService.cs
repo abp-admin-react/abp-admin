@@ -1,12 +1,14 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.IpRegions;
 using AbpAdmin.OperationLogs;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Volo.Abp.Application.Dtos;
+using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 
 namespace AbpAdmin.Identity;
@@ -28,6 +30,22 @@ public class IdentitySessionAppService : AbpAdminAppService, IIdentitySessionApp
         _ipLocationResolver = ipLocationResolver;
     }
 
+    public virtual async Task<PagedResultDto<IdentitySessionDto>> QueryAsync(GridQueryInput input)
+    {
+        var query = await LazyServiceProvider.LazyGetRequiredService<IReadOnlyRepository<IdentitySession, Guid>>().GetQueryableAsync();
+        var grid = new GridQueryDefinition<IdentitySession>()
+            .SearchableField("userId", x => x.UserId)
+            .SearchableField("device", x => x.Device)
+            .SearchableField("clientId", x => x.ClientId)
+            .SearchableField("sessionId", x => x.SessionId)
+            .SearchableField("ipAddresses", x => x.IpAddresses)
+            .Field("signedIn", x => x.SignedIn)
+            .Field("lastAccessed", x => x.LastAccessed);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "signedIn", true, x => x.Id, Map);
+        await AttachRegionsAsync(page.Items);
+        return new(page.TotalCount, page.Items);
+    }
+
     public virtual async Task<PagedResultDto<IdentitySessionDto>> GetListAsync(GetIdentitySessionListInput input)
     {
         var count = await _sessionRepository.GetCountAsync(input.UserId, input.Device, input.ClientId);
@@ -39,21 +57,26 @@ public class IdentitySessionAppService : AbpAdminAppService, IIdentitySessionApp
             input.Device,
             input.ClientId);
 
-        var dtos = items.Select(x => new IdentitySessionDto
-        {
-            Id = x.Id,
-            SessionId = x.SessionId,
-            UserId = x.UserId,
-            Device = x.Device,
-            DeviceInfo = x.DeviceInfo,
-            ClientId = x.ClientId,
-            IpAddresses = x.IpAddresses,
-            SignedIn = x.SignedIn,
-            LastAccessed = x.LastAccessed
-        }).ToList();
+        var dtos = items.Select(Map).ToList();
+        await AttachRegionsAsync(dtos);
+        return new PagedResultDto<IdentitySessionDto>(count, dtos);
+    }
 
-        // 会话表 IP 是逗号拼接的近期列表；归属地按「最近一个 IP」解析（语义即当前接入位置）。
-        // 当页去重后批量解析（审计日志列表同款：一次缓存往返 + 离线库内存查询；xdb 缺失降级为空列）。
+    private static IdentitySessionDto Map(IdentitySession x) => new IdentitySessionDto
+    {
+        Id = x.Id,
+        SessionId = x.SessionId,
+        UserId = x.UserId,
+        Device = x.Device,
+        DeviceInfo = x.DeviceInfo,
+        ClientId = x.ClientId,
+        IpAddresses = x.IpAddresses,
+        SignedIn = x.SignedIn,
+        LastAccessed = x.LastAccessed
+    };
+
+    private async Task AttachRegionsAsync(System.Collections.Generic.IReadOnlyList<IdentitySessionDto> dtos)
+    {
         var lastIps = dtos
             .Select(x => LastIpOf(x.IpAddresses))
             .Where(ip => ip != null)
@@ -71,8 +94,6 @@ public class IdentitySessionAppService : AbpAdminAppService, IIdentitySessionApp
                 }
             }
         }
-
-        return new PagedResultDto<IdentitySessionDto>(count, dtos);
     }
 
     private static string? LastIpOf(string? ipAddresses) => ipAddresses?

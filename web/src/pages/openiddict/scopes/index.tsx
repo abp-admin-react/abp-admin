@@ -1,21 +1,30 @@
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   ProFormText,
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm } from 'antd';
-import React, { useRef } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+  Popconfirm,
+} from 'antd';
+import React from 'react';
 import {
   createOpenIddictScope,
   deleteOpenIddictScope,
-  getOpenIddictScopes,
   type OpenIddictScopeDto,
+  queryOpenIddictScopes,
   updateOpenIddictScope,
 } from '@/abp/openIddictApplications';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 type ScopeFormValues = {
   name: string;
@@ -37,85 +46,86 @@ const ScopeFormFields: React.FC = () => (
 const ScopesPage: React.FC = () => {
   const { message } = App.useApp();
   const access = useAccess();
-  const actionRef = useRef<ActionType>(undefined);
+  const grid = useSearchableRemoteGrid<OpenIddictScopeDto>({
+    columnDefs: toGridColumns<OpenIddictScopeDto>(
+      [
+        { title: '名称', dataIndex: 'name' },
+        { title: '显示名', dataIndex: 'displayName' },
+        { title: '说明', dataIndex: 'description' },
+        {
+          title: '操作',
+          valueType: 'option',
+          render: (_, record) => [
+            ...(access.canUpdateOpenIddictScope
+              ? [
+                  <ModalForm<ScopeFormValues>
+                    key="edit"
+                    title="编辑范围"
+                    trigger={<a>编辑</a>}
+                    initialValues={record}
+                    onFinish={async (values) => {
+                      await updateOpenIddictScope(record.id, values);
+                      message.success('已更新');
+                      grid.refresh();
+                      return true;
+                    }}
+                  >
+                    <ScopeFormFields />
+                  </ModalForm>,
+                ]
+              : []),
+            ...(access.canDeleteOpenIddictScope
+              ? [
+                  <Popconfirm
+                    key="delete"
+                    title="确认删除？"
+                    onConfirm={async () => {
+                      await deleteOpenIddictScope(record.id);
+                      message.success('已删除');
+                      grid.refresh();
+                    }}
+                  >
+                    <a>删除</a>
+                  </Popconfirm>,
+                ]
+              : []),
+          ],
+        },
+      ],
+      { pro: true, kinds: {} },
+    ),
+    ariaLabel: '作用域',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: queryOpenIddictScopes,
+  });
+
   return (
     <PageContainer>
-      <AutoHeightProTable<OpenIddictScopeDto>
-        rowKey="id"
-        actionRef={actionRef}
-        search={false}
-        columns={[
-          { title: '名称', dataIndex: 'name' },
-          { title: '显示名', dataIndex: 'displayName' },
-          { title: '说明', dataIndex: 'description' },
-          {
-            title: '操作',
-            valueType: 'option',
-            render: (_, record) => [
-              ...(access.canUpdateOpenIddictScope
-                ? [
-                    <ModalForm<ScopeFormValues>
-                      key="edit"
-                      title="编辑范围"
-                      trigger={<a>编辑</a>}
-                      initialValues={record}
-                      onFinish={async (values) => {
-                        await updateOpenIddictScope(record.id, values);
-                        message.success('已更新');
-                        actionRef.current?.reload();
-                        return true;
-                      }}
-                    >
-                      <ScopeFormFields />
-                    </ModalForm>,
-                  ]
-                : []),
-              ...(access.canDeleteOpenIddictScope
-                ? [
-                    <Popconfirm
-                      key="delete"
-                      title="确认删除？"
-                      onConfirm={async () => {
-                        await deleteOpenIddictScope(record.id);
-                        message.success('已删除');
-                        actionRef.current?.reload();
-                      }}
-                    >
-                      <a>删除</a>
-                    </Popconfirm>,
-                  ]
-                : []),
-            ],
-          },
-        ]}
-        request={async (params) => {
-          const result = await getOpenIddictScopes(params);
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        toolBarRender={() =>
-          access.canCreateOpenIddictScope
-            ? [
-                <ModalForm<ScopeFormValues>
-                  key="create"
-                  title="新建范围"
-                  trigger={<Button type="primary">新建</Button>}
-                  onFinish={async (values) => {
-                    await createOpenIddictScope(values);
-                    message.success('已创建');
-                    actionRef.current?.reload();
-                    return true;
-                  }}
-                >
-                  <ScopeFormFields />
-                </ModalForm>,
-              ]
-            : []
-        }
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {access.canCreateOpenIddictScope
+          ? [
+              <ModalForm<ScopeFormValues>
+                key="create"
+                title="新建范围"
+                trigger={<Button type="primary">新建</Button>}
+                onFinish={async (values) => {
+                  await createOpenIddictScope(values);
+                  message.success('已创建');
+                  grid.refresh();
+                  return true;
+                }}
+              >
+                <ScopeFormFields />
+              </ModalForm>,
+            ]
+          : []}
+      </GridControls>
+      <AgGridReact<OpenIddictScopeDto> {...grid.gridProps} />
     </PageContainer>
   );
 };

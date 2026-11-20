@@ -7,6 +7,7 @@
  * - 用户/角色主 CRUD 在 identity.ts；本文件不重复那一套。
  */
 import { request } from '@umijs/max';
+import { type GridQuery, postGridQuery } from './gridQuery';
 import type { PagedResult } from './identity';
 
 export type OrganizationUnitDto = {
@@ -278,4 +279,52 @@ export async function revokeAllSessionsByUser(userId: string) {
   return request(`/api/app/identity-session/revoke-all-by-user/${userId}`, {
     method: 'POST',
   });
+}
+
+export function queryClaimTypes(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<ClaimTypeDto>(
+    '/api/app/claim-type/query',
+    input,
+    signal,
+  );
+}
+
+export function querySecurityLogs(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<SecurityLogDto>(
+    '/api/app/security-log/query',
+    input,
+    signal,
+  );
+}
+
+export function querySessions(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<IdentitySessionDto>(
+    '/api/app/identity-session/query',
+    input,
+    signal,
+  );
+}
+
+export function queryOrganizationMembers(
+  unitId: string,
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<{ id: string; userName: string; email?: string }>(
+    `/api/app/organization-unit/${encodeURIComponent(unitId)}/query-members`,
+    input,
+    signal,
+  );
+}
+
+export function queryOrganizationRoles(
+  unitId: string,
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<{ id: string; name: string }>(
+    `/api/app/organization-unit/${encodeURIComponent(unitId)}/query-roles`,
+    input,
+    signal,
+  );
 }

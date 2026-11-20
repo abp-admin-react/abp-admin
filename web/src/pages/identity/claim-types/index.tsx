@@ -1,5 +1,4 @@
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   type ProColumns,
@@ -8,19 +7,28 @@ import {
   ProFormText,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm } from 'antd';
-import React, { useRef } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+  Popconfirm,
+} from 'antd';
+import React from 'react';
 import {
   type ClaimTypeDto,
   createClaimType,
   deleteClaimType,
-  getClaimTypes,
+  queryClaimTypes,
   updateClaimType,
 } from '@/abp/identityAdmin';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 const ClaimTypesPage: React.FC = () => {
-  const actionRef = useRef<ActionType>(undefined);
   // App.useApp() 消费 ConfigProvider 主题上下文，替代不推荐的静态 message（重构报告问题 20）
   const { message } = App.useApp();
   const access = useAccess();
@@ -57,7 +65,7 @@ const ClaimTypesPage: React.FC = () => {
                 valueType: record.valueType,
               });
               message.success('已更新');
-              actionRef.current?.reload();
+              grid.refresh();
               return true;
             }}
           >
@@ -74,7 +82,7 @@ const ClaimTypesPage: React.FC = () => {
             onConfirm={async () => {
               await deleteClaimType(record.id);
               message.success('已删除');
-              actionRef.current?.reload();
+              grid.refresh();
             }}
           >
             <a>删除</a>
@@ -84,22 +92,25 @@ const ClaimTypesPage: React.FC = () => {
     },
   ];
 
+  const grid = useSearchableRemoteGrid<ClaimTypeDto>({
+    columnDefs: toGridColumns<ClaimTypeDto>(columns, {
+      pro: true,
+      kinds: { required: 'boolean', isStatic: 'boolean' },
+    }),
+    ariaLabel: '声明类型',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: queryClaimTypes,
+  });
+
   return (
     <PageContainer title="用户身份属性">
-      <AutoHeightProTable<ClaimTypeDto>
-        rowKey="id"
-        actionRef={actionRef}
-        columns={columns}
-        search={false}
-        request={async (params) => {
-          const result = await getClaimTypes(params);
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        toolBarRender={() => [
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {[
           access.canCreateClaimTypes ? (
             <ModalForm
               key="create"
@@ -108,7 +119,7 @@ const ClaimTypesPage: React.FC = () => {
               onFinish={async (values) => {
                 await createClaimType(values as { name: string });
                 message.success('已创建');
-                actionRef.current?.reload();
+                grid.refresh();
                 return true;
               }}
             >
@@ -136,7 +147,8 @@ const ClaimTypesPage: React.FC = () => {
             <React.Fragment key="create-placeholder" />
           ),
         ]}
-      />
+      </GridControls>
+      <AgGridReact<ClaimTypeDto> {...grid.gridProps} />
     </PageContainer>
   );
 };

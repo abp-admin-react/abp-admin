@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -82,6 +83,15 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
         var list = await _roleAppService.GetListAsync(new GetIdentityRolesInput { Filter = roleName });
         list.Items.Single(item => item.Id == role.Id)
             .GetProperty<string>(RoleRemarkConsts.PropertyName).ShouldBe("负责审核订单");
+
+        var grid = await _roleUserAppService.QueryRolesAsync(new GridQueryInput
+        {
+            Keyword = "审核订单",
+            Filters = [new() { Field = "name", Conditions = [new() { Op = "eq", Value = roleName }] }],
+            Sort = [new() { Field = "extraProperties.Remark", Direction = "asc" }]
+        });
+        grid.TotalCount.ShouldBe(1);
+        grid.Items.Single().Id.ShouldBe(role.Id);
 
         var detail = await _roleAppService.GetAsync(role.Id);
         detail.GetProperty<string>(RoleRemarkConsts.PropertyName).ShouldBe("负责审核订单");

@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 
@@ -7,6 +8,8 @@ namespace AbpAdmin.Identity;
 
 public interface ISecurityLogAppService : IApplicationService
 {
+    Task<PagedResultDto<SecurityLogDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<SecurityLogDto>> GetListAsync(GetSecurityLogListInput input);
 }
 

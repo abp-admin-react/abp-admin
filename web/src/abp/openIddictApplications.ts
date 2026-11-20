@@ -6,6 +6,7 @@
  *   这里是后台登记的全部客户端。
  */
 import { request } from '@umijs/max';
+import { type GridQuery, postGridQuery } from './gridQuery';
 
 /** 应用管理 DTO（与后端 OpenIddictApplicationDto 对齐；永远不含 ClientSecret/JWKS 等凭据材料） */
 export type OpenIddictApplicationDto = {
@@ -214,4 +215,23 @@ export async function generateOpenIddictAccessToken(
     method: 'POST',
     data,
   });
+}
+
+export function queryOpenIddictApplications(
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<OpenIddictApplicationDto>(
+    '/api/app/open-iddict-application/query',
+    input,
+    signal,
+  );
+}
+
+export function queryOpenIddictScopes(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<OpenIddictScopeDto>(
+    '/api/app/open-iddict-scope/query',
+    input,
+    signal,
+  );
 }

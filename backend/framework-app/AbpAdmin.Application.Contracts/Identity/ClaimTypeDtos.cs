@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Identity;
@@ -10,6 +11,8 @@ namespace AbpAdmin.Identity;
 
 public interface IClaimTypeAppService : IApplicationService
 {
+    Task<PagedResultDto<ClaimTypeDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<ClaimTypeDto>> GetListAsync(PagedAndSortedResultRequestDto input);
 
     Task<List<ClaimTypeDto>> GetLookupAsync();

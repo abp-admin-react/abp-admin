@@ -1,13 +1,15 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using OpenIddict.Abstractions;
-using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Domain.Entities;
+using Volo.Abp.Domain.Repositories;
 using Volo.Abp.OpenIddict.Scopes;
+using Volo.Abp;
 
 namespace AbpAdmin.OpenIddict;
 
@@ -38,6 +40,17 @@ public class OpenIddictScopeAppService : AbpAdminAppService, IOpenIddictScopeApp
     {
         _scopeRepository = scopeRepository;
         _scopeManager = scopeManager;
+    }
+
+    public virtual async Task<PagedResultDto<OpenIddictScopeDto>> QueryAsync(GridQueryInput input)
+    {
+        var query = await LazyServiceProvider.LazyGetRequiredService<IReadOnlyRepository<OpenIddictScope, Guid>>().GetQueryableAsync();
+        var grid = new GridQueryDefinition<OpenIddictScope>()
+            .SearchableField("name", x => x.Name)
+            .SearchableField("displayName", x => x.DisplayName)
+            .SearchableField("description", x => x.Description);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "name", false, x => x.Id, Map);
+        return new(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<OpenIddictScopeDto>> GetListAsync(PagedAndSortedResultRequestDto input)

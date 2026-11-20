@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { App } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRole, type IdentityRoleDto, updateRole } from '@/abp/identity';
@@ -16,6 +16,7 @@ const regularRole: IdentityRoleDto = {
 
 vi.mock('@umijs/max', () => ({ useAccess: () => access }));
 vi.mock('@/abp/identity', () => ({
+  queryRoles: vi.fn(),
   createRole: vi.fn(),
   updateRole: vi.fn(),
   deleteRole: vi.fn(),
@@ -27,18 +28,20 @@ vi.mock('@/components/IdentityOrgHelp', () => ({
 vi.mock('@/components/PermissionModal', () => ({ default: () => null }));
 vi.mock('@/components/ClaimModal', () => ({ default: () => null }));
 vi.mock('./components/RoleUsersDrawer', () => ({ default: () => null }));
-vi.mock('@/components/AutoHeightProTable', () => ({
-  default: (props: any) => {
-    harness.table(props);
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: ({ columnDefs }: any) => {
+    const actionColumn = columnDefs.find(
+      (column: any) => column.headerName === '操作',
+    );
+    const Actions = actionColumn.cellRenderer;
     return (
-      <>
-        <div data-testid="actions">
-          {props.columns
-            .find((col: any) => col.valueType === 'option')
-            .render(undefined, role)}
-        </div>
-        {props.toolBarRender()}
-      </>
+      <div data-testid="actions">
+        <Actions
+          {...actionColumn.cellRendererParams}
+          data={role}
+          node={{ rowIndex: 0 }}
+        />
+      </div>
     );
   },
 }));
@@ -171,10 +174,9 @@ describe('角色管理常规流程', () => {
       </App>,
     );
     expect(screen.getByTestId('actions').textContent).toContain('编辑备注');
-    expect(screen.getAllByLabelText('名称')[0]).toHaveProperty(
-      'disabled',
-      true,
-    );
+    expect(
+      within(screen.getByTestId('actions')).getByLabelText('名称'),
+    ).toHaveProperty('disabled', true);
     expect(screen.getAllByLabelText('注册时默认分配')).toHaveLength(1);
     const form = harness.form.mock.calls
       .map(([props]) => props)

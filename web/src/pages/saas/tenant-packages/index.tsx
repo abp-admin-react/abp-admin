@@ -1,6 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons';
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   type ProColumns,
@@ -8,7 +7,16 @@ import {
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { Alert, App, Button, Popconfirm, Tree } from 'antd';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  Alert,
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+  Popconfirm,
+  Tree,
+} from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import React, { useRef, useState } from 'react';
 import { toMenuIcon as iconOf } from '@/abp/menuIcons';
@@ -17,13 +25,15 @@ import {
   createTenantPackage,
   deleteTenantPackage,
   getPackageMenuSelection,
-  getTenantPackages,
+  queryTenantPackages,
   type TenantPackageDto,
   updatePackageMenuSelection,
   updateTenantPackage,
 } from '@/abp/tenantPackages';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
-import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 type EditTarget = { mode: 'create' } | { mode: 'edit'; row: TenantPackageDto };
 
@@ -40,7 +50,6 @@ function toTreeData(nodes: MenuTreeDto[]): DataNode[] {
 const TenantPackagePage: React.FC = () => {
   const { message } = App.useApp();
   const access = useAccess();
-  const actionRef = useRef<ActionType>(undefined);
   const [editTarget, setEditTarget] = useState<EditTarget>();
   const [menuTarget, setMenuTarget] = useState<TenantPackageDto>();
   const [menuTree, setMenuTree] = useState<DataNode[]>([]);
@@ -75,12 +84,12 @@ const TenantPackagePage: React.FC = () => {
     await updatePackageMenuSelection(menuTarget.id, checkedKeys);
     message.success('套餐菜单已保存');
     setMenuTarget(undefined);
-    actionRef.current?.reload();
+    grid.refresh();
     return true;
   };
 
   const columns: ProColumns<TenantPackageDto>[] = [
-    { title: '套餐名', dataIndex: 'name', ...textFilter('按套餐名筛选') },
+    { title: '套餐名', dataIndex: 'name' },
     { title: '菜单数', dataIndex: 'menuCount', width: 90 },
     { title: '备注', dataIndex: 'remark', ellipsis: true },
     {
@@ -107,7 +116,7 @@ const TenantPackagePage: React.FC = () => {
               onConfirm={async () => {
                 await deleteTenantPackage(record.id);
                 message.success('套餐已删除');
-                actionRef.current?.reload();
+                grid.refresh();
               }}
             >
               <a style={{ color: '#ff4d4f' }}>删除</a>
@@ -117,38 +126,39 @@ const TenantPackagePage: React.FC = () => {
     },
   ];
 
+  const grid = useSearchableRemoteGrid<TenantPackageDto>({
+    columnDefs: toGridColumns<TenantPackageDto>(columns, {
+      pro: true,
+      kinds: { menuCount: 'number' },
+    }),
+    ariaLabel: '租户套餐',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: queryTenantPackages,
+  });
+
   return (
     <PageContainer title="租户菜单套餐">
-      <AutoHeightProTable<TenantPackageDto>
-        rowKey="id"
-        headerTitle="租户套餐"
-        actionRef={actionRef}
-        columns={columns}
-        request={async (params, _sorter, filter) => {
-          const res = await getTenantPackages({
-            current: params.current,
-            pageSize: params.pageSize,
-            filter: firstFilterValue(filter, 'name'),
-          });
-          return { data: res.items, total: res.totalCount, success: true };
-        }}
-        search={false}
-        pagination={{ defaultPageSize: 10 }}
-        toolBarRender={() =>
-          [
-            access.canCreateTenantPackages ? (
-              <Button
-                key="create"
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => setEditTarget({ mode: 'create' })}
-              >
-                新增套餐
-              </Button>
-            ) : null,
-          ].filter(Boolean)
-        }
-      />
+      <strong>{'租户套餐'}</strong>
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {[
+          access.canCreateTenantPackages ? (
+            <Button
+              key="create"
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setEditTarget({ mode: 'create' })}
+            >
+              新增套餐
+            </Button>
+          ) : null,
+        ].filter(Boolean)}
+      </GridControls>
+      <AgGridReact<TenantPackageDto> {...grid.gridProps} />
 
       <ModalForm
         title={
@@ -182,7 +192,7 @@ const TenantPackagePage: React.FC = () => {
             message.success('套餐已创建，接下来请配置菜单');
           }
           setEditTarget(undefined);
-          actionRef.current?.reload();
+          grid.refresh();
           return true;
         }}
       >

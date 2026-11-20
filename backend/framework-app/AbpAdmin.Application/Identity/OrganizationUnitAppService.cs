@@ -1,13 +1,15 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
-using Volo.Abp;
+using Microsoft.AspNetCore.Mvc;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
+using Volo.Abp;
 
 namespace AbpAdmin.Identity;
 
@@ -32,6 +34,34 @@ public class OrganizationUnitAppService : AbpAdminAppService, IOrganizationUnitA
         _userQueryRepository = userQueryRepository;
         _userManager = userManager;
         _roleRepository = roleRepository;
+    }
+
+    [HttpPost("/api/app/organization-unit/{id}/query-roles")]
+    public virtual async Task<PagedResultDto<OrganizationUnitRoleDto>> QueryRolesAsync(Guid id, GridQueryInput input)
+    {
+        var unit = await _organizationUnitRepository.GetAsync(id, includeDetails: true);
+        var roleIds = unit.Roles.Select(x => x.RoleId).ToList();
+        var query = (await LazyServiceProvider.LazyGetRequiredService<IReadOnlyRepository<IdentityRole, Guid>>().GetQueryableAsync())
+            .Where(x => roleIds.Contains(x.Id));
+        var grid = new GridQueryDefinition<IdentityRole>()
+            .SearchableField("name", x => x.Name);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "name", false, x => x.Id, x => new OrganizationUnitRoleDto { Id = x.Id, Name = x.Name });
+        return new(page.TotalCount, page.Items);
+    }
+
+    [HttpPost("/api/app/organization-unit/{id}/query-members")]
+    public virtual async Task<PagedResultDto<OrganizationUnitUserDto>> QueryMembersAsync(Guid id, GridQueryInput input)
+    {
+        await _organizationUnitRepository.GetAsync(id);
+        var query = (await _userQueryRepository.GetQueryableAsync())
+            .Where(x => x.OrganizationUnits.Any(link => link.OrganizationUnitId == id));
+        var grid = new GridQueryDefinition<IdentityUser>()
+            .SearchableField("userName", x => x.UserName);
+        if (await AuthorizationService.IsGrantedAsync(IdentityPermissions.Users.Update))
+            grid.SearchableField("email", x => x.Email);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "userName", false, x => x.Id, x =>
+            new OrganizationUnitUserDto { Id = x.Id, UserName = x.UserName, Email = x.Email });
+        return new(page.TotalCount, page.Items);
     }
 
     public virtual async Task<System.Collections.Generic.List<OrganizationUnitDto>> GetListAsync()

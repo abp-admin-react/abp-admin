@@ -2,15 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Menus;
+using AbpAdmin.OperationLogs;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
-using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Data;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.MultiTenancy;
-using AbpAdmin.OperationLogs;
+using Volo.Abp;
 
 namespace AbpAdmin.Tenants;
 
@@ -33,6 +34,18 @@ public class TenantPackageAppService : AbpAdminAppService, ITenantPackageAppServ
         _packageRepository = packageRepository;
         _menuRepository = menuRepository;
         _dataFilter = dataFilter;
+    }
+
+    public virtual async Task<PagedResultDto<TenantPackageDto>> QueryAsync(GridQueryInput input)
+    {
+        EnsureHostSide();
+        var query = await _packageRepository.WithDetailsAsync(x => x.Menus);
+        var grid = new GridQueryDefinition<TenantPackage>()
+            .SearchableField("name", x => x.Name)
+            .Field("menuCount", x => x.Menus.Count)
+            .SearchableField("remark", x => x.Remark);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "name", false, x => x.Id, x => ToDto(x));
+        return new(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<TenantPackageDto>> GetListAsync(TenantPackageListInput input)

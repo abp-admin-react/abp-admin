@@ -1,7 +1,9 @@
 using System;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
+using Volo.Abp.Identity;
 
 namespace AbpAdmin.Identity;
 
@@ -13,5 +15,9 @@ namespace AbpAdmin.Identity;
 /// </summary>
 public interface IRoleUserAdminAppService : IApplicationService
 {
+    Task<PagedResultDto<IdentityRoleDto>> QueryRolesAsync(GridQueryInput input);
+
+    Task<PagedResultDto<RoleUserDto>> QueryAsync(Guid roleId, GridQueryInput input);
+
     Task<PagedResultDto<RoleUserDto>> GetListAsync(Guid roleId, PagedAndSortedResultRequestDto input);
 }

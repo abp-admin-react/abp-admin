@@ -83,7 +83,7 @@ export async function getUsers(params: {
   current?: number;
   pageSize?: number;
   filter?: string;
-  /** ABP 排序串（如 "UserName desc"），由列头 sorter 经 sorterToAbpSorting 生成 */
+  /** ABP 排序串（如 "UserName desc"） */
   sorting?: string;
 }) {
   const maxResultCount = params.pageSize ?? 10;
@@ -156,7 +156,7 @@ export async function getRoles(params: {
   current?: number;
   pageSize?: number;
   filter?: string;
-  /** ABP 排序串（如 "Name asc"），由列头 sorter 经 sorterToAbpSorting 生成 */
+  /** ABP 排序串（如 "Name asc"） */
   sorting?: string;
 }) {
   const maxResultCount = params.pageSize ?? 10;
@@ -418,5 +418,25 @@ export async function getCurrentAccountStatus() {
     {
       method: 'GET',
     },
+  );
+}
+
+export function queryRoles(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<IdentityRoleDto>(
+    '/api/app/role-user-admin/query-roles',
+    input,
+    signal,
+  );
+}
+
+export function queryRoleUsers(
+  roleId: string,
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<RoleUserDto>(
+    `/api/app/role-user-admin/query?roleId=${encodeURIComponent(roleId)}`,
+    input,
+    signal,
   );
 }

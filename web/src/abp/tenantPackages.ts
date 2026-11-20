@@ -1,4 +1,5 @@
 import { request } from '@umijs/max';
+import { type GridQuery, postGridQuery } from './gridQuery';
 import type { MenuTreeDto } from './menus';
 
 export type TenantPackageDto = {
@@ -76,4 +77,12 @@ export async function applyTenantPackage(
     method: 'POST',
     data: { packageId },
   });
+}
+
+export function queryTenantPackages(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<TenantPackageDto>(
+    '/api/app/tenant-package/query',
+    input,
+    signal,
+  );
 }

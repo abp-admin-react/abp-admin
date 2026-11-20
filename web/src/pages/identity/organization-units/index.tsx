@@ -1,5 +1,4 @@
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   ProCard,
@@ -8,39 +7,49 @@ import {
   ProFormText,
   ProFormTextArea,
   ProFormTreeSelect,
-  ProTable,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   App,
   Button,
   Collapse,
   Dropdown,
   Empty,
+  Button as GridButton,
+  Space as GridControls,
   type MenuProps,
   Popconfirm,
   Space,
   Splitter,
   Tree,
 } from 'antd';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
 import { getAllRoles, getUsers } from '@/abp/identity';
 import {
   addOrganizationUnitMembers,
   addOrganizationUnitRoles,
   createOrganizationUnit,
   deleteOrganizationUnit,
-  getOrganizationUnitMembers,
-  getOrganizationUnitRoles,
   getOrganizationUnits,
   moveOrganizationUnit,
   type OrganizationUnitDto,
+  queryOrganizationMembers,
+  queryOrganizationRoles,
   removeOrganizationUnitMember,
   removeOrganizationUnitRole,
   updateOrganizationUnit,
 } from '@/abp/identityAdmin';
 import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { isNotFound } from '@/requestErrorConfig';
+
+type OrgMember = { id: string; userName: string; email?: string };
+type OrgRole = { id: string; name: string };
 
 const organizationIdentifierPattern =
   /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -86,8 +95,6 @@ function IdentifierListField({ name, label }: { name: string; label: string }) {
 const OrganizationUnitsPage: React.FC = () => {
   const access = useAccess();
   const { message, modal } = App.useApp();
-  const actionRef = useRef<ActionType>(undefined);
-  const roleActionRef = useRef<ActionType>(undefined);
   const [units, setUnits] = useState<OrganizationUnitDto[]>([]);
   const [selected, setSelected] = useState<OrganizationUnitDto>();
   const [renameModalOpen, setRenameModalOpen] = useState(false);
@@ -114,7 +121,7 @@ const OrganizationUnitsPage: React.FC = () => {
   const movableTreeData = useMemo(() => {
     if (!selected) return [];
     const excluded = new Set([
-      selected.id,
+      selected?.id,
       ...collectDescendantIds(selected, units),
     ]);
     return units
@@ -141,7 +148,7 @@ const OrganizationUnitsPage: React.FC = () => {
       danger: true,
       onClick: () =>
         modal.confirm({
-          title: `确认删除部门「${selected.displayName}」？`,
+          title: `确认删除部门「${selected?.displayName}」？`,
           okText: '删除',
           cancelText: '取消',
           okButtonProps: { danger: true },
@@ -156,6 +163,93 @@ const OrganizationUnitsPage: React.FC = () => {
         }),
     });
   }
+
+  const membersGrid = useSearchableRemoteGrid<OrgMember>({
+    columnDefs: toGridColumns<OrgMember>(
+      [
+        { title: '用户名', dataIndex: 'userName' },
+        { title: '邮箱', dataIndex: 'email' },
+        ...(access.canManageOrganizationUnitMembers
+          ? [
+              {
+                title: '操作',
+                valueType: 'option',
+                render: (_, record) => (
+                  <Popconfirm
+                    title="确认将该成员移出本部门？"
+                    onConfirm={async () => {
+                      if (!selected) return;
+                      await removeOrganizationUnitMember(
+                        selected.id,
+                        record.id,
+                      );
+                      message.success('已移除');
+                      membersGrid.refresh();
+                    }}
+                  >
+                    <a>移除</a>
+                  </Popconfirm>
+                ),
+              } as ProColumns,
+            ]
+          : []),
+      ],
+      {
+        pro: true,
+        kinds: { email: access.canUpdateUsers ? 'text' : 'display' },
+      },
+    ),
+    ariaLabel: '部门成员',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: React.useCallback(
+      (input: GridQuery, signal: AbortSignal) =>
+        selected
+          ? queryOrganizationMembers(selected.id, input, signal)
+          : Promise.resolve({ items: [], totalCount: 0 }),
+      [selected?.id],
+    ),
+  });
+  const rolesGrid = useSearchableRemoteGrid<OrgRole>({
+    columnDefs: toGridColumns<OrgRole>(
+      [
+        { title: '角色名称', dataIndex: 'name' },
+        ...(access.canManageOrganizationUnitRoles
+          ? [
+              {
+                title: '操作',
+                valueType: 'option',
+                render: (_, record) => (
+                  <Popconfirm
+                    title="确认移除该部门统一角色？"
+                    description="移除后，成员不再通过本部门获得该角色。"
+                    onConfirm={async () => {
+                      if (!selected) return;
+                      await removeOrganizationUnitRole(selected.id, record.id);
+                      message.success('已移除');
+                      rolesGrid.refresh();
+                    }}
+                  >
+                    <a>移除</a>
+                  </Popconfirm>
+                ),
+              } as ProColumns,
+            ]
+          : []),
+      ],
+      { pro: true, kinds: {} },
+    ),
+    ariaLabel: '部门角色',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: React.useCallback(
+      (input: GridQuery, signal: AbortSignal) =>
+        selected
+          ? queryOrganizationRoles(selected.id, input, signal)
+          : Promise.resolve({ items: [], totalCount: 0 }),
+      [selected?.id],
+    ),
+  });
 
   return (
     <PageContainer {...identityOrgHelpHeader('org', '部门')}>
@@ -208,19 +302,19 @@ const OrganizationUnitsPage: React.FC = () => {
         <Splitter.Panel>
           {selected ? (
             <ProCard
-              title={selected.displayName}
+              title={selected?.displayName}
               extra={
                 <Space wrap>
                   {access.canCreateOrganizationUnits && (
                     <ModalForm
                       key={`child-${selected.id}`}
-                      title={`添加子部门 - ${selected.displayName}`}
+                      title={`添加子部门 - ${selected?.displayName}`}
                       trigger={<Button>添加子部门</Button>}
                       modalProps={{ destroyOnHidden: true }}
                       onFinish={async (values) => {
                         await createOrganizationUnit({
                           displayName: values.displayName,
-                          parentId: selected.id,
+                          parentId: selected?.id,
                         });
                         message.success('已添加子部门');
                         await load();
@@ -241,99 +335,67 @@ const OrganizationUnitsPage: React.FC = () => {
                 </Space>
               }
             >
-              <ProTable
-                key={`members-${selected.id}`}
-                rowKey="id"
-                headerTitle="部门成员"
-                actionRef={actionRef}
-                search={false}
-                options={false}
-                columns={[
-                  { title: '用户名', dataIndex: 'userName' },
-                  { title: '邮箱', dataIndex: 'email' },
-                  ...(access.canManageOrganizationUnitMembers
-                    ? [
-                        {
-                          title: '操作',
-                          valueType: 'option',
-                          render: (_, record) => (
-                            <Popconfirm
-                              title="确认将该成员移出本部门？"
-                              onConfirm={async () => {
-                                await removeOrganizationUnitMember(
-                                  selected.id,
-                                  record.id,
-                                );
-                                message.success('已移除');
-                                actionRef.current?.reload();
-                              }}
-                            >
-                              <a>移除</a>
-                            </Popconfirm>
-                          ),
-                        } as ProColumns,
-                      ]
-                    : []),
-                ]}
-                request={async (params) => {
-                  const pageSize = params.pageSize ?? 10;
-                  const result = await getOrganizationUnitMembers(selected.id, {
-                    skipCount: ((params.current ?? 1) - 1) * pageSize,
-                    maxResultCount: pageSize,
-                  });
-                  return {
-                    data: result.items,
-                    total: result.totalCount,
-                    success: true,
-                  };
-                }}
-                toolBarRender={() =>
-                  access.canManageOrganizationUnitMembers
-                    ? [
-                        <ModalForm<{ userIds?: string[]; userIdsText?: string }>
-                          key="add-members"
-                          title={`添加成员 - ${selected.displayName}`}
-                          trigger={<Button type="primary">添加成员</Button>}
-                          modalProps={{ destroyOnHidden: true }}
-                          scrollToFirstError={{ focus: true }}
-                          onFinish={async (values) => {
-                            const ids = access.canManageUsers
-                              ? values.userIds ?? []
-                              : parseIdentifierList(values.userIdsText);
-                            try {
-                              await addOrganizationUnitMembers(selected.id, ids);
-                            } catch (error) {
-                              if (!isNotFound(error)) throw error;
-                              message.error('找不到指定用户，请核对用户 ID。');
-                              return false;
-                            }
-                            message.success('已添加');
-                            actionRef.current?.reload();
-                            return true;
-                          }}
-                        >
-                          {access.canManageUsers ? (
-                            <ProFormSelect
-                              name="userIds"
-                              label="用户"
-                              mode="multiple"
-                              rules={[{ required: true, message: '请选择用户' }]}
-                              request={async () => {
-                                const result = await getUsers({ current: 1, pageSize: 100 });
-                                return (result.items || []).map((item) => ({
-                                  label: item.userName,
-                                  value: item.id,
-                                }));
-                              }}
-                            />
-                          ) : (
-                            <IdentifierListField name="userIdsText" label="用户 ID" />
-                          )}
-                        </ModalForm>,
-                      ]
-                    : []
-                }
-              />
+              <strong>{'部门成员'}</strong>
+              <GridControls wrap style={{ marginBottom: 8 }}>
+                {membersGrid.searchBox}
+                {membersGrid.hasFilters && (
+                  <GridButton onClick={membersGrid.clearFilters}>
+                    清空筛选
+                  </GridButton>
+                )}{' '}
+                {access.canManageOrganizationUnitMembers
+                  ? [
+                      <ModalForm<{ userIds?: string[]; userIdsText?: string }>
+                        key="add-members"
+                        title={`添加成员 - ${selected?.displayName}`}
+                        trigger={<Button type="primary">添加成员</Button>}
+                        modalProps={{ destroyOnHidden: true }}
+                        scrollToFirstError={{ focus: true }}
+                        onFinish={async (values) => {
+                          const ids = access.canManageUsers
+                            ? (values.userIds ?? [])
+                            : parseIdentifierList(values.userIdsText);
+                          try {
+                            await addOrganizationUnitMembers(selected?.id, ids);
+                          } catch (error) {
+                            if (!isNotFound(error)) throw error;
+                            message.error('找不到指定用户，请核对用户 ID。');
+                            return false;
+                          }
+                          message.success('已添加');
+                          membersGrid.refresh();
+                          return true;
+                        }}
+                      >
+                        {access.canManageUsers ? (
+                          <ProFormSelect
+                            name="userIds"
+                            label="用户"
+                            mode="multiple"
+                            rules={[{ required: true, message: '请选择用户' }]}
+                            request={async () => {
+                              const result = await getUsers({
+                                current: 1,
+                                pageSize: 100,
+                              });
+                              return (result.items || []).map((item) => ({
+                                label: item.userName,
+                                value: item.id,
+                              }));
+                            }}
+                          />
+                        ) : (
+                          <IdentifierListField
+                            name="userIdsText"
+                            label="用户 ID"
+                          />
+                        )}
+                      </ModalForm>,
+                    ]
+                  : []}
+              </GridControls>
+              <AgGridReact<OrgMember> {...membersGrid.gridProps} />
+
               <Collapse
                 key={`roles-${selected.id}`}
                 destroyOnHidden
@@ -344,98 +406,80 @@ const OrganizationUnitsPage: React.FC = () => {
                     children: (
                       <>
                         <p>本部门所有成员自动获得这些角色。</p>
-                        <ProTable
-                          rowKey="id"
-                          headerTitle="已配置角色"
-                          actionRef={roleActionRef}
-                          search={false}
-                          options={false}
-                          pagination={false}
-                          columns={[
-                            { title: '角色名称', dataIndex: 'name' },
-                            ...(access.canManageOrganizationUnitRoles
-                              ? [
-                                  {
-                                    title: '操作',
-                                    valueType: 'option',
-                                    render: (_, record) => (
-                                      <Popconfirm
-                                        title="确认移除该部门统一角色？"
-                                        description="移除后，成员不再通过本部门获得该角色。"
-                                        onConfirm={async () => {
-                                          await removeOrganizationUnitRole(
-                                            selected.id,
-                                            record.id,
-                                          );
-                                          message.success('已移除');
-                                          roleActionRef.current?.reload();
-                                        }}
-                                      >
-                                        <a>移除</a>
-                                      </Popconfirm>
-                                    ),
-                                  } as ProColumns,
-                                ]
-                              : []),
-                          ]}
-                          request={async () => {
-                            const result = await getOrganizationUnitRoles(
-                              selected.id,
-                            );
-                            return {
-                              data: result.items,
-                              total: result.items?.length || 0,
-                              success: true,
-                            };
-                          }}
-                          toolBarRender={() =>
-                            access.canManageOrganizationUnitRoles
-                              ? [
-                                  <ModalForm<{ roleIds?: string[]; roleIdsText?: string }>
-                                    key="add-roles"
-                                    title={`配置部门统一角色 - ${selected.displayName}`}
-                                    trigger={<Button>添加角色</Button>}
-                                    modalProps={{ destroyOnHidden: true }}
-                                    scrollToFirstError={{ focus: true }}
-                                    onFinish={async (values) => {
-                                      const ids = access.canManageRoles
-                                        ? values.roleIds ?? []
-                                        : parseIdentifierList(values.roleIdsText);
-                                      try {
-                                        await addOrganizationUnitRoles(selected.id, ids);
-                                      } catch (error) {
-                                        if (!isNotFound(error)) throw error;
-                                        message.error('找不到指定角色，请核对角色 ID。');
-                                        return false;
-                                      }
-                                      message.success('已添加');
-                                      roleActionRef.current?.reload();
-                                      return true;
-                                    }}
-                                  >
-                                    <p>角色将授予本部门所有成员。</p>
-                                    {access.canManageRoles ? (
-                                      <ProFormSelect
-                                        name="roleIds"
-                                        label="角色"
-                                        mode="multiple"
-                                        rules={[{ required: true, message: '请选择角色' }]}
-                                        request={async () => {
-                                          const result = await getAllRoles();
-                                          return (result.items || []).map((item) => ({
+
+                        <strong>{'已配置角色'}</strong>
+                        <GridControls wrap style={{ marginBottom: 8 }}>
+                          {rolesGrid.searchBox}
+                          {rolesGrid.hasFilters && (
+                            <GridButton onClick={rolesGrid.clearFilters}>
+                              清空筛选
+                            </GridButton>
+                          )}{' '}
+                          {access.canManageOrganizationUnitRoles
+                            ? [
+                                <ModalForm<{
+                                  roleIds?: string[];
+                                  roleIdsText?: string;
+                                }>
+                                  key="add-roles"
+                                  title={`配置部门统一角色 - ${selected?.displayName}`}
+                                  trigger={<Button>添加角色</Button>}
+                                  modalProps={{ destroyOnHidden: true }}
+                                  scrollToFirstError={{ focus: true }}
+                                  onFinish={async (values) => {
+                                    const ids = access.canManageRoles
+                                      ? (values.roleIds ?? [])
+                                      : parseIdentifierList(values.roleIdsText);
+                                    try {
+                                      await addOrganizationUnitRoles(
+                                        selected?.id,
+                                        ids,
+                                      );
+                                    } catch (error) {
+                                      if (!isNotFound(error)) throw error;
+                                      message.error(
+                                        '找不到指定角色，请核对角色 ID。',
+                                      );
+                                      return false;
+                                    }
+                                    message.success('已添加');
+                                    rolesGrid.refresh();
+                                    return true;
+                                  }}
+                                >
+                                  <p>角色将授予本部门所有成员。</p>
+                                  {access.canManageRoles ? (
+                                    <ProFormSelect
+                                      name="roleIds"
+                                      label="角色"
+                                      mode="multiple"
+                                      rules={[
+                                        {
+                                          required: true,
+                                          message: '请选择角色',
+                                        },
+                                      ]}
+                                      request={async () => {
+                                        const result = await getAllRoles();
+                                        return (result.items || []).map(
+                                          (item) => ({
                                             label: item.name,
                                             value: item.id,
-                                          }));
-                                        }}
-                                      />
-                                    ) : (
-                                      <IdentifierListField name="roleIdsText" label="角色 ID" />
-                                    )}
-                                  </ModalForm>,
-                                ]
-                              : []
-                          }
-                        />
+                                          }),
+                                        );
+                                      }}
+                                    />
+                                  ) : (
+                                    <IdentifierListField
+                                      name="roleIdsText"
+                                      label="角色 ID"
+                                    />
+                                  )}
+                                </ModalForm>,
+                              ]
+                            : []}
+                        </GridControls>
+                        <AgGridReact<OrgRole> {...rolesGrid.gridProps} />
                       </>
                     ),
                   },
@@ -454,14 +498,14 @@ const OrganizationUnitsPage: React.FC = () => {
       </Splitter>
       {selected && access.canUpdateOrganizationUnits ? (
         <ModalForm
-          key={`rename-${selected.id}-${selected.displayName}`}
+          key={`rename-${selected.id}-${selected?.displayName}`}
           title="重命名部门"
           open={renameModalOpen}
           onOpenChange={setRenameModalOpen}
-          initialValues={{ displayName: selected.displayName }}
+          initialValues={{ displayName: selected?.displayName }}
           modalProps={{ destroyOnHidden: true }}
           onFinish={async (values) => {
-            await updateOrganizationUnit(selected.id, {
+            await updateOrganizationUnit(selected?.id, {
               displayName: values.displayName,
             });
             message.success('已更新');
@@ -476,13 +520,13 @@ const OrganizationUnitsPage: React.FC = () => {
       {selected && access.canUpdateOrganizationUnits ? (
         <ModalForm
           key={`move-${selected.id}`}
-          title={`移动部门 - ${selected.displayName}`}
+          title={`移动部门 - ${selected?.displayName}`}
           open={moveModalOpen}
           onOpenChange={setMoveModalOpen}
           modalProps={{ destroyOnHidden: true }}
           onFinish={async (values) => {
             await moveOrganizationUnit(
-              selected.id,
+              selected?.id,
               values.targetParentId || null,
             );
             message.success('已移动');

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 
@@ -8,6 +9,8 @@ namespace AbpAdmin.Tenants;
 
 public interface ITenantPackageAppService : IApplicationService
 {
+    Task<PagedResultDto<TenantPackageDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<TenantPackageDto>> GetListAsync(TenantPackageListInput input);
 
     Task<TenantPackageDto> GetAsync(Guid id);

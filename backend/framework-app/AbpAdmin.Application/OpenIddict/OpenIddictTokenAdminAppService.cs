@@ -2,16 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
+using AbpAdmin.OperationLogs;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using OpenIddict.Abstractions;
-using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.OpenIddict.Applications;
 using Volo.Abp.OpenIddict.Authorizations;
 using Volo.Abp.OpenIddict.Tokens;
-using AbpAdmin.OperationLogs;
+using Volo.Abp;
 
 namespace AbpAdmin.OpenIddict;
 
@@ -46,6 +47,67 @@ public class OpenIddictTokenAdminAppService : AbpAdminAppService, IOpenIddictTok
         _applicationReadOnlyRepository = applicationReadOnlyRepository;
         _tokenReadOnlyRepository = tokenReadOnlyRepository;
         _authorizationReadOnlyRepository = authorizationReadOnlyRepository;
+    }
+
+    public virtual async Task<PagedResultDto<OpenIddictAuthorizationDto>> QueryAuthorizationsAsync(GridQueryInput input)
+    {
+        var apps = await _applicationReadOnlyRepository.GetQueryableAsync();
+        var rows = from row in await _authorizationReadOnlyRepository.GetQueryableAsync()
+                   join app in apps on row.ApplicationId equals app.Id into matches
+                   from app in matches.DefaultIfEmpty()
+                   select new OpenIddictAuthorizationDto
+                   {
+                       ApplicationClientId = app == null ? null : app.ClientId,
+                       Id = row.Id,
+                       ApplicationId = row.ApplicationId,
+                       Type = row.Type,
+                       Subject = row.Subject,
+                       Status = row.Status,
+                       CreationDate = row.CreationDate,
+                       Scopes = row.Scopes,
+                   };
+        var grid = new GridQueryDefinition<OpenIddictAuthorizationDto>()
+            .SearchableField("applicationClientId", x => x.ApplicationClientId)
+            .SearchableField("subject", x => x.Subject)
+            .SearchableField("type", x => x.Type)
+            .SearchableField("status", x => x.Status)
+            .SearchableField("scopes", x => x.Scopes)
+            .Field("creationDate", x => x.CreationDate)
+            .Field("applicationId", x => x.ApplicationId);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationDate", true, x => x.Id, x => x);
+        return new(page.TotalCount, page.Items);
+    }
+
+    public virtual async Task<PagedResultDto<OpenIddictTokenDto>> QueryTokensAsync(GridQueryInput input)
+    {
+        var apps = await _applicationReadOnlyRepository.GetQueryableAsync();
+        var rows = from row in await _tokenReadOnlyRepository.GetQueryableAsync()
+                   join app in apps on row.ApplicationId equals app.Id into matches
+                   from app in matches.DefaultIfEmpty()
+                   select new OpenIddictTokenDto
+                   {
+                       ApplicationClientId = app == null ? null : app.ClientId,
+                       Id = row.Id,
+                       ApplicationId = row.ApplicationId,
+                       Type = row.Type,
+                       Subject = row.Subject,
+                       Status = row.Status,
+                       CreationDate = row.CreationDate,
+                       AuthorizationId = row.AuthorizationId,
+                       ReferenceId = row.ReferenceId,
+                       ExpirationDate = row.ExpirationDate,
+                       RedemptionDate = row.RedemptionDate,
+                   };
+        var grid = new GridQueryDefinition<OpenIddictTokenDto>()
+            .SearchableField("applicationClientId", x => x.ApplicationClientId)
+            .SearchableField("subject", x => x.Subject)
+            .SearchableField("type", x => x.Type)
+            .SearchableField("status", x => x.Status)
+            .Field("creationDate", x => x.CreationDate)
+            .Field("expirationDate", x => x.ExpirationDate)
+            .Field("applicationId", x => x.ApplicationId);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationDate", true, x => x.Id, x => x);
+        return new(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<OpenIddictTokenDto>> GetTokensAsync(OpenIddictTokenListInput input)

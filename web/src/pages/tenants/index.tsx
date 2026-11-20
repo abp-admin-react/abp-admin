@@ -1,6 +1,4 @@
-import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   type ProColumns,
@@ -8,16 +6,27 @@ import {
   ProFormText,
 } from '@ant-design/pro-components';
 import { useAccess, useModel } from '@umijs/max';
-import { App, Button, Popconfirm, Tag } from 'antd';
-import React, { useRef, useState } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+  Popconfirm,
+  Tag,
+} from 'antd';
+import React, { useState } from 'react';
 import { getAllEditions } from '@/abp/proModules';
 import { applyTenantPackage } from '@/abp/tenantPackages';
-import { createTenant, deleteTenant, getTenants } from '@/abp/tenants';
+import { createTenant, deleteTenant, queryTenants } from '@/abp/tenants';
 import type { CreateTenantInput, TenantDto } from '@/abp/types';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import FeatureModal from '@/components/FeatureModal';
-import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { useDictionary } from '@/hooks/useDictionary';
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import ConnectionStringDrawer from './ConnectionStringDrawer';
 import ApplyPackageModal from './components/ApplyPackageModal';
 import EditTenantModal, {
@@ -101,7 +110,6 @@ const CreateTenantModal: React.FC<{
 const TenantsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
   configurationEntry,
 }) => {
-  const actionRef = useRef<ActionType>(undefined);
   const access = useAccess();
   const { message } = App.useApp();
   const { initialState } = useModel('@@initialState');
@@ -112,7 +120,7 @@ const TenantsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
     activationDict.items.map((it) => [it.code, it]),
   );
 
-  const reload = () => actionRef.current?.reload();
+  const reload = () => grid.refresh();
 
   // 版本列的 Id→名称映射（lookup 需要 AbpAdmin.Editions 权限，无权限时回退显示原始 Id）
   const [editions, setEditions] = useState<
@@ -155,7 +163,6 @@ const TenantsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
     {
       title: '名称',
       dataIndex: 'name',
-      ...textFilter('按租户名称筛选'),
     },
     {
       title: 'Id',
@@ -165,6 +172,7 @@ const TenantsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
     },
     {
       title: '版本',
+      key: 'edition',
       search: false,
       render: (_, record) => {
         const editionId = record.extraProperties?.[TENANT_PROP.EditionId];
@@ -174,6 +182,7 @@ const TenantsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
     },
     {
       title: '激活状态',
+      key: 'activationState',
       search: false,
       render: (_, record) =>
         activationTag(
@@ -182,6 +191,7 @@ const TenantsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
     },
     {
       title: '版本到期时间',
+      key: 'editionEnd',
       search: false,
       render: (_, record) =>
         record.extraProperties?.[TENANT_PROP.EditionEndDateUtc] || '-',
@@ -241,37 +251,41 @@ const TenantsPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
     },
   ];
 
+  const grid = useSearchableRemoteGrid<TenantDto>({
+    columnDefs: toGridColumns<TenantDto>(columns, {
+      pro: true,
+      kinds: {
+        id: 'uuid',
+        edition: 'text',
+        activationState: 'number',
+        editionEnd: 'date',
+      },
+    }),
+    ariaLabel: '租户',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: queryTenants,
+  });
+
   return (
     <PageContainer title="租户" extra={configurationEntry}>
-      <AutoHeightProTable<TenantDto>
-        rowKey="id"
-        actionRef={actionRef}
-        columns={columns}
-        search={false}
-        request={async (params, _sorter, filter) => {
-          const result = await getTenants({
-            current: params.current,
-            pageSize: params.pageSize,
-            filter: firstFilterValue(filter, 'name'),
-          });
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        toolBarRender={
-          access.canCreateTenants
-            ? () => [
-                <CreateTenantModal
-                  key="create"
-                  canApplyPackage={canApplyPackage}
-                  onSuccess={reload}
-                />,
-              ]
-            : undefined
-        }
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {access.canCreateTenants
+          ? [
+              <CreateTenantModal
+                key="create"
+                canApplyPackage={canApplyPackage}
+                onSuccess={reload}
+              />,
+            ]
+          : undefined}
+      </GridControls>
+      <AgGridReact<TenantDto> {...grid.gridProps} />
+
       <FeatureModal
         open={!!featureTarget}
         title={`功能 - ${featureTarget?.name || ''}`}

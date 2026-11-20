@@ -1,16 +1,26 @@
-import { type ActionType, PageContainer } from '@ant-design/pro-components';
+import { PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
-import { App, Button, Popconfirm } from 'antd';
-import React, { useEffect, useRef, useState } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+  Popconfirm,
+} from 'antd';
+import React, { useEffect, useState } from 'react';
 import {
   deleteOpenIddictApplication,
-  getOpenIddictApplications,
   getOpenIddictScopeAll,
   type OpenIddictApplicationDto,
   type OpenIddictScopeLookupDto,
+  queryOpenIddictApplications,
 } from '@/abp/openIddictApplications';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import PermissionModal from '@/components/PermissionModal';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import AppFormModal from './components/AppFormModal';
 import GenerateTokenModal from './components/GenerateTokenModal';
 import TokenLifetimeDrawer from './components/TokenLifetimeDrawer';
@@ -18,7 +28,6 @@ import TokenLifetimeDrawer from './components/TokenLifetimeDrawer';
 const ApplicationsPage: React.FC = () => {
   const { message } = App.useApp();
   const access = useAccess();
-  const actionRef = useRef<ActionType>(undefined);
   const [permissionKey, setPermissionKey] = useState<string>();
   const [scopeOptions, setScopeOptions] = useState<OpenIddictScopeLookupDto[]>(
     [],
@@ -57,7 +66,7 @@ const ApplicationsPage: React.FC = () => {
           isEdit
           record={record}
           scopeOptions={scopeOptions}
-          onSuccess={() => actionRef.current?.reload()}
+          onSuccess={() => grid.refresh()}
         />,
       );
     }
@@ -104,7 +113,7 @@ const ApplicationsPage: React.FC = () => {
           onConfirm={async () => {
             await deleteOpenIddictApplication(record.id);
             message.success('已删除');
-            actionRef.current?.reload();
+            grid.refresh();
           }}
         >
           <a>删除</a>
@@ -114,46 +123,49 @@ const ApplicationsPage: React.FC = () => {
     return actions;
   };
 
+  const grid = useSearchableRemoteGrid<OpenIddictApplicationDto>({
+    columnDefs: toGridColumns<OpenIddictApplicationDto>(
+      [
+        { title: 'Client Id', dataIndex: 'clientId' },
+        { title: '显示名', dataIndex: 'displayName' },
+        { title: '类型', dataIndex: 'clientType' },
+        { title: '同意', dataIndex: 'consentType' },
+        {
+          title: '操作',
+          valueType: 'option',
+          render: (_, record) => renderActions(record),
+        },
+      ],
+      { pro: true, kinds: {} },
+    ),
+    ariaLabel: '应用',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: queryOpenIddictApplications,
+  });
+
   return (
     <PageContainer>
-      <AutoHeightProTable<OpenIddictApplicationDto>
-        rowKey="id"
-        actionRef={actionRef}
-        search={false}
-        columns={[
-          { title: 'Client Id', dataIndex: 'clientId' },
-          { title: '显示名', dataIndex: 'displayName' },
-          { title: '类型', dataIndex: 'clientType' },
-          { title: '同意', dataIndex: 'consentType' },
-          {
-            title: '操作',
-            valueType: 'option',
-            render: (_, record) => renderActions(record),
-          },
-        ]}
-        request={async (params) => {
-          const result = await getOpenIddictApplications(params);
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        toolBarRender={() =>
-          canCreateApplication
-            ? [
-                <AppFormModal
-                  key="create"
-                  title="新建应用"
-                  trigger={<Button type="primary">新建</Button>}
-                  isEdit={false}
-                  scopeOptions={scopeOptions}
-                  onSuccess={() => actionRef.current?.reload()}
-                />,
-              ]
-            : []
-        }
-      />
+      <GridControls wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {grid.hasFilters && (
+          <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+        )}{' '}
+        {canCreateApplication
+          ? [
+              <AppFormModal
+                key="create"
+                title="新建应用"
+                trigger={<Button type="primary">新建</Button>}
+                isEdit={false}
+                scopeOptions={scopeOptions}
+                onSuccess={() => grid.refresh()}
+              />,
+            ]
+          : []}
+      </GridControls>
+      <AgGridReact<OpenIddictApplicationDto> {...grid.gridProps} />
+
       <PermissionModal
         open={!!permissionKey}
         title={`权限 - ${permissionKey}`}

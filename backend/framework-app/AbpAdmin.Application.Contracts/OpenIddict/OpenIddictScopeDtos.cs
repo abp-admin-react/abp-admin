@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 
@@ -8,6 +9,8 @@ namespace AbpAdmin.OpenIddict;
 
 public interface IOpenIddictScopeAppService : IApplicationService
 {
+    Task<PagedResultDto<OpenIddictScopeDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<OpenIddictScopeDto>> GetListAsync(PagedAndSortedResultRequestDto input);
 
     Task<ListResultDto<OpenIddictScopeLookupDto>> GetAllAsync();

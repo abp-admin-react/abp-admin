@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 
@@ -8,6 +9,8 @@ namespace AbpAdmin.Identity;
 
 public interface IIdentitySessionAppService : IApplicationService
 {
+    Task<PagedResultDto<IdentitySessionDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<IdentitySessionDto>> GetListAsync(GetIdentitySessionListInput input);
 
     Task RevokeAsync(Guid id);

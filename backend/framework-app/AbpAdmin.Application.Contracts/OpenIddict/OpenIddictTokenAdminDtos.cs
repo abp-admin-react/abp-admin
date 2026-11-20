@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 
@@ -13,6 +14,10 @@ namespace AbpAdmin.OpenIddict;
 /// </summary>
 public interface IOpenIddictTokenAdminAppService : IApplicationService
 {
+    Task<PagedResultDto<OpenIddictAuthorizationDto>> QueryAuthorizationsAsync(GridQueryInput input);
+
+    Task<PagedResultDto<OpenIddictTokenDto>> QueryTokensAsync(GridQueryInput input);
+
     Task<PagedResultDto<OpenIddictTokenDto>> GetTokensAsync(OpenIddictTokenListInput input);
 
     Task<PagedResultDto<OpenIddictAuthorizationDto>> GetAuthorizationsAsync(OpenIddictAuthorizationListInput input);

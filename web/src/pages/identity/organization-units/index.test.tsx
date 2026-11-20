@@ -26,8 +26,18 @@ const mocks = vi.hoisted(() => ({
   removeOrganizationUnitRole: vi.fn(),
 }));
 
+vi.mock('ag-grid-react', () => import('../../../../tests/gridTestDouble'));
+vi.mock('@/abp/gridQuery', () => ({
+  postGridQuery: (url: string, grid: unknown) =>
+    url.endsWith('/query-members')
+      ? mocks.getOrganizationUnitMembers(url, grid)
+      : mocks.getOrganizationUnitRoles(url, grid),
+}));
 vi.mock('@umijs/max', () => ({ useAccess: mocks.useAccess }));
-vi.mock('@/abp/identityAdmin', () => mocks);
+vi.mock('@/abp/identityAdmin', async (actual) => ({
+  ...(await actual<typeof import('@/abp/identityAdmin')>()),
+  ...mocks,
+}));
 vi.mock('@/abp/identity', () => ({
   getAllRoles: mocks.getAllRoles,
   getUsers: mocks.getUsers,
@@ -60,10 +70,10 @@ function renderPage() {
 async function selectDepartment() {
   fireEvent.click(await screen.findByText('研发部'));
   await waitFor(() =>
-    expect(mocks.getOrganizationUnitMembers).toHaveBeenCalledWith('root-1', {
-      skipCount: 0,
-      maxResultCount: 20,
-    }),
+    expect(mocks.getOrganizationUnitMembers).toHaveBeenCalledWith(
+      '/api/app/organization-unit/root-1/query-members',
+      expect.objectContaining({ skipCount: 0, maxResultCount: 10 }),
+    ),
   );
 }
 
@@ -80,8 +90,12 @@ describe('部门维护', () => {
       items: [{ id: 'role-1', name: '业务查看' }],
     });
     mocks.createOrganizationUnit.mockResolvedValue({ id: 'new-department' });
-    mocks.getUsers.mockResolvedValue({ items: [{ id: knownId, userName: '照常选择用户' }] });
-    mocks.getAllRoles.mockResolvedValue({ items: [{ id: knownId, name: '照常选择角色' }] });
+    mocks.getUsers.mockResolvedValue({
+      items: [{ id: knownId, userName: '照常选择用户' }],
+    });
+    mocks.getAllRoles.mockResolvedValue({
+      items: [{ id: knownId, name: '照常选择角色' }],
+    });
   });
 
   it.each([
@@ -112,7 +126,10 @@ describe('部门维护', () => {
 
     fireEvent.click(screen.getByText('统一角色（可选）'));
     expect(await screen.findByText('业务查看')).toBeTruthy();
-    expect(mocks.getOrganizationUnitRoles).toHaveBeenCalledWith('root-1');
+    expect(mocks.getOrganizationUnitRoles).toHaveBeenCalledWith(
+      '/api/app/organization-unit/root-1/query-roles',
+      expect.anything(),
+    );
     expect(screen.getByText('本部门所有成员自动获得这些角色。')).toBeTruthy();
   });
 
@@ -181,58 +198,100 @@ describe('部门维护', () => {
   });
 
   it.each([
-    ['添加成员', '用户 ID', 'canManageOrganizationUnitMembers', 'addOrganizationUnitMembers'],
-    ['添加角色', '角色 ID', 'canManageOrganizationUnitRoles', 'addOrganizationUnitRoles'],
-  ] as const)('仅有部门权限时用明确 ID %s，不调用全局目录', async (button, label, permission, endpoint) => {
-    mocks.useAccess.mockReturnValue({ canManageOrganizationUnits: true, [permission]: true });
-    renderPage();
-    await selectDepartment();
-    if (button === '添加角色') fireEvent.click(screen.getByText('统一角色（可选）'));
-    fireEvent.click(await screen.findByRole('button', { name: button }));
-    const dialog = await screen.findByRole('dialog');
-    const field = within(dialog).getByLabelText(label);
-    const form = dialog.querySelector('form');
-    if (!form) throw new Error('部门授权弹窗缺少表单');
+    [
+      '添加成员',
+      '用户 ID',
+      'canManageOrganizationUnitMembers',
+      'addOrganizationUnitMembers',
+    ],
+    [
+      '添加角色',
+      '角色 ID',
+      'canManageOrganizationUnitRoles',
+      'addOrganizationUnitRoles',
+    ],
+  ] as const)(
+    '仅有部门权限时用明确 ID %s，不调用全局目录',
+    async (button, label, permission, endpoint) => {
+      mocks.useAccess.mockReturnValue({
+        canManageOrganizationUnits: true,
+        [permission]: true,
+      });
+      renderPage();
+      await selectDepartment();
+      if (button === '添加角色')
+        fireEvent.click(screen.getByText('统一角色（可选）'));
+      fireEvent.click(await screen.findByRole('button', { name: button }));
+      const dialog = await screen.findByRole('dialog');
+      const field = within(dialog).getByLabelText(label);
+      const form = dialog.querySelector('form');
+      if (!form) throw new Error('部门授权弹窗缺少表单');
 
-    fireEvent.change(field, { target: { value: 'not-a-guid' } });
-    expect(within(dialog).queryByText(`请输入带连字符的完整${label}`)).toBeNull();
-    fireEvent.submit(form);
-    expect(await within(dialog).findByText(`请输入带连字符的完整${label}`)).toBeTruthy();
-    expect(mocks[endpoint]).not.toHaveBeenCalled();
+      fireEvent.change(field, { target: { value: 'not-a-guid' } });
+      expect(
+        within(dialog).queryByText(`请输入带连字符的完整${label}`),
+      ).toBeNull();
+      fireEvent.submit(form);
+      expect(
+        await within(dialog).findByText(`请输入带连字符的完整${label}`),
+      ).toBeTruthy();
+      expect(mocks[endpoint]).not.toHaveBeenCalled();
 
-    fireEvent.change(field, { target: { value: `${knownId.toUpperCase()}，\n${secondId}\n${knownId}` } });
-    fireEvent.submit(form);
-    await waitFor(() => expect(mocks[endpoint]).toHaveBeenCalledExactlyOnceWith('root-1', [knownId, secondId]));
-    expect(mocks.getUsers).not.toHaveBeenCalled();
-    expect(mocks.getAllRoles).not.toHaveBeenCalled();
-  });
+      fireEvent.change(field, {
+        target: {
+          value: `${knownId.toUpperCase()}，\n${secondId}\n${knownId}`,
+        },
+      });
+      fireEvent.submit(form);
+      await waitFor(() =>
+        expect(mocks[endpoint]).toHaveBeenCalledExactlyOnceWith('root-1', [
+          knownId,
+          secondId,
+        ]),
+      );
+      expect(mocks.getUsers).not.toHaveBeenCalled();
+      expect(mocks.getAllRoles).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['添加成员', '用户', 'canManageUsers', 'getUsers'],
     ['添加角色', '角色', 'canManageRoles', 'getAllRoles'],
-  ] as const)('同时持有目录读取权限时仍可用原选择器%s', async (button, label, permission, endpoint) => {
-    mocks.useAccess.mockReturnValue({ ...permissions, [permission]: true });
-    renderPage();
-    await selectDepartment();
-    if (button === '添加角色') fireEvent.click(screen.getByText('统一角色（可选）'));
-    fireEvent.click(await screen.findByRole('button', { name: button }));
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('combobox', { name: label })).toBeTruthy();
-    await waitFor(() => expect(mocks[endpoint]).toHaveBeenCalled());
-  });
+  ] as const)(
+    '同时持有目录读取权限时仍可用原选择器%s',
+    async (button, label, permission, endpoint) => {
+      mocks.useAccess.mockReturnValue({ ...permissions, [permission]: true });
+      renderPage();
+      await selectDepartment();
+      if (button === '添加角色')
+        fireEvent.click(screen.getByText('统一角色（可选）'));
+      fireEvent.click(await screen.findByRole('button', { name: button }));
+      const dialog = await screen.findByRole('dialog');
+      expect(
+        within(dialog).getByRole('combobox', { name: label }),
+      ).toBeTruthy();
+      await waitFor(() => expect(mocks[endpoint]).toHaveBeenCalled());
+    },
+  );
 
   it('提交不存在的用户 ID 时保留弹窗并提示核对', async () => {
     mocks.useAccess.mockReturnValue({ canManageOrganizationUnitMembers: true });
-    mocks.addOrganizationUnitMembers.mockRejectedValueOnce({ response: { status: 404 } });
+    mocks.addOrganizationUnitMembers.mockRejectedValueOnce({
+      response: { status: 404 },
+    });
     renderPage();
     await selectDepartment();
     fireEvent.click(screen.getByRole('button', { name: '添加成员' }));
     const dialog = await screen.findByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('用户 ID'), { target: { value: knownId } });
+    fireEvent.change(within(dialog).getByLabelText('用户 ID'), {
+      target: { value: knownId },
+    });
     const form = dialog.querySelector('form');
     if (!form) throw new Error('添加成员弹窗缺少表单');
     fireEvent.submit(form);
-    expect(await screen.findByText('找不到指定用户，请核对用户 ID。')).toBeTruthy();
+    expect(
+      await screen.findByText('找不到指定用户，请核对用户 ID。'),
+    ).toBeTruthy();
     expect(within(dialog).getByLabelText('用户 ID')).toHaveValue(knownId);
   });
 });

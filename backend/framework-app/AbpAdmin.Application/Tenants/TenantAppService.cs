@@ -4,28 +4,31 @@ using System.Data.Common;
 using System.Linq;
 using System.Threading.Tasks;
 using AbpAdmin.Data;
+using AbpAdmin.Grids;
 using AbpAdmin.Localization;
 using AbpAdmin.Menus;
+using AbpAdmin.OperationLogs;
+using AbpAdmin.Permissions;
 using AbpAdmin.Settings;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Auditing;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
+using Volo.Abp.Domain.Repositories;
 using Volo.Abp.EventBus.Distributed;
-using Volo.Abp.EventBus;
 using Volo.Abp.EventBus.Local;
+using Volo.Abp.EventBus;
 using Volo.Abp.MultiTenancy;
 using Volo.Abp.ObjectExtending;
 using Volo.Abp.Settings;
 using Volo.Abp.TenantManagement;
-using AbpAdmin.OperationLogs;
+using Volo.Abp;
 
 namespace AbpAdmin.Tenants;
 
@@ -71,6 +74,26 @@ public class TenantAppService : Volo.Abp.TenantManagement.TenantAppService
         _tenantPackageManager = tenantPackageManager;
         _menuManager = menuManager;
         _abpAdminLocalizer = abpAdminLocalizer;
+    }
+
+    public virtual async Task<PagedResultDto<TenantDto>> QueryAsync(GridQueryInput input)
+    {
+        var canReadEditions = await AuthorizationService.IsGrantedAsync(AbpAdminPermissions.Editions.Default);
+        var rows = await LazyServiceProvider.LazyGetRequiredService<IAdminGridProjections>().TenantsAsync(canReadEditions);
+        var grid = new GridQueryDefinition<TenantGridRecord>()
+            .SearchableField("name", x => x.Tenant.Name)
+            .SearchableField("id", x => x.Tenant.Id)
+            .SearchableField("edition", x => x.Edition)
+            .Field("activationState", x => x.ActivationState)
+            .Field("editionEnd", x => x.EditionEnd);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "name", false, x => x.Tenant.Id, x =>
+        {
+            var dto = ObjectMapper.Map<Tenant, TenantDto>(x.Tenant);
+            dto.ExtraProperties[AbpAdminTenantConsts.ActivationStatePropertyName] = x.ActivationState;
+            dto.ExtraProperties[AbpAdminTenantConsts.EditionEndDateUtcPropertyName] = x.EditionEnd;
+            return dto;
+        });
+        return new(page.TotalCount, page.Items);
     }
 
     /// <summary>

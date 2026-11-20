@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
-using Volo.Abp;
 using Volo.Abp.Application.Dtos;
+using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
+using Volo.Abp;
 
 namespace AbpAdmin.Identity;
 
@@ -22,6 +24,20 @@ public class ClaimTypeAppService : AbpAdminAppService, IClaimTypeAppService
     {
         _claimTypeManager = claimTypeManager;
         _claimTypeRepository = claimTypeRepository;
+    }
+
+    public virtual async Task<PagedResultDto<ClaimTypeDto>> QueryAsync(GridQueryInput input)
+    {
+        EnsureHostSide();
+        var query = await LazyServiceProvider.LazyGetRequiredService<IReadOnlyRepository<IdentityClaimType, Guid>>().GetQueryableAsync();
+        var grid = new GridQueryDefinition<IdentityClaimType>()
+            .SearchableField("name", x => x.Name)
+            .SearchableField("description", x => x.Description)
+            .Field("required", x => x.Required)
+            .Field("isStatic", x => x.IsStatic)
+            .SearchableField("regex", x => x.Regex);
+        var page = await grid.ReadPageAsync(query, input, AsyncExecuter, "name", false, x => x.Id, Map);
+        return new(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<ClaimTypeDto>> GetListAsync(PagedAndSortedResultRequestDto input)
