@@ -1,4 +1,3 @@
-import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 import { PlusOutlined } from '@ant-design/icons';
 import {
   ModalForm,
@@ -8,19 +7,24 @@ import {
   ProFormText,
 } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import { Button, message, Popconfirm, Tag } from 'antd';
-import React, { useRef, useState } from 'react';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import React, { useState } from 'react';
 import {
   createLanguage,
   deleteLanguage,
-  getLanguages,
   type Language,
   type LanguageData,
   type LanguageUpdate,
+  queryLanguages,
   setDefaultLanguage,
   updateLanguage,
 } from '@/abp/localizationAdmin';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import FrameworkConfiguration from '@/pages/settings/FrameworkConfiguration';
 
 // .NET 标准 culture 清单
 const cultureOptions = [
@@ -52,7 +56,6 @@ const LanguagesPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [currentRecord, setCurrentRecord] = useState<Language>();
-  const tableRef = useRef<any>(null);
   const access = useAccess();
 
   const handleCreate = async (values: LanguageData) => {
@@ -60,7 +63,7 @@ const LanguagesPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
       await createLanguage(values);
       message.success('创建成功');
       setCreateModalOpen(false);
-      tableRef.current?.reload();
+      grid.refresh();
       return true;
     } catch (e: any) {
       message.error(e?.response?.data?.error?.message || '创建失败');
@@ -75,7 +78,7 @@ const LanguagesPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
       message.success('更新成功');
       setEditModalOpen(false);
       setCurrentRecord(undefined);
-      tableRef.current?.reload();
+      grid.refresh();
       return true;
     } catch (e: any) {
       message.error(e?.response?.data?.error?.message || '更新失败');
@@ -87,7 +90,7 @@ const LanguagesPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
     try {
       await deleteLanguage(id);
       message.success('删除成功');
-      tableRef.current?.reload();
+      grid.refresh();
     } catch (e: any) {
       message.error(e?.response?.data?.error?.message || '删除失败');
     }
@@ -97,100 +100,109 @@ const LanguagesPage: React.FC<{ configurationEntry?: React.ReactNode }> = ({
     try {
       await setDefaultLanguage(id);
       message.success('设置默认语言成功');
-      tableRef.current?.reload();
+      grid.refresh();
     } catch (e: any) {
       message.error(e?.response?.data?.error?.message || '设置失败');
     }
   };
 
-  return (
-    <PageContainer title="语言管理" extra={configurationEntry}>
-      <AutoHeightProTable
-        actionRef={tableRef}
-        rowKey="id"
-        columns={[
-          { title: '显示名', dataIndex: 'displayName' },
-          { title: 'Culture Name', dataIndex: 'cultureName' },
-          { title: 'UI Culture Name', dataIndex: 'uiCultureName' },
-          { title: '旗标', dataIndex: 'flagIcon' },
-          {
-            title: '状态',
-            dataIndex: 'isEnabled',
-            render: (_, record) => (
-              <Tag color={record.isEnabled ? 'green' : 'red'}>
-                {record.isEnabled ? '启用' : '禁用'}
-              </Tag>
-            ),
-          },
-          {
-            title: '默认',
-            dataIndex: 'isDefault',
-            render: (_, record) =>
-              record.isDefault ? <Tag color="blue">默认</Tag> : null,
-          },
-          {
-            title: '操作',
-            valueType: 'option',
-            render: (_, record) =>
-              [
-                access.canUpdateLanguages && (
+  const grid = useSearchableRemoteGrid<Language>({
+    columnDefs: toGridColumns<Language>(
+      [
+        { title: '显示名', dataIndex: 'displayName' },
+        { title: 'Culture Name', dataIndex: 'cultureName' },
+        { title: 'UI Culture Name', dataIndex: 'uiCultureName' },
+        { title: '旗标', dataIndex: 'flagIcon' },
+        {
+          title: '状态',
+          dataIndex: 'isEnabled',
+          render: (_, record) => (
+            <Tag color={record.isEnabled ? 'green' : 'red'}>
+              {record.isEnabled ? '启用' : '禁用'}
+            </Tag>
+          ),
+        },
+        {
+          title: '默认',
+          dataIndex: 'isDefault',
+          render: (_, record) =>
+            record.isDefault ? <Tag color="blue">默认</Tag> : null,
+        },
+        {
+          title: '操作',
+          valueType: 'option',
+          render: (_, record) =>
+            [
+              access.canUpdateLanguages && (
+                <a
+                  key="edit"
+                  onClick={() => {
+                    setCurrentRecord(record);
+                    setEditModalOpen(true);
+                  }}
+                >
+                  编辑
+                </a>
+              ),
+              access.canChangeDefaultLanguage &&
+                !record.isDefault &&
+                record.isEnabled && (
                   <a
-                    key="edit"
+                    key="default"
                     onClick={() => {
-                      setCurrentRecord(record);
-                      setEditModalOpen(true);
+                      if (record.id) handleSetAsDefault(record.id);
                     }}
                   >
-                    编辑
+                    设为默认
                   </a>
                 ),
-                access.canChangeDefaultLanguage &&
-                  !record.isDefault &&
-                  record.isEnabled && (
-                    <a
-                      key="default"
-                      onClick={() => {
-                        if (record.id) handleSetAsDefault(record.id);
-                      }}
-                    >
-                      设为默认
-                    </a>
-                  ),
-                access.canDeleteLanguages && !record.isDefault && (
-                  <Popconfirm
-                    key="delete"
-                    title="确定删除此语言？"
-                    onConfirm={() => {
-                      if (record.id) handleDelete(record.id);
-                    }}
-                  >
-                    <a style={{ color: 'red' }}>删除</a>
-                  </Popconfirm>
-                ),
-              ].filter(Boolean),
-          },
-        ]}
-        toolbar={{
-          actions: access.canCreateLanguages
-            ? [
-                <Button
-                  key="create"
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={() => setCreateModalOpen(true)}
+              access.canDeleteLanguages && !record.isDefault && (
+                <Popconfirm
+                  key="delete"
+                  title="确定删除此语言？"
+                  onConfirm={() => {
+                    if (record.id) handleDelete(record.id);
+                  }}
                 >
-                  新增语言
-                </Button>,
-              ]
-            : [],
+                  <a style={{ color: 'red' }}>删除</a>
+                </Popconfirm>
+              ),
+            ].filter(Boolean),
+        },
+      ],
+      { pro: true, kinds: { isEnabled: 'boolean', isDefault: 'boolean' } },
+    ),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '语言',
+    query: queryLanguages,
+  });
+
+  return (
+    <PageContainer title="语言管理" extra={configurationEntry}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
         }}
-        request={async () => {
-          const result = await getLanguages();
-          return { data: result.items, success: true };
-        }}
-        search={false}
-        pagination={false}
-      />
+      >
+        {grid.searchBox}
+        {access.canCreateLanguages
+          ? [
+              <Button
+                key="create"
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setCreateModalOpen(true)}
+              >
+                新增语言
+              </Button>,
+            ]
+          : []}
+      </div>
+      <AgGridReact<Language> {...grid.gridProps} />
 
       {/* 新增语言 Modal */}
       <ModalForm

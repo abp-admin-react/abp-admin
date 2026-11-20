@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -36,6 +37,24 @@ public class DataDictionaryViewAppService : AbpAdminAppService, IDataDictionaryV
         _dataDictionaryManager = dataDictionaryManager;
         _metaRepository = metaRepository;
         _metaManager = metaManager;
+    }
+
+    [RemoteService(false)]
+    [Authorize(EasyAbp.Abp.DataDictionary.Permissions.DataDictionaryPermissions.DataDictionary.Default)]
+    public virtual async Task<PagedResultDto<DataDictionaryListItemDto>> QueryAsync(GridQueryInput input)
+    {
+        var rows = await _dataDictionaryRepository.GetQueryableAsync();
+        var grid = new GridQueryDefinition<DataDictionary>()
+            .SearchableField("code", x => x.Code)
+            .SearchableField("displayText", x => x.DisplayText)
+            .SearchableField("description", x => x.Description)
+            .Field("isStatic", x => x.IsStatic);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "code", false, x => x.Id,
+            d => new DataDictionaryListItemDto
+        {
+            Id = d.Id, Code = d.Code, DisplayText = d.DisplayText, Description = d.Description, IsStatic = d.IsStatic
+        });
+        return new PagedResultDto<DataDictionaryListItemDto>(page.TotalCount, page.Items);
     }
 
     /// <inheritdoc />

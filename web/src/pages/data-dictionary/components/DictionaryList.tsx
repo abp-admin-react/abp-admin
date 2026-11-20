@@ -1,15 +1,17 @@
-import {
-  type ActionType,
-  type ProColumns,
-  ProTable,
-} from '@ant-design/pro-components';
+import type { ProColumns } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import { App, Button, Popconfirm, Tag } from 'antd';
 import type React from 'react';
-import { useRef } from 'react';
+import { useEffect } from 'react';
+import { queryDataDictionaries } from '@/abp/dataDictionary';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { queryClient } from '@/queryClient';
 import type { DataDictionaryListItem } from '../service';
-import { deleteDataDictionary, getDataDictionaries } from '../service';
+import { deleteDataDictionary } from '../service';
 import DictionaryForm from './DictionaryForm';
 
 interface DictionaryListProps {
@@ -19,7 +21,7 @@ interface DictionaryListProps {
   onSelect: (dictionary: DataDictionaryListItem) => void;
 }
 
-/** 左侧字典列表。字典数量是几十量级，一次拉 100 条。 */
+/** 左侧字典列表。通过服务端查询选择要编辑的字典。 */
 const DictionaryList: React.FC<DictionaryListProps> = ({
   selectedId,
   version,
@@ -27,15 +29,14 @@ const DictionaryList: React.FC<DictionaryListProps> = ({
 }) => {
   const { message } = App.useApp();
   const access = useAccess();
-  const actionRef = useRef<ActionType>(undefined);
 
   const columns: ProColumns<DataDictionaryListItem>[] = [
     { title: '编码', dataIndex: 'code', search: false, ellipsis: true },
-    { title: '显示名', dataIndex: 'displayText', search: false },
+    { title: '显示名', dataIndex: 'displayText' },
     {
       title: '静态',
       dataIndex: 'isStatic',
-      search: false,
+
       width: 64,
       render: (_, record) =>
         record.isStatic ? <Tag color="blue">静态</Tag> : <Tag>可编辑</Tag>,
@@ -51,7 +52,7 @@ const DictionaryList: React.FC<DictionaryListProps> = ({
             title={`编辑字典 - ${record.code ?? ''}`}
             trigger={<a>编辑</a>}
             initialValues={record}
-            onSuccess={() => actionRef.current?.reload()}
+            onSuccess={() => grid.refresh()}
           />
         ) : null,
         // 静态字典由代码定义，不允许删除（后端会拒绝，UI 同步隐藏入口）
@@ -67,7 +68,7 @@ const DictionaryList: React.FC<DictionaryListProps> = ({
                   queryKey: ['data-dictionary'],
                 });
                 message.success('已删除');
-                actionRef.current?.reload();
+                grid.refresh();
               } catch (e) {
                 // 服务端拒绝（静态结构锁等）必须可见，与表单/编辑器的错误呈现契约一致
                 message.error(
@@ -85,45 +86,55 @@ const DictionaryList: React.FC<DictionaryListProps> = ({
     },
   ];
 
+  const grid = useSearchableRemoteGrid<DataDictionaryListItem>({
+    columnDefs: toGridColumns<DataDictionaryListItem>(columns, {
+      pro: true,
+      kinds: { isStatic: 'boolean' },
+    }),
+    getRowId: ({ data }) => String(data.id ?? data.code),
+    ariaLabel: '字典',
+    query: queryDataDictionaries,
+  });
+  useEffect(() => {
+    grid.refresh();
+  }, [version]);
+
   return (
-    <ProTable<DataDictionaryListItem>
-      headerTitle="字典"
-      rowKey="id"
-      actionRef={actionRef}
-      columns={columns}
-      search={false}
-      // params 变化会让 ProTable 重新执行 request：父组件用递增 version 驱动左列重查
-      params={{ version }}
-      pagination={{ pageSize: 100, hideOnSinglePage: true }}
-      request={async (params) => {
-        const result = await getDataDictionaries({
-          current: params.current,
-          pageSize: params.pageSize,
-        });
-        return {
-          data: result.items ?? [],
-          total: result.totalCount ?? 0,
-          success: true,
-        };
-      }}
-      rowClassName={(record) =>
-        record.id === selectedId ? 'ant-table-row-selected' : ''
-      }
-      onRow={(record) => ({
-        onClick: () => onSelect(record),
-        style: { cursor: 'pointer' },
-      })}
-      toolBarRender={() => [
-        access.canCreateDataDictionary ? (
-          <DictionaryForm
-            key="create"
-            title="新建字典"
-            trigger={<Button type="primary">新建字典</Button>}
-            onSuccess={() => actionRef.current?.reload()}
-          />
-        ) : null,
-      ]}
-    />
+    <>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {'字典'}
+        {grid.searchBox}
+        {[
+          access.canCreateDataDictionary ? (
+            <DictionaryForm
+              key="create"
+              title="新建字典"
+              trigger={<Button type="primary">新建字典</Button>}
+              onSuccess={() => grid.refresh()}
+            />
+          ) : null,
+        ]}
+      </div>
+      <AgGridReact<DataDictionaryListItem>
+        {...grid.gridProps}
+        onRowClicked={({ data }) => data && onSelect(data)}
+        getRowStyle={({ data }) => ({
+          cursor: 'pointer',
+          backgroundColor:
+            data && data.id === selectedId
+              ? 'var(--ag-selected-row-background-color)'
+              : 'transparent',
+        })}
+      />
+    </>
   );
 };
 

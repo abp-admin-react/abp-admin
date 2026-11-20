@@ -1,6 +1,10 @@
+import { postGridQuery } from '@/abp/gridQuery';
+
+vi.mock('@/abp/gridQuery', () => ({ postGridQuery: vi.fn() }));
+vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
+
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as languageService from '@/abp/localizationAdmin';
 
 // T2.2 验收：覆盖「列表渲染与无权限时按钮隐藏」。
 // 权限可变的 mock：默认有管理权限，单个用例可覆盖
@@ -12,10 +16,14 @@ let mockAccess: Record<string, boolean> = {
 
 vi.mock('@umijs/max', () => ({
   useAccess: () => mockAccess,
-  useLocation: () => ({ pathname: '/administration/localization/languages', search: '' }),
+  useLocation: () => ({
+    pathname: '/administration/localization/languages',
+    search: '',
+  }),
 }));
 
-vi.mock('@/abp/localizationAdmin', () => ({
+vi.mock('@/abp/localizationAdmin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/abp/localizationAdmin')>()),
   getLanguages: vi.fn(),
   createLanguage: vi.fn(),
   updateLanguage: vi.fn(),
@@ -28,21 +36,6 @@ vi.mock('@ant-design/pro-components', () => ({
   PageContainer: ({ children }: any) => (
     <div data-testid="page-container">{children}</div>
   ),
-  ProTable: ({ columns, toolbar, request }: any) => {
-    request?.({}, {}, {});
-    return (
-      <div data-testid="pro-table">
-        <div data-testid="table-columns">
-          {columns?.map((col: any, i: number) => (
-            <div key={col.dataIndex ?? col.key ?? i} data-testid="column">
-              {col.title}
-            </div>
-          ))}
-        </div>
-        <div data-testid="toolbar">{toolbar?.actions}</div>
-      </div>
-    );
-  },
   ModalForm: ({ children, title }: any) => (
     <div data-testid="modal-form" data-title={title}>
       {children}
@@ -79,10 +72,12 @@ const mockLanguages = {
 describe('LanguagesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAccess = { canManageLanguages: true, canCreateLanguages: true, canChangeDefaultLanguage: true };
-    vi.mocked(languageService.getLanguages).mockResolvedValue(
-      mockLanguages as never,
-    );
+    mockAccess = {
+      canManageLanguages: true,
+      canCreateLanguages: true,
+      canChangeDefaultLanguage: true,
+    };
+    vi.mocked(postGridQuery).mockResolvedValue(mockLanguages as never);
   });
 
   it('挂载即请求语言列表', async () => {
@@ -90,7 +85,7 @@ describe('LanguagesPage', () => {
     render(<Page />);
 
     await waitFor(() => {
-      expect(languageService.getLanguages).toHaveBeenCalled();
+      expect(postGridQuery).toHaveBeenCalled();
     });
   });
 
@@ -98,8 +93,8 @@ describe('LanguagesPage', () => {
     const { default: Page } = await import('./index');
     render(<Page />);
 
-    const columns = await screen.findAllByTestId('column');
-    const titles = columns.map((c) => c.textContent);
+    const columns = await screen.findAllByRole('columnheader');
+    const titles = columns.map((c) => c.getAttribute('aria-label'));
     expect(titles).toContain('显示名');
     expect(titles).toContain('Culture Name');
     expect(titles).toContain('UI Culture Name');
@@ -121,7 +116,7 @@ describe('LanguagesPage', () => {
     const { default: Page } = await import('./index');
     render(<Page />);
 
-    await screen.findByTestId('toolbar');
+    await screen.findByRole('searchbox');
     expect(screen.queryByText('新增语言')).toBeNull();
   });
 });

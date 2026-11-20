@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Threading.Tasks;
 using Volo.Abp.Application.Dtos;
@@ -7,6 +8,8 @@ namespace AbpAdmin.Localization;
 
 public interface ILanguageTextAppService : IApplicationService
 {
+    Task<PagedResultDto<LanguageTextDto>> QueryAsync(string cultureName, string? baseCultureName, bool onlyEmpty, GridQueryInput input);
+
     /// <summary>
     /// 语言文本列表：静态基线 + 数据库覆盖的合并视图（对标 Pro 的静态文本外部存储）。
     /// CultureName 必选；ResourceName 可选（空 = 跨全部注册资源列出）。

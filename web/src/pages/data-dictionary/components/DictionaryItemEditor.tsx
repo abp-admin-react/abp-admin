@@ -1,18 +1,31 @@
-import { EditableProTable, type ProColumns } from '@ant-design/pro-components';
 import { useQuery } from '@tanstack/react-query';
 import { useAccess, useModel } from '@umijs/max';
-import { Alert, App, Button, Tag } from 'antd';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  Alert,
+  App,
+  Button,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Tag,
+} from 'antd';
 import type React from 'react';
 import { useEffect, useState } from 'react';
+import {
+  type RemoteColumn,
+  useSearchableLocalGrid,
+} from '@/components/remoteGrid';
 import { dictionaryQueryKey } from '@/hooks/useDictionary';
 import { queryClient } from '@/queryClient';
 import type { DataDictionaryListItem } from '../service';
 import { getDataDictionaryByCode, saveDataDictionaryItems } from '../service';
 
 interface EditableItem {
-  // EditableProTable 的行 key 必须在编辑过程中保持稳定。
-  // 不能直接拿可编辑的 code 当 rowKey：新行 code 初始为空串，
-  // 输入第一个字符 rowKey 就变，可编辑表单按 rowKey 存状态，key 一换输入全丢。
+  // 用户可修改编码，本地行标识随草稿保留。
   _key: string;
   code: string;
   displayText?: string;
@@ -29,13 +42,7 @@ interface DictionaryItemEditorProps {
   onSaved: () => void;
 }
 
-/**
- * 右侧字典项编辑（T3.4 第 7 步）。
- * 全量加载、不分页（一个字典的项数是几十量级；真有几百项是数据模型设计问题）。
- * 保存走自建原子端点 saveDataDictionaryItems：显示信息 + 全部项 + 展示元数据一次提交
- * （同一后端工作单元；Order 取数组顺序；静态字典有服务端结构锁，漏传整单拒绝）。
- * 数据源是自建视图端点而不是模块端点——模块 DTO 不带 isStatic/tagType。
- */
+/** 排序和搜索只影响显示，保存始终按原始顺序提交完整草稿。 */
 const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
   dictionary,
   onSaved,
@@ -53,7 +60,8 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
     }),
   );
   const [items, setItems] = useState<EditableItem[]>([]);
-  const [editableKeys, setEditableKeys] = useState<React.Key[]>([]);
+  const [editing, setEditing] = useState<EditableItem>();
+  const [form] = Form.useForm<EditableItem>();
   const [saving, setSaving] = useState(false);
 
   // 合并视图查询：enabled 卡住空 code——上级行保证挂载时必有 code，这里只做防御
@@ -68,7 +76,7 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
   useEffect(() => {
     setItems(
       (viewQuery.data?.items ?? []).map((it) => ({
-        _key: it.code ?? '',
+        _key: `stored:${it.code ?? ''}`,
         code: it.code ?? '',
         displayText: it.displayText,
         description: it.description ?? undefined,
@@ -83,7 +91,7 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
     canUpdateDataDictionary &&
     !!viewQuery.data &&
     !viewQuery.isFetching &&
-    editableKeys.length === 0;
+    !editing;
 
   const save = async () => {
     if (!canSave || saving) return;
@@ -138,55 +146,69 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
     }
   };
 
-  const columns: ProColumns<EditableItem>[] = [
+  const openEditor = (row: EditableItem) => {
+    form.setFieldsValue({
+      ...row,
+      description: row.description,
+      tagType: row.tagType,
+    });
+    setEditing(row);
+  };
+  const columns: RemoteColumn<EditableItem>[] = [
+    { field: 'code', headerName: '编码', flex: 1 },
+    { field: 'displayText', headerName: '显示名', flex: 1 },
+    { field: 'description', headerName: '描述', flex: 1 },
     {
-      title: '编码',
-      dataIndex: 'code',
-      formItemProps: { rules: [{ required: true, message: '编码必填' }] },
-      // 静态项的编码不允许改，后端代码可能强依赖
-      editable: (_, row) => !row.isStatic,
+      field: 'tagType',
+      headerName: '标签颜色',
+      cellRenderer: ({ value }: { value?: string }) =>
+        value ? <Tag color={value}>{value}</Tag> : '—',
     },
     {
-      title: '显示名',
-      dataIndex: 'displayText',
-      formItemProps: { rules: [{ required: true, message: '显示名必填' }] },
+      field: 'isStatic',
+      headerName: '静态',
+      kind: 'boolean',
+      booleanLabels: { true: '静态', false: '可编辑' },
+      cellRenderer: ({ value }: { value?: boolean }) => (
+        <Tag color={value ? 'blue' : undefined}>
+          {value ? '静态' : '可编辑'}
+        </Tag>
+      ),
     },
-    { title: '描述', dataIndex: 'description' },
-    {
-      title: '标签颜色',
-      dataIndex: 'tagType',
-      valueType: 'select',
-      fieldProps: { options: tagTypeOptions, allowClear: true },
-      render: (_, row) =>
-        row.tagType ? <Tag color={row.tagType}>{row.tagType}</Tag> : '—',
-    },
-    {
-      title: '静态',
-      dataIndex: 'isStatic',
-      editable: false,
-      width: 72,
-      render: (_, row) =>
-        row.isStatic ? (
-          <Tag
-            color="blue"
-            title="由代码定义：可改显示名，不允许改编码、不允许删除"
-          >
-            静态
-          </Tag>
-        ) : (
-          <Tag>可编辑</Tag>
-        ),
-    },
-    ...(canUpdateDataDictionary
-      ? [
-          {
-            title: '操作',
-            valueType: 'option' as const,
-            width: 130,
-          },
-        ]
-      : []),
   ];
+  if (canUpdateDataDictionary && viewQuery.data) {
+    columns.push({
+      colId: 'actions',
+      kind: 'display',
+      headerName: '操作',
+      cellRenderer: ({ data }: { data: EditableItem }) => (
+        <Space>
+          <Button type="link" size="small" onClick={() => openEditor(data)}>
+            编辑
+          </Button>
+          {!isStaticDict && !data.isStatic && (
+            <Popconfirm
+              title="移除此字典项？保存全部后生效。"
+              onConfirm={() =>
+                setItems((rows) => rows.filter((r) => r._key !== data._key))
+              }
+            >
+              <Button type="link" size="small">
+                删除
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      ),
+    });
+  }
+  const grid = useSearchableLocalGrid<EditableItem>({
+    columnDefs: columns,
+    rowData: items,
+    getRowId: ({ data }) => data._key,
+    ariaLabel: '字典项',
+    keywordFields: ['code', 'displayText', 'description', 'tagType'],
+  });
 
   return (
     <>
@@ -216,42 +238,71 @@ const DictionaryItemEditor: React.FC<DictionaryItemEditorProps> = ({
           title="这是静态字典（由代码定义并随种子写入）：只允许改显示名，不允许改编码、不允许删除、不允许新增。种子只在首次写入/补缺失项，您的修改不会被重新部署重置。"
         />
       )}
-      <EditableProTable<EditableItem>
-        rowKey="_key"
+      <Space wrap style={{ marginBottom: 8 }}>
+        {grid.searchBox}
+        {canUpdateDataDictionary && viewQuery.data && !isStaticDict && (
+          <Button
+            onClick={() =>
+              openEditor({
+                _key: `draft:${++newItemKeySeq}`,
+                code: '',
+                displayText: '',
+                isStatic: false,
+              })
+            }
+          >
+            新增字典项
+          </Button>
+        )}
+      </Space>
+      <AgGridReact<EditableItem>
+        {...grid.gridProps}
         loading={viewQuery.isLoading}
-        value={items}
-        onChange={(next) => setItems([...next])}
-        pagination={false}
-        // 静态字典不允许新增项（与服务端结构锁一致），直接关掉行创建器
-        recordCreatorProps={
-          !canUpdateDataDictionary || !viewQuery.data || isStaticDict
-            ? false
-            : {
-                record: () => ({
-                  _key: `__new_${++newItemKeySeq}`,
-                  code: '',
-                  displayText: '',
-                  isStatic: false,
-                }),
-                creatorButtonText: '新增字典项',
-              }
-        }
-        editable={
-          canUpdateDataDictionary && viewQuery.data
-            ? {
-                type: 'multiple',
-                editableKeys,
-                onChange: setEditableKeys,
-                // 静态项不允许删除，删除按钮置灰的原因见 T3.4 第 5 步 IsStatic 语义
-                actionRender: (row, _config, defaultDom) =>
-                  row.isStatic
-                    ? [defaultDom.save, defaultDom.cancel]
-                    : [defaultDom.save, defaultDom.delete, defaultDom.cancel],
-              }
-            : undefined
-        }
-        columns={columns}
+        containerStyle={{ width: '100%', height: 420 }}
       />
+      <Modal
+        open={!!editing}
+        forceRender
+        title="编辑字典项"
+        onCancel={() => setEditing(undefined)}
+        onOk={() => form.submit()}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={(values) => {
+            if (!editing) return;
+            const item = { ...editing, ...values };
+            setItems((rows) =>
+              rows.some((r) => r._key === item._key)
+                ? rows.map((r) => (r._key === item._key ? item : r))
+                : [...rows, item],
+            );
+            setEditing(undefined);
+          }}
+        >
+          <Form.Item
+            name="code"
+            label="编码"
+            rules={[{ required: true, whitespace: true }]}
+          >
+            <Input disabled={isStaticDict || editing?.isStatic} />
+          </Form.Item>
+          <Form.Item
+            name="displayText"
+            label="显示名"
+            rules={[{ required: true, whitespace: true }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input />
+          </Form.Item>
+          <Form.Item name="tagType" label="标签颜色">
+            <Select options={tagTypeOptions} allowClear />
+          </Form.Item>
+        </Form>
+      </Modal>
       {canUpdateDataDictionary && (
         <Button
           type="primary"

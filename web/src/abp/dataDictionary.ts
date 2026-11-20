@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 import { request } from '@umijs/max';
 import { isNotFound } from '@/requestErrorConfig';
 
@@ -112,4 +113,12 @@ export async function saveDataDictionaryItems(
     method: 'PUT',
     data: input,
   });
+}
+
+export function queryDataDictionaries(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<DataDictionaryListItem>(
+    '/api/app/data-dictionary-view/query',
+    input,
+    signal,
+  );
 }

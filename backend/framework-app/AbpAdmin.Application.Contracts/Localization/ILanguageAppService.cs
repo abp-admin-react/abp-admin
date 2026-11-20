@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Threading.Tasks;
 using Volo.Abp.Application.Dtos;
@@ -7,6 +8,8 @@ namespace AbpAdmin.Localization;
 
 public interface ILanguageAppService : IApplicationService
 {
+    Task<PagedResultDto<LanguageDto>> QueryAsync(GridQueryInput input);
+
     Task<ListResultDto<LanguageDto>> GetListAsync();
 
     Task<LanguageDto> GetAsync(Guid id);

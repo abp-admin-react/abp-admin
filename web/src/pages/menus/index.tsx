@@ -1,19 +1,9 @@
-import { PlusOutlined } from '@ant-design/icons';
-import {
-  type ActionType,
-  PageContainer,
-  ProTable,
-} from '@ant-design/pro-components';
+import { PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import { App, Button, Tooltip } from 'antd';
-import { QuestionCircleOutlined } from '@ant-design/icons';
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   deleteMenu,
   getMenuTree,
@@ -21,8 +11,9 @@ import {
   type MenuTreeDto,
   type PermissionOptionDto,
 } from '@/abp/menus';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 import MenuFormModal from './components/MenuFormModal';
-import { MENU_TABLE_SCROLL_X, buildMenuColumns } from './components/menuColumns';
+import { buildMenuColumns } from './components/menuColumns';
 import {
   buildPermissionTreeData,
   type MenuEditTarget,
@@ -35,19 +26,18 @@ function collectAllKeys(nodes: MenuTreeDto[]): React.Key[] {
   return nodes.flatMap((node) => [node.id, ...collectAllKeys(node.children)]);
 }
 
-
-
 const MenuManagement: React.FC = () => {
   const { message } = App.useApp();
   const access = useAccess();
-  const actionRef = useRef<ActionType | undefined>(undefined);
+
   const [tree, setTree] = useState<MenuTreeDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [editTarget, setEditTarget] = useState<MenuEditTarget>();
   const [permissions, setPermissions] = useState<PermissionOptionDto[]>([]);
   const allRowKeys = useMemo(() => collectAllKeys(tree), [tree]);
-  const allExpanded = allRowKeys.length > 0 && expandedRowKeys.length >= allRowKeys.length;
+  const allExpanded =
+    allRowKeys.length > 0 && expandedRowKeys.length >= allRowKeys.length;
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -90,9 +80,58 @@ const MenuManagement: React.FC = () => {
     [permissions],
   );
 
+  const { rows, parents } = useMemo(() => {
+    const rows: MenuTreeDto[] = [];
+    const parents = new Map<string, string[]>();
+    const visit = (nodes: MenuTreeDto[], ancestors: string[]) => {
+      for (const node of nodes) {
+        rows.push(node);
+        parents.set(node.id, ancestors);
+        visit(node.children, [...ancestors, node.id]);
+      }
+    };
+    visit(tree, []);
+    return { rows, parents };
+  }, [tree]);
+  const titles = useMemo(
+    () => new Map(rows.map((node) => [node.id, node.title])),
+    [rows],
+  );
+  const expanded = useMemo(() => new Set(expandedRowKeys), [expandedRowKeys]);
   const columns = useMemo(
     () =>
       buildMenuColumns({
+        ancestorPath: (node) =>
+          parents
+            .get(node.id)
+            ?.map((id) => titles.get(id))
+            .join(' / ') ?? '',
+        treeToggle: (node) => (
+          <span
+            style={{
+              display: 'var(--menu-toggle-display, inline)',
+              paddingLeft: (parents.get(node.id)?.length ?? 0) * 14,
+            }}
+          >
+            {node.children.length > 0 ? (
+              <Button
+                type="text"
+                size="small"
+                aria-label={`${expanded.has(node.id) ? '折叠' : '展开'}${node.title}`}
+                aria-expanded={expanded.has(node.id)}
+                onClick={() =>
+                  setExpandedRowKeys((keys) =>
+                    expanded.has(node.id)
+                      ? keys.filter((key) => key !== node.id)
+                      : [...keys, node.id],
+                  )
+                }
+              >
+                {expanded.has(node.id) ? '▾' : '▸'}
+              </Button>
+            ) : null}
+          </span>
+        ),
         canCreateMenus: !!access.canCreateMenus,
         canUpdateMenus: !!access.canUpdateMenus,
         canDeleteMenus: !!access.canDeleteMenus,
@@ -104,68 +143,111 @@ const MenuManagement: React.FC = () => {
           reload();
         },
       }),
-    [access, message, reload],
+    [access, message, reload, parents, expanded, titles],
   );
 
+  const grid = useSearchableLocalGrid<MenuTreeDto>({
+    columnDefs: toGridColumns(columns, {
+      pro: true,
+      kinds: { type: 'number', orderNo: 'number', isEnabled: 'boolean' },
+    }),
+    rowData: rows,
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '菜单',
+    keywordFields: ['title', 'name', 'path', 'permissionName'],
+    pagination: false,
+  });
+  const visibleRows = useMemo(
+    () =>
+      grid.hasFilters
+        ? rows
+        : rows.filter((n) =>
+            parents.get(n.id)?.every((id) => expanded.has(id)),
+          ),
+    [grid.hasFilters, rows, parents, expanded],
+  );
   return (
     <PageContainer>
-      <ProTable<MenuTreeDto>
-        rowKey="id"
-        headerTitle={
-          <span>
-            菜单树&nbsp;
-            <Tooltip
-              title={
-                <div style={{ lineHeight: 1.8 }}>
-                  在此维护菜单名称、顺序、隐藏和启停状态。修改保存后，用户刷新页面即可看到。
-                  <br />
-                  菜单随绑定的功能权限显示；到角色页配置功能权限，无需再为菜单分配角色。
-                  <br />
-                  停用目录会隐藏其全部子菜单；隐藏目录自身时，有权限的子菜单仍可显示。
-                </div>
-              }
-            >
-              <QuestionCircleOutlined style={{ color: '#8c8c8c', cursor: 'help' }} />
-            </Tooltip>
-          </span>
-        }
-        loading={loading}
-        actionRef={actionRef}
-        columns={columns}
-        dataSource={tree}
-        search={false}
-        pagination={false}
-        scroll={{ x: MENU_TABLE_SCROLL_X }}
-        expandable={{
-          expandedRowKeys,
-          onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          alignItems: 'center',
+          marginBottom: 8,
+          flexWrap: 'wrap',
         }}
-        toolBarRender={() =>
-          [
+      >
+        <span>
+          菜单树&nbsp;
+          <Tooltip
+            title={
+              <div style={{ lineHeight: 1.8 }}>
+                在此维护菜单名称、顺序、隐藏和启停状态。修改保存后，用户刷新页面即可看到。
+                <br />
+                菜单随绑定的功能权限显示；到角色页配置功能权限，无需再为菜单分配角色。
+                <br />
+                停用目录会隐藏其全部子菜单；隐藏目录自身时，有权限的子菜单仍可显示。
+              </div>
+            }
+          >
+            <QuestionCircleOutlined
+              style={{ color: '#8c8c8c', cursor: 'help' }}
+            />
+          </Tooltip>
+        </span>
+        {grid.searchBox}
+        {[
+          <Button
+            key="expand-toggle"
+            onClick={() =>
+              setExpandedRowKeys((keys) =>
+                keys.length >= allRowKeys.length ? [] : allRowKeys,
+              )
+            }
+          >
+            {allExpanded ? '折叠全部' : '展开全部'}
+          </Button>,
+          access.canCreateMenus ? (
             <Button
-              key="expand-toggle"
-              onClick={() =>
-                setExpandedRowKeys((keys) =>
-                  keys.length >= allRowKeys.length ? [] : allRowKeys,
-                )
-              }
+              key="create"
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setEditTarget({ mode: 'create' })}
             >
-              {allExpanded ? '折叠全部' : '展开全部'}
-            </Button>,
-            access.canCreateMenus ? (
-              <Button
-                key="create"
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => setEditTarget({ mode: 'create' })}
-              >
-                新增顶级菜单
-              </Button>
-            ) : null,
-          ].filter(Boolean)
+              新增顶级菜单
+            </Button>
+          ) : null,
+        ].filter(Boolean)}
+      </div>
+      <div
+        style={
+          {
+            '--menu-path-display': grid.hasFilters ? 'inline' : 'none',
+            '--menu-toggle-display': grid.hasFilters ? 'none' : 'inline',
+          } as React.CSSProperties
         }
-      />
-
+      >
+        <AgGridReact<MenuTreeDto>
+          {...grid.gridProps}
+          rowData={visibleRows}
+          loading={loading}
+          postSortRows={({ nodes }) => {
+            // 先按用户选择的列对同级菜单排序，再按树的先序输出，确保子菜单紧跟父级。
+            const rank = new Map(nodes.map((n, i) => [n.data?.id, i]));
+            const chain = (id: string) => [...(parents.get(id) ?? []), id];
+            nodes.sort((a, b) => {
+              if (!a.data || !b.data) return 0;
+              const left = chain(a.data.id),
+                right = chain(b.data.id);
+              for (let i = 0; i < Math.min(left.length, right.length); i++) {
+                if (left[i] !== right[i])
+                  return (rank.get(left[i]) ?? 0) - (rank.get(right[i]) ?? 0);
+              }
+              return left.length - right.length;
+            });
+          }}
+        />
+      </div>
       <MenuFormModal
         target={editTarget}
         menuTreeData={menuTreeData}
@@ -173,7 +255,6 @@ const MenuManagement: React.FC = () => {
         onClose={() => setEditTarget(undefined)}
         onSaved={reload}
       />
-
     </PageContainer>
   );
 };

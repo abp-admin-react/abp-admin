@@ -1,3 +1,8 @@
+import { postGridQuery } from '@/abp/gridQuery';
+
+vi.mock('@/abp/gridQuery', () => ({ postGridQuery: vi.fn() }));
+vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
@@ -45,57 +50,13 @@ vi.mock('@umijs/max', () => ({
 // Mock ProComponents：ProTable 真正执行 request 并渲染可点击的行；
 // EditableProTable 渲染传入的完整 items。其余保留语义化 testid。
 vi.mock('@ant-design/pro-components', async () => {
-  const React = await import('react');
+  const _React = await import('react');
   return {
     PageContainer: ({ children }: any) => (
       <div data-testid="page-container">{children}</div>
     ),
     ProCard: ({ children }: any) => (
       <div data-testid="pro-card">{children}</div>
-    ),
-    ProTable: ({ columns, toolBarRender, request, onRow }: any) => {
-      const [rows, setRows] = React.useState<any[]>([]);
-      React.useEffect(() => {
-        Promise.resolve(request?.({ current: 1, pageSize: 100 }, {}, {})).then(
-          (r: any) => setRows(r?.data ?? []),
-        );
-      }, [request]);
-      return (
-        <div data-testid="dictionary-table">
-          <div data-testid="table-columns">
-            {columns?.map((col: any, i: number) => (
-              <div key={col.dataIndex ?? col.key ?? i} data-testid="column">
-                {col.title}
-              </div>
-            ))}
-          </div>
-          {rows.map((row: any) => (
-            <button
-              type="button"
-              key={row.id}
-              data-testid={`dict-row-${row.code}`}
-              onClick={() => onRow?.(row)?.onClick?.()}
-            >
-              {row.displayText}
-            </button>
-          ))}
-          {toolBarRender && <div data-testid="toolbar">{toolBarRender()}</div>}
-        </div>
-      );
-    },
-    EditableProTable: ({ value, columns }: any) => (
-      <div data-testid="item-editor">
-        {columns?.map((col: any, i: number) => (
-          <span key={col.dataIndex ?? i} data-testid="item-column">
-            {col.title}
-          </span>
-        ))}
-        {(value ?? []).map((row: any) => (
-          <div key={row.code} data-testid={`item-row-${row.code}`}>
-            {row.code}:{row.displayText}
-          </div>
-        ))}
-      </div>
     ),
     ModalForm: ({ children, title, trigger }: any) => (
       <div data-testid="modal-form" data-title={title}>
@@ -146,7 +107,7 @@ describe('DataDictionaryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAccess = allAccess;
-    vi.mocked(service.getDataDictionaries).mockResolvedValue({
+    vi.mocked(postGridQuery).mockResolvedValue({
       items: [genderDict, customDict],
       totalCount: 2,
     } as never);
@@ -190,8 +151,10 @@ describe('DataDictionaryPage', () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(service.getDataDictionaries).toHaveBeenCalledWith(
-        expect.objectContaining({ current: 1, pageSize: 100 }),
+      expect(postGridQuery).toHaveBeenCalledWith(
+        expect.stringContaining('/query'),
+        expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+        expect.any(AbortSignal),
       );
     });
   });
@@ -199,8 +162,8 @@ describe('DataDictionaryPage', () => {
   it('渲染规格要求的列（含静态标识）', async () => {
     await renderPage();
 
-    const columns = await screen.findAllByTestId('column');
-    const titles = columns.map((c) => c.textContent);
+    const columns = await screen.findAllByRole('columnheader');
+    const titles = columns.map((c) => c.getAttribute('aria-label'));
     expect(titles).toContain('编码');
     expect(titles).toContain('显示名');
     expect(titles).toContain('静态');
@@ -210,27 +173,26 @@ describe('DataDictionaryPage', () => {
   it('工具栏有新建字典入口', async () => {
     await renderPage();
 
-    const toolbar = await screen.findByTestId('toolbar');
-    expect(toolbar.textContent).toContain('新建字典');
+    expect(await screen.findByText('新建字典')).toBeInTheDocument();
   });
 
   it('选中字典后右侧加载其全部项（不分页）', async () => {
     await renderPage();
 
-    fireEvent.click(await screen.findByTestId('dict-row-Gender'));
+    fireEvent.click(await screen.findByRole('cell', { name: 'Gender' }));
 
     await waitFor(() => {
       expect(service.getDataDictionaryByCode).toHaveBeenCalledWith('Gender');
     });
-    expect(await screen.findByTestId('item-row-Unknown')).toBeTruthy();
-    expect(await screen.findByTestId('item-row-Male')).toBeTruthy();
+    expect(await screen.findByRole('cell', { name: 'Unknown' })).toBeTruthy();
+    expect(await screen.findByRole('cell', { name: 'Male' })).toBeTruthy();
   });
 
   it('保存是单端点原子提交：显示信息 + 完整 items + 展示元数据一次 PUT', async () => {
     await renderPage();
 
-    fireEvent.click(await screen.findByTestId('dict-row-CustomerLevel'));
-    await screen.findByTestId('item-row-VIP');
+    fireEvent.click(await screen.findByRole('cell', { name: 'CustomerLevel' }));
+    await screen.findByRole('cell', { name: 'VIP' });
 
     fireEvent.click(screen.getByText('保存全部字典项'));
 
@@ -256,8 +218,8 @@ describe('DataDictionaryPage', () => {
   it('保存失败时错误提示可见且不出现已保存', async () => {
     await renderPage();
 
-    fireEvent.click(await screen.findByTestId('dict-row-CustomerLevel'));
-    await screen.findByTestId('item-row-VIP');
+    fireEvent.click(await screen.findByRole('cell', { name: 'CustomerLevel' }));
+    await screen.findByRole('cell', { name: 'VIP' });
 
     // 服务端整单拒绝（编码重复/静态结构锁/非法 tagType）：错误必须可见，
     // 吞掉异常时弹窗只是转一下 spinner，用户不知道保存没发生
@@ -274,8 +236,8 @@ describe('DataDictionaryPage', () => {
   it('静态字典显示只读提示', async () => {
     await renderPage();
 
-    fireEvent.click(await screen.findByTestId('dict-row-Gender'));
-    await screen.findByTestId('item-row-Male');
+    fireEvent.click(await screen.findByRole('cell', { name: 'Gender' }));
+    await screen.findByRole('cell', { name: 'Male' });
 
     expect(screen.getByText(/这是静态字典/)).toBeTruthy();
   });
@@ -283,8 +245,10 @@ describe('DataDictionaryPage', () => {
   it('只读权限可查看字典项但没有写入入口', async () => {
     mockAccess = { canViewDataDictionary: true };
     await renderPage();
-    fireEvent.click(await screen.findByTestId('dict-row-CustomerLevel'));
-    expect(await screen.findByTestId('item-row-VIP')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('cell', { name: 'CustomerLevel' }));
+    expect(
+      await screen.findByRole('cell', { name: 'VIP' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText('保存全部字典项')).toBeNull();
     expect(service.saveDataDictionaryItems).not.toHaveBeenCalled();
   });
@@ -292,7 +256,7 @@ describe('DataDictionaryPage', () => {
   it('读不到当前数据时禁用整表保存并显示原因', async () => {
     vi.mocked(service.getDataDictionaryByCode).mockResolvedValueOnce(null);
     await renderPage();
-    fireEvent.click(await screen.findByTestId('dict-row-CustomerLevel'));
+    fireEvent.click(await screen.findByRole('cell', { name: 'CustomerLevel' }));
     expect(await screen.findByText('字典已不存在')).toBeInTheDocument();
     const save = screen.getByRole('button', { name: '保存全部字典项' });
     expect(save).toBeDisabled();

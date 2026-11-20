@@ -1,3 +1,5 @@
+vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   fireEvent,
@@ -120,7 +122,11 @@ describe('module management localization', () => {
       initialized: true,
       modules: modules.map((module) => {
         if (module.id === 'Chain') {
-          return { ...module, configurationPath: '/web3/operations?settings=network', historyPath: '/web3/operations' };
+          return {
+            ...module,
+            configurationPath: '/web3/operations?settings=network',
+            historyPath: '/web3/operations',
+          };
         }
         if (module.id === 'Finance') {
           return { ...module, historyPath: '/finance/vouchers' };
@@ -129,10 +135,23 @@ describe('module management localization', () => {
       }),
     });
     try {
-      render(<QueryClientProvider client={new QueryClient()}><App><ModulesPage /></App></QueryClientProvider>);
-      expect(await screen.findByRole('link', { name: '配置链上充提' })).toHaveAttribute('href', '/collection/withdrawals?settings=withdraw');
-      expect(screen.getByRole('link', { name: '查看链上充提历史记录' })).toHaveAttribute('href', '/collection/withdrawals');
-      expect(screen.getByRole('link', { name: /财务工作区/ })).toHaveAttribute('href', '/finance/vouchers');
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <App>
+            <ModulesPage />
+          </App>
+        </QueryClientProvider>,
+      );
+      expect(
+        await screen.findByRole('link', { name: '配置链上充提' }),
+      ).toHaveAttribute('href', '/collection/withdrawals?settings=withdraw');
+      expect(
+        screen.getByRole('link', { name: '查看链上充提历史记录' }),
+      ).toHaveAttribute('href', '/collection/withdrawals');
+      expect(screen.getByRole('link', { name: /财务工作区/ })).toHaveAttribute(
+        'href',
+        '/finance/vouchers',
+      );
       expect(screen.queryByRole('button', { name: '停用收款' })).toBeNull();
     } finally {
       mocks.permissions = {};

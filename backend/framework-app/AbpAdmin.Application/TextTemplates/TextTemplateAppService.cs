@@ -1,3 +1,5 @@
+using Volo.Abp.Application.Dtos;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,6 +33,16 @@ public class TextTemplateAppService : AbpAdminAppService, ITextTemplateAppServic
         _templateContentProvider = templateContentProvider;
         _contentRepository = contentRepository;
         _cacheCleaner = cacheCleaner;
+    }
+
+    public virtual async Task<PagedResultDto<TextTemplateDto>> QueryAsync(GridQueryInput input)
+    {
+        var grid = new GridQueryDefinition<TextTemplateDto>()
+            .SearchableField("name", x => x.Name)
+            .SearchableField("displayName", x => x.DisplayName)
+            .Field("isLayout", x => x.IsLayout)
+            .Field("isSandboxed", x => x.IsSandboxed);
+        return grid.ReadSnapshot((await GetListAsync()), input, "name", x => x.Name);
     }
 
     public virtual async Task<List<TextTemplateDto>> GetListAsync(string? filter = null)

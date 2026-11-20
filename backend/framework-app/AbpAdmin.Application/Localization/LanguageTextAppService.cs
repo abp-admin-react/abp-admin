@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -44,7 +45,13 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
     /// IsOverridden=当前上下文是否有覆盖行（不含 host 的行）——「恢复默认」只删当前层，
     /// 前端以它决定按钮是否可点。OnlyEmpty 按生效值过滤，即真正的"未翻译过滤"。
     /// </summary>
-    public virtual async Task<PagedResultDto<LanguageTextDto>> GetListAsync(GetLanguageTextsInput input)
+    public virtual Task<PagedResultDto<LanguageTextDto>> GetListAsync(GetLanguageTextsInput input) =>
+        ReadTextsAsync(input, null);
+
+    public virtual Task<PagedResultDto<LanguageTextDto>> QueryAsync(string cultureName, string? baseCultureName, bool onlyEmpty, GridQueryInput input) =>
+        ReadTextsAsync(new GetLanguageTextsInput { CultureName = cultureName, BaseCultureName = baseCultureName, OnlyEmpty = onlyEmpty }, input);
+
+    private async Task<PagedResultDto<LanguageTextDto>> ReadTextsAsync(GetLanguageTextsInput input, GridQueryInput? gridInput)
     {
         // 目标文化必选（DTO [Required]，页面默认选中启用语言）；资源可选，空 = 全部注册资源
         if (!string.IsNullOrWhiteSpace(input.ResourceName) && IsClientStaticResource(input.ResourceName))
@@ -134,6 +141,20 @@ public class LanguageTextAppService : ApplicationService, ILanguageTextAppServic
         // 过滤后一次性物化：避免惰性 SelectMany 链被 Count() 和分页各枚举一遍
         // （跨资源宇宙 ~2700 行，双重投影意味着每请求双倍 DTO 分配）
         var filtered = ApplyFilter(rows, input).ToList();
+
+        if (gridInput != null)
+        {
+            var grid = new GridQueryDefinition<LanguageTextDto>()
+                .SearchableField("resourceName", x => x.ResourceName)
+                .SearchableField("name", x => x.Name)
+                .SearchableField("value", x => x.Value)
+                .SearchableField("baseValue", x => x.BaseValue);
+            var matches = grid.Filter(filtered.AsQueryable(), gridInput).ToList();
+            var ordered = grid.OrderBy(matches.AsQueryable(), gridInput, "resourceName", false, x => x.Name)
+                .ThenBy(x => x.ResourceName);
+            return new PagedResultDto<LanguageTextDto>(matches.Count,
+                ordered.Skip(gridInput.SkipCount).Take(gridInput.MaxResultCount).ToList());
+        }
 
         return new PagedResultDto<LanguageTextDto>(
             filtered.Count,

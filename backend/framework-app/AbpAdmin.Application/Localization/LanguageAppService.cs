@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -28,6 +29,21 @@ public class LanguageAppService : ApplicationService, ILanguageAppService
         _languageRepository = languageRepository;
         _languageManager = languageManager;
         _languageCache = languageCache;
+    }
+
+    public virtual async Task<PagedResultDto<LanguageDto>> QueryAsync(GridQueryInput input)
+    {
+        var rows = await _languageRepository.GetQueryableAsync();
+        var grid = new GridQueryDefinition<Language>()
+            .SearchableField("displayName", x => x.DisplayName)
+            .SearchableField("cultureName", x => x.CultureName)
+            .SearchableField("uiCultureName", x => x.UiCultureName)
+            .SearchableField("flagIcon", x => x.FlagIcon)
+            .Field("isEnabled", x => x.IsEnabled)
+            .Field("isDefault", x => x.IsDefault);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "displayName", false, x => x.Id,
+            x => ObjectMapper.Map<Language, LanguageDto>(x));
+        return new PagedResultDto<LanguageDto>(page.TotalCount, page.Items);
     }
 
     public virtual async Task<ListResultDto<LanguageDto>> GetListAsync()

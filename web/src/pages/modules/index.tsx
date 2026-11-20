@@ -1,7 +1,8 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useAccess, useIntl, useModel } from '@umijs/max';
-import { Alert, App, Button, Modal, Space, Table, Tag } from 'antd';
+import { AgGridReact } from 'ag-grid-react';
+import { Alert, App, Button, Modal, Space, Tag } from 'antd';
 import { useRef, useState } from 'react';
 import {
   getModuleManagement,
@@ -12,6 +13,7 @@ import {
   previewModuleChange,
   updateModuleManagement,
 } from '@/abp/moduleManagement';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 import english from '@/locales/en-US/modules';
 import { isSafeMenuPath } from '@/utils/redirect';
 
@@ -99,7 +101,8 @@ export default function ModulesPage() {
       return undefined;
     if (
       module.id === 'Chain' &&
-      (path === '/web3/operations?settings=deposit' || path === '/web3/operations?settings=network') &&
+      (path === '/web3/operations?settings=deposit' ||
+        path === '/web3/operations?settings=network') &&
       !access.canConfigureCollectionNetwork &&
       access.canAdminWithdrawals &&
       access.canManageCollectionWallets
@@ -109,10 +112,15 @@ export default function ModulesPage() {
     return path;
   };
   const historyLink = (module: ManagedModule) => {
-    if (!module.historyPath || !isSafeMenuPath(module.historyPath) || !canViewHistory(module.id))
+    if (
+      !module.historyPath ||
+      !isSafeMenuPath(module.historyPath) ||
+      !canViewHistory(module.id)
+    )
       return undefined;
     if (module.id === 'Chain' && module.historyPath === '/web3/operations') {
-      if (access.canViewDepositRecords) return '/operations/payments?view=deposits';
+      if (access.canViewDepositRecords)
+        return '/operations/payments?view=deposits';
       if (access.canAdminWithdrawals) return '/collection/withdrawals';
     }
     return module.historyPath;
@@ -181,6 +189,98 @@ export default function ModulesPage() {
     }
   }
 
+  const grid = useSearchableLocalGrid<
+    ManagedModule & { name: string; status: string; related: string }
+  >({
+    columnDefs: toGridColumns<
+      ManagedModule & { name: string; status: string; related: string }
+    >(
+      [
+        {
+          title: t('pages.modules.column.module'),
+          dataIndex: 'name',
+          render: (_, module) => moduleName(module.id),
+        },
+        {
+          title: t('pages.modules.column.status'),
+          dataIndex: 'status',
+          render: (_, module) =>
+            !state?.initialized ? (
+              <Tag>{t('pages.modules.status.pending')}</Tag>
+            ) : module.isEnabled ? (
+              <Tag color="success">{t('pages.modules.status.enabled')}</Tag>
+            ) : (
+              <Tag>{t('pages.modules.status.disabled')}</Tag>
+            ),
+        },
+        {
+          title: t('pages.modules.column.dependencies'),
+          dataIndex: 'related',
+          render: (_, module) => moduleList(module.dependencies) || '—',
+        },
+        {
+          title: t('pages.modules.column.actions'),
+          render: (_, module) => {
+            const configurationPath = configurationLink(module);
+            const historyPath = historyLink(module);
+            return (
+              <Space wrap>
+                {configurationPath && (
+                  <Link
+                    to={configurationPath}
+                    aria-label={t('pages.modules.configureLabel', {
+                      module: moduleName(module.id),
+                    })}
+                  >
+                    {t('pages.modules.configure')}
+                  </Link>
+                )}
+                {historyPath && (
+                  <Link
+                    to={historyPath}
+                    aria-label={t('pages.modules.historyLabel', {
+                      module: moduleName(module.id),
+                    })}
+                  >
+                    {t('pages.modules.history')}
+                  </Link>
+                )}
+                {access.canUpdateModuleManagement && (
+                  <Button
+                    disabled={!state?.initialized || pending}
+                    danger={module.isEnabled}
+                    aria-label={actionLabel(module.id, !module.isEnabled)}
+                    onClick={() => void showPreview(module)}
+                  >
+                    {t(
+                      module.isEnabled
+                        ? 'pages.modules.disable'
+                        : 'pages.modules.enable',
+                    )}
+                  </Button>
+                )}
+              </Space>
+            );
+          },
+        },
+      ],
+      { kinds: {} },
+    ),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '平台模块',
+    rowData: modules.map((m) => ({
+      ...m,
+      name: moduleName(m.id),
+      related: moduleList(m.dependencies),
+      status: !state?.initialized
+        ? t('pages.modules.status.pending')
+        : m.isEnabled
+          ? t('pages.modules.status.enabled')
+          : t('pages.modules.status.disabled'),
+    })),
+    keywordFields: ['id', 'name', 'status', 'related'],
+  });
+
   return (
     <PageContainer
       title={pageTitle}
@@ -209,79 +309,25 @@ export default function ModulesPage() {
           style={{ marginBottom: 12 }}
         />
       )}
-      <Table<ManagedModule>
-        rowKey="id"
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {grid.searchBox}
+      </div>
+      <AgGridReact<
+        ManagedModule & { name: string; status: string; related: string }
+      >
+        {...grid.gridProps}
         loading={moduleQuery.isLoading}
-        dataSource={modules}
-        pagination={false}
-        scroll={{ x: 570 }}
-        columns={[
-          {
-            title: t('pages.modules.column.module'),
-            render: (_, module) => moduleName(module.id),
-          },
-          {
-            title: t('pages.modules.column.status'),
-            render: (_, module) =>
-              !state?.initialized ? (
-                <Tag>{t('pages.modules.status.pending')}</Tag>
-              ) : module.isEnabled ? (
-                <Tag color="success">{t('pages.modules.status.enabled')}</Tag>
-              ) : (
-                <Tag>{t('pages.modules.status.disabled')}</Tag>
-              ),
-          },
-          {
-            title: t('pages.modules.column.dependencies'),
-            render: (_, module) => moduleList(module.dependencies) || '—',
-          },
-          {
-            title: t('pages.modules.column.actions'),
-            render: (_, module) => {
-              const configurationPath = configurationLink(module);
-              const historyPath = historyLink(module);
-              return (
-                <Space wrap>
-                  {configurationPath && (
-                    <Link
-                      to={configurationPath}
-                      aria-label={t('pages.modules.configureLabel', {
-                        module: moduleName(module.id),
-                      })}
-                    >
-                      {t('pages.modules.configure')}
-                    </Link>
-                  )}
-                  {historyPath && (
-                      <Link
-                        to={historyPath}
-                        aria-label={t('pages.modules.historyLabel', {
-                          module: moduleName(module.id),
-                        })}
-                      >
-                        {t('pages.modules.history')}
-                      </Link>
-                    )}
-                  {access.canUpdateModuleManagement && (
-                    <Button
-                      disabled={!state?.initialized || pending}
-                      danger={module.isEnabled}
-                      aria-label={actionLabel(module.id, !module.isEnabled)}
-                      onClick={() => void showPreview(module)}
-                    >
-                      {t(
-                        module.isEnabled
-                          ? 'pages.modules.disable'
-                          : 'pages.modules.enable',
-                      )}
-                    </Button>
-                  )}
-                </Space>
-              );
-            },
-          },
-        ]}
       />
+
       <Modal
         open={!!dialog}
         title={dialog && actionLabel(dialog.module.id, dialog.change.isEnabled)}

@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System.Threading.Tasks;
 using AbpAdmin.DataDictionaries;
 using Microsoft.AspNetCore.Authorization;
@@ -23,6 +24,10 @@ public class DataDictionaryViewController : AbpAdminController
     {
         _dataDictionaryViewAppService = dataDictionaryViewAppService;
     }
+
+    [HttpPost("query")]
+    public Task<PagedResultDto<DataDictionaryListItemDto>> QueryAsync([FromBody] GridQueryInput input) =>
+        _dataDictionaryViewAppService.QueryAsync(input);
 
     /// <summary>字典分页列表（管理页左列；不含 Items）。按 Code 排序，需要 DataDictionary.Default 权限。</summary>
     [HttpGet]

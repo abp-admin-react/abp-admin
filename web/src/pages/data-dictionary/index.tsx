@@ -12,8 +12,7 @@ import type { DataDictionaryListItem } from './service';
  */
 export default function DataDictionaryPage() {
   // 当前选中字典（详情区数据源）；listVersion 是左列刷新版本号：
-  // 右侧保存成功后递增，经 ProTable params 传给 DictionaryList 触发重新 request，
-  // 让左列拿到改名后的 displayText（左列数据不走全局缓存，只能靠重查刷新）。
+  // 保存字典项后刷新左侧列表的显示信息。
   const [selected, setSelected] = useState<
     DataDictionaryListItem | undefined
   >();

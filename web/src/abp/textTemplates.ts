@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 import { request } from '@umijs/max';
 
 const path = '/api/app/text-template';
@@ -32,4 +33,12 @@ export function updateTextTemplate(
 
 export function restoreTextTemplate(data: TemplateContentKey) {
   return request<void>(`${path}/restore-to-default`, { method: 'POST', data });
+}
+
+export function queryTextTemplates(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<TextTemplate>(
+    '/api/app/text-template/query',
+    input,
+    signal,
+  );
 }

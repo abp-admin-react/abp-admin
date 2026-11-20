@@ -1,6 +1,7 @@
 import { RollbackOutlined, SaveOutlined } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Button,
   Input,
@@ -11,18 +12,21 @@ import {
   Switch,
   Tooltip,
 } from 'antd';
-import React, { useEffect, useRef, useState } from 'react';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
-import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import React, { useEffect, useState } from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
 import {
   type EnabledLanguage,
   getEnabledLanguages,
-  getLanguageTexts,
   getLanguageTextResourceNames,
   type LanguageText,
+  queryLanguageTexts,
   restoreLanguageText,
   updateLanguageText,
 } from '@/abp/localizationAdmin';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 const LanguageTextsPage: React.FC = () => {
   const [resourceNames, setResourceNames] = useState<string[]>([]);
@@ -35,16 +39,7 @@ const LanguageTextsPage: React.FC = () => {
   const [editingKey, setEditingKey] = useState<string>('');
   const [editingValue, setEditingValue] = useState<string>('');
   const [onlyEmpty, setOnlyEmpty] = useState(false);
-  const tableRef = useRef<any>(null);
   const access = useAccess();
-
-  // 目标文化就绪后重载：首请求在语言列表到达前发出（带空目标文化会被后端 400 拒绝，
-  // request 里的守卫此时回空页），就绪后必须补一发真实请求，否则首屏停留在空表
-  useEffect(() => {
-    if (targetCulture) {
-      tableRef.current?.reload();
-    }
-  }, [targetCulture, baseCulture, onlyEmpty]);
 
   useEffect(() => {
     // 加载资源名称列表；失败要可见——静默吞掉会让"资源"下拉为空且列表无从过滤
@@ -83,7 +78,7 @@ const LanguageTextsPage: React.FC = () => {
       });
       message.success('保存成功');
       setEditingKey('');
-      tableRef.current?.reload();
+      grid.refresh();
     } catch (e: any) {
       message.error(e?.response?.data?.error?.message || '保存失败');
     }
@@ -101,7 +96,7 @@ const LanguageTextsPage: React.FC = () => {
         name: record.name,
       });
       message.success('已恢复默认');
-      tableRef.current?.reload();
+      grid.refresh();
     } catch (e: any) {
       message.error(e?.response?.data?.error?.message || '恢复失败');
     }
@@ -134,172 +129,172 @@ const LanguageTextsPage: React.FC = () => {
     </>
   );
 
+  const gridQuery = React.useCallback(
+    (input: GridQuery, signal: AbortSignal) =>
+      targetCulture
+        ? queryLanguageTexts(
+            {
+              cultureName: targetCulture,
+              baseCultureName: baseCulture ?? '',
+              onlyEmpty,
+            },
+            input,
+            signal,
+          )
+        : Promise.resolve({ items: [], totalCount: 0 }),
+    [targetCulture, baseCulture, onlyEmpty],
+  );
+  const grid = useSearchableRemoteGrid<LanguageText>({
+    columnDefs: toGridColumns<LanguageText>(
+      [
+        {
+          title: '资源',
+          dataIndex: 'resourceName',
+          valueEnum: Object.fromEntries(
+            resourceNames.map((name) => [name, name]),
+          ),
+        },
+        {
+          title: 'Key',
+          dataIndex: 'name',
+          ellipsis: true,
+        },
+        {
+          title: '基准语言',
+          dataIndex: 'baseValue',
+          ellipsis: true,
+          // 对照列只展示；后端没有按基准值过滤的参数，搜索表单里放行会静默无效
+          search: false,
+          render: (_, record) => {
+            if (isEditing(record)) {
+              return <span style={{ color: '#999' }}>—</span>;
+            }
+            return (
+              record.baseValue || <span style={{ color: '#999' }}>(空)</span>
+            );
+          },
+        },
+        {
+          title: '值',
+          dataIndex: 'value',
+          ellipsis: true,
+          render: (_, record) => {
+            if (isEditing(record)) {
+              return (
+                <Input.TextArea
+                  value={editingValue}
+                  onChange={(e) => setEditingValue(e.target.value)}
+                  rows={2}
+                />
+              );
+            }
+            return _ || <span style={{ color: '#999' }}>(空)</span>;
+          },
+        },
+        {
+          title: '操作',
+          valueType: 'option',
+          width: 150,
+          render: (_, record) => {
+            if (isEditing(record)) {
+              return [
+                <Button
+                  key="save"
+                  type="link"
+                  size="small"
+                  icon={<SaveOutlined />}
+                  onClick={() => handleSave(record)}
+                >
+                  保存
+                </Button>,
+                <Button
+                  key="cancel"
+                  type="link"
+                  size="small"
+                  onClick={() => setEditingKey('')}
+                >
+                  取消
+                </Button>,
+              ];
+            }
+            return [
+              access.canEditLanguageTexts && (
+                <Button
+                  key="edit"
+                  type="link"
+                  size="small"
+                  onClick={() => {
+                    setEditingKey(
+                      `${record.resourceName}-${record.cultureName}-${record.name}`,
+                    );
+                    setEditingValue(record.value || '');
+                  }}
+                >
+                  编辑
+                </Button>
+              ),
+              access.canEditLanguageTexts && (
+                <Tooltip
+                  title={
+                    record.isOverridden
+                      ? undefined
+                      : // isOverridden = 当前层级（host 或本租户）是否有覆盖行（后端口径）。
+                        // false = 当前层没有可删的覆盖行 → 按钮禁用；
+                        // 此时显示的值来自静态默认或上级 host 配置，恢复本就无从谈起
+                        '该条目在当前层级没有覆盖记录，「恢复默认」不会产生变化'
+                  }
+                >
+                  <Popconfirm
+                    key="restore"
+                    title="确定恢复默认值？"
+                    disabled={!record.isOverridden}
+                    onConfirm={() => handleRestore(record)}
+                  >
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<RollbackOutlined />}
+                      disabled={!record.isOverridden}
+                    >
+                      恢复默认
+                    </Button>
+                  </Popconfirm>
+                </Tooltip>
+              ),
+            ].filter(Boolean);
+          },
+        },
+      ],
+      { pro: true, kinds: {} },
+    ),
+    getRowId: ({ data }) =>
+      JSON.stringify([data.resourceName, data.cultureName, data.name]),
+    ariaLabel: '语言文本',
+    query: gridQuery,
+  });
+
   return (
     <PageContainer>
-      <AutoHeightProTable<LanguageText>
-        actionRef={tableRef}
-        rowKey={(record) =>
-          `${record.resourceName}-${record.cultureName}-${record.name}`
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {grid.searchBox}
+        {
+          <Space>
+            {renderCultureSelect('基准语言', baseCulture, setBaseCulture)}
+            {renderCultureSelect('目标语言', targetCulture, setTargetCulture)}
+            <Switch checked={onlyEmpty} onChange={setOnlyEmpty} />
+            <span>只显示空值</span>
+          </Space>
         }
-        columns={[
-          {
-            title: '资源',
-            dataIndex: 'resourceName',
-            // 单选：页面按首值下发
-            filterMultiple: false,
-            filters: resourceNames.map((name) => ({ text: name, value: name })),
-          },
-          {
-            title: 'Key',
-            dataIndex: 'name',
-            ellipsis: true,
-            // 该筛选喂给后端 Filter（key 或生效值、大小写不敏感）——
-            // 标题叫"Key"，placeholder 必须说清也匹配值，否则口径误导
-            ...textFilter('按 Key 或生效值模糊搜索'),
-          },
-          {
-            title: '基准语言',
-            dataIndex: 'baseValue',
-            ellipsis: true,
-            // 对照列只展示；后端没有按基准值过滤的参数，搜索表单里放行会静默无效
-            search: false,
-            render: (_, record) => {
-              if (isEditing(record)) {
-                return <span style={{ color: '#999' }}>—</span>;
-              }
-              return (
-                record.baseValue || <span style={{ color: '#999' }}>(空)</span>
-              );
-            },
-          },
-          {
-            title: '值',
-            dataIndex: 'value',
-            ellipsis: true,
-            render: (_, record) => {
-              if (isEditing(record)) {
-                return (
-                  <Input.TextArea
-                    value={editingValue}
-                    onChange={(e) => setEditingValue(e.target.value)}
-                    rows={2}
-                  />
-                );
-              }
-              return _ || <span style={{ color: '#999' }}>(空)</span>;
-            },
-          },
-          {
-            title: '操作',
-            valueType: 'option',
-            width: 150,
-            render: (_, record) => {
-              if (isEditing(record)) {
-                return [
-                  <Button
-                    key="save"
-                    type="link"
-                    size="small"
-                    icon={<SaveOutlined />}
-                    onClick={() => handleSave(record)}
-                  >
-                    保存
-                  </Button>,
-                  <Button
-                    key="cancel"
-                    type="link"
-                    size="small"
-                    onClick={() => setEditingKey('')}
-                  >
-                    取消
-                  </Button>,
-                ];
-              }
-              return [
-                access.canEditLanguageTexts && (
-                  <Button
-                    key="edit"
-                    type="link"
-                    size="small"
-                    onClick={() => {
-                      setEditingKey(
-                        `${record.resourceName}-${record.cultureName}-${record.name}`,
-                      );
-                      setEditingValue(record.value || '');
-                    }}
-                  >
-                    编辑
-                  </Button>
-                ),
-                access.canEditLanguageTexts && (
-                  <Tooltip
-                    title={
-                      record.isOverridden
-                        ? undefined
-                        : // isOverridden = 当前层级（host 或本租户）是否有覆盖行（后端口径）。
-                          // false = 当前层没有可删的覆盖行 → 按钮禁用；
-                          // 此时显示的值来自静态默认或上级 host 配置，恢复本就无从谈起
-                          '该条目在当前层级没有覆盖记录，「恢复默认」不会产生变化'
-                    }
-                  >
-                    <Popconfirm
-                      key="restore"
-                      title="确定恢复默认值？"
-                      disabled={!record.isOverridden}
-                      onConfirm={() => handleRestore(record)}
-                    >
-                      <Button
-                        type="link"
-                        size="small"
-                        icon={<RollbackOutlined />}
-                        disabled={!record.isOverridden}
-                      >
-                        恢复默认
-                      </Button>
-                    </Popconfirm>
-                  </Tooltip>
-                ),
-              ].filter(Boolean);
-            },
-          },
-        ]}
-        toolbar={{
-          filter: (
-            <Space>
-              {renderCultureSelect('基准语言', baseCulture, setBaseCulture)}
-              {renderCultureSelect('目标语言', targetCulture, setTargetCulture)}
-              <Switch checked={onlyEmpty} onChange={setOnlyEmpty} />
-              <span>只显示空值</span>
-            </Space>
-          ),
-        }}
-        request={async (params, _sorter, filter) => {
-          // 目标文化走工具栏状态（必选，默认选中启用语言），不进搜索表单；
-          // 资源可空 = 跨全部注册资源（后端合并静态基线 + 覆盖行）。
-          // 语言列表未就绪时先回空页，避免带空目标文化打出 400（就绪后由 effect 重载）
-          if (!targetCulture) {
-            return { data: [], total: 0, success: true };
-          }
-          const result = await getLanguageTexts({
-            resourceName: firstFilterValue(filter, 'resourceName'),
-            cultureName: targetCulture,
-            baseCultureName: baseCulture,
-            filter: firstFilterValue(filter, 'name'),
-            onlyEmpty,
-            skipCount: ((params.current ?? 1) - 1) * (params.pageSize ?? 10),
-            maxResultCount: params.pageSize ?? 10,
-          });
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        search={false}
-        pagination={{
-          pageSize: 20,
-        }}
-      />
+      </div>
+      <AgGridReact<LanguageText> {...grid.gridProps} />
     </PageContainer>
   );
 };

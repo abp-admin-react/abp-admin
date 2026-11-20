@@ -5,6 +5,8 @@ import { toMenuIcon } from '@/abp/menuIcons';
 import { MENU_TYPE, type MenuTreeDto } from '@/abp/menus';
 
 type BuildMenuColumnsOptions = {
+  ancestorPath?: (node: MenuTreeDto) => string;
+  treeToggle?: (node: MenuTreeDto) => React.ReactNode;
   canCreateMenus: boolean;
   canUpdateMenus: boolean;
   canDeleteMenus: boolean;
@@ -13,11 +15,7 @@ type BuildMenuColumnsOptions = {
   onDelete: (node: MenuTreeDto) => void | Promise<void>;
 };
 
-/** 菜单管理页的表格列构建（从 index.tsx 抽离），操作回调由页面注入。
- * 全列定宽 + 表格 scroll.x：内容总宽超出窄视口时出横向滚动条，
- * 避免"名称逐字竖排/权限标签被裁没"这类挤压变形（宽屏下列宽照常拉伸）。
- * MENU_TABLE_SCROLL_X 必须等于下方各列 width 之和，增删列时同步维护。 */
-export const MENU_TABLE_SCROLL_X = 1000;
+/** 菜单权限控制操作入口，树节点的展开状态由页面维护。 */
 
 export function buildMenuColumns(
   opts: BuildMenuColumnsOptions,
@@ -26,16 +24,24 @@ export function buildMenuColumns(
     {
       title: '名称',
       dataIndex: 'title',
-      // 宽度需容纳层级缩进（antd 每级 15px）+ 展开钮 + 图标 + 最长标题；
+      // 宽度需容纳层级缩进+ 展开钮 + 图标 + 最长标题；
       // name（国际化 key 尾段）不在主列表展示，查看/编辑入口在表单的"国际化 key"字段
       width: 200,
-      render: (_, record) => (
-        <Space>
-          {toMenuIcon(record.icon)}
-          {/* nowrap：固定表格布局下禁止标题折行，超宽交由列宽兜底 */}
-          <span style={{ whiteSpace: 'nowrap' }}>{record.title}</span>
-        </Space>
-      ),
+      render: (_, record) => {
+        const path = opts.ancestorPath?.(record);
+        return (
+          <Space title={path ? `${path} / ${record.title}` : record.title}>
+            {opts.treeToggle?.(record)}
+            {toMenuIcon(record.icon)}
+            <span>{record.title}</span>
+            {path && (
+              <small style={{ display: 'var(--menu-path-display, none)' }}>
+                {path}
+              </small>
+            )}
+          </Space>
+        );
+      },
     },
     {
       title: '类型',

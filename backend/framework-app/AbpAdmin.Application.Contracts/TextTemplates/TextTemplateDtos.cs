@@ -1,3 +1,5 @@
+using Volo.Abp.Application.Dtos;
+using AbpAdmin.Grids;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
@@ -8,6 +10,8 @@ namespace AbpAdmin.TextTemplates;
 public interface ITextTemplateAppService : IApplicationService
 {
     /// <summary>模板定义列表；filter 按 Name/显示名模糊过滤（不区分大小写）。</summary>
+    Task<PagedResultDto<TextTemplateDto>> QueryAsync(GridQueryInput input);
+
     Task<List<TextTemplateDto>> GetListAsync(string? filter = null);
 
     Task<TextTemplateDto> GetContentAsync(string name, string? cultureName = null);

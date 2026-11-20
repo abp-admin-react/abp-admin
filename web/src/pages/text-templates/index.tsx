@@ -1,5 +1,6 @@
-import { type ActionType, PageContainer } from '@ant-design/pro-components';
+import { PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import { Alert, Button, Input, Modal, message, Popconfirm, Select } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -9,16 +10,17 @@ import {
 } from '@/abp/localizationAdmin';
 import {
   getTextTemplateContent,
-  getTextTemplates,
+  queryTextTemplates,
   restoreTextTemplate,
   type TextTemplate,
   updateTextTemplate,
 } from '@/abp/textTemplates';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
-import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 const TextTemplatesPage: React.FC = () => {
-  const actionRef = useRef<ActionType>(undefined);
   const access = useAccess();
   const [languages, setLanguages] = useState<EnabledLanguage[]>([]);
   const [selectedCulture, setSelectedCulture] = useState<string | undefined>(
@@ -41,9 +43,7 @@ const TextTemplatesPage: React.FC = () => {
     const load = access.canManageLanguages
       ? getLanguages().then(({ items }) => items)
       : getEnabledLanguages();
-    load
-      .then(setLanguages)
-      .catch(() => message.error('语言列表加载失败'));
+    load.then(setLanguages).catch(() => message.error('语言列表加载失败'));
   }, [access.canManageLanguages]);
 
   // 打开编辑模态框
@@ -83,7 +83,7 @@ const TextTemplatesPage: React.FC = () => {
       });
       message.success('已保存');
       setEditModalVisible(false);
-      actionRef.current?.reload();
+      grid.refresh();
     } catch (error: any) {
       message.error(error?.data?.error?.message || '保存失败');
     } finally {
@@ -102,7 +102,7 @@ const TextTemplatesPage: React.FC = () => {
       });
       message.success('已恢复默认');
       setEditModalVisible(false);
-      actionRef.current?.reload();
+      grid.refresh();
     } catch (error: any) {
       message.error(error?.data?.error?.message || '恢复默认失败');
     } finally {
@@ -119,74 +119,79 @@ const TextTemplatesPage: React.FC = () => {
     })),
   ];
 
+  const grid = useSearchableRemoteGrid<TextTemplate>({
+    columnDefs: toGridColumns<TextTemplate>(
+      [
+        {
+          title: '名称',
+          dataIndex: 'name',
+          width: 300,
+        },
+        {
+          title: '显示名',
+          dataIndex: 'displayName',
+          ellipsis: true,
+        },
+        {
+          title: '布局',
+          dataIndex: 'isLayout',
+          width: 80,
+
+          valueEnum: { true: { text: '是' }, false: { text: '否' } },
+        },
+        {
+          title: '沙箱',
+          dataIndex: 'isSandboxed',
+          width: 80,
+
+          render: (_, record) => (
+            <span style={{ color: record.isSandboxed ? 'green' : 'red' }}>
+              {record.isSandboxed ? '是' : '否'}
+            </span>
+          ),
+        },
+        {
+          title: '操作',
+          valueType: 'option',
+          width: 200,
+          render: (_, record) => [
+            <a key="edit" onClick={() => openEditModal(record)}>
+              {canEdit(record) ? '编辑' : '查看'}
+            </a>,
+            access.canUpdateTextTemplates && (
+              <Popconfirm
+                key="restore"
+                title="确定要恢复默认内容吗？"
+                description="将删除当前租户对该模板的所有覆盖记录。"
+                onConfirm={() => handleRestore(record)}
+              >
+                <a style={{ color: 'orange' }}>恢复默认</a>
+              </Popconfirm>
+            ),
+          ],
+        },
+      ],
+      { pro: true, kinds: { isLayout: 'boolean', isSandboxed: 'boolean' } },
+    ),
+    getRowId: ({ data }) => data.name,
+    ariaLabel: '文本模板',
+    query: queryTextTemplates,
+  });
+
   return (
     <PageContainer>
-      <AutoHeightProTable<TextTemplate>
-        rowKey="name"
-        actionRef={actionRef}
-        // 列表过滤走后端（filter 参数：按名称/显示名模糊匹配），筛选 UI 在列头
-        search={false}
-        loading={loading}
-        columns={[
-          {
-            title: '名称',
-            dataIndex: 'name',
-            width: 300,
-            ...textFilter('按模板名称筛选'),
-          },
-          {
-            title: '显示名',
-            dataIndex: 'displayName',
-            ellipsis: true,
-            ...textFilter('按显示名筛选'),
-          },
-          {
-            title: '布局',
-            dataIndex: 'isLayout',
-            width: 80,
-            search: false,
-            valueEnum: { true: { text: '是' }, false: { text: '否' } },
-          },
-          {
-            title: '沙箱',
-            dataIndex: 'isSandboxed',
-            width: 80,
-            search: false,
-            render: (_, record) => (
-              <span style={{ color: record.isSandboxed ? 'green' : 'red' }}>
-                {record.isSandboxed ? '是' : '否'}
-              </span>
-            ),
-          },
-          {
-            title: '操作',
-            valueType: 'option',
-            width: 200,
-            render: (_, record) => [
-              <a key="edit" onClick={() => openEditModal(record)}>
-                {canEdit(record) ? '编辑' : '查看'}
-              </a>,
-              access.canUpdateTextTemplates && (
-                <Popconfirm
-                  key="restore"
-                  title="确定要恢复默认内容吗？"
-                  description="将删除当前租户对该模板的所有覆盖记录。"
-                  onConfirm={() => handleRestore(record)}
-                >
-                  <a style={{ color: 'orange' }}>恢复默认</a>
-                </Popconfirm>
-              ),
-            ],
-          },
-        ]}
-        request={async (_params, _sorter, filter) => {
-          const items = await getTextTemplates(
-            firstFilterValue(filter, 'name') ||
-              firstFilterValue(filter, 'displayName'),
-          );
-          return { data: items, total: items.length, success: true };
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
         }}
-      />
+      >
+        {grid.searchBox}
+      </div>
+      <AgGridReact<TextTemplate> {...grid.gridProps} />
 
       {/* 编辑模态框 */}
       <Modal
@@ -257,7 +262,10 @@ const TextTemplatesPage: React.FC = () => {
             <Popconfirm
               title="确定要恢复默认内容吗？"
               description={`将删除当前租户对该模板${selectedCulture ? ` (${selectedCulture})` : ''}的覆盖记录。`}
-              onConfirm={() => editingTemplate && handleRestore(editingTemplate, selectedCulture)}
+              onConfirm={() =>
+                editingTemplate &&
+                handleRestore(editingTemplate, selectedCulture)
+              }
             >
               <Button danger disabled={loading}>
                 恢复默认

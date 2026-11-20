@@ -1,4 +1,8 @@
-import { ProTable } from '@ant-design/pro-components';
+import { AgGridReact } from 'ag-grid-react';
+import { toGridColumns } from '@/components/remoteGrid';
+
+vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
+
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MENU_TYPE, type MenuTreeDto } from '@/abp/menus';
@@ -21,21 +25,19 @@ describe('菜单操作权限', () => {
     const onEdit = vi.fn();
     const onAddChild = vi.fn();
     const table = (canCreateMenus: boolean, canUpdateMenus: boolean) => (
-      <ProTable<MenuTreeDto>
-        rowKey="id"
-        search={false}
-        pagination={false}
-        options={false}
-        toolBarRender={false}
-        dataSource={[catalog]}
-        columns={buildMenuColumns({
-          canCreateMenus,
-          canUpdateMenus,
-          canDeleteMenus: false,
-          onEdit,
-          onAddChild,
-          onDelete: vi.fn(),
-        })}
+      <AgGridReact<MenuTreeDto>
+        rowData={[catalog]}
+        columnDefs={toGridColumns<MenuTreeDto>(
+          buildMenuColumns({
+            canCreateMenus,
+            canUpdateMenus,
+            canDeleteMenus: false,
+            onEdit,
+            onAddChild,
+            onDelete: vi.fn(),
+          }),
+          { pro: true },
+        )}
       />
     );
     const view = render(table(false, true));

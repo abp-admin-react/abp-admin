@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 import { request } from '@umijs/max';
 import { getApplicationConfiguration } from './config';
 
@@ -108,4 +109,20 @@ export function restoreLanguageText(input: LanguageTextKey) {
       Name: input.name,
     },
   });
+}
+
+export function queryLanguages(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<Language>('/api/app/language/query', input, signal);
+}
+
+export function queryLanguageTexts(
+  culture: { cultureName: string; baseCultureName: string; onlyEmpty: boolean },
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<LanguageText>(
+    `/api/app/language-text/query?${new URLSearchParams({ cultureName: culture.cultureName, baseCultureName: culture.baseCultureName, onlyEmpty: String(culture.onlyEmpty) })}`,
+    input,
+    signal,
+  );
 }

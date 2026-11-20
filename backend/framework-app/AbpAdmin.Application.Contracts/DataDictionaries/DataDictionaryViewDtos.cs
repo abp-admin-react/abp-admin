@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -20,6 +21,8 @@ namespace AbpAdmin.DataDictionaries;
 public interface IDataDictionaryViewAppService : IApplicationService
 {
     /// <summary>字典分页列表（管理页左列；不含 Items）。按 Code 排序。</summary>
+    Task<PagedResultDto<DataDictionaryListItemDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<DataDictionaryListItemDto>> GetListAsync(PagedResultRequestDto input);
 
     /// <summary>按字典编码取合并视图（模块字典项 join 我们的元数据）。字典不存在时返回 null。</summary>
