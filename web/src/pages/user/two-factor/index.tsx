@@ -7,7 +7,7 @@ import {
   sendTwoFactorCode,
   verifyTwoFactorCode,
 } from '@/abp/account';
-import { consumeIntendedRedirect } from '@/utils/redirect';
+import { DEFAULT_LANDING_PATH } from '@/utils/redirect';
 import Settings from '../../../../config/defaultSettings';
 
 const useStyles = createStyles(() => ({
@@ -22,16 +22,7 @@ const useStyles = createStyles(() => ({
   },
 }));
 
-/**
- * T2.7 双因素验码页（React 版）。
- *
- * 注意：该页**不在 OIDC 登录流程内**。前端登录是后端 MVC 页（Volo.Abp.Account.Web.OpenIddict），
- * 双因素第二步由后端 `Pages/Account/TwoFactorVerification`（MVC）完成——开源包的
- * `LoginModel.TwoFactorLoginResultAsync` 直接抛 NotImplementedException，已由替换的
- * `AbpAdminLoginModel` 覆写跳转（验证结论见 docs/refactor/03-batch2-pro-parity.md T2.7 末节）。
- * 本页假定用户已登录并调用 AppService 的双因素端点，可作为将来「登录后再验证」场景的底子，
- * 当前登录流程不会跳转到此页。
- */
+/** 面向已登录用户的 SPA 验码页。OIDC 登录时的双因素验证由后端账户页处理。 */
 const TwoFactorVerification: React.FC = () => {
   const { styles } = useStyles();
   const { message } = App.useApp();
@@ -42,29 +33,24 @@ const TwoFactorVerification: React.FC = () => {
   const [countdown, setCountdown] = useState(0);
   const [provider, setProvider] = useState<'Email' | 'Phone'>('Email');
 
-  // initialState.currentUser 统一使用 userid 命名（见 app.tsx），不再用 as any 取不存在的 id 字段
   const currentUser = initialState?.currentUser;
   const userId = currentUser?.userid;
 
   useEffect(() => {
-    // 检查用户是否已登录
     if (!userId) {
       message.error('请先登录');
       history.replace('/user/login');
       return;
     }
 
-    // 检查用户是否启用了 2FA
     getTwoFactorStatus()
       .then((status) => {
         if (!status.twoFactorEnabled) {
-          // 未启用 2FA，直接跳转到首页
           message.info('您未启用双因素认证');
           history.replace('/');
           return;
         }
 
-        // 自动选择可用的验证方式
         if (status.emailConfirmed) {
           setProvider('Email');
         } else if (status.phoneNumberConfirmed) {
@@ -117,9 +103,7 @@ const TwoFactorVerification: React.FC = () => {
       await verifyTwoFactorCode({ code, provider });
       message.success('验证成功');
 
-      // 跳转到原来的目标页面或首页（守卫与读后即清收口在 utils/redirect——此前这里是
-      // 无校验直读，登录侧的过滤对它不生效）
-      history.replace(consumeIntendedRedirect());
+      history.replace(DEFAULT_LANDING_PATH);
     } catch {
       // 错误由全局 errorHandler 统一提示
     } finally {

@@ -1,5 +1,11 @@
 /** 页面路由、访问权限和历史地址跳转。运行时侧栏分组由 /api/app/my-menu 提供。 */
 export default [
+  // 根路径先匹配工作台跳转，避免落到空路径的权限分组。
+  {
+    path: '/',
+    layout: false,
+    redirect: '/welcome',
+  },
   {
     path: '/user',
     layout: false,
@@ -490,10 +496,6 @@ export default [
     path: '/account/force-change-password',
     hideInMenu: true,
     component: './account/force-change-password',
-  },
-  {
-    path: '/',
-    redirect: '/welcome',
   },
   {
     // 历史路径兼容：旧菜单层级下的地址重定向到新层级

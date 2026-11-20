@@ -1,13 +1,4 @@
-/**
- * 登录入口：OIDC 跳转、租户选择/子域名、Magic Link/OTP 落地。
- *
- * - 普通登录：startLogin() → IdP → /user/callback；本页不持有密码表单（密码在后端 Account）。
- * - Magic Link：query 带 magicLinkToken+email → loginWithMagicLink → applyTokensForNewSession
- *   → 按权限解析落地后 window.location.replace；成功 toast「登录成功，正在进入系统…」。
- * - 切租户后若已有 SignalR 连接，必须 hasRealTimeConnection() 门闸后再 restartRealTime()，
- *   勿用 isRealTimeAvailable()（乐观默认 true 会误触发未登录建连）。
- * - 登录成功立刻离登录页：无 intended redirect 时按 Finance 权限落地（Ledger.View→A1，否则菜单首个财务页）。
- */
+/** 登录入口负责选择租户、发起 OIDC 登录及处理邮件链接和验证码。 */
 import { Helmet, history } from '@umijs/max';
 import { Alert, App, Button, Card, Input, Space, Spin, Typography } from 'antd';
 import { createStyles } from 'antd-style';
@@ -23,10 +14,7 @@ import {
   isSubdomainTenantMode,
   setStoredTenant,
 } from '@/abp/tenant';
-import {
-  consumeIntendedRedirect,
-  storeIntendedRedirect,
-} from '@/utils/redirect';
+import { DEFAULT_LANDING_PATH } from '@/utils/redirect';
 import Settings from '../../../../config/defaultSettings';
 
 const useStyles = createStyles(({ token }) => ({
@@ -60,10 +48,6 @@ const Login: React.FC = () => {
   const [currentTenant, setCurrentTenant] = useState(() => getStoredTenant());
   const [loading, setLoading] = useState(false);
 
-  // ========== Magic Link 免密登录落地 ==========
-  // 邮件链接形如 /user/login?magicLinkToken=...&email=...[&tenant=...]，
-  // 检测到参数即进入落地状态机：自动解析租户 → 服务端消费凭据换令牌 → 建立会话跳转。
-  // 链接失效时展示兜底验证码输入（邮件正文同时含 6 位 OTP，与链接共享一次性凭据记录）。
   const [magic, setMagic] = useState<{
     email: string;
     token: string;
@@ -72,7 +56,7 @@ const Login: React.FC = () => {
   const [magicWorking, setMagicWorking] = useState(false);
   const [magicError, setMagicError] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState('');
-  // 一次性守卫：防止 effect 重跑导致同一凭据被消费两次（一次性 token 消费后第二次必失败）
+  // 邮件链接凭据只能消费一次，避免 effect 重跑导致重复提交。
   const magicStartedRef = useRef(false);
 
   useEffect(() => {
@@ -92,24 +76,19 @@ const Login: React.FC = () => {
     });
   }, [subdomainMode]);
 
-  // T3.2：租户信息在 access token 的 claim 里，切租户后旧连接持有的还是
-  // 旧租户上下文，必须断开重连。登录页通常尚未登录（无连接），门闸必须判
-  // 「连接对象存在」（hasRealTimeConnection）而不是可用性（其乐观初值 true 会把
-  // 未登录访客也放进重建分支，得到一次注定 401 的建连加 60 秒重建循环）；
-  // 重建不传 handlers，保持应用级注册不被清空。
+  // 切换租户时重连已存在的 SignalR 连接，避免沿用旧租户上下文。
   const reconnectRealTimeAfterTenantSwitch = () => {
     if (hasRealTimeConnection()) {
       void restartRealTime();
     }
   };
 
-  // 「换票 → 建会话 → 跳转」的公共尾段（审查轮去重：魔法链接与 OTP 兜底两条路径共用）
   const establishSession = async (
     result: Awaited<ReturnType<typeof loginWithMagicLink>>,
   ) => {
     await applyTokensForNewSession(result);
-    message.success('登录成功，正在进入系统…');
-    window.location.replace(consumeIntendedRedirect());
+    message.success('登录成功，正在打开工作台…');
+    window.location.replace(DEFAULT_LANDING_PATH);
   };
 
   const consumeMagicLink = async (
@@ -121,7 +100,7 @@ const Login: React.FC = () => {
     setMagicError(null);
     try {
       if (tenantName) {
-        // 链接自带租户：先解析并写入本地租户状态，后续请求的 __tenant 头与服务端租户上下文一致
+        // 换票请求使用本地租户状态生成 __tenant，先写入邮件指定的租户。
         const result = await findTenantByName(tenantName);
         if (!result.success || !result.tenantId || !result.isActive) {
           setMagicError('链接对应的租户不存在或未启用');
@@ -138,9 +117,9 @@ const Login: React.FC = () => {
         tenantName,
       });
       await establishSession(result);
-    } catch (error) {
-      console.error('magic link 登录失败', error);
-      setMagicError('登录链接无效或已过期，可改用邮件中的验证码登录');
+    } catch {
+      console.warn('[auth] 邮件链接登录失败');
+      setMagicError('无法使用此链接登录，可改用邮件中的验证码');
     } finally {
       setMagicWorking(false);
     }
@@ -159,9 +138,9 @@ const Login: React.FC = () => {
         tenantName: magic.tenantName,
       });
       await establishSession(result);
-    } catch (error) {
-      console.error('OTP 登录失败', error);
-      setMagicError('验证码无效或已过期');
+    } catch {
+      console.warn('[auth] 邮件验证码登录失败');
+      setMagicError('验证码登录失败，请检查验证码或稍后重试');
     } finally {
       setMagicWorking(false);
     }
@@ -179,12 +158,10 @@ const Login: React.FC = () => {
     }
     magicStartedRef.current = true;
     const tenantName = params.get('tenant') || undefined;
-    // 一次性凭据已在本地变量中：立即从地址栏/历史记录剥离（凭据是 bearer 性质，
-    // 留在 URL 里会被历史记录、截图、分享泄露；失败态保留 OTP 兜底即可）
+    // 从浏览器历史移除一次性凭据，再发起换票。
     window.history.replaceState(null, '', '/user/login');
     setMagic({ email, token, tenantName });
     void consumeMagicLink(email, token, tenantName);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const switchTenant = async () => {
@@ -215,21 +192,14 @@ const Login: React.FC = () => {
   const login = async () => {
     setLoading(true);
     try {
-      const redirect = new URLSearchParams(window.location.search).get(
-        'redirect',
-      );
-      // 只存站内目标（post-auth open redirect 防线，走私形态的判定见 utils/redirect）
-      storeIntendedRedirect(redirect);
       await startLogin();
-    } catch (error) {
+    } catch {
       setLoading(false);
-      const detail = error instanceof Error ? error.message : String(error);
-      message.error(`无法跳转到 ABP 登录页：${detail}`);
-      console.error(error);
+      console.warn('[auth] 无法发起 OpenIddict 登录');
+      message.error('无法打开登录页，请稍后重试');
     }
   };
 
-  // Magic Link 落地视图：链接参数存在时接管整个页面（进行中 / 失败兜底两种形态）
   if (magic) {
     return (
       <div className={styles.container}>
@@ -309,9 +279,7 @@ const Login: React.FC = () => {
           }
         >
           <Typography.Paragraph type="secondary">
-            使用 ABP OpenIddict 授权码 + PKCE 登录。默认账号 admin / 1q2w3E*。
-            {/* 子域名提示动态取当前 host/port（此前硬编码 demo.localhost:8000 已移除；
-                该行曾因编辑编码事故变成乱码问号串，全站用户可见）。已在 demo 子域下则直接展示当前地址 */}
+            使用 ABP OpenIddict 授权码和 PKCE 登录。
             也可用子域名访问，例如 demo 租户：
             {window.location.hostname.startsWith('demo.')
               ? window.location.hostname

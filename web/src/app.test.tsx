@@ -166,16 +166,14 @@ describe('app getInitialState', () => {
     expect(state.fetchUserInfo).toBeDefined();
   });
 
-  it('should redirect to login when currentUser fetch fails (401)', async () => {
+  it('should redirect to login when the session is missing', async () => {
     const { getInitialState } = await import('./app');
     // 无有效 OIDC 会话 → fetchUserInfo 返回 undefined
     mockGetUser.mockResolvedValue(null);
 
     const state = await getInitialState();
 
-    expect(mockReplace).toHaveBeenCalledWith(
-      expect.stringContaining('/user/login?redirect='),
-    );
+    expect(mockReplace).toHaveBeenCalledWith('/user/login');
     expect(state.currentUser).toBeUndefined();
   });
 
@@ -194,21 +192,18 @@ describe('app getInitialState', () => {
     expect(state.fetchUserInfo).toBeDefined();
   });
 
-  it('should encode redirect path correctly on 401', async () => {
+  it('should not carry a protected page into login as a return destination', async () => {
     const { getInitialState } = await import('./app');
     mockHistory.location = {
-      pathname: '/admin/users',
-      search: '?page=2',
-      hash: '#section',
+      pathname: '/system/server-monitor',
+      search: '?refresh=1',
+      hash: '#status',
     };
     mockGetUser.mockResolvedValue(null);
 
     await getInitialState();
 
-    // 源码只回跳 pathname + search（不含 hash）
-    expect(mockReplace).toHaveBeenCalledWith(
-      `/user/login?redirect=${encodeURIComponent('/admin/users?page=2')}`,
-    );
+    expect(mockReplace).toHaveBeenCalledExactlyOnceWith('/user/login');
   });
 
   it('should include default settings in initial state', async () => {

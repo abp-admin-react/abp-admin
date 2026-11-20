@@ -195,9 +195,7 @@ export async function getInitialState(): Promise<AppInitialState> {
   ).lastConfig;
 
   if (!currentUser) {
-    history.replace(
-      `${loginPath}?redirect=${encodeURIComponent(location.pathname + location.search)}`,
-    );
+    history.replace(loginPath);
   } else if (!skipPasswordCheckPaths.includes(location.pathname)) {
     // 检查是否需要强制改密（密码过期或管理员要求）
     try {
@@ -303,9 +301,7 @@ export const layout: RunTimeLayoutConfig = ({
         !publicPaths.includes(location.pathname) &&
         !skipPasswordCheckPaths.includes(location.pathname)
       ) {
-        history.replace(
-          `${loginPath}?redirect=${encodeURIComponent(location.pathname + location.search)}`,
-        );
+        history.replace(loginPath);
       }
     },
     ErrorBoundary,

@@ -16,8 +16,6 @@ export const STORAGE_PREFIX = 'abpadmin:';
 export const STORAGE_KEYS = {
   /** localStorage：当前租户 {id,name} JSON（tenant.ts）。缺失 = 宿主租户。 */
   tenant: `${STORAGE_PREFIX}tenant`,
-  /** sessionStorage：登录前要回跳的站内路径（utils/redirect.ts）。仅本标签页有效，用完即删。 */
-  redirect: `${STORAGE_PREFIX}redirect`,
   /** localStorage：最后活动时间戳 ms（IdleSessionWatcher），跨标签同步空闲登出。 */
   idleLastActivity: `${STORAGE_PREFIX}idle-last-activity`,
   /** localStorage：'1' = 财务走内存假数据（finance.ts）。验收前必须删除，否则数据"假成功"。 */
