@@ -189,17 +189,36 @@ export function linkExternalLogin(provider: string) {
 }
 
 export function queryPasskeys(input: GridQuery, signal: AbortSignal) {
-  return postGridQuery<UserPasskeyDto>('/api/app/account-passkey/query', input, signal);
+  return postGridQuery<UserPasskeyDto>(
+    '/api/app/account-passkey/query',
+    input,
+    signal,
+  );
 }
 
 export function queryExternalLogins(input: GridQuery, signal: AbortSignal) {
-  return postGridQuery<UserLoginDto>('/api/app/account-security/query-logins', input, signal);
+  return postGridQuery<UserLoginDto>(
+    '/api/app/account-security/query-logins',
+    input,
+    signal,
+  );
 }
 
-export function queryReceivedDelegations(input: GridQuery, signal: AbortSignal) {
-  return postGridQuery<IdentityUserDelegationDto>('/api/app/identity-user-delegation/query-received', input, signal);
+export function queryReceivedDelegations(
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<IdentityUserDelegationDto>(
+    '/api/app/identity-user-delegation/query-received',
+    input,
+    signal,
+  );
 }
 
 export function querySentDelegations(input: GridQuery, signal: AbortSignal) {
-  return postGridQuery<IdentityUserDelegationDto>('/api/app/identity-user-delegation/query-sent', input, signal);
+  return postGridQuery<IdentityUserDelegationDto>(
+    '/api/app/identity-user-delegation/query-sent',
+    input,
+    signal,
+  );
 }

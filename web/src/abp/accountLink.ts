@@ -46,5 +46,9 @@ export async function switchToLinkedAccount(id: string) {
 }
 
 export function queryLinkedAccounts(input: GridQuery, signal: AbortSignal) {
-  return postGridQuery<LinkedAccountDto>('/api/app/account-link/query', input, signal);
+  return postGridQuery<LinkedAccountDto>(
+    '/api/app/account-link/query',
+    input,
+    signal,
+  );
 }

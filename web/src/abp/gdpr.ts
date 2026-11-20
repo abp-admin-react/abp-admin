@@ -57,5 +57,9 @@ export async function deleteCurrentUserAccount(password: string) {
 }
 
 export function queryGdprRequests(input: GridQuery, signal: AbortSignal) {
-  return postGridQuery<GdprRequestDto>('/api/app/gdpr-request/query', input, signal);
+  return postGridQuery<GdprRequestDto>(
+    '/api/app/gdpr-request/query',
+    input,
+    signal,
+  );
 }
