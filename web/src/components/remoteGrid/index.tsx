@@ -1,10 +1,13 @@
 import { AG_GRID_LOCALE_ZH_CN } from '@ag-grid-community/locale';
 import {
   CellStyleModule,
+  ClientSideRowModelApiModule,
+  ClientSideRowModelModule,
   type ColDef,
   ColumnApiModule,
   CustomFilterModule,
   DateFilterModule,
+  ExternalFilterModule,
   type GridApi,
   type GridOptions,
   GridStateModule,
@@ -16,6 +19,10 @@ import {
   NumberFilterModule,
   PaginationModule,
   RenderApiModule,
+  RowApiModule,
+  RowAutoHeightModule,
+  RowSelectionModule,
+  RowStyleModule,
   TextFilterModule,
   TooltipModule,
   themeQuartz,
@@ -25,11 +32,15 @@ import type {
   CustomFloatingFilterProps,
 } from 'ag-grid-react';
 import { Button, Input, theme } from 'antd';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GridQuery } from '@/abp/gridQuery';
 import type { PagedResult } from '@/abp/identity';
+import { type KeywordField, localColumn, matchesKeyword } from './localValues';
 import { currentGridQuery, toGridQuery } from './query';
 import { type ColumnKind, inputHint, serverHint } from './validation';
+
+export { toGridColumns } from './columns';
+export type { ColumnKind as RemoteColumnKind } from './validation';
 
 type BooleanLabels = { true: string; false: string };
 export type RemoteColumn<T> = ColDef<T> & {
@@ -43,7 +54,10 @@ type QueryPage<T> = (
 ) => Promise<PagedResult<T>>;
 
 const modules = [
-  InfiniteRowModelModule,
+  RowSelectionModule,
+  RowApiModule,
+  RowStyleModule,
+  RowAutoHeightModule,
   PaginationModule,
   TextFilterModule,
   NumberFilterModule,
@@ -55,6 +69,13 @@ const modules = [
   ColumnApiModule,
   RenderApiModule,
   TooltipModule,
+];
+const remoteModules = [...modules, InfiniteRowModelModule];
+const localModules = [
+  ...modules,
+  ClientSideRowModelModule,
+  ClientSideRowModelApiModule,
+  ExternalFilterModule,
 ];
 const textOps = [
   'contains',
@@ -199,7 +220,7 @@ function showFilterHint(api: GridApi, message: string) {
 
 function makeDatasource<T>(
   query: QueryPage<T>,
-  columns: RemoteColumn<T>[],
+  columns: { current: RemoteColumn<T>[] },
   keyword: string,
 ): IDatasource {
   let active = new AbortController();
@@ -225,7 +246,7 @@ function makeDatasource<T>(
       params.api.setGridOption('activeOverlay', undefined);
       try {
         const input = toGridQuery(params, keyword);
-        const help = inputHint(input, columns);
+        const help = inputHint(input, columns.current);
         if (help) {
           params.failCallback();
           return showFilterHint(params.api, help);
@@ -240,7 +261,7 @@ function makeDatasource<T>(
         if (params.api.isDestroyed()) return;
         params.failCallback();
         if (signal.aborted) return;
-        const help = serverHint(error, columns);
+        const help = serverHint(error, columns.current);
         if (help) return showFilterHint(params.api, help);
         params.api.setGridOption('activeOverlay', RetryOverlay);
       }
@@ -269,21 +290,9 @@ const containerStyle = {
   height: 'max(310px, calc(100dvh - 260px))',
 };
 
-/** 复用查询与显示配置，业务页面直接渲染 AgGridReact 并可覆盖官方属性。 */
-export function useRemoteGrid<T>(
-  options: RemoteGridOptions<T>,
-  keyword = '',
-): AgGridReactProps<T> {
-  const {
-    columnDefs,
-    query,
-    getRowId,
-    initialState,
-    pageSize = 20,
-    ariaLabel,
-  } = options;
+function useGridTheme() {
   const { token } = theme.useToken();
-  const gridTheme = useMemo(
+  return useMemo(
     () =>
       themeQuartz.withParams({
         fontFamily: token.fontFamily,
@@ -299,15 +308,33 @@ export function useRemoteGrid<T>(
       }),
     [token],
   );
+}
+
+/** 复用查询与显示配置，业务页面直接渲染 AgGridReact 并可覆盖官方属性。 */
+export function useRemoteGrid<T>(
+  options: RemoteGridOptions<T>,
+  keyword = '',
+): AgGridReactProps<T> {
+  const {
+    columnDefs,
+    query,
+    getRowId,
+    initialState,
+    pageSize = 20,
+    ariaLabel,
+  } = options;
+  const gridTheme = useGridTheme();
+  const latestColumns = useRef(columnDefs);
+  latestColumns.current = columnDefs;
   const columns = useMemo(() => columnDefs.map(buildColumn<T>), [columnDefs]);
   const datasource = useMemo(
-    () => makeDatasource(query, columnDefs, keyword),
-    [query, columnDefs, keyword],
+    () => makeDatasource(query, latestColumns, keyword),
+    [query, keyword],
   );
   return {
     columnDefs: columns,
     datasource,
-    modules,
+    modules: remoteModules,
     getRowId,
     initialState,
     defaultColDef,
@@ -337,28 +364,25 @@ interface KeywordSearchOptions {
   enterButton?: string;
 }
 
-/** 关键词提交时更换数据源，列条件保存在 AG Grid；可搜索的字段只在后端资源中声明。 */
-export function useSearchableRemoteGrid<T>({
-  search,
-  ...options
-}: RemoteGridOptions<T> & { search?: KeywordSearchOptions }) {
+function useGridSearch<T>(
+  ariaLabel: string | undefined,
+  search: KeywordSearchOptions | undefined,
+  initialState?: GridOptions<T>['initialState'],
+) {
   const [draft, setDraft] = useState('');
   const [keyword, setKeyword] = useState('');
   const [hasColumnFilters, setHasColumnFilters] = useState(
-    () =>
-      Object.keys(options.initialState?.filter?.filterModel ?? {}).length > 0,
+    () => Object.keys(initialState?.filter?.filterModel ?? {}).length > 0,
   );
   const api = useRef<GridApi<T> | null>(null);
-  const grid = useRemoteGrid(options, keyword);
-  const gridProps: AgGridReactProps<T> = {
-    ...grid,
-    onGridReady(event) {
-      api.current = event.api;
-      grid.onGridReady?.(event);
+  const events: Pick<AgGridReactProps<T>, 'onGridReady' | 'onFilterChanged'> = {
+    onGridReady({ api: grid }) {
+      api.current = grid;
+      if (ariaLabel) grid.setGridAriaProperty('label', ariaLabel);
     },
     onFilterChanged(event) {
       setHasColumnFilters(Object.keys(event.api.getFilterModel()).length > 0);
-      grid.onFilterChanged?.(event);
+      firstPage(event);
     },
   };
   function submit(text: string) {
@@ -371,7 +395,7 @@ export function useSearchableRemoteGrid<T>({
   }
   const searchBox = (
     <Input.Search
-      aria-label={search?.label ?? `搜索${options.ariaLabel ?? '表格'}`}
+      aria-label={search?.label ?? `搜索${ariaLabel ?? '表格'}`}
       placeholder={search?.placeholder ?? '输入关键词搜索'}
       style={{ width: 'min(320px, 100%)' }}
       allowClear
@@ -395,18 +419,114 @@ export function useSearchableRemoteGrid<T>({
     />
   );
   return {
-    gridProps,
+    events,
+    api,
+    keyword,
     searchBox,
     hasFilters: hasColumnFilters || Boolean(keyword),
     clearFilters() {
       submit('');
-      api.current?.setFilterModel(null);
+      if (!api.current?.isDestroyed()) api.current?.setFilterModel(null);
+    },
+  };
+}
+
+/** 表格只提交关键词，参与匹配的字段和行级权限由服务端资源声明。 */
+export function useSearchableRemoteGrid<T>({
+  search,
+  ...options
+}: RemoteGridOptions<T> & { search?: KeywordSearchOptions }) {
+  const state = useGridSearch<T>(
+    options.ariaLabel,
+    search,
+    options.initialState,
+  );
+  const grid = useRemoteGrid(options, state.keyword);
+  return {
+    gridProps: { ...grid, ...state.events },
+    searchBox: state.searchBox,
+    clearFilters: state.clearFilters,
+    hasFilters: state.hasFilters,
+    refresh() {
+      if (!state.api.current?.isDestroyed())
+        state.api.current?.purgeInfiniteCache();
     },
     getQuery() {
-      const current = api.current;
-      return current && !current.isDestroyed()
-        ? currentGridQuery(current, options.pageSize ?? 20, keyword)
+      const api = state.api.current;
+      return api && !api.isDestroyed()
+        ? currentGridQuery(api, options.pageSize ?? 20, state.keyword)
         : undefined;
     },
+  };
+}
+
+interface LocalGridOptions<T> extends Omit<RemoteGridOptions<T>, 'query'> {
+  rowData: T[] | readonly T[] | null | undefined;
+  keywordFields: readonly KeywordField<T>[];
+  pagination?: boolean;
+  search?: KeywordSearchOptions;
+}
+
+/** 适用于一次返回完整集合的配置和明细。外部关键词与 AG 列条件同时生效，排序与选择仍由 AG 维护。 */
+export function useSearchableLocalGrid<T>(options: LocalGridOptions<T>) {
+  const {
+    columnDefs,
+    rowData,
+    getRowId,
+    initialState,
+    ariaLabel,
+    pageSize = 20,
+    pagination = true,
+  } = options;
+  const state = useGridSearch<T>(ariaLabel, options.search, initialState);
+  const fields = useRef(options.keywordFields);
+  fields.current = options.keywordFields;
+  const keyword = useRef(state.keyword);
+  keyword.current = state.keyword;
+  const { api } = state;
+  useEffect(() => {
+    if (api.current && !api.current.isDestroyed())
+      api.current.onFilterChanged();
+  }, [api, state.keyword]);
+  const theme = useGridTheme();
+  const columns = useMemo(
+    () => columnDefs.map((col) => localColumn(col, buildColumn(col))),
+    [columnDefs],
+  );
+  const gridProps: AgGridReactProps<T> = {
+    columnDefs: columns,
+    rowData: rowData as T[] | undefined,
+    getRowId,
+    initialState,
+    defaultColDef,
+    theme,
+    modules: localModules,
+    loadThemeGoogleFonts: false,
+    localeText: AG_GRID_LOCALE_ZH_CN,
+    containerStyle: pagination
+      ? containerStyle
+      : {
+          width: '100%',
+          minWidth: 0,
+          height: Math.min(460, 120 + Math.max(rowData?.length ?? 0, 1) * 42),
+        },
+    pagination,
+    paginationPageSize: pageSize,
+    paginationPageSizeSelector: [10, 20, 50, 100],
+    tooltipShowMode: 'whenTruncated',
+    tooltipShowDelay: 400,
+    isExternalFilterPresent: () => Boolean(keyword.current),
+    doesExternalFilterPass: (node) =>
+      node.data != null &&
+      matchesKeyword(node.data, fields.current, keyword.current),
+    onSortChanged: firstPage,
+    ...state.events,
+  };
+  return {
+    gridProps,
+    searchBox: state.searchBox,
+    hasFilters: state.hasFilters,
+    clearFilters: state.clearFilters,
+    keyword: state.keyword,
   };
 }
