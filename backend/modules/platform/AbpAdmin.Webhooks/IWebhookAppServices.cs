@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -10,6 +11,8 @@ namespace AbpAdmin.Webhooks;
 /// <summary>Webhook 订阅管理（Auto API：/api/app/webhook-subscription）。</summary>
 public interface IWebhookSubscriptionAppService : IApplicationService
 {
+    Task<PagedResultDto<WebhookSubscriptionDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<WebhookSubscriptionDto>> GetListAsync(GetWebhookSubscriptionListInput input);
 
     Task<WebhookSubscriptionDto> GetAsync(Guid id);
@@ -87,6 +90,8 @@ public class UpdateWebhookSubscriptionInput
 /// <summary>Webhook 发送记录（Auto API：/api/app/webhook-send-record）。</summary>
 public interface IWebhookSendRecordAppService : IApplicationService
 {
+    Task<PagedResultDto<WebhookSendRecordDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<WebhookSendRecordDto>> GetListAsync(GetWebhookSendRecordListInput input);
 
     Task DeleteAsync(Guid id);

@@ -137,6 +137,18 @@ public abstract class NotificationManagementAppServiceTests<TStartupModule> : Ab
         original.RetryCount.ShouldBe(1);
         original.FinalSuccess.ShouldBeNull(); // 最后一次尝试是刚建的重试记录（未发送）
 
+        var gridPage = await WithUnitOfWorkAsync(async () => await _managementAppService.QueryAsync(false, new Grids.GridQueryInput
+        {
+            Keyword = InAppNotificationConsts.NotificationMethod,
+            Filters = [
+                new() { Field = "finalSuccess", Conditions = [new() { Op = "eq", Value = "pending" }] },
+                new() { Field = "retryCount", Conditions = [new() { Op = "gte", Value = "1" }] }
+            ],
+            Sort = [new() { Field = "retryCount", Direction = "desc" }],
+            MaxResultCount = 100
+        }));
+        gridPage.Items.ShouldContain(x => x.Id == originalId && x.FinalSuccess == null && x.RetryCount == 1);
+
         var withRetries = await WithUnitOfWorkAsync(async () =>
             await _managementAppService.GetListAsync(new GetNotificationListInput
             {

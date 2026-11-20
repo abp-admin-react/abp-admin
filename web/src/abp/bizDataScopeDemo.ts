@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 import { request } from '@umijs/max';
 
 /**
@@ -60,4 +61,12 @@ export async function deleteBizDataScopeDemo(id: string) {
   return request(`/api/app/biz-data-scope-demo/${id}`, {
     method: 'DELETE',
   });
+}
+
+export function queryBizDataScopeDemos(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<BizDataScopeDemoDto>(
+    '/api/app/biz-data-scope-demo/query',
+    input,
+    signal,
+  );
 }

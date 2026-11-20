@@ -26,6 +26,33 @@ public abstract class WebhookSubscriptionAppServiceTests<TStartupModule> : AbpAd
     }
 
     [Fact]
+    public async Task Grid_Searches_Event_Membership_Before_Paging()
+    {
+        var prefix = "grid." + Guid.NewGuid().ToString("N");
+        foreach (var active in new[] { true, false, true })
+        {
+            await _subscriptionAppService.CreateAsync(new CreateWebhookSubscriptionInput
+            {
+                WebhookUri = "https://example.com/grid",
+                IsActive = active,
+                Events = [prefix + ".created", "other.event"],
+                Secret = "grid-secret-0123456789"
+            });
+        }
+
+        var page = await _subscriptionAppService.QueryAsync(new AbpAdmin.Grids.GridQueryInput
+        {
+            Keyword = prefix.ToUpperInvariant(),
+            SkipCount = 1,
+            MaxResultCount = 1,
+            Sort = [new() { Field = "events", Direction = "asc" }],
+            Filters = [new() { Field = "isActive", Conditions = [new() { Op = "eq", Value = "true" }] }]
+        });
+        page.TotalCount.ShouldBe(2);
+        page.Items.Single().Events.ShouldContain(prefix + ".created");
+    }
+
+    [Fact]
     public async Task Create_Get_Update_Delete_Full_Lifecycle()
     {
         // Create：密钥不回传（HasSecret=true），事件集落库

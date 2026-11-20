@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Linq.Dynamic.Core;
@@ -55,6 +56,18 @@ public class BizDataScopeDemoAppService : ApplicationService, IBizDataScopeDemoA
         _dataScopeState = dataScopeState;
         _frameworkLocalizer = frameworkLocalizer;
         LocalizationResource = typeof(BizTemplateResource);
+    }
+
+    public virtual async Task<PagedResultDto<BizDataScopeDemoDto>> QueryAsync(GridQueryInput input)
+    {
+        var rows = await _repository.GetQueryableAsync();
+        var grid = new GridQueryDefinition<BizDataScopeDemo>()
+            .SearchableField("name", x => x.Name)
+            .SearchableField("organizationUnitId", x => x.OrganizationUnitId)
+            .Field("creationTime", x => x.CreationTime);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationTime", true, x => x.Id,
+            x => ObjectMapper.Map<BizDataScopeDemo, BizDataScopeDemoDto>(x));
+        return new PagedResultDto<BizDataScopeDemoDto>(page.TotalCount, page.Items);
     }
 
     public async Task<PagedResultDto<BizDataScopeDemoDto>> GetListAsync(PagedAndSortedResultRequestDto input)

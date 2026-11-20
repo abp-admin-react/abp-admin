@@ -1,9 +1,6 @@
-import {
-  type ActionType,
-  PageContainer,
-  type ProColumns,
-} from '@ant-design/pro-components';
+import { PageContainer, type ProColumns } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   App,
   Button,
@@ -15,20 +12,22 @@ import {
   Tabs,
   Tag,
 } from 'antd';
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   createWebhookSubscription,
   deleteWebhookSendRecord,
   deleteWebhookSubscription,
-  getWebhookSendRecords,
-  getWebhookSubscriptions,
+  queryWebhookSendRecords,
+  queryWebhookSubscriptions,
   resendWebhookSendRecord,
+  updateWebhookSubscription,
   type WebhookSendRecord,
   type WebhookSubscription,
-  updateWebhookSubscription,
 } from '@/abp/webhooks';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
-import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 /**
  * Webhook 管理：Tab1 订阅 CRUD（密钥写后不回显，留空=保持）；
@@ -37,8 +36,6 @@ import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
 const WebhooksPage: React.FC = () => {
   const access = useAccess();
   const { message } = App.useApp();
-  const subscriptionActionRef = useRef<ActionType>(undefined);
-  const recordActionRef = useRef<ActionType>(undefined);
 
   const [subModalOpen, setSubModalOpen] = useState(false);
   const [editingSub, setEditingSub] = useState<WebhookSubscription | null>(
@@ -110,7 +107,7 @@ const WebhooksPage: React.FC = () => {
         message.success('订阅已创建');
       }
       setSubModalOpen(false);
-      subscriptionActionRef.current?.reload();
+      subscriptions.refresh();
     } catch {
       // 服务端拒绝（重名事件等）由全局 errorHandler 呈现，保持弹窗打开
     }
@@ -122,7 +119,6 @@ const WebhooksPage: React.FC = () => {
       dataIndex: 'webhookUri',
       ellipsis: true,
       copyable: true,
-      ...textFilter('地址'),
     },
     {
       title: '事件',
@@ -159,7 +155,7 @@ const WebhooksPage: React.FC = () => {
               onConfirm={async () => {
                 await deleteWebhookSubscription(record.id);
                 message.success('已删除');
-                subscriptionActionRef.current?.reload();
+                subscriptions.refresh();
               }}
             >
               <Button size="small" type="link" danger>
@@ -177,18 +173,13 @@ const WebhooksPage: React.FC = () => {
       title: '事件',
       dataIndex: 'eventName',
       width: 180,
-      ...textFilter('事件名'),
     },
     { title: '负载', dataIndex: 'payload', ellipsis: true, copyable: true },
     {
       title: '结果',
       dataIndex: 'succeeded',
       width: 90,
-      filters: [
-        { text: '成功', value: 'true' },
-        { text: '失败', value: 'false' },
-      ],
-      filterMultiple: false,
+      valueEnum: { true: '成功', false: '失败' },
       render: (_, record) =>
         record.succeeded ? (
           <Tag color="green">成功</Tag>
@@ -221,7 +212,7 @@ const WebhooksPage: React.FC = () => {
               onConfirm={async () => {
                 await resendWebhookSendRecord(record.id);
                 message.success('已重新入队');
-                recordActionRef.current?.reload();
+                records.refresh();
               }}
             >
               <Button size="small" type="link">
@@ -235,7 +226,7 @@ const WebhooksPage: React.FC = () => {
               onConfirm={async () => {
                 await deleteWebhookSendRecord(record.id);
                 message.success('已删除');
-                recordActionRef.current?.reload();
+                records.refresh();
               }}
             >
               <Button size="small" type="link" danger>
@@ -248,6 +239,31 @@ const WebhooksPage: React.FC = () => {
     },
   ];
 
+  const records = useSearchableRemoteGrid<WebhookSendRecord>({
+    columnDefs: toGridColumns<WebhookSendRecord>(recordColumns, {
+      pro: true,
+      kinds: {
+        succeeded: 'boolean',
+        responseStatusCode: 'number',
+        attemptCount: 'number',
+        lastAttemptTime: 'date',
+      },
+    }),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '发送记录',
+    query: queryWebhookSendRecords,
+  });
+
+  const subscriptions = useSearchableRemoteGrid<WebhookSubscription>({
+    columnDefs: toGridColumns<WebhookSubscription>(subscriptionColumns, {
+      pro: true,
+      kinds: { isActive: 'boolean' },
+    }),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: 'Webhook 订阅',
+    query: queryWebhookSubscriptions,
+  });
+
   return (
     <PageContainer title="事件回调订阅">
       <Tabs
@@ -258,38 +274,34 @@ const WebhooksPage: React.FC = () => {
                   key: 'subscriptions',
                   label: '订阅',
                   children: (
-                    <AutoHeightProTable<WebhookSubscription>
-                      headerTitle="Webhook 订阅"
-                      rowKey="id"
-                      search={false}
-                      options={false}
-                      actionRef={subscriptionActionRef}
-                      toolBarRender={() => [
-                        access.canCreateWebhookSubscriptions ? (
-                          <Button
-                            key="create"
-                            type="primary"
-                            onClick={openCreateSub}
-                          >
-                            新建订阅
-                          </Button>
-                        ) : null,
-                      ]}
-                      request={async (params, _sorter, filters) => {
-                        const result = await getWebhookSubscriptions({
-                          current: params.current,
-                          pageSize: params.pageSize,
-                          filter: firstFilterValue(filters, 'webhookUri'),
-                        });
-                        return {
-                          data: result.items,
-                          total: result.totalCount,
-                          success: true,
-                        };
-                      }}
-                      columns={subscriptionColumns}
-                      pagination={{ pageSize: 20 }}
-                    />
+                    <>
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          gap: 8,
+                          marginBottom: 8,
+                        }}
+                      >
+                        {'Webhook 订阅'}
+                        {subscriptions.searchBox}
+                        {[
+                          access.canCreateWebhookSubscriptions ? (
+                            <Button
+                              key="create"
+                              type="primary"
+                              onClick={openCreateSub}
+                            >
+                              新建订阅
+                            </Button>
+                          ) : null,
+                        ]}
+                      </div>
+                      <AgGridReact<WebhookSubscription>
+                        {...subscriptions.gridProps}
+                      />
+                    </>
                   ),
                 },
               ]
@@ -300,35 +312,21 @@ const WebhooksPage: React.FC = () => {
                   key: 'records',
                   label: '发送记录',
                   children: (
-                    <AutoHeightProTable<WebhookSendRecord>
-                      headerTitle="发送记录（交付终态）"
-                      rowKey="id"
-                      search={false}
-                      options={false}
-                      actionRef={recordActionRef}
-                      request={async (params, _sorter, filters) => {
-                        const resultFilter = firstFilterValue(
-                          filters,
-                          'succeeded',
-                        );
-                        const result = await getWebhookSendRecords({
-                          current: params.current,
-                          pageSize: params.pageSize,
-                          eventName: firstFilterValue(filters, 'eventName'),
-                          succeeded:
-                            resultFilter === undefined
-                              ? undefined
-                              : resultFilter === 'true',
-                        });
-                        return {
-                          data: result.items,
-                          total: result.totalCount,
-                          success: true,
-                        };
-                      }}
-                      columns={recordColumns}
-                      pagination={{ pageSize: 20 }}
-                    />
+                    <>
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          gap: 8,
+                          marginBottom: 8,
+                        }}
+                      >
+                        {'发送记录（交付终态）'}
+                        {records.searchBox}
+                      </div>
+                      <AgGridReact<WebhookSendRecord> {...records.gridProps} />
+                    </>
                   ),
                 },
               ]

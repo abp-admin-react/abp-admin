@@ -1,3 +1,8 @@
+vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
+vi.mock('@/abp/gridQuery', () => ({
+  postGridQuery: (...args: unknown[]) => mocks.getBizDataScopeDemos(...args),
+}));
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import { describe, expect, it, vi } from 'vitest';
@@ -24,7 +29,8 @@ vi.mock('@/abp/identity', () => ({ getAllRoles: mocks.getAllRoles }));
 vi.mock('@/abp/identityAdmin', () => ({
   getOrganizationUnits: mocks.getOrganizationUnits,
 }));
-vi.mock('@/abp/bizDataScopeDemo', () => ({
+vi.mock('@/abp/bizDataScopeDemo', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/abp/bizDataScopeDemo')>()),
   getBizDataScopeDemos: mocks.getBizDataScopeDemos,
   createBizDataScopeDemo: vi.fn(),
   deleteBizDataScopeDemo: vi.fn(),

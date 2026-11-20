@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 /**
  * 通知管理 API，对齐 INotificationManagementAppService。
  */
@@ -113,4 +114,16 @@ export async function sendNotificationToUsers(data: {
 
 export async function getBroadcast(id: string) {
   return request<NotificationBroadcast>(`${path}/${id}/broadcast`);
+}
+
+export function queryNotifications(
+  includeRetries: boolean,
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<NotificationListItem>(
+    `/api/app/notification-management/query?includeRetries=${includeRetries}`,
+    input,
+    signal,
+  );
 }

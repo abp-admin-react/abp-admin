@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -16,6 +17,8 @@ namespace AbpAdmin.Notifications;
 /// </summary>
 public interface INotificationManagementAppService : IApplicationService
 {
+    Task<PagedResultDto<NotificationListItemDto>> QueryAsync(bool includeRetries, GridQueryInput input);
+
     Task<PagedResultDto<NotificationListItemDto>> GetListAsync(GetNotificationListInput input);
 
     /// <summary>详情 + 完整尝试链（原记录 + 所有重试记录，按时间升序）。</summary>

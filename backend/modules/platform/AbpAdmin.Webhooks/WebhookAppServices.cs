@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,6 +34,41 @@ public class WebhookSubscriptionAppService : ApplicationService, IWebhookSubscri
         _configuration = configuration;
         // 模块资源：L["Webhooks:*"]（URI 校验/重名事件等用户可见文案）
         LocalizationResource = typeof(Localization.WebhooksResource);
+    }
+
+    private sealed class SubscriptionGridRow
+    {
+        public WebhookSubscription Subscription { get; init; } = default!;
+        public string EventNames { get; init; } = "";
+    }
+
+    public virtual async Task<PagedResultDto<WebhookSubscriptionDto>> QueryAsync(GridQueryInput input)
+    {
+        // 先按订阅聚合事件。每个订阅只占一行，总数和分页不受订阅事件数量影响。
+        var subscriptions = await _subscriptionRepository.GetQueryableAsync();
+        var events = await _eventRepository.GetQueryableAsync();
+        var grouped = events.GroupBy(e => e.SubscriptionId).Select(g => new
+        {
+            Id = g.Key,
+            Names = string.Join("、", g.OrderBy(e => e.EventName).Select(e => e.EventName))
+        });
+        var rows = from subscription in subscriptions
+                   join names in grouped on subscription.Id equals names.Id into allNames
+                   from item in allNames.DefaultIfEmpty()
+                   select new SubscriptionGridRow { Subscription = subscription, EventNames = item.Names ?? "" };
+        var grid = new GridQueryDefinition<SubscriptionGridRow>()
+            .SearchableField("webhookUri", x => x.Subscription.WebhookUri)
+            .SearchableField("description", x => x.Subscription.Description)
+            .SearchableField("events", x => x.EventNames)
+            .Field("isActive", x => x.Subscription.IsActive)
+            .Field("creationTime", x => x.Subscription.CreationTime);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationTime", true,
+            x => x.Subscription.Id, x => x.Subscription);
+        var ids = page.Items.Select(s => s.Id).ToList();
+        var bySubscription = (await AsyncExecuter.ToListAsync(events.Where(e => ids.Contains(e.SubscriptionId))
+            .OrderBy(e => e.EventName))).ToLookup(e => e.SubscriptionId);
+        return new PagedResultDto<WebhookSubscriptionDto>(page.TotalCount,
+            page.Items.Select(s => Map(s, bySubscription[s.Id].Select(e => e.EventName).ToList())).ToList());
     }
 
     public virtual async Task<PagedResultDto<WebhookSubscriptionDto>> GetListAsync(GetWebhookSubscriptionListInput input)
@@ -185,6 +221,22 @@ public class WebhookSendRecordAppService : ApplicationService, IWebhookSendRecor
     {
         _recordRepository = recordRepository;
         _backgroundJobManager = backgroundJobManager;
+    }
+
+    public virtual async Task<PagedResultDto<WebhookSendRecordDto>> QueryAsync(GridQueryInput input)
+    {
+        var rows = await _recordRepository.GetQueryableAsync();
+        var grid = new GridQueryDefinition<WebhookSendRecord>()
+            .SearchableField("eventName", x => x.EventName)
+            .SearchableField("payload", x => x.Payload)
+            .Field("succeeded", x => x.Succeeded)
+            .Field("responseStatusCode", x => x.ResponseStatusCode)
+            .Field("attemptCount", x => x.AttemptCount)
+            .Field("lastAttemptTime", x => x.LastAttemptTime)
+            .Field("creationTime", x => x.CreationTime);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationTime", true, x => x.Id,
+            x => Map(x));
+        return new PagedResultDto<WebhookSendRecordDto>(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<WebhookSendRecordDto>> GetListAsync(GetWebhookSendRecordListInput input)

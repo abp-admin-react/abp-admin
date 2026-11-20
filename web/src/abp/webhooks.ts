@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 /**
  * Webhook 订阅管理 API（AbpAdmin.Webhooks.* 权限）。
  *
@@ -133,4 +134,23 @@ export async function resendWebhookSendRecord(id: string): Promise<void> {
 
 export async function deleteWebhookSendRecord(id: string): Promise<void> {
   return request(`/api/app/webhook-send-record/${id}`, { method: 'DELETE' });
+}
+
+export function queryWebhookSubscriptions(
+  input: GridQuery,
+  signal: AbortSignal,
+) {
+  return postGridQuery<WebhookSubscription>(
+    '/api/app/webhook-subscription/query',
+    input,
+    signal,
+  );
+}
+
+export function queryWebhookSendRecords(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<WebhookSendRecord>(
+    '/api/app/webhook-send-record/query',
+    input,
+    signal,
+  );
 }

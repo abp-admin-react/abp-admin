@@ -5,6 +5,7 @@ import {
 } from '@ant-design/icons';
 import { PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -22,12 +23,15 @@ import {
   type BizDataScopeDemoDto,
   createBizDataScopeDemo,
   deleteBizDataScopeDemo,
-  getBizDataScopeDemos,
+  queryBizDataScopeDemos,
 } from '@/abp/bizDataScopeDemo';
 import { getAllRoles, type IdentityRoleDto } from '@/abp/identity';
 import { getOrganizationUnits } from '@/abp/identityAdmin';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 import DataScopeModal from '@/components/DataScopeModal';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 type OrganizationUnitItem = {
   id: string;
@@ -46,29 +50,9 @@ const BizDataScopeDemoPage: React.FC = () => {
   const [scopeOpen, setScopeOpen] = useState(false);
   const canConfigureScope =
     access.canManageRoleDataScopes && access.canManageRoles;
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<BizDataScopeDemoDto[]>([]);
-  const [total, setTotal] = useState(0);
   const [ouList, setOuList] = useState<OrganizationUnitItem[]>([]);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [form] = Form.useForm();
-
-  const fetchData = async () => {
-    if (!access.canManageBizDataScopeDemo) return;
-    setLoading(true);
-    try {
-      const res = await getBizDataScopeDemos({
-        skipCount: 0,
-        maxResultCount: 100,
-      });
-      setData(res.items || []);
-      setTotal(res.totalCount || 0);
-    } catch (e: any) {
-      message.error(e?.message || '加载失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const fetchOuList = async () => {
     try {
@@ -81,7 +65,6 @@ const BizDataScopeDemoPage: React.FC = () => {
 
   useEffect(() => {
     if (!access.canManageBizDataScopeDemo) return;
-    fetchData();
     fetchOuList();
   }, [access.canManageBizDataScopeDemo]);
 
@@ -111,7 +94,7 @@ const BizDataScopeDemoPage: React.FC = () => {
       message.success('创建成功');
       setCreateModalOpen(false);
       form.resetFields();
-      fetchData();
+      grid.refresh();
     } catch (e: any) {
       message.error(e?.message || '创建失败');
     }
@@ -125,7 +108,7 @@ const BizDataScopeDemoPage: React.FC = () => {
         try {
           await deleteBizDataScopeDemo(id);
           message.success('删除成功');
-          fetchData();
+          grid.refresh();
         } catch (e: any) {
           message.error(e?.message || '删除失败');
         }
@@ -176,6 +159,15 @@ const BizDataScopeDemoPage: React.FC = () => {
     },
   ];
 
+  const grid = useSearchableRemoteGrid<BizDataScopeDemoDto>({
+    columnDefs: toGridColumns<BizDataScopeDemoDto>(columns, {
+      kinds: { organizationUnitId: 'uuid', creationTime: 'date' },
+    }),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '数据范围示例',
+    query: queryBizDataScopeDemos,
+  });
+
   return (
     <PageContainer>
       <Card>
@@ -221,16 +213,10 @@ const BizDataScopeDemoPage: React.FC = () => {
               }}
             >
               <Space>
-                <span>当前可见数据条数：</span>
-                <Tag color="green" style={{ fontSize: 16 }}>
-                  {total}
-                </Tag>
-              </Space>
-              <Space>
                 <Button
                   key="refresh"
                   icon={<ReloadOutlined />}
-                  onClick={fetchData}
+                  onClick={grid.refresh}
                 >
                   刷新
                 </Button>
@@ -244,13 +230,19 @@ const BizDataScopeDemoPage: React.FC = () => {
                 </Button>
               </Space>
             </div>
-            <ResizableTable
-              rowKey="id"
-              loading={loading}
-              columns={columns}
-              dataSource={data}
-              pagination={false}
-            />
+
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: 8,
+                marginBottom: 8,
+              }}
+            >
+              {grid.searchBox}
+            </div>
+            <AgGridReact<BizDataScopeDemoDto> {...grid.gridProps} />
           </>
         )}
       </Card>

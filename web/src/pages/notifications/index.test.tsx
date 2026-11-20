@@ -1,10 +1,15 @@
+import { postGridQuery } from '@/abp/gridQuery';
+
+vi.mock('@/abp/gridQuery', () => ({ postGridQuery: vi.fn() }));
+vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import NotificationDetailDrawer from './components/NotificationDetail';
 import * as service from '@/abp/notificationManagement';
+import NotificationDetailDrawer from './components/NotificationDetail';
 
 vi.mock('@umijs/max', () => ({
   useAccess: () => ({ canManageNotifications: true }),
@@ -13,7 +18,9 @@ vi.mock('@umijs/max', () => ({
 
 // Mock 服务层：页面不直接依赖生成客户端，mock 这一层即可
 vi.mock('@/abp/notificationManagement', async () => {
-  const actual = await vi.importActual<typeof import('@/abp/notificationManagement')>('@/abp/notificationManagement');
+  const actual = await vi.importActual<
+    typeof import('@/abp/notificationManagement')
+  >('@/abp/notificationManagement');
   return {
     ...actual,
     getNotifications: vi.fn(),
@@ -43,21 +50,6 @@ vi.mock('@ant-design/pro-components', () => ({
   PageContainer: ({ children }: any) => (
     <div data-testid="page-container">{children}</div>
   ),
-  ProTable: ({ columns, toolBarRender, request }: any) => {
-    request?.({ current: 1, pageSize: 10 }, {}, {});
-    return (
-      <div data-testid="pro-table">
-        <div data-testid="table-columns">
-          {columns?.map((col: any, i: number) => (
-            <div key={col.dataIndex ?? col.key ?? i} data-testid="column">
-              {col.title}
-            </div>
-          ))}
-        </div>
-        {toolBarRender && <div data-testid="toolbar">{toolBarRender()}</div>}
-      </div>
-    );
-  },
   ModalForm: ({ children, title }: any) => (
     <div data-testid="modal-form" data-title={title}>
       {children}
@@ -106,7 +98,7 @@ const mockList = {
 describe('NotificationsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(service.getNotifications).mockResolvedValue(mockList as never);
+    vi.mocked(postGridQuery).mockResolvedValue(mockList as never);
   });
 
   it('挂载即请求发送记录列表', async () => {
@@ -114,8 +106,10 @@ describe('NotificationsPage', () => {
     renderWithClient(<Page />);
 
     await waitFor(() => {
-      expect(service.getNotifications).toHaveBeenCalledWith(
-        expect.objectContaining({ current: 1, pageSize: 10 }),
+      expect(postGridQuery).toHaveBeenCalledWith(
+        expect.stringContaining('/query'),
+        expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+        expect.any(AbortSignal),
       );
     });
   });
@@ -124,8 +118,8 @@ describe('NotificationsPage', () => {
     const { default: Page } = await import('./index');
     renderWithClient(<Page />);
 
-    const columns = await screen.findAllByTestId('column');
-    const titles = columns.map((c) => c.textContent);
+    const columns = await screen.findAllByRole('columnheader');
+    const titles = columns.map((c) => c.getAttribute('aria-label'));
     expect(titles).toContain('创建时间');
     expect(titles).toContain('渠道');
     expect(titles).toContain('接收人');
@@ -141,8 +135,7 @@ describe('NotificationsPage', () => {
     const { default: Page } = await import('./index');
     renderWithClient(<Page />);
 
-    const toolbar = await screen.findByTestId('toolbar');
-    expect(toolbar.textContent).toContain('发送通知 / 公告');
+    expect(await screen.findByText('发送通知 / 公告')).toBeInTheDocument();
   });
 
   // T-模块7：antd v6 Timeline 从 items.children 改为 items.content，写错会静默渲染空尝试链

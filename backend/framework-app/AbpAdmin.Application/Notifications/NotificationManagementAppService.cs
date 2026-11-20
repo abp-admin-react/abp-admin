@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -52,6 +53,32 @@ public class NotificationManagementAppService : ApplicationService, INotificatio
         _notificationInfoRepository = notificationInfoRepository;
         _broadcastRepository = broadcastRepository;
         _notificationDispatcher = notificationDispatcher;
+    }
+
+    public virtual async Task<PagedResultDto<NotificationListItemDto>> QueryAsync(bool includeRetries, GridQueryInput input)
+    {
+        var all = await _notificationRepository.GetQueryableAsync();
+        // 先投影最终发送状态和重试次数，列头查询与实际显示采用同一次尝试。
+        var rows = from n in all
+                   where includeRetries || n.RetryForNotificationId == null
+                   select new NotificationListItemDto
+                   {
+                       Id = n.Id, UserId = n.UserId, UserName = n.UserName, NotificationInfoId = n.NotificationInfoId,
+                       NotificationMethod = n.NotificationMethod, Success = n.Success, CompletionTime = n.CompletionTime,
+                       FailureReason = n.FailureReason, CreationTime = n.CreationTime, RetryCount = all.Count(r => r.RetryForNotificationId == n.Id),
+                       FinalSuccess = all.Any(r => r.RetryForNotificationId == n.Id) ? all.Where(r => r.RetryForNotificationId == n.Id).OrderByDescending(r => r.CreationTime).ThenByDescending(r => r.Id)
+                           .Select(r => r.Success).FirstOrDefault() : n.Success
+                   };
+        var grid = new GridQueryDefinition<NotificationListItemDto>()
+            .Field("creationTime", x => x.CreationTime)
+            .SearchableField("notificationMethod", x => x.NotificationMethod)
+            .SearchableField("userName", x => x.UserName ?? x.UserId.ToString())
+            .SearchableField("failureReason", x => x.FailureReason)
+            .Field("retryCount", x => x.RetryCount)
+            .Field("finalSuccess", x => x.FinalSuccess == true ? "true" : x.FinalSuccess == false ? "false" : "pending");
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationTime", true, x => x.Id,
+            x => x);
+        return new PagedResultDto<NotificationListItemDto>(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<NotificationListItemDto>> GetListAsync(GetNotificationListInput input)
