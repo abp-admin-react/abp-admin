@@ -1,5 +1,5 @@
 import { request } from '@umijs/max';
-import type { GridQuery } from './gridQuery';
+import { type GridQuery, postGridQuery } from './gridQuery';
 import type { PagedResult } from './identity';
 
 export type OperationLogDto = {
@@ -37,13 +37,11 @@ export type GetOperationLogListParams = {
 };
 
 export function queryOperationLogs(input: GridQuery, signal: AbortSignal) {
-  return request<PagedResult<OperationLogDto>>('/api/app/operation-log/query', {
-    method: 'POST',
-    data: input,
+  return postGridQuery<OperationLogDto>(
+    '/api/app/operation-log/query',
+    input,
     signal,
-    // 数据块加载失败时由网格显示重试入口。
-    skipErrorHandler: true,
-  });
+  );
 }
 
 export async function getOperationLogs(params: GetOperationLogListParams) {
