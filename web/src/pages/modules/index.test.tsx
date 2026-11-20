@@ -209,7 +209,8 @@ describe('module management localization', () => {
       const ordersCell = await screen.findByRole('cell', {
         name: orders,
       });
-      const ordersRow = ordersCell.closest('tr')!;
+      const ordersRow = ordersCell.closest('tr');
+      if (!ordersRow) throw new Error('订单模块单元格缺少所在行');
       expect(
         within(ordersRow).getByRole('cell', { name: payments }),
       ).toBeVisible();
