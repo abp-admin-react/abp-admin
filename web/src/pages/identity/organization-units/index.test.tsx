@@ -191,7 +191,8 @@ describe('部门维护', () => {
     fireEvent.click(await screen.findByRole('button', { name: button }));
     const dialog = await screen.findByRole('dialog');
     const field = within(dialog).getByLabelText(label);
-    const form = dialog.querySelector('form')!;
+    const form = dialog.querySelector('form');
+    if (!form) throw new Error('部门授权弹窗缺少表单');
 
     fireEvent.change(field, { target: { value: 'not-a-guid' } });
     expect(within(dialog).queryByText(`请输入带连字符的完整${label}`)).toBeNull();
@@ -228,7 +229,9 @@ describe('部门维护', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加成员' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('用户 ID'), { target: { value: knownId } });
-    fireEvent.submit(dialog.querySelector('form')!);
+    const form = dialog.querySelector('form');
+    if (!form) throw new Error('添加成员弹窗缺少表单');
+    fireEvent.submit(form);
     expect(await screen.findByText('找不到指定用户，请核对用户 ID。')).toBeTruthy();
     expect(within(dialog).getByLabelText('用户 ID')).toHaveValue(knownId);
   });
