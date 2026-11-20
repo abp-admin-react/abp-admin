@@ -1353,6 +1353,78 @@
       }
     }
   },
+  "AbpAdmin.Grids.GridCondition": {
+    "kind": "dto",
+    "properties": {
+      "Op": {
+        "type": "string",
+        "nullable": false
+      },
+      "Value": {
+        "type": "string",
+        "nullable": false
+      },
+      "ValueTo": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Grids.GridFilterGroup": {
+    "kind": "dto",
+    "properties": {
+      "Conditions": {
+        "type": "List\u003CGridCondition\u003E",
+        "nullable": false
+      },
+      "Field": {
+        "type": "string",
+        "nullable": false
+      },
+      "Join": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Grids.GridQueryInput": {
+    "kind": "dto",
+    "properties": {
+      "Filters": {
+        "type": "List\u003CGridFilterGroup\u003E",
+        "nullable": false
+      },
+      "Keyword": {
+        "type": "string",
+        "nullable": true
+      },
+      "MaxResultCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "SkipCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "Sort": {
+        "type": "List\u003CGridSort\u003E",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Grids.GridSort": {
+    "kind": "dto",
+    "properties": {
+      "Direction": {
+        "type": "string",
+        "nullable": false
+      },
+      "Field": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Identity.DynamicSearchFieldDto": {
     "kind": "dto",
     "properties": {
@@ -1722,6 +1794,13 @@
         "nullable": false
       }
     }
+  },
+  "AbpAdmin.Menus.MenuTypeEnum": {
+    "kind": "enum",
+    "members": [
+      "Catalog",
+      "Menu"
+    ]
   },
   "AbpAdmin.Monitoring.CacheMonitorInfoDto": {
     "kind": "dto",

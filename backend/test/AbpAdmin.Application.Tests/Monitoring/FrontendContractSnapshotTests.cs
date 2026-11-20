@@ -38,6 +38,7 @@ public class FrontendContractSnapshotTests
     /// <summary>web/src/abp 手写镜像层消费的契约 DTO 种子（nullability 关键字段所在的 DTO 必须列入）。</summary>
     private static readonly Type[] SeedTypes =
     {
+        typeof(AbpAdmin.Grids.GridQueryInput),
         typeof(ServerMonitorDto),
         typeof(RuntimeInfoDto),
         typeof(CacheMonitorInfoDto),

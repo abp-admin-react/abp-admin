@@ -1,6 +1,23 @@
 # 管理端表格与图表设计
 
-2026-11-20 · 实施前可行性分析。验收优先级是让用户在任意业务列表中容易排序和搜索，并减少开发者逐页重复配置。
+## 已接入的业务表格
+
+操作日志和会员资金的账户主表直接使用 `AgGridReact`。点击列头可切换排序，按住 Shift 点击其他列可追加排序。表头下可以直接输入条件，列筛选按钮可以选择比较方式。多个列的条件同时生效，文本、日期和数字列还支持在同一列用 AND / OR 组合两个条件。日期按 UTC 日历日比较，金额输入和传输使用十进制字符串。
+
+| 页面 | 查询接口 | 数据范围 |
+| --- | --- | --- |
+| 操作日志 | `POST /api/app/operation-log/query` | 当前账号可访问的日志。页面关键词可与列条件叠加 |
+| 会员资金 | `POST /api/app/collection-balance-admin/member-balance-accounts/query` | 先按会员汇总各币种余额，再筛选和排序，最后返回当页会员 |
+
+### 新增一张同类表
+
+1. 在资源的 AppService 上沿用业务查询权限，在 `GridQueryDefinition<T>` 中用 `.Field("字段键", row => row.Property)` 登记可查询字段。金额绑定数据库 decimal，时间绑定原始时间值。对授权后的 `IQueryable` 调用 `Filter`，统计总数，再调用 `OrderBy` 并传入唯一键，最后 `Skip`、`Take`。返回 ABP `PagedResultDto`。参考[操作日志服务](../backend/framework-app/AbpAdmin.Application/OperationLogs/OperationLogAppService.cs)。
+2. 在 `web/src/abp` 定义接收 `GridQuery` 和 `AbortSignal` 的 POST 请求函数。列的 `field` 或 `colId` 对应后端字段键。在 `RemoteColumn<T>[]` 声明标题和类型，文本是默认值，自由格式标识符、UUID、数值、金额、日期、布尔、操作列分别用 `identifier`、`uuid`、`number`、`decimal`、`date`、`boolean`、`display`。展示值可用官方 `valueFormatter` 或 `cellRenderer`。参考[操作日志页面](../web/src/pages/operation-logs/index.tsx)。
+3. 调用 `const grid = useRemoteGrid({ columnDefs, query, getRowId })`，渲染 `<AgGridReact {...grid} />`。共享配置处理中文、主题、分页、筛选模型转换、取消过期请求、筛选输入错误提示和加载失败重试。新资源用超过一页的数据验证总数、排序和组合条件。参考[共享配置](../web/src/components/remoteGrid/index.tsx)和[请求转换](../web/src/components/remoteGrid/query.ts)。
+
+## 选型与后续规划
+
+以下记录 2026-11-20 的设计分析。动态字段清单 `/schema`、多值选择和跨资源列偏好属于后续规划。当前两张表的可查询字段由前后端显式登记。
 
 ## 全站分工
 
