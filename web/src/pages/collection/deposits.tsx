@@ -1,5 +1,6 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { Link, useAccess, useModel } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -8,17 +9,23 @@ import {
   Popconfirm,
   Select,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef as useGridRef,
+  useRef,
+  useState,
+} from 'react';
+import { businessGridQueries, gridScope } from '@/abp/businessGrid';
 import {
   approveLargeDeposit,
   DEPOSIT_STATUS_LABELS,
-  depositStatusLabel,
   type DepositOrderListDto,
+  depositStatusLabel,
   getDepositOrders,
 } from '@/abp/chainAdmin';
 import {
@@ -27,7 +34,12 @@ import {
   onChainDepositChanged,
   startChainSignalR,
 } from '@/abp/chainSignalR';
-import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import {
+  toGridColumns,
+  useSearchableLocalGrid,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 import { depositVouchersUrl } from '@/pages/finance/vouchers/navigation';
 import { isValidRecordId, RecordFocus } from './record-focus';
 import {
@@ -61,37 +73,31 @@ export default function DepositsPage({
   const access = useAccess();
   const { initialState } = useModel('@@initialState');
   const currentUserId = initialState?.currentUser?.userid;
+  const refreshGrid = useGridRef<() => void>(undefined);
   const [data, setData] = useState<DepositOrderListDto[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const focused = depositId !== undefined;
   const invalidId = focused && !isValidRecordId(depositId);
-  const invalidSweepId = !focused && sweepTaskId !== undefined && !isValidRecordId(sweepTaskId);
+  const invalidSweepId =
+    !focused && sweepTaskId !== undefined && !isValidRecordId(sweepTaskId);
   const [loading, setLoading] = useState(focused && !invalidId);
   const [loadFailed, setLoadFailed] = useState(false);
   const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [symbolFilter, setSymbolFilter] = useState<string | undefined>();
   const [connState, setConnState] = useState<ChainConnState>('disconnected');
   const latestRequest = useRef(0);
-  const pageSize = 20;
 
   const reload = useCallback(
     async (background = false) => {
-      if (invalidId || invalidSweepId) return;
+      refreshGrid.current?.();
+      if (!focused || invalidId || invalidSweepId) return;
       const request = ++latestRequest.current;
       if (!background) setLoading(true);
       try {
-        const result = await getDepositOrders(
-          focused
-            ? { skipCount: 0, maxResultCount: 1, depositId }
-            : {
-                skipCount: (page - 1) * pageSize,
-                maxResultCount: pageSize,
-                status: statusFilter,
-                symbol: symbolFilter,
-                ...(sweepTaskId ? { sweepTaskId } : {}),
-              },
-        );
+        const result = await getDepositOrders({
+          skipCount: 0,
+          maxResultCount: 1,
+          depositId,
+        });
         if (request !== latestRequest.current) return;
         const rows = focused
           ? result.items.filter(
@@ -99,7 +105,7 @@ export default function DepositsPage({
             )
           : result.items;
         setData(rows);
-        setTotal(focused ? rows.length : result.totalCount);
+
         setLoadFailed(false);
       } catch {
         if (focused && !background && request === latestRequest.current) {
@@ -110,12 +116,12 @@ export default function DepositsPage({
         if (request === latestRequest.current) setLoading(false);
       }
     },
-    [depositId, focused, invalidId, invalidSweepId, page, statusFilter, sweepTaskId, symbolFilter],
+    [depositId, focused, invalidId, invalidSweepId],
   );
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (focused) void reload();
+  }, [focused, reload]);
   useChainRecordRefresh(reload);
 
   useEffect(() => {
@@ -295,18 +301,44 @@ export default function DepositsPage({
       : []),
   ];
 
-  const {
-    columns: resizableColumns,
-    components,
-    scrollX,
-  } = useResizableColumns(columns);
-
   const record = focused ? data[0] : undefined;
   const canViewTopUpOrder =
     access.canViewAllOrders ||
     (access.canViewOwnOrders &&
       currentUserId &&
       currentUserId.toLowerCase() === record?.userId.toLowerCase());
+  const depositsGridScope = gridScope({
+    depositId,
+    sweepTaskId,
+    status: focused ? undefined : statusFilter,
+    symbol: focused ? undefined : symbolFilter,
+  });
+  const recordColumns = toGridColumns<DepositOrderListDto>(columns, {
+    kinds: {
+      amount: 'decimal',
+      fee: 'decimal',
+      actualAmount: 'decimal',
+      blockNumber: 'number',
+      logIndex: 'number',
+      creationTime: 'date',
+    },
+  });
+  const depositsGrid = useSearchableRemoteGrid<DepositOrderListDto>({
+    ariaLabel: '充值记录',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(businessGridQueries.deposits, depositsGridScope),
+    columnDefs: recordColumns,
+  });
+  const focusedGrid = useSearchableLocalGrid<DepositOrderListDto>({
+    ariaLabel: '充值记录',
+    getRowId: ({ data }) => String(data.id),
+    pagination: false,
+    rowData: data,
+    columnDefs: recordColumns,
+    keywordFields: ['txHash', 'toAddress', 'userId', 'symbol'],
+  });
+  const visibleGrid = focused ? focusedGrid : depositsGrid;
+  refreshGrid.current = depositsGrid.refresh;
   const content = (
     <Card
       extra={
@@ -321,7 +353,6 @@ export default function DepositsPage({
                 value={statusFilter}
                 onChange={(v) => {
                   setStatusFilter(v);
-                  setPage(1);
                 }}
                 options={Object.entries(DEPOSIT_STATUS_LABELS).map(
                   ([value, cfg]) => ({ value, label: cfg.text }),
@@ -334,7 +365,6 @@ export default function DepositsPage({
                 value={symbolFilter}
                 onChange={(v) => {
                   setSymbolFilter(v);
-                  setPage(1);
                 }}
                 options={[
                   { value: 'USDT', label: 'USDT' },
@@ -365,8 +395,8 @@ export default function DepositsPage({
                 </Text>
                 {renderStatus(record.status, record)}
                 <Text copyable>充值单号 {record.id}</Text>
-                {record.balanceTxnId && (
-                  access.canViewMemberFunds ? (
+                {record.balanceTxnId &&
+                  (access.canViewMemberFunds ? (
                     <Link
                       to={memberFundsUrl(record.userId, record.balanceTxnId)}
                       aria-label={`查看充值余额流水 ${record.balanceTxnId}`}
@@ -374,19 +404,24 @@ export default function DepositsPage({
                       查看余额流水
                     </Link>
                   ) : (
-                    <Text copyable={{ text: record.balanceTxnId }}>余额流水 {record.balanceTxnId}</Text>
-                  )
-                )}
+                    <Text copyable={{ text: record.balanceTxnId }}>
+                      余额流水 {record.balanceTxnId}
+                    </Text>
+                  ))}
                 {record.balanceTxnId && canViewTopUpOrder && (
                   <Link
-                    to={topUpOrderRecordsUrl(record.userId, record.balanceTxnId)}
+                    to={topUpOrderRecordsUrl(
+                      record.userId,
+                      record.balanceTxnId,
+                    )}
                     aria-label={`查看充值单 ${record.id} 的充值入账记录`}
                   >
                     查看充值入账记录
                   </Link>
                 )}
-                {record.sweepTaskId && (
-                  access.canViewWeb3Operations && (access.canViewCollections || access.canAdminNetwork) ? (
+                {record.sweepTaskId &&
+                  (access.canViewWeb3Operations &&
+                  (access.canViewCollections || access.canAdminNetwork) ? (
                     <Link
                       to={sweepTaskUrl(record.sweepTaskId)}
                       aria-label={`查看归集任务 ${record.sweepTaskId}`}
@@ -394,9 +429,10 @@ export default function DepositsPage({
                       查看归集任务
                     </Link>
                   ) : (
-                    <Text copyable={{ text: record.sweepTaskId }}>归集任务 {record.sweepTaskId}</Text>
-                  )
-                )}
+                    <Text copyable={{ text: record.sweepTaskId }}>
+                      归集任务 {record.sweepTaskId}
+                    </Text>
+                  ))}
                 {record.status === 'Swept' && access.canViewFinanceVouchers && (
                   <Link
                     to={depositVouchersUrl(record.id)}
@@ -413,30 +449,20 @@ export default function DepositsPage({
       {!focused && sweepTaskId !== undefined && (
         <Alert
           type={invalidSweepId ? 'warning' : 'info'}
-          title={invalidSweepId ? '无效的归集任务链接' : `归集任务 ${sweepTaskId} 的充值记录`}
+          title={
+            invalidSweepId
+              ? '无效的归集任务链接'
+              : `归集任务 ${sweepTaskId} 的充值记录`
+          }
           action={<Link to={DEPOSIT_LIST_PATH}>查看全部充值</Link>}
           style={{ marginBottom: 12 }}
         />
       )}
       {!invalidSweepId && (!focused || record) && (
-        <Table<DepositOrderListDto>
-          rowKey="id"
-          loading={loading}
-          dataSource={data}
-          columns={resizableColumns}
-          components={components}
-          scroll={{ x: scrollX }}
-          size="small"
-          pagination={
-            !focused && {
-              current: page,
-              pageSize,
-              total,
-              showSizeChanger: false,
-              onChange: (p) => setPage(p),
-            }
-          }
-        />
+        <>
+          {visibleGrid.searchBox}
+          <AgGridReact<DepositOrderListDto> {...visibleGrid.gridProps} />
+        </>
       )}
     </Card>
   );

@@ -1,3 +1,4 @@
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   Button,
@@ -7,7 +8,6 @@ import {
   Select,
   Space,
   Spin,
-  Table,
   Tag,
   Typography,
 } from 'antd';
@@ -19,6 +19,7 @@ import {
   type NetworkStatusDto,
   type TokenStatusDto,
 } from '@/abp/chainAdmin';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 
 const formatBlock = (value?: number | null) => value?.toLocaleString() ?? '—';
 const formatTime = (value?: string | null) =>
@@ -64,6 +65,78 @@ function NetworkScanDetails({ networkId }: { networkId: string }) {
     };
   }, [networkId]);
 
+  const detailGrid1 = useSearchableLocalGrid<TokenStatusDto>({
+    ariaLabel: '代币状态',
+    rowData: status?.tokens,
+    keywordFields: ['symbol', 'lastScanProvider', 'lastScanFailure'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.id),
+    columnDefs: toGridColumns<TokenStatusDto>(
+      [
+        { title: '代币', dataIndex: 'symbol' },
+        {
+          title: '状态',
+          dataIndex: 'isEnabled',
+          render: (enabled: boolean) => (
+            <Tag color={enabled ? 'success' : 'default'}>
+              {enabled ? '已启用' : '已停用'}
+            </Tag>
+          ),
+        },
+        {
+          title: '已扫描至区块',
+          dataIndex: 'lastScannedBlock',
+          render: formatBlock,
+        },
+        { title: '落后块数', dataIndex: 'blocksBehind', render: formatBlock },
+        { title: '最近扫描', dataIndex: 'lastScanAt', render: formatTime },
+        {
+          title: '最近成功来源',
+          dataIndex: 'lastScanProvider',
+          render: (_, row) =>
+            row.lastScanProvider ? (
+              <Space orientation="vertical" size={4}>
+                {row.lastScanProvider}
+                <Typography.Text type="secondary">
+                  {formatTime(row.lastScanProviderAt)}
+                </Typography.Text>
+              </Space>
+            ) : (
+              '—'
+            ),
+        },
+        {
+          title: '扫链异常',
+          dataIndex: 'lastScanFailure',
+          render: (_, row) =>
+            row.lastScanFailure || row.scanReplayFromBlock != null ? (
+              <Space orientation="vertical" size={4}>
+                {row.lastScanFailure && (
+                  <Tag color="warning">
+                    {scanFailureLabels[row.lastScanFailure] ?? '查询失败'}
+                  </Tag>
+                )}
+                {row.scanReplayFromBlock != null && (
+                  <Typography.Text type="secondary">
+                    待从区块 {formatBlock(row.scanReplayFromBlock)} 复扫
+                  </Typography.Text>
+                )}
+              </Space>
+            ) : (
+              '—'
+            ),
+        },
+      ],
+      {
+        kinds: {
+          isEnabled: 'boolean',
+          blocksBehind: 'number',
+          lastScannedBlock: 'number',
+          lastScanAt: 'date',
+        },
+      },
+    ),
+  });
   if (failed && !status)
     return (
       <Alert
@@ -104,68 +177,8 @@ function NetworkScanDetails({ networkId }: { networkId: string }) {
           },
         ]}
       />
-      <Table<TokenStatusDto>
-        size="small"
-        pagination={false}
-        rowKey="id"
-        dataSource={status.tokens}
-        scroll={{ x: 850 }}
-        columns={[
-          { title: '代币', dataIndex: 'symbol' },
-          {
-            title: '状态',
-            dataIndex: 'isEnabled',
-            render: (enabled: boolean) => (
-              <Tag color={enabled ? 'success' : 'default'}>
-                {enabled ? '已启用' : '已停用'}
-              </Tag>
-            ),
-          },
-          {
-            title: '已扫描至区块',
-            dataIndex: 'lastScannedBlock',
-            render: formatBlock,
-          },
-          { title: '落后块数', dataIndex: 'blocksBehind', render: formatBlock },
-          { title: '最近扫描', dataIndex: 'lastScanAt', render: formatTime },
-          {
-            title: '最近成功来源',
-            key: 'lastScanProvider',
-            render: (_, row) =>
-              row.lastScanProvider ? (
-                <Space orientation="vertical" size={4}>
-                  {row.lastScanProvider}
-                  <Typography.Text type="secondary">
-                    {formatTime(row.lastScanProviderAt)}
-                  </Typography.Text>
-                </Space>
-              ) : (
-                '—'
-              ),
-          },
-          {
-            title: '扫链异常',
-            key: 'scanFailure',
-            render: (_, row) =>
-              row.lastScanFailure || row.scanReplayFromBlock != null ? (
-                <Space orientation="vertical" size={4}>
-                  {row.lastScanFailure && (
-                    <Tag color="warning">
-                      {scanFailureLabels[row.lastScanFailure] ?? '查询失败'}
-                    </Tag>
-                  )}
-                  {row.scanReplayFromBlock != null && (
-                    <Typography.Text type="secondary">
-                      待从区块 {formatBlock(row.scanReplayFromBlock)} 复扫
-                    </Typography.Text>
-                  )}
-                </Space>
-              ) : (
-                '—'
-              ),
-          },
-        ]}
-      />
+      {detailGrid1.searchBox}
+      <AgGridReact<TokenStatusDto> {...detailGrid1.gridProps} />
     </Space>
   );
 }

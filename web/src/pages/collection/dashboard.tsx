@@ -4,13 +4,15 @@ import {
   StatisticCard,
 } from '@ant-design/pro-components';
 import { Link, useAccess } from '@umijs/max';
-import { Alert, Card, Space, Spin, Table, Tag, Typography } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import { Alert, Card, Space, Spin, Tag, Typography } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
 import {
   getTreasuryDashboard,
+  type StatusBucketDto,
   type TreasuryDashboardDto,
 } from '@/abp/collectionAdmin';
-import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 import AnkrBalanceCard from './AnkrBalanceCard';
 
 const { Text } = Typography;
@@ -32,7 +34,7 @@ export default function CollectionDashboardPage({
 } = {}) {
   const access = useAccess();
   const [data, setData] = useState<TreasuryDashboardDto>();
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
   const reload = useCallback(async () => {
@@ -88,9 +90,27 @@ export default function CollectionDashboardPage({
       align: 'right' as const,
     },
   ];
-  const depositTable = useResizableColumns(statusColumns);
-  const withdrawTable = useResizableColumns(withdrawColumns);
 
+  const detailGrid2 = useSearchableLocalGrid<StatusBucketDto>({
+    ariaLabel: '提现状态统计',
+    rowData: data?.withdrawByStatus,
+    keywordFields: ['status', 'currency'],
+    pagination: false,
+    getRowId: ({ data }) => `${data.status}|${data.currency ?? ''}`,
+    columnDefs: toGridColumns<StatusBucketDto>(withdrawColumns, {
+      kinds: { count: 'number', total: 'decimal' },
+    }),
+  });
+  const detailGrid1 = useSearchableLocalGrid<StatusBucketDto>({
+    ariaLabel: '充值状态统计',
+    rowData: data?.depositByStatus,
+    keywordFields: ['status', 'currency'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.status),
+    columnDefs: toGridColumns<StatusBucketDto>(statusColumns, {
+      kinds: { count: 'number', total: 'decimal' },
+    }),
+  });
   const content = (
     <Space orientation="vertical" style={{ width: '100%' }} size={16}>
       <Alert
@@ -103,7 +123,9 @@ export default function CollectionDashboardPage({
           unconfiguredAction={
             access.canAdminNetwork &&
             access.canConfigureCollectionNetwork && (
-              <Link to="/web3/operations?view=overview&settings=providers">前往第三方扫链</Link>
+              <Link to="/web3/operations?view=overview&settings=providers">
+                前往第三方扫链
+              </Link>
             )
           }
         />
@@ -224,34 +246,16 @@ export default function CollectionDashboardPage({
               title="充值单按状态"
               headerBordered
             >
-              <Table
-                rowKey="status"
-                dataSource={data.depositByStatus}
-                columns={depositTable.columns}
-                components={depositTable.components}
-                scroll={{ x: depositTable.scrollX }}
-                pagination={false}
-                size="small"
-                loading={loading}
-                locale={{ emptyText: '暂无进款单' }}
-              />
+              {detailGrid1.searchBox}
+              <AgGridReact<StatusBucketDto> {...detailGrid1.gridProps} />
             </ProCard>
             <ProCard
               colSpan={{ xs: 24, md: 12 }}
               title="提现单按状态"
               headerBordered
             >
-              <Table
-                rowKey={(row) => `${row.status}-${row.currency ?? ''}`}
-                dataSource={data.withdrawByStatus}
-                columns={withdrawTable.columns}
-                components={withdrawTable.components}
-                scroll={{ x: withdrawTable.scrollX }}
-                pagination={false}
-                size="small"
-                loading={loading}
-                locale={{ emptyText: '暂无提现单' }}
-              />
+              {detailGrid2.searchBox}
+              <AgGridReact<StatusBucketDto> {...detailGrid2.gridProps} />
             </ProCard>
           </ProCard>
 

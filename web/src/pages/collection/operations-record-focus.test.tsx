@@ -1,3 +1,5 @@
+vi.mock('ag-grid-react', () => import('../../../tests/gridTestDouble'));
+
 import {
   act,
   fireEvent,
@@ -406,4 +408,54 @@ describe('Web3 运营明细定位', () => {
       `/operations/payments?view=deposits&sweepTaskId=${sweepTaskId}`,
     );
   });
+});
+
+vi.mock('@/abp/businessGrid', async (original) => {
+  const grid = await original<typeof import('@/abp/businessGrid')>();
+  return {
+    ...grid,
+    businessGridQueries: {
+      ...grid.businessGridQueries,
+      deposits: (
+        input: import('@/abp/gridQuery').GridQuery,
+        _signal: AbortSignal,
+        scope: string,
+      ) =>
+        mocks.getDepositOrders({
+          skipCount: input.skipCount,
+          maxResultCount: input.maxResultCount,
+          ...Object.fromEntries(new URLSearchParams(scope)),
+        }),
+      sweeps: (
+        input: import('@/abp/gridQuery').GridQuery,
+        _signal: AbortSignal,
+        scope: string,
+      ) =>
+        mocks.getSweepTasks({
+          skipCount: input.skipCount,
+          maxResultCount: input.maxResultCount,
+          ...Object.fromEntries(new URLSearchParams(scope)),
+        }),
+      withdrawals: (
+        input: import('@/abp/gridQuery').GridQuery,
+        _signal: AbortSignal,
+        scope: string,
+      ) =>
+        mocks.getWithdrawals({
+          skipCount: input.skipCount,
+          maxResultCount: input.maxResultCount,
+          ...Object.fromEntries(new URLSearchParams(scope)),
+        }),
+      vault: (
+        input: import('@/abp/gridQuery').GridQuery,
+        _signal: AbortSignal,
+        scope: string,
+      ) =>
+        mocks.getVaultChecks({
+          skipCount: input.skipCount,
+          maxResultCount: input.maxResultCount,
+          ...Object.fromEntries(new URLSearchParams(scope)),
+        }),
+    },
+  };
 });

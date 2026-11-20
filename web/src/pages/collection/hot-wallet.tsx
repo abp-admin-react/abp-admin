@@ -1,5 +1,6 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { Link, useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -11,12 +12,12 @@ import {
   Select,
   Space,
   Spin,
-  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef as useGridRef, useState } from 'react';
+import { businessGridQueries, gridScope } from '@/abp/businessGrid';
 import {
   type ChainConnState,
   onChainConnState,
@@ -27,7 +28,6 @@ import { financeErrorText } from '@/abp/finance';
 import {
   ackHotWalletTxn,
   getHotWallet,
-  getHotWalletTxns,
   getHotWalletWatchStatus,
   getWithdrawStatus,
   type HotWalletTxnDto,
@@ -37,7 +37,11 @@ import {
   type WithdrawHotWalletStatusDto,
   type WithdrawStatusDto,
 } from '@/abp/withdrawal';
-import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 
 const { Text } = Typography;
 
@@ -53,10 +57,7 @@ export default function HotWalletWatchPage({
 } = {}) {
   const access = useAccess();
   const { message } = App.useApp();
-  const [data, setData] = useState<HotWalletTxnDto[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const refreshGrid = useGridRef<() => void>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [directionFilter, setDirectionFilter] = useState<string | undefined>();
   const [watch, setWatch] = useState<HotWalletWatchStatusDto>();
@@ -66,25 +67,8 @@ export default function HotWalletWatchPage({
   const [ackNote, setAckNote] = useState('');
   const [acting, setActing] = useState(false);
   const [connState, setConnState] = useState<ChainConnState>('disconnected');
-  const pageSize = 20;
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await getHotWalletTxns({
-        skipCount: (page - 1) * pageSize,
-        maxResultCount: pageSize,
-        status: statusFilter,
-        direction: directionFilter,
-      });
-      setData(result.items);
-      setTotal(result.totalCount);
-    } catch {
-      /* interceptor */
-    } finally {
-      setLoading(false);
-    }
-  }, [page, statusFilter, directionFilter]);
+  const reload = useCallback(() => refreshGrid.current?.(), []);
 
   const reloadCards = useCallback(async () => {
     try {
@@ -104,9 +88,6 @@ export default function HotWalletWatchPage({
     }
   }, []);
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
   useEffect(() => {
     reloadCards();
   }, [reloadCards]);
@@ -288,12 +269,22 @@ export default function HotWalletWatchPage({
     },
   ];
 
-  const {
-    columns: resizableColumns,
-    components,
-    scrollX,
-  } = useResizableColumns(columns);
-
+  const hotWalletGridScope = gridScope({
+    status: statusFilter,
+    direction: directionFilter,
+  });
+  const hotWalletGrid = useSearchableRemoteGrid<HotWalletTxnDto>({
+    ariaLabel: '热钱包流水',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(
+      businessGridQueries.hotWallet,
+      hotWalletGridScope,
+    ),
+    columnDefs: toGridColumns<HotWalletTxnDto>(columns, {
+      kinds: { amount: 'decimal', blockNumber: 'number', creationTime: 'date' },
+    }),
+  });
+  refreshGrid.current = hotWalletGrid.refresh;
   const content = (
     <>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
@@ -380,7 +371,6 @@ export default function HotWalletWatchPage({
                 value={statusFilter}
                 onChange={(v) => {
                   setStatusFilter(v);
-                  setPage(1);
                 }}
                 options={Object.entries(HW_TXN_STATUS_LABELS).map(
                   ([value, cfg]) => ({
@@ -396,7 +386,6 @@ export default function HotWalletWatchPage({
                 value={directionFilter}
                 onChange={(v) => {
                   setDirectionFilter(v);
-                  setPage(1);
                 }}
                 options={Object.entries(HW_DIRECTION_LABELS).map(
                   ([value, cfg]) => ({
@@ -408,22 +397,8 @@ export default function HotWalletWatchPage({
             </Space>
           }
         >
-          <Table<HotWalletTxnDto>
-            rowKey={(r) => `${r.txHash}-${r.logIndex}`}
-            loading={loading}
-            dataSource={data}
-            columns={resizableColumns}
-            components={components}
-            scroll={{ x: scrollX }}
-            size="small"
-            pagination={{
-              current: page,
-              pageSize,
-              total,
-              showSizeChanger: false,
-              onChange: (p) => setPage(p),
-            }}
-          />
+          {hotWalletGrid.searchBox}
+          <AgGridReact<HotWalletTxnDto> {...hotWalletGrid.gridProps} />
         </Card>
       </Space>
 

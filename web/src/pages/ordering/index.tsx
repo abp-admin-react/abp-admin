@@ -1,7 +1,7 @@
 import { PlusOutlined } from '@ant-design/icons';
-import { PageContainer } from '@ant-design/pro-components';
-import type { ActionType, ProColumns } from '@ant-design/pro-components';
+import { PageContainer, type ProColumns } from '@ant-design/pro-components';
 import { history, Link, useAccess, useLocation, useModel } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -19,37 +19,44 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useEffect, useRef, useState } from 'react';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import React, {
+  useEffect,
+  useMemo as useGridMemo,
+  useRef,
+  useState,
+} from 'react';
+import { businessGridQueries, gridScope } from '@/abp/businessGrid';
+import {
+  BALANCE_ACTION_LABELS,
+  type BalanceTxnDto,
+  getMyBalances,
+  type MyBalanceDto,
+} from '@/abp/collection';
+import type { GridQuery } from '@/abp/gridQuery';
 import {
   adminGetOrder,
-  adminGetOrders,
+  cancelOrder,
+  createOrder,
+  currencyLabel,
+  getOrder,
+  getOrderRefsByBalanceTxn,
   type OrderDto,
   PAY_CHANNEL_META,
   PAY_METHOD_GROUPS,
-  currencyLabel,
   payChannelLabel,
-  cancelOrder,
-  createOrder,
-  getOrder,
-  getMyOrders,
-  getOrderRefsByBalanceTxn,
   startPay,
 } from '@/abp/ordering';
-import {
-  type BalanceTxnDto,
-  type MyBalanceDto,
-  BALANCE_ACTION_LABELS,
-  getMyBalances,
-  getMyTxns,
-} from '@/abp/collection';
-import { isNotFound } from '@/requestErrorConfig';
 import {
   ConfigurationLink,
   ConfigurationPage,
   useConfigurationLocation,
 } from '@/components/ContextConfiguration';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { useModuleEnabled } from '@/hooks/useModuleAvailability';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 import { isValidRecordId } from '@/pages/collection/record-focus';
 import {
   depositRecordUrl,
@@ -57,6 +64,7 @@ import {
   orderRecordUrl,
   paymentRecordUrl,
 } from '@/pages/collection/record-links';
+import { isNotFound } from '@/requestErrorConfig';
 import { SettingsForm } from '../settings/channel';
 
 /** 订单及余额流水。个人与管理视图按各自权限请求数据。 */
@@ -131,9 +139,10 @@ const TxHashLink: React.FC<{ txHash?: string | null }> = ({ txHash }) =>
 /** 订单事实区（渠道单号 / 退款累计 / 异常与退款明细）——行展开与详情弹窗共用的唯一渲染 */
 const OrderDetailFacts: React.FC<{ order: OrderDto }> = ({ order }) => {
   const access = useAccess();
-  const collectionId = PAY_CHANNEL_META[order.payChannel ?? '']?.category === 'Balance'
-    ? undefined
-    : order.collectionId;
+  const collectionId =
+    PAY_CHANNEL_META[order.payChannel ?? '']?.category === 'Balance'
+      ? undefined
+      : order.collectionId;
   const balanceTxnId = order.balanceTxnId;
 
   function renderCollection(id: string) {
@@ -180,7 +189,9 @@ const OrderDetailFacts: React.FC<{ order: OrderDto }> = ({ order }) => {
       {order.refundedAmount != null && (
         <Typography.Paragraph style={{ marginBottom: 4 }}>
           退款累计：
-          <Typography.Text type="warning">{order.refundedAmount}</Typography.Text>
+          <Typography.Text type="warning">
+            {order.refundedAmount}
+          </Typography.Text>
         </Typography.Paragraph>
       )}
       {order.anomalyLines?.length ? (
@@ -189,7 +200,9 @@ const OrderDetailFacts: React.FC<{ order: OrderDto }> = ({ order }) => {
             <li key={line.id}>
               {fmtTime(line.creationTime)} · {line.amount ?? '-'}{' '}
               {line.currency ?? ''} · {line.channelTradeNo ?? ''} · {line.note}
-              {line.collectionId && <> · {renderCollection(line.collectionId)}</>}
+              {line.collectionId && (
+                <> · {renderCollection(line.collectionId)}</>
+              )}
             </li>
           ))}
         </ul>
@@ -212,7 +225,8 @@ const OrderTimeline: React.FC<{ order: OrderDto }> = ({ order }) => {
       content: `${order.orderType === 'TopUp' ? '充值入账' : '支付'} · ${fmtTime(order.paidAt)}${
         order.channelTradeNo
           ? ` · 渠道单号 ${order.channelTradeNo}`
-          : order.orderType !== 'TopUp' && PAY_CHANNEL_META[order.payChannel ?? '']?.category === 'Balance'
+          : order.orderType !== 'TopUp' &&
+              PAY_CHANNEL_META[order.payChannel ?? '']?.category === 'Balance'
             ? ' · 余额支付'
             : ''
       }`,
@@ -258,7 +272,9 @@ export default function OrderingPage() {
   }
 
   return canViewRecords ? (
-    <OrderRecords configurationPath={canConfigure ? link('rules') : undefined} />
+    <OrderRecords
+      configurationPath={canConfigure ? link('rules') : undefined}
+    />
   ) : null;
 }
 
@@ -277,25 +293,38 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
   const hasTopUpLookup = lookupBalanceTxnId !== null || lookupUserId !== null;
   const personalAllowed = access.canViewOwnOrders;
   const showAll =
-    access.canViewAllOrders && (hasTopUpLookup || view === 'all' || !personalAllowed || !view);
-  const activeTab = showAll ? 'all' : view === 'txns' && !hasTopUpLookup ? 'txns' : 'orders';
+    access.canViewAllOrders &&
+    (hasTopUpLookup || view === 'all' || !personalAllowed || !view);
+  const activeTab = showAll
+    ? 'all'
+    : view === 'txns' && !hasTopUpLookup
+      ? 'txns'
+      : 'orders';
   const requestedId = query.get('orderId');
-  const invalidOrderLink = requestedId !== null && !isValidRecordId(requestedId);
-  const canViewLookupOwner = showAll || (
-    personalAllowed &&
-    currentUserId &&
-    currentUserId.toLowerCase() === lookupUserId?.toLowerCase()
-  );
-  const invalidTopUpLookup = hasTopUpLookup && !(
-    lookupBalanceTxnId && isValidRecordId(lookupBalanceTxnId) &&
-    lookupUserId && isValidRecordId(lookupUserId) && canViewLookupOwner
-  );
-  const orderType = hasTopUpLookup || query.get('orderType') === 'TopUp' ? 'TopUp' : 'Business';
+  const invalidOrderLink =
+    requestedId !== null && !isValidRecordId(requestedId);
+  const canViewLookupOwner =
+    showAll ||
+    (personalAllowed &&
+      currentUserId &&
+      currentUserId.toLowerCase() === lookupUserId?.toLowerCase());
+  const invalidTopUpLookup =
+    hasTopUpLookup &&
+    !(
+      lookupBalanceTxnId &&
+      isValidRecordId(lookupBalanceTxnId) &&
+      lookupUserId &&
+      isValidRecordId(lookupUserId) &&
+      canViewLookupOwner
+    );
+  const orderType =
+    hasTopUpLookup || query.get('orderType') === 'TopUp' ? 'TopUp' : 'Business';
   const isTopUpView = orderType === 'TopUp';
-  const hasAnomaly = showAll && !isTopUpView && query.get('hasAnomaly') === 'true';
+  const hasAnomaly =
+    showAll && !isTopUpView && query.get('hasAnomaly') === 'true';
   const recordsKey = `${orderType}:${hasAnomaly}:${lookupUserId ?? ''}:${lookupBalanceTxnId ?? ''}`;
   const { message, modal } = App.useApp();
-  const actionRef = useRef<ActionType | undefined>(undefined);
+  const actionRef = useRef<{ reload: () => void }>(undefined);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const createInFlight = useRef(false);
@@ -358,7 +387,8 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
   };
 
   const submitPay = async () => {
-    if (!canStartPayment || !payTarget || payCredential || payInFlight.current) return;
+    if (!canStartPayment || !payTarget || payCredential || payInFlight.current)
+      return;
     payInFlight.current = true;
     setPaying(true);
     try {
@@ -421,7 +451,6 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
     });
   };
 
-  // 余额标签放 headerTitle：不占表格行高，AutoHeightProTable 的高度测量不受干扰
   const headerTitle = (
     <Space>
       {balances.map((b) => (
@@ -433,13 +462,11 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
   );
 
   // ── 流水页签 ────────────────────────────────────────────────────────────────────────
-  const txnActionRef = useRef<ActionType | undefined>(undefined);
-  const [, setTxnRange] = useState<[string | null, string | null]>([
+  const txnActionRef = useRef<{ reload: () => void }>(undefined);
+  const [txnRange, setTxnRange] = useState<[string | null, string | null]>([
     null,
     null,
   ]);
-  // 表格立即重查，使用 ref 读取本次选择的起止时间。
-  const txnRangeRef = useRef<[string | null, string | null]>([null, null]);
   const [orderDetail, setOrderDetail] = useState<OrderDto | null>(null);
   const [detailError, setDetailError] = useState<string>();
   useEffect(() => {
@@ -451,11 +478,15 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
     getDetails(requestedId)
       .then((order) => {
         if (!active) return;
-        if (order?.id?.toLowerCase() === requestedId.toLowerCase()) setOrderDetail(order);
+        if (order?.id?.toLowerCase() === requestedId.toLowerCase())
+          setOrderDetail(order);
         else setDetailError('未找到该订单');
       })
       .catch((error: unknown) => {
-        if (active) setDetailError(isNotFound(error) ? '未找到该订单' : '加载订单详情失败');
+        if (active)
+          setDetailError(
+            isNotFound(error) ? '未找到该订单' : '加载订单详情失败',
+          );
       });
     return () => {
       active = false;
@@ -573,15 +604,19 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
         return (
           <Space wrap>
             {ref && <Link to={detailHref(ref.orderId)}>{ref.orderNo}</Link>}
-            {depositId && (
-              access.canViewDepositRecords ? (
-                <Link to={depositRecordUrl(depositId)} aria-label={`查看充值单 ${depositId}`}>
+            {depositId &&
+              (access.canViewDepositRecords ? (
+                <Link
+                  to={depositRecordUrl(depositId)}
+                  aria-label={`查看充值单 ${depositId}`}
+                >
                   充值记录
                 </Link>
               ) : (
-                <Typography.Text copyable={{ text: depositId }}>充值单 {depositId}</Typography.Text>
-              )
-            )}
+                <Typography.Text copyable={{ text: depositId }}>
+                  充值单 {depositId}
+                </Typography.Text>
+              ))}
           </Space>
         );
       },
@@ -594,19 +629,263 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
     },
   ];
 
+  const myTxnsGridScope = gridScope({
+    fromTime: txnRange[0],
+    toTime: txnRange[1],
+  });
+  const myTxnsGrid = useSearchableRemoteGrid<BalanceTxnDto>({
+    ariaLabel: '我的余额流水',
+    getRowId: ({ data }) => String(data.id),
+    query: useGridMemo(
+      () => async (input: GridQuery, signal: AbortSignal) => {
+        const result = await businessGridQueries.myTxns(
+          input,
+          signal,
+          myTxnsGridScope,
+        );
+        const refs = await getOrderRefsByBalanceTxn(
+          result.items.map(orderLookupTxnId),
+        ).catch(() => []);
+        if (!signal.aborted)
+          setTxnRefs((previous) => ({
+            ...previous,
+            ...Object.fromEntries(
+              refs.map((r) => [
+                r.balanceTxnId,
+                { orderId: r.orderId, orderNo: r.orderNo },
+              ]),
+            ),
+          }));
+        return result;
+      },
+      [myTxnsGridScope],
+    ),
+    columnDefs: toGridColumns<BalanceTxnDto>(txnColumns, {
+      pro: true,
+      kinds: {
+        amount: 'decimal',
+        balanceAfter: 'decimal',
+        creationTime: 'date',
+      },
+    }),
+  });
+  txnActionRef.current = { reload: myTxnsGrid.refresh };
+  const [timelineOrder, setTimelineOrder] = useState<OrderDto>();
+  const myOrdersGridScope = gridScope({
+    orderType,
+    userId: hasTopUpLookup ? lookupUserId : undefined,
+    balanceTxnId: hasTopUpLookup ? lookupBalanceTxnId : undefined,
+  });
+  const myOrdersGrid = useSearchableRemoteGrid<OrderDto>({
+    ariaLabel: '我的订单',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(businessGridQueries.myOrders, myOrdersGridScope),
+    columnDefs: toGridColumns<OrderDto>(
+      [
+        { title: '订单号', dataIndex: 'orderNo', width: 220 },
+        {
+          title: '标题',
+          dataIndex: 'subject',
+          ellipsis: true,
+          render: (_, order) =>
+            order.orderType === 'TopUp' ? '账户充值' : order.subject,
+        },
+        {
+          title: '标价 (USD)',
+          dataIndex: 'amount',
+          hideInTable: isTopUpView,
+          width: 110,
+          render: (_, record) => record.amount ?? '-',
+        },
+        {
+          title: '状态',
+          dataIndex: 'status',
+          width: 160,
+          render: (_, record) => {
+            const tag = orderStatus(record);
+            return (
+              <Space size={4} wrap>
+                <Tag color={tag.color}>{tag.text}</Tag>
+                {record.refundedAmount != null && (
+                  <Tooltip title={`人工退款累计 ${record.refundedAmount}`}>
+                    <Tag color="orange">已退款</Tag>
+                  </Tooltip>
+                )}
+              </Space>
+            );
+          },
+        },
+        {
+          title: isTopUpView ? '入账金额' : '应付',
+          dataIndex: 'payAmount',
+          width: 140,
+          render: (_, order) =>
+            order.payAmount
+              ? `${order.payAmount} ${currencyLabel(order.payCurrency)}`
+              : '-',
+        },
+        {
+          title: isTopUpView ? '充值方式' : '支付方式',
+          dataIndex: 'payChannel',
+          width: 150,
+          render: (_, record) => {
+            const label = payChannelLabel(record);
+            if (!label) return '-';
+            const meta = record.payChannel
+              ? PAY_CHANNEL_META[record.payChannel]
+              : undefined;
+            return <Tag color={meta?.color ?? 'default'}>{label}</Tag>;
+          },
+        },
+        {
+          title: '操作',
+          width: 195,
+          render: (_, order) =>
+            order.orderType === 'TopUp' ? (
+              renderDetailsLink(order)
+            ) : (
+              <Space>
+                {renderDetailsLink(order)}
+                <Button
+                  size="small"
+                  type="primary"
+                  disabled={
+                    !canStartPayment || order.status !== 'PendingPayment'
+                  }
+                  onClick={() => {
+                    if (payInFlight.current) return;
+                    setPayTarget(order);
+                    setPayCredential(null);
+                    setPayMethod(order.payChannel ?? 'WechatNative');
+                  }}
+                >
+                  支付
+                </Button>
+                <Button
+                  size="small"
+                  danger
+                  disabled={order.status !== 'PendingPayment'}
+                  onClick={() => doCancel(order)}
+                >
+                  取消
+                </Button>
+              </Space>
+            ),
+        },
+        {
+          title: '订单详情',
+          key: 'timeline',
+          valueType: 'option',
+          render: (_, row) => (
+            <Button type="link" onClick={() => setTimelineOrder(row)}>
+              查看时间线
+            </Button>
+          ),
+        },
+      ],
+      { pro: true, kinds: { amount: 'decimal', payAmount: 'decimal' } },
+    ),
+  });
+  actionRef.current = { reload: myOrdersGrid.refresh };
+  const ordersGridScope = gridScope({
+    orderType,
+    hasAnomaly: hasAnomaly || undefined,
+    userId: hasTopUpLookup ? lookupUserId : undefined,
+    balanceTxnId: hasTopUpLookup ? lookupBalanceTxnId : undefined,
+  });
+  const ordersGrid = useSearchableRemoteGrid<OrderDto>({
+    ariaLabel: '全部订单',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(businessGridQueries.orders, ordersGridScope),
+    columnDefs: toGridColumns<OrderDto>(
+      [
+        { title: '订单号', dataIndex: 'orderNo', width: 210 },
+        {
+          title: '用户 ID',
+          dataIndex: 'userId',
+          ellipsis: true,
+          width: 170,
+        },
+        {
+          title: '标题',
+          dataIndex: 'subject',
+          ellipsis: true,
+          render: (_, order) =>
+            order.orderType === 'TopUp' ? '账户充值' : order.subject,
+        },
+        {
+          title: isTopUpView ? '入账金额' : '标价（USD）',
+          dataIndex: isTopUpView ? 'payAmount' : 'amount',
+          width: 125,
+          render: (_, order) =>
+            isTopUpView
+              ? `${order.payAmount ?? '—'} ${currencyLabel(order.payCurrency)}`
+              : (order.amount ?? '—'),
+        },
+        {
+          title: isTopUpView ? '充值方式' : '支付方式',
+          dataIndex: 'payChannel',
+          width: 150,
+          render: (_, order) => payChannelLabel(order) ?? '—',
+        },
+        {
+          title: '状态',
+          dataIndex: 'status',
+          width: 160,
+          render: (_, order) => (
+            <Space size={4} wrap>
+              <Tag color={orderStatus(order).color}>
+                {orderStatus(order).text}
+              </Tag>
+              {order.paymentAnomaly && <Tag color="warning">支付异常</Tag>}
+            </Space>
+          ),
+        },
+        {
+          title: '创建时间',
+          dataIndex: 'creationTime',
+          width: 160,
+          render: (_, order) => fmtTime(order.creationTime),
+        },
+        {
+          title: '操作',
+          width: 72,
+          render: (_, order) => renderDetailsLink(order),
+        },
+      ],
+      {
+        pro: true,
+        kinds: {
+          amount: 'decimal',
+          payAmount: 'decimal',
+          creationTime: 'date',
+        },
+      },
+    ),
+  });
   return (
     <PageContainer
       title="订单管理"
-      extra={configurationPath && (
-        <ConfigurationLink to={configurationPath}>订单规则</ConfigurationLink>
-      )}
+      extra={
+        configurationPath && (
+          <ConfigurationLink to={configurationPath}>订单规则</ConfigurationLink>
+        )
+      }
     >
       {hasTopUpLookup && (
         <Alert
           showIcon
           type={invalidTopUpLookup ? 'warning' : 'info'}
-          title={invalidTopUpLookup ? '充值入账记录链接无效或没有查看权限' : `余额流水 ${lookupBalanceTxnId} 的充值入账记录`}
-          action={<Link to={`${pathname}?view=${activeTab}&orderType=TopUp`}>查看全部充值入账记录</Link>}
+          title={
+            invalidTopUpLookup
+              ? '充值入账记录链接无效或没有查看权限'
+              : `余额流水 ${lookupBalanceTxnId} 的充值入账记录`
+          }
+          action={
+            <Link to={`${pathname}?view=${activeTab}&orderType=TopUp`}>
+              查看全部充值入账记录
+            </Link>
+          }
           style={{ marginBottom: 12 }}
         />
       )}
@@ -615,7 +894,11 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
           showIcon
           type="warning"
           title={invalidOrderLink ? '订单链接无效' : detailError}
-          action={<Button size="small" onClick={closeOrderDetail}>查看订单列表</Button>}
+          action={
+            <Button size="small" onClick={closeOrderDetail}>
+              查看订单列表
+            </Button>
+          }
           style={{ marginBottom: 12 }}
         />
       )}
@@ -644,97 +927,31 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
                   key: 'all',
                   label: '全部订单',
                   children: showAll && !invalidTopUpLookup && (
-                    <AutoHeightProTable<OrderDto>
-                      key={recordsKey}
-                      rowKey="id"
-                      search={false}
-                      pagination={{ defaultPageSize: 20 }}
-                      headerTitle={hasAnomaly ? '有支付异常的订单' : undefined}
-                      toolBarRender={() => [
+                    <>
+                      {ordersGrid.searchBox}
+                      {hasAnomaly ? '有支付异常的订单' : undefined}
+                      {(() => [
                         orderTypeSelect,
-                        ...(!isTopUpView ? [
-                          <Button
-                            key="anomaly"
-                            onClick={() =>
-                              history.push(
-                                `${pathname}?view=all${hasAnomaly ? '' : '&hasAnomaly=true'}`,
-                              )
-                            }
-                          >
-                            {hasAnomaly ? '查看全部' : '仅看支付异常'}
-                          </Button>,
-                        ] : []),
-                      ]}
-                      request={async ({ current = 1, pageSize = 20 }) => {
-                        const result = await adminGetOrders({
-                          skipCount: (current - 1) * pageSize,
-                          maxResultCount: pageSize,
-                          orderType,
-                          hasAnomaly: hasAnomaly || undefined,
-                          ...(hasTopUpLookup ? {
-                            balanceTxnId: lookupBalanceTxnId ?? undefined,
-                            userId: lookupUserId ?? undefined,
-                          } : {}),
-                        });
-                        return {
-                          data: result.items,
-                          total: result.totalCount,
-                          success: true,
-                        };
-                      }}
-                      columns={[
-                        { title: '订单号', dataIndex: 'orderNo', width: 210 },
-                        {
-                          title: '用户 ID',
-                          dataIndex: 'userId',
-                          ellipsis: true,
-                          width: 170,
-                        },
-                        {
-                          title: '标题',
-                          dataIndex: 'subject',
-                          ellipsis: true,
-                          render: (_, order) => order.orderType === 'TopUp' ? '账户充值' : order.subject,
-                        },
-                        {
-                          title: isTopUpView ? '入账金额' : '标价（USD）',
-                          width: 125,
-                          render: (_, order) => isTopUpView
-                            ? `${order.payAmount ?? '—'} ${currencyLabel(order.payCurrency)}`
-                            : (order.amount ?? '—'),
-                        },
-                        {
-                          title: isTopUpView ? '充值方式' : '支付方式',
-                          width: 150,
-                          render: (_, order) => payChannelLabel(order) ?? '—',
-                        },
-                        {
-                          title: '状态',
-                          width: 160,
-                          render: (_, order) => (
-                            <Space size={4} wrap>
-                              <Tag color={orderStatus(order).color}>
-                                {orderStatus(order).text}
-                              </Tag>
-                              {order.paymentAnomaly && (
-                                <Tag color="warning">支付异常</Tag>
-                              )}
-                            </Space>
-                          ),
-                        },
-                        {
-                          title: '创建时间',
-                          dataIndex: 'creationTime',
-                          width: 160,
-                          render: (_, order) => fmtTime(order.creationTime),
-                        },
-                        {
-                          title: '操作',
-                          width: 72,
-                          render: (_, order) => renderDetailsLink(order),
-                        },
-                      ]}
-                    />
+                        ...(!isTopUpView
+                          ? [
+                              <Button
+                                key="anomaly"
+                                onClick={() =>
+                                  history.push(
+                                    `${pathname}?view=all${hasAnomaly ? '' : '&hasAnomaly=true'}`,
+                                  )
+                                }
+                              >
+                                {hasAnomaly ? '查看全部' : '仅看支付异常'}
+                              </Button>,
+                            ]
+                          : []),
+                      ])()}
+                      <AgGridReact<OrderDto>
+                        {...ordersGrid.gridProps}
+                        key={recordsKey}
+                      />
+                    </>
                   ),
                 },
               ]
@@ -745,160 +962,51 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
                   key: 'orders',
                   label: '我的订单',
                   children: !invalidTopUpLookup && (
-                    <AutoHeightProTable<OrderDto>
-                      key={recordsKey}
-                      rowKey="id"
-                      actionRef={actionRef}
-                      search={false}
-                      pagination={{ pageSize: 10 }}
-                      request={async (params) => {
-                        const result = await getMyOrders({
-                          skipCount:
-                            ((params.current || 1) - 1) *
-                            (params.pageSize || 10),
-                          maxResultCount: params.pageSize || 10,
-                          orderType,
-                          ...(hasTopUpLookup ? {
-                            balanceTxnId: lookupBalanceTxnId ?? undefined,
-                            userId: lookupUserId ?? undefined,
-                          } : {}),
-                        });
-                        return {
-                          data: result.items,
-                          total: result.totalCount,
-                          success: true,
-                        };
-                      }}
-                      toolBarRender={() => [
+                    <>
+                      {myOrdersGrid.searchBox}
+                      {(() => [
                         orderTypeSelect,
-                        ...(!isTopUpView ? [
-                          <Button
-                            key="create"
-                            type="primary"
-                            icon={<PlusOutlined />}
-                            disabled={!acceptsOrders}
-                            onClick={() => setCreateOpen(true)}
-                          >
-                            创建订单
-                          </Button>,
-                        ] : []),
-                      ]}
-                      columns={[
-                        { title: '订单号', dataIndex: 'orderNo', width: 220 },
-                        {
-                          title: '标题',
-                          dataIndex: 'subject',
-                          ellipsis: true,
-                          render: (_, order) => order.orderType === 'TopUp' ? '账户充值' : order.subject,
-                        },
-                        {
-                          title: '标价 (USD)',
-                          dataIndex: 'amount',
-                          hideInTable: isTopUpView,
-                          width: 110,
-                          render: (_, record) => record.amount ?? '-',
-                        },
-                        {
-                          title: '状态',
-                          dataIndex: 'status',
-                          width: 160,
-                          render: (_, record) => {
-                            const tag = orderStatus(record);
-                            return (
-                              <Space size={4} wrap>
-                                <Tag color={tag.color}>{tag.text}</Tag>
-                                {record.refundedAmount != null && (
-                                  <Tooltip
-                                    title={`人工退款累计 ${record.refundedAmount}`}
-                                  >
-                                    <Tag color="orange">已退款</Tag>
-                                  </Tooltip>
-                                )}
-                              </Space>
-                            );
-                          },
-                        },
-                        {
-                          title: isTopUpView ? '入账金额' : '应付',
-                          width: 140,
-                          render: (_, order) =>
-                            order.payAmount
-                              ? `${order.payAmount} ${currencyLabel(order.payCurrency)}`
-                              : '-',
-                        },
-                        {
-                          title: isTopUpView ? '充值方式' : '支付方式',
-                          dataIndex: 'payChannel',
-                          width: 150,
-                          render: (_, record) => {
-                            const label = payChannelLabel(record);
-                            if (!label) return '-';
-                            const meta = record.payChannel
-                              ? PAY_CHANNEL_META[record.payChannel]
-                              : undefined;
-                            return (
-                              <Tag color={meta?.color ?? 'default'}>
-                                {label}
-                              </Tag>
-                            );
-                          },
-                        },
-                        {
-                          title: '操作',
-                          width: 195,
-                          render: (_, order) => order.orderType === 'TopUp' ? (
-                            renderDetailsLink(order)
-                          ) : (
-                            <Space>
-                              {renderDetailsLink(order)}
+                        ...(!isTopUpView
+                          ? [
                               <Button
-                                size="small"
+                                key="create"
                                 type="primary"
-                                disabled={!canStartPayment || order.status !== 'PendingPayment'}
-                                onClick={() => {
-                                  if (payInFlight.current) return;
-                                  setPayTarget(order);
-                                  setPayCredential(null);
-                                  setPayMethod(
-                                    order.payChannel ?? 'WechatNative',
-                                  );
-                                }}
+                                icon={<PlusOutlined />}
+                                disabled={!acceptsOrders}
+                                onClick={() => setCreateOpen(true)}
                               >
-                                支付
-                              </Button>
-                              <Button
-                                size="small"
-                                danger
-                                disabled={order.status !== 'PendingPayment'}
-                                onClick={() => doCancel(order)}
-                              >
-                                取消
-                              </Button>
-                            </Space>
-                          ),
-                        },
-                      ]}
-                      expandable={{
-                        expandedRowRender: (order) => (
-                          <div style={{ padding: '4px 0' }}>
-                            <OrderTimeline order={order} />
-                            <OrderDetailFacts order={order} />
-                          </div>
-                        ),
-                      }}
-                    />
+                                创建订单
+                              </Button>,
+                            ]
+                          : []),
+                      ])()}
+                      <AgGridReact<OrderDto>
+                        {...myOrdersGrid.gridProps}
+                        key={recordsKey}
+                      />
+                      <Modal
+                        title="订单详情"
+                        open={!!timelineOrder}
+                        onCancel={() => setTimelineOrder(undefined)}
+                        footer={null}
+                      >
+                        {timelineOrder && (
+                          <>
+                            <OrderTimeline order={timelineOrder} />
+                            <OrderDetailFacts order={timelineOrder} />
+                          </>
+                        )}
+                      </Modal>
+                    </>
                   ),
                 },
                 {
                   key: 'txns',
                   label: '我的余额流水',
                   children: (
-                    <AutoHeightProTable<BalanceTxnDto>
-                      rowKey="id"
-                      actionRef={txnActionRef}
-                      search={false}
-                      pagination={{ pageSize: 10 }}
-                      headerTitle={
+                    <>
+                      {myTxnsGrid.searchBox}
+                      {
                         <DatePicker.RangePicker
                           showTime
                           onChange={(range) => {
@@ -906,44 +1014,12 @@ function OrderRecords({ configurationPath }: { configurationPath?: string }) {
                               range?.[0]?.toISOString() ?? null,
                               range?.[1]?.toISOString() ?? null,
                             ];
-                            txnRangeRef.current = next;
                             setTxnRange(next);
-                            txnActionRef.current?.reload();
                           }}
                         />
                       }
-                      request={async (params) => {
-                        const result = await getMyTxns({
-                          skipCount:
-                            ((params.current || 1) - 1) *
-                            (params.pageSize || 10),
-                          maxResultCount: params.pageSize || 10,
-                          fromTime: txnRangeRef.current[0] ?? undefined,
-                          toTime: txnRangeRef.current[1] ?? undefined,
-                        });
-                        // 扣款/回冲行批量反查来源订单号（后端只按当前用户过滤，不泄露他人单号）
-                        const ids = result.items.map(orderLookupTxnId);
-                        if (ids.length > 0) {
-                          const orderRefs = await getOrderRefsByBalanceTxn(
-                            ids,
-                          ).catch(() => []);
-                          setTxnRefs(
-                            Object.fromEntries(
-                              orderRefs.map((r) => [
-                                r.balanceTxnId,
-                                { orderId: r.orderId, orderNo: r.orderNo },
-                              ]),
-                            ),
-                          );
-                        }
-                        return {
-                          data: result.items,
-                          total: result.totalCount,
-                          success: true,
-                        };
-                      }}
-                      columns={txnColumns}
-                    />
+                      <AgGridReact<BalanceTxnDto> {...myTxnsGrid.gridProps} />
+                    </>
                   ),
                 },
               ]

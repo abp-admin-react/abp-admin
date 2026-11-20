@@ -1,3 +1,4 @@
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   Button,
@@ -11,7 +12,6 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tag,
   Typography,
 } from 'antd';
@@ -44,6 +44,7 @@ import {
   testScanProviderBalance,
   updateScanProvider,
 } from '@/abp/scanProviders';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 import { AnkrBalanceAmounts } from './AnkrBalanceCard';
 import { useCredentialProbe } from './useCredentialProbe';
 
@@ -494,105 +495,60 @@ export default function ScanProvidersPage() {
     );
   }
 
-  return (
-    <Card
-      title={<span id={titleId}>扫链服务商</span>}
-      extra={
-        <Button
-          type="primary"
-          disabled={busy || !networks.length}
-          onClick={() => setEditing(null)}
-        >
-          添加服务商
-        </Button>
-      }
-    >
-      <Typography.Paragraph type="secondary">
-        充值扫链从适用网络的第一条已启用配置开始，查询失败时按顺序使用下一条。当前自动充值扫链运行于
-        BSC。
-      </Typography.Paragraph>
-      {list?.legacyRpcActive && (
-        <Alert
-          showIcon
-          type="info"
-          title="BSC 仍保留原有 RPC"
-          description="启用新的扫链配置后会优先尝试下方顺序。新的 Ankr RPC 成功读取日志后，原有 RPC 才会退出充值扫链。"
-          style={{ marginBlockEnd: 12 }}
-        />
-      )}
-      {list?.legacyBalancePending && (
-        <Alert
-          showIcon
-          type="warning"
-          title="已有 Ankr 余额凭据等待关联"
-          description="请在对应的 Ankr 配置行选择「关联旧余额凭据」。"
-          style={{ marginBlockEnd: 12 }}
-        />
-      )}
-      {error && (
-        <Alert
-          showIcon
-          type="error"
-          title={error}
-          action={<Button onClick={load}>刷新</Button>}
-          style={{ marginBlockEnd: 12 }}
-        />
-      )}
-      <div role="status" className="sr-only">
-        {notice}
-      </div>
-      <Table<ScanProviderDto>
-        aria-labelledby={titleId}
-        rowKey="id"
-        dataSource={providers}
-        loading={loading}
-        pagination={false}
-        scroll={{ x: 820 }}
-        locale={{ emptyText: '暂无第三方扫链服务商' }}
-        columns={[
-          {
-            title: '顺序',
-            key: 'order',
-            render: (_, _entry, index) => index + 1,
-          },
-          {
-            title: '服务商',
-            dataIndex: 'provider',
-            render: (type: ScanProvider) => providerNames[type],
-          },
-          {
-            title: '备注',
-            dataIndex: 'label',
-            render: (label: string | null) => label || '—',
-          },
-          { title: 'API 密钥', dataIndex: 'keyMasked' },
-          {
-            title: '适用网络',
-            key: 'networks',
-            render: (_, entry) => (
-              <Space wrap>
-                {entry.networks.map(({ networkId }) => (
-                  <Tag key={networkId}>
-                    {networks.find(({ id }) => id === networkId)?.name ??
-                      networkId}
-                  </Tag>
-                ))}
-              </Space>
-            ),
-          },
-          {
-            title: '状态',
-            key: 'enabled',
-            render: (_, entry) => (
-              <Tag color={entry.isEnabled ? 'success' : 'default'}>
-                {entry.isEnabled ? '已启用' : '已停用'}
-              </Tag>
-            ),
-          },
-          {
-            title: '操作',
-            key: 'actions',
-            render: (_, entry, index) => (
+  const detailGrid1 = useSearchableLocalGrid<ScanProviderDto>({
+    ariaLabel: '扫链服务商',
+    rowData: providers,
+    keywordFields: ['provider', 'label', 'keyMasked'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.id),
+    columnDefs: toGridColumns<ScanProviderDto>(
+      [
+        {
+          title: '顺序',
+          dataIndex: 'sortOrder',
+          render: (_, entry) =>
+            providers.findIndex((row) => row.id === entry.id) + 1,
+        },
+        {
+          title: '服务商',
+          dataIndex: 'provider',
+          render: (type: ScanProvider) => providerNames[type],
+        },
+        {
+          title: '备注',
+          dataIndex: 'label',
+          render: (label: string | null) => label || '—',
+        },
+        { title: 'API 密钥', dataIndex: 'keyMasked' },
+        {
+          title: '适用网络',
+          key: 'networks',
+          render: (_, entry) => (
+            <Space wrap>
+              {entry.networks.map(({ networkId }) => (
+                <Tag key={networkId}>
+                  {networks.find(({ id }) => id === networkId)?.name ??
+                    networkId}
+                </Tag>
+              ))}
+            </Space>
+          ),
+        },
+        {
+          title: '状态',
+          dataIndex: 'isEnabled',
+          render: (_, entry) => (
+            <Tag color={entry.isEnabled ? 'success' : 'default'}>
+              {entry.isEnabled ? '已启用' : '已停用'}
+            </Tag>
+          ),
+        },
+        {
+          title: '操作',
+          key: 'actions',
+          render: (_, entry) => {
+            const index = providers.findIndex((row) => row.id === entry.id);
+            return (
               <Space wrap size="small">
                 <Button
                   type="link"
@@ -664,10 +620,62 @@ export default function ScanProvidersPage() {
                   </Button>
                 </Popconfirm>
               </Space>
-            ),
+            );
           },
-        ]}
-      />
+        },
+      ],
+      { kinds: { sortOrder: 'number', isEnabled: 'boolean' } },
+    ),
+  });
+  return (
+    <Card
+      title={<span id={titleId}>扫链服务商</span>}
+      extra={
+        <Button
+          type="primary"
+          disabled={busy || !networks.length}
+          onClick={() => setEditing(null)}
+        >
+          添加服务商
+        </Button>
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        充值扫链从适用网络的第一条已启用配置开始，查询失败时按顺序使用下一条。当前自动充值扫链运行于
+        BSC。
+      </Typography.Paragraph>
+      {list?.legacyRpcActive && (
+        <Alert
+          showIcon
+          type="info"
+          title="BSC 仍保留原有 RPC"
+          description="启用新的扫链配置后会优先尝试下方顺序。新的 Ankr RPC 成功读取日志后，原有 RPC 才会退出充值扫链。"
+          style={{ marginBlockEnd: 12 }}
+        />
+      )}
+      {list?.legacyBalancePending && (
+        <Alert
+          showIcon
+          type="warning"
+          title="已有 Ankr 余额凭据等待关联"
+          description="请在对应的 Ankr 配置行选择「关联旧余额凭据」。"
+          style={{ marginBlockEnd: 12 }}
+        />
+      )}
+      {error && (
+        <Alert
+          showIcon
+          type="error"
+          title={error}
+          action={<Button onClick={load}>刷新</Button>}
+          style={{ marginBlockEnd: 12 }}
+        />
+      )}
+      <div role="status" className="sr-only">
+        {notice}
+      </div>
+      {detailGrid1.searchBox}
+      <AgGridReact<ScanProviderDto> {...detailGrid1.gridProps} />
       <Drawer
         title={
           editing ? `编辑 ${providerNames[editing.provider]}` : '添加扫链服务商'

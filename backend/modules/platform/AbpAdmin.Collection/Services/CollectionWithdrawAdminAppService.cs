@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -136,7 +138,15 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     }
 
     /// <summary>提现单列表（可按订单、状态、用户过滤，倒序分页）。</summary>
-    public virtual async Task<PagedResultDto<WithdrawOrderDto>> GetWithdrawalsAsync(
+    public virtual Task<PagedResultDto<WithdrawOrderDto>> GetWithdrawalsAsync(
+        int skipCount, int maxResultCount, string? status = null, Guid? userId = null, Guid? withdrawalId = null) =>
+        ReadWithdrawalsPageAsync(null, skipCount, maxResultCount, status, userId, withdrawalId);
+
+    [HttpPost("api/app/collection-withdraw-admin/withdrawals/query")]
+    public virtual Task<PagedResultDto<WithdrawOrderDto>> QueryWithdrawalsAsync([FromBody] GridQueryInput grid, string? status = null, Guid? userId = null, Guid? withdrawalId = null) =>
+        ReadWithdrawalsPageAsync(grid, grid.SkipCount, grid.MaxResultCount, status, userId, withdrawalId);
+
+    private async Task<PagedResultDto<WithdrawOrderDto>> ReadWithdrawalsPageAsync(GridQueryInput? grid,
         int skipCount, int maxResultCount, string? status = null, Guid? userId = null, Guid? withdrawalId = null)
     {
         AssertHost();
@@ -163,9 +173,23 @@ public class CollectionWithdrawAdminAppService : ApplicationService
             query = query.Where(o => o.UserId == userId.Value);
         }
 
+        var definition = new GridQueryDefinition<ColWithdrawOrder>()
+            .SearchableField("id", x => x.Id.ToString())
+            .Field("creationTime", x => x.CreationTime)
+            .SearchableField("userId", x => x.UserId.ToString())
+            .SearchableEnumField("currency", x => x.Currency)
+            .SearchableField("toAddress", x => x.ToAddress)
+            .Field("amount", x => x.Amount)
+            .Field("fee", x => x.Fee)
+            .Field("actualAmount", x => x.ActualAmount)
+            .SearchableEnumField("status", x => x.Status)
+            .SearchableField("txHash", x => x.TxHash)
+            .SearchableField("auditRemark", x => x.AuditRemark);
+        if (grid != null) query = definition.Filter(query, grid);
         var total = await query.CountAsync();
-        var rows = await query
-            .OrderByDescending(o => o.CreationTime)
+        var rows = await (grid == null
+            ? query.OrderByDescending(o => o.CreationTime)
+            : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
             .ToListAsync();
@@ -405,7 +429,15 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     }
 
     /// <summary>热钱包流水分页（可按状态/方向筛选，最新在前）。</summary>
-    public virtual async Task<PagedResultDto<HotWalletTxnDto>> GetHotWalletTxnsAsync(
+    public virtual Task<PagedResultDto<HotWalletTxnDto>> GetHotWalletTxnsAsync(
+        int skipCount, int maxResultCount, string? status = null, string? direction = null) =>
+        ReadHotWalletTxnsPageAsync(null, skipCount, maxResultCount, status, direction);
+
+    [HttpPost("api/app/collection-withdraw-admin/hot-wallet-txns/query")]
+    public virtual Task<PagedResultDto<HotWalletTxnDto>> QueryHotWalletTxnsAsync([FromBody] GridQueryInput grid, string? status = null, string? direction = null) =>
+        ReadHotWalletTxnsPageAsync(grid, grid.SkipCount, grid.MaxResultCount, status, direction);
+
+    private async Task<PagedResultDto<HotWalletTxnDto>> ReadHotWalletTxnsPageAsync(GridQueryInput? grid,
         int skipCount, int maxResultCount, string? status = null, string? direction = null)
     {
         AssertHost();
@@ -426,9 +458,22 @@ public class CollectionWithdrawAdminAppService : ApplicationService
             query = query.Where(t => t.Direction == dir);
         }
 
+        var definition = new GridQueryDefinition<ColHotWalletTxn>()
+            .Field("creationTime", x => x.CreationTime)
+            .SearchableField("symbol", x => x.Symbol)
+            .SearchableEnumField("direction", x => x.Direction)
+            .SearchableField("counterparty", x => x.Direction == HotWalletDirection.Out ? x.To : x.From)
+            .Field("amount", x => x.Amount)
+            .SearchableEnumField("status", x => x.Status)
+            .SearchableField("matchedWithdrawId", x => x.MatchedWithdrawId.ToString())
+            .SearchableField("txHash", x => x.TxHash)
+            .Field("blockNumber", x => x.BlockNumber)
+            .SearchableField("ackedBy", x => x.AckedBy);
+        if (grid != null) query = definition.Filter(query, grid);
         var total = await query.CountAsync();
-        var items = await query
-            .OrderByDescending(t => t.BlockNumber).ThenByDescending(t => t.LogIndex)
+        var items = await (grid == null
+            ? query.OrderByDescending(t => t.BlockNumber).ThenByDescending(t => t.LogIndex)
+            : definition.OrderBy(query, grid, "blockNumber", true, x => x.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
             .ToListAsync();

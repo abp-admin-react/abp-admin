@@ -1,5 +1,6 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { Link, useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   App,
   Button,
@@ -7,12 +8,18 @@ import {
   Popconfirm,
   Select,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef as useGridRef,
+  useRef,
+  useState,
+} from 'react';
+import { businessGridQueries, gridScope } from '@/abp/businessGrid';
 import {
   getDepositOrders,
   getSweepTasks,
@@ -26,7 +33,12 @@ import {
   onChainSweepChanged,
   startChainSignalR,
 } from '@/abp/chainSignalR';
-import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import {
+  toGridColumns,
+  useSearchableLocalGrid,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 import { isValidRecordId, RecordFocus } from './record-focus';
 import { depositRecordsForSweepUrl } from './record-links';
 import { useChainRecordRefresh } from './use-chain-record-refresh';
@@ -47,9 +59,8 @@ export default function SweepsPage({
 } = {}) {
   const { message } = App.useApp();
   const access = useAccess();
+  const refreshGrid = useGridRef<() => void>(undefined);
   const [data, setData] = useState<SweepTaskListDto[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const focusId = sweepTaskId ?? depositId;
   const invalidId = !!focusId && !isValidRecordId(focusId);
   const [loading, setLoading] = useState(!!focusId && !invalidId);
@@ -62,11 +73,11 @@ export default function SweepsPage({
   const [connState, setConnState] = useState<ChainConnState>('disconnected');
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const latestRequest = useRef(0);
-  const pageSize = 20;
 
   const reload = useCallback(
     async (background = false) => {
-      if (invalidId) return;
+      refreshGrid.current?.();
+      if (invalidId || !focusId) return;
       const request = ++latestRequest.current;
       if (!background) {
         setLoading(true);
@@ -87,14 +98,13 @@ export default function SweepsPage({
             )?.sweepTaskId ?? undefined;
           if (!taskId) {
             setData([]);
-            setTotal(0);
+
             return;
           }
         }
         const result = await getSweepTasks({
-          skipCount: taskId ? 0 : (page - 1) * pageSize,
-          maxResultCount: taskId ? 1 : pageSize,
-          status: statusFilter,
+          skipCount: 0,
+          maxResultCount: 1,
           ...(taskId && { sweepTaskId: taskId }),
         });
         if (request !== latestRequest.current) return;
@@ -104,7 +114,6 @@ export default function SweepsPage({
             )
           : result.items;
         setData(rows);
-        setTotal(taskId ? rows.length : result.totalCount);
       } catch {
         if (focusId && !background && request === latestRequest.current)
           setLoadFailed(true);
@@ -112,12 +121,12 @@ export default function SweepsPage({
         if (request === latestRequest.current) setLoading(false);
       }
     },
-    [depositId, focusId, invalidId, page, statusFilter, sweepTaskId],
+    [depositId, focusId, invalidId, sweepTaskId],
   );
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (focusId) void reload();
+  }, [focusId, reload]);
   useChainRecordRefresh(reload);
 
   useEffect(() => {
@@ -263,12 +272,35 @@ export default function SweepsPage({
       : []),
   ];
 
-  const {
-    columns: resizableColumns,
-    components,
-    scrollX,
-  } = useResizableColumns(columns);
-
+  const sweepsGridScope = gridScope({
+    sweepTaskId: focusId ? data[0]?.id : undefined,
+    status: focusId ? undefined : statusFilter,
+  });
+  const recordColumns = toGridColumns<SweepTaskListDto>(columns, {
+    kinds: {
+      amount: 'decimal',
+      addressIndex: 'number',
+      nonceUsed: 'number',
+      retryable: 'boolean',
+      statusChangedAt: 'date',
+    },
+  });
+  const sweepsGrid = useSearchableRemoteGrid<SweepTaskListDto>({
+    ariaLabel: '归集任务',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(businessGridQueries.sweeps, sweepsGridScope),
+    columnDefs: recordColumns,
+  });
+  const focusedGrid = useSearchableLocalGrid<SweepTaskListDto>({
+    ariaLabel: '归集任务',
+    getRowId: ({ data }) => String(data.id),
+    pagination: false,
+    rowData: data,
+    columnDefs: recordColumns,
+    keywordFields: ['address', 'symbol', 'txHash'],
+  });
+  const visibleGrid = focusId ? focusedGrid : sweepsGrid;
+  refreshGrid.current = sweepsGrid.refresh;
   const content = (
     <Card
       title="归集任务"
@@ -282,7 +314,6 @@ export default function SweepsPage({
             value={statusFilter}
             onChange={(v) => {
               setStatusFilter(v);
-              setPage(1);
             }}
             options={Object.entries(SWEEP_STATUS_LABELS).map(
               ([value, cfg]) => ({ value, label: cfg.text }),
@@ -306,26 +337,12 @@ export default function SweepsPage({
           }
         />
       )}
-      <Table<SweepTaskListDto>
-        rowKey="id"
-        loading={loading}
-        dataSource={data}
-        columns={resizableColumns}
-        components={components}
-        scroll={{ x: scrollX }}
-        size="small"
-        pagination={
-          focusId
-            ? false
-            : {
-                current: page,
-                pageSize,
-                total,
-                showSizeChanger: false,
-                onChange: (p) => setPage(p),
-              }
-        }
-      />
+      {(!focusId || data[0]) && (
+        <>
+          {visibleGrid.searchBox}
+          <AgGridReact<SweepTaskListDto> {...visibleGrid.gridProps} />
+        </>
+      )}
     </Card>
   );
   return embedded ? (

@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Threading;
@@ -33,7 +34,16 @@ public class CollectionBalanceAdjustmentAppService(
 {
     [HttpGet("api/app/collection-balance-adjustment")]
     [UnitOfWork(IsDisabled = true)]
-    public virtual async Task<PagedResultDto<CollectionBalanceAdjustmentDto>> GetListAsync(
+    public virtual Task<PagedResultDto<CollectionBalanceAdjustmentDto>> GetListAsync(
+        CollectionBalanceAdjustmentListInput input, CancellationToken cancellationToken = default) =>
+        ReadListPageAsync(null, input, cancellationToken);
+
+    [HttpPost("api/app/collection-balance-adjustment/query")]
+    [UnitOfWork(IsDisabled = true)]
+    public virtual Task<PagedResultDto<CollectionBalanceAdjustmentDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] CollectionBalanceAdjustmentListInput input, CancellationToken cancellationToken = default) =>
+        ReadListPageAsync(grid, input, cancellationToken);
+
+    private async Task<PagedResultDto<CollectionBalanceAdjustmentDto>> ReadListPageAsync(GridQueryInput? grid,
         CollectionBalanceAdjustmentListInput input, CancellationToken cancellationToken = default)
     {
         AssertHost();
@@ -55,9 +65,22 @@ public class CollectionBalanceAdjustmentAppService(
                 || id.HasValue && (row.Id == id || row.RequestId == id || row.UserId == id));
         }
 
+        var definition = new GridQueryDefinition<ColBalanceAdjustment>()
+            .SearchableField("id", x => x.Id.ToString())
+            .SearchableField("userId", x => x.UserId.ToString())
+            .SearchableField("requestId", x => x.RequestId.ToString())
+            .Field("amount", x => x.Amount)
+            .SearchableEnumField("currency", x => x.Currency)
+            .SearchableEnumField("status", x => x.Status)
+            .SearchableField("reason", x => x.Reason)
+            .SearchableField("applicantId", x => x.ApplicantId.ToString())
+            .Field("creationTime", x => x.CreationTime);
+        if (grid != null) query = definition.Filter(query, grid);
         var count = await query.LongCountAsync(cancellationToken);
-        var rows = await query.OrderByDescending(row => row.CreationTime).ThenByDescending(row => row.Id)
-            .Skip(input.SkipCount).Take(Math.Min(input.MaxResultCount, 200)).ToListAsync(cancellationToken);
+        var rows = await (grid == null
+            ? query.OrderByDescending(row => row.CreationTime).ThenByDescending(row => row.Id)
+            : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
+            .Skip(grid?.SkipCount ?? input.SkipCount).Take(grid?.MaxResultCount ?? Math.Min(input.MaxResultCount, 200)).ToListAsync(cancellationToken);
         await uow.CompleteAsync(cancellationToken);
         return new(count, rows.Select(Map).ToList());
     }

@@ -1,3 +1,5 @@
+using AbpAdmin.Collection.Entities;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,7 +45,7 @@ internal static class BalanceQueries
     public static async Task<(int Total, List<BalanceTxnDto> Items)> GetTxnsAsync(
         CollectionDbContext dbContext, Guid userId,
         int skipCount, int maxResultCount, DateTime? fromTime = null, DateTime? toTime = null,
-        Guid? txnId = null, Guid? withdrawalId = null)
+        Guid? txnId = null, Guid? withdrawalId = null, GridQueryInput? grid = null)
     {
         var query = dbContext.BalanceTxns.AsNoTracking()
             .Where(t => t.UserId == userId);
@@ -64,9 +66,20 @@ internal static class BalanceQueries
             query = query.Where(t => t.CreationTime < toTime.Value);
         }
 
+        var definition = new GridQueryDefinition<ColBalanceTxn>()
+            .SearchableField("id", x => x.Id.ToString())
+            .Field("seq", x => x.Seq)
+            .SearchableField("action", x => x.Action)
+            .Field("amount", x => x.Amount)
+            .SearchableEnumField("currency", x => x.Currency)
+            .Field("balanceAfter", x => x.BalanceAfter)
+            .SearchableField("businessType", x => x.BusinessType)
+            .SearchableField("txHash", x => dbContext.DepositOrders.Where(d => d.UserId == x.UserId && x.Action == BalanceActions.DepositCredit && d.Id.ToString() == x.IdempotencyKey).Select(d => d.TxHash).FirstOrDefault())
+            .Field("creationTime", x => x.CreationTime);
+        if (grid != null) query = definition.Filter(query, grid);
         var total = await query.CountAsync();
-        var rows = await query
-            .OrderByDescending(t => t.Seq)
+        var rows = await (grid == null ? query.OrderByDescending(t => t.Seq)
+            : definition.OrderBy(query, grid, "seq", true, t => t.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
             .Select(t => new

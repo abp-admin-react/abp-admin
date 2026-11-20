@@ -1,15 +1,21 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { Link, useAccess } from '@umijs/max';
-import { Card, Table, Tag, Typography } from 'antd';
-import React, { useCallback, useEffect, useState } from 'react';
-import { getVaultChecks, type VaultCheckListDto } from '@/abp/chainAdmin';
+import { AgGridReact } from 'ag-grid-react';
+import { Card, Tag, Typography } from 'antd';
+import { useCallback, useEffect, useRef as useGridRef, useState } from 'react';
+import { businessGridQueries } from '@/abp/businessGrid';
+import type { VaultCheckListDto } from '@/abp/chainAdmin';
 import {
   type ChainConnState,
   onChainConnState,
   onChainVaultCheck,
   startChainSignalR,
 } from '@/abp/chainSignalR';
-import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 
 const { Text } = Typography;
 
@@ -22,32 +28,10 @@ export default function VaultPage({
   embedded?: boolean;
 } = {}) {
   const access = useAccess();
-  const [data, setData] = useState<VaultCheckListDto[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const refreshGrid = useGridRef<() => void>(undefined);
   const [connState, setConnState] = useState<ChainConnState>('disconnected');
-  const pageSize = 20;
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await getVaultChecks({
-        skipCount: (page - 1) * pageSize,
-        maxResultCount: pageSize,
-      });
-      setData(result.items);
-      setTotal(result.totalCount);
-    } catch {
-      /* interceptor */
-    } finally {
-      setLoading(false);
-    }
-  }, [page]);
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  const reload = useCallback(() => refreshGrid.current?.(), []);
 
   useEffect(() => {
     const offConn = onChainConnState(setConnState);
@@ -111,6 +95,7 @@ export default function VaultPage({
     },
     {
       title: '状态',
+      dataIndex: 'status',
       width: 80,
       render: (_: unknown, row: VaultCheckListDto) =>
         parseNum(row.difference) < 0 ? (
@@ -127,33 +112,27 @@ export default function VaultPage({
     },
   ];
 
-  const {
-    columns: resizableColumns,
-    components,
-    scrollX,
-  } = useResizableColumns(columns);
-
+  const vaultGrid = useSearchableRemoteGrid<VaultCheckListDto>({
+    ariaLabel: '金库核对',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(businessGridQueries.vault, ''),
+    columnDefs: toGridColumns<VaultCheckListDto>(columns, {
+      kinds: {
+        vaultBalance: 'decimal',
+        userTotal: 'decimal',
+        difference: 'decimal',
+        checkedAt: 'date',
+      },
+    }),
+  });
+  refreshGrid.current = vaultGrid.refresh;
   const content = (
     <Card
       title="核对记录"
       extra={<Tag color={connView.color}>{connView.text}</Tag>}
     >
-      <Table<VaultCheckListDto>
-        rowKey="id"
-        loading={loading}
-        dataSource={data}
-        columns={resizableColumns}
-        components={components}
-        scroll={{ x: scrollX }}
-        size="small"
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          showSizeChanger: false,
-          onChange: (p) => setPage(p),
-        }}
-      />
+      {vaultGrid.searchBox}
+      <AgGridReact<VaultCheckListDto> {...vaultGrid.gridProps} />
     </Card>
   );
   if (embedded) return content;

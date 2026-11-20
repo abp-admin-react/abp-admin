@@ -53,6 +53,7 @@ vi.mock('@/abp/collectionAdmin', () => ({
 vi.mock('ag-grid-react', () => ({
   AgGridReact: ({
     datasource,
+    rowData,
     columnDefs,
   }: AgGridReactProps<MemberBalanceGridRowDto>) => {
     const [rows, setRows] = useState<MemberBalanceGridRowDto[]>([]);
@@ -63,7 +64,12 @@ vi.mock('ag-grid-react', () => ({
         endRow: 20,
         context: {},
         filterModel: {},
-        sortModel: [{ colId: 'updatedAt', sort: 'desc' }],
+        sortModel: (columnDefs as ColDef<MemberBalanceGridRowDto>[]).flatMap(
+          (col) =>
+            (col.sort === 'asc' || col.sort === 'desc') && col.field
+              ? [{ colId: col.field, sort: col.sort }]
+              : [],
+        ),
         api: {
           isDestroyed: () => destroyed,
           setGridOption: vi.fn(),
@@ -84,12 +90,17 @@ vi.mock('ag-grid-react', () => ({
     return (
       <table>
         <tbody>
-          {rows.map((row) => (
+          {(rowData ?? rows).map((row) => (
             <tr key={row.userId}>
               {columns.map((column) => (
                 <td key={column.field ?? column.colId}>
                   {column.cellRenderer
-                    ? column.cellRenderer({ data: row })
+                    ? column.cellRenderer({
+                        ...column.cellRendererParams,
+                        data: row,
+                        value: column.field ? row[column.field] : undefined,
+                        node: { rowIndex: 0 },
+                      })
                     : column.field
                       ? row[column.field]
                       : null}
@@ -465,4 +476,24 @@ describe('用户余额查询', () => {
     expect(screen.queryByText('115.987654321')).toBeNull();
     expect(screen.queryByText('8.13')).toBeNull();
   });
+});
+
+vi.mock('@/abp/businessGrid', async (original) => {
+  const grid = await original<typeof import('@/abp/businessGrid')>();
+  return {
+    ...grid,
+    businessGridQueries: {
+      ...grid.businessGridQueries,
+      memberTxns: (
+        input: import('@/abp/gridQuery').GridQuery,
+        _signal: AbortSignal,
+        scope: string,
+      ) =>
+        mocks.transactions({
+          skipCount: input.skipCount,
+          maxResultCount: input.maxResultCount,
+          ...Object.fromEntries(new URLSearchParams(scope)),
+        }),
+    },
+  };
 });

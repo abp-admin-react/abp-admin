@@ -1,9 +1,6 @@
-import {
-  type ActionType,
-  PageContainer,
-  type ProColumns,
-} from '@ant-design/pro-components';
+import { PageContainer, type ProColumns } from '@ant-design/pro-components';
 import { history, Link, useAccess, useLocation, useModel } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   Button,
@@ -21,6 +18,7 @@ import {
   Typography,
 } from 'antd';
 import { useEffect, useRef, useState } from 'react';
+import { businessGridQueries, gridScope } from '@/abp/businessGrid';
 import {
   COLLECTION_CHANNELS,
   COLLECTION_CURRENCIES,
@@ -30,20 +28,23 @@ import {
   type CollectionPaymentAdminDto,
   type CollectionRefundDto,
   getCollectionPayment,
-  getCollectionPayments,
   getCollectionRefunds,
   queryCollectionPayment,
   queryCollectionRefund,
   type RequestCollectionRefundInput,
   requestCollectionRefund,
 } from '@/abp/collectionAdmin';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import {
   ConfigurationLink,
   ConfigurationPage,
   useConfigurationLocation,
 } from '@/components/ContextConfiguration';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { useModuleEnabled } from '@/hooks/useModuleAvailability';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 import { isNotFound } from '@/requestErrorConfig';
 import DepositsPage from '../collection/deposits';
 import NetworkConfigPage from '../collection/network';
@@ -51,12 +52,6 @@ import { orderRecordUrl } from '../collection/record-links';
 import { Web3RuleSection } from '../collection/rules';
 import { PaymentChannelSettings } from '../settings/channel';
 import { thirdPartyPaymentChannels } from '../settings/channelGroups';
-
-type PaymentSearch = {
-  filter?: string;
-  status?: string;
-  channel?: string;
-};
 
 const channelLabels = Object.fromEntries(
   COLLECTION_CHANNELS.map(({ value, label }) => [value, label]),
@@ -725,26 +720,18 @@ function PaymentRecords({
     if (id) history.push(target);
     else history.replace(target);
   }
-  const actionRef = useRef<ActionType | undefined>(undefined);
+  const actionRef = useRef<{ reload: () => void }>(undefined);
 
   const columns: ProColumns<CollectionPaymentAdminDto>[] = [
     {
-      title: '搜索',
-      dataIndex: 'filter',
-      hideInTable: true,
-      fieldProps: { placeholder: '收款单号、渠道交易号或业务单 ID' },
-    },
-    {
       title: '收款单号',
       dataIndex: 'collectionNo',
-      search: false,
       ellipsis: true,
       width: 190,
     },
     {
       title: '渠道',
       dataIndex: 'channel',
-      search: false,
       valueType: 'select',
       valueEnum: channelLabels,
       width: 135,
@@ -760,7 +747,6 @@ function PaymentRecords({
     {
       title: '金额',
       dataIndex: 'amount',
-      search: false,
       align: 'right',
       width: 145,
       render: (_, payment) => formatAmount(payment),
@@ -768,14 +754,12 @@ function PaymentRecords({
     {
       title: '渠道交易号',
       dataIndex: 'channelTradeNo',
-      search: false,
       ellipsis: true,
       width: 180,
     },
     {
       title: '创建时间',
       dataIndex: 'creationTime',
-      search: false,
       valueType: 'dateTime',
       width: 170,
     },
@@ -795,6 +779,17 @@ function PaymentRecords({
     },
   ];
 
+  const paymentsGridScope = gridScope({ channel: selectedChannel });
+  const paymentsGrid = useSearchableRemoteGrid<CollectionPaymentAdminDto>({
+    ariaLabel: '收款订单',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(businessGridQueries.payments, paymentsGridScope),
+    columnDefs: toGridColumns<CollectionPaymentAdminDto>(columns, {
+      pro: true,
+      kinds: { amount: 'decimal', creationTime: 'date' },
+    }),
+  });
+  actionRef.current = { reload: paymentsGrid.refresh };
   return (
     <>
       {!acceptsPayments && (
@@ -806,46 +801,31 @@ function PaymentRecords({
           style={{ marginBottom: 12 }}
         />
       )}
-      <AutoHeightProTable<CollectionPaymentAdminDto, PaymentSearch>
-        actionRef={actionRef}
-        rowKey="id"
-        columns={columns}
-        params={{ channel: selectedChannel }}
-        toolBarRender={() => [
-          <Space key="channel">
-            <label htmlFor="third-party-channel">渠道</label>
-            <Select
-              id="third-party-channel"
-              allowClear
-              placeholder="全部外部渠道"
-              value={selectedChannel}
-              style={{ minWidth: 145 }}
-              options={thirdPartyPaymentChannels.map(({ channel, label }) => ({
-                value: channel,
-                label,
-              }))}
-              onChange={(channel) => {
-                const next = new URLSearchParams(search);
-                next.set('view', 'payments');
-                if (channel) next.set('channel', channel);
-                else next.delete('channel');
-                history.push({ pathname, search: `?${next}`, hash });
-              }}
-            />
-          </Space>,
-        ]}
-        request={async ({ current = 1, pageSize = 20, filter, status }) => {
-          const { items, totalCount } = await getCollectionPayments({
-            skipCount: (current - 1) * pageSize,
-            maxResultCount: pageSize,
-            filter,
-            status,
-            channel: selectedChannel,
-          });
-          return { data: items, total: totalCount, success: true };
-        }}
-        pagination={{ defaultPageSize: 20 }}
-      />
+      {paymentsGrid.searchBox}
+      {(() => [
+        <Space key="channel">
+          <label htmlFor="third-party-channel">渠道</label>
+          <Select
+            id="third-party-channel"
+            allowClear
+            placeholder="全部外部渠道"
+            value={selectedChannel}
+            style={{ minWidth: 145 }}
+            options={thirdPartyPaymentChannels.map(({ channel, label }) => ({
+              value: channel,
+              label,
+            }))}
+            onChange={(channel) => {
+              const next = new URLSearchParams(search);
+              next.set('view', 'payments');
+              if (channel) next.set('channel', channel);
+              else next.delete('channel');
+              history.push({ pathname, search: `?${next}`, hash });
+            }}
+          />
+        </Space>,
+      ])()}
+      <AgGridReact<CollectionPaymentAdminDto> {...paymentsGrid.gridProps} />
       <Drawer
         title="收款记录详情"
         open={!!detailId}

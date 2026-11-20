@@ -148,7 +148,16 @@ public class CollectionBalanceAdminAppService : ApplicationService
     }
 
     /// <summary>某用户的余额流水（倒序分页，可选时间范围；充值行回填链上凭证）。</summary>
-    public virtual async Task<PagedResultDto<BalanceTxnDto>> GetMemberTxnsAsync(
+    public virtual Task<PagedResultDto<BalanceTxnDto>> GetMemberTxnsAsync(
+        Guid userId, int skipCount, int maxResultCount,
+        DateTime? fromTime = null, DateTime? toTime = null, Guid? txnId = null, Guid? withdrawalId = null) =>
+        ReadMemberTxnsPageAsync(null, userId, skipCount, maxResultCount, fromTime, toTime, txnId, withdrawalId);
+
+    [HttpPost("api/app/collection-balance-admin/member-txns/query")]
+    public virtual Task<PagedResultDto<BalanceTxnDto>> QueryMemberTxnsAsync([FromBody] GridQueryInput grid, Guid userId, DateTime? fromTime = null, DateTime? toTime = null, Guid? txnId = null, Guid? withdrawalId = null) =>
+        ReadMemberTxnsPageAsync(grid, userId, grid.SkipCount, grid.MaxResultCount, fromTime, toTime, txnId, withdrawalId);
+
+    private async Task<PagedResultDto<BalanceTxnDto>> ReadMemberTxnsPageAsync(GridQueryInput? grid,
         Guid userId, int skipCount, int maxResultCount,
         DateTime? fromTime = null, DateTime? toTime = null, Guid? txnId = null, Guid? withdrawalId = null)
     {
@@ -161,7 +170,7 @@ public class CollectionBalanceAdminAppService : ApplicationService
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var (total, items) = await BalanceQueries.GetTxnsAsync(
-            dbContext, userId, skipCount, maxResultCount, fromTime, toTime, txnId, withdrawalId);
+            dbContext, userId, skipCount, maxResultCount, fromTime, toTime, txnId, withdrawalId, grid);
         await uow.CompleteAsync();
         return new PagedResultDto<BalanceTxnDto>(total, items);
     }

@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -20,7 +22,14 @@ namespace AbpAdmin.Collection.Services;
 public class CollectionPaymentAdminAppService(
     IDbContextProvider<CollectionDbContext> dbContextProvider) : ApplicationService
 {
-    public virtual async Task<PagedResultDto<CollectionPaymentAdminDto>> GetListAsync(CollectionPaymentListInput input)
+    public virtual Task<PagedResultDto<CollectionPaymentAdminDto>> GetListAsync(CollectionPaymentListInput input) =>
+        ReadListPageAsync(null, input);
+
+    [HttpPost("api/app/collection-payment-admin/query")]
+    public virtual Task<PagedResultDto<CollectionPaymentAdminDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] CollectionPaymentListInput input) =>
+        ReadListPageAsync(grid, input);
+
+    private async Task<PagedResultDto<CollectionPaymentAdminDto>> ReadListPageAsync(GridQueryInput? grid, CollectionPaymentListInput input)
     {
         AssertHost();
 
@@ -47,12 +56,25 @@ public class CollectionPaymentAdminAppService(
                     (row.Id == identifier || row.BusinessId == identifier || row.UserId == identifier)));
         }
 
+        var definition = new GridQueryDefinition<ColCollection>()
+            .SearchableField("id", x => x.Id.ToString())
+            .SearchableField("collectionNo", x => x.CollectionNo)
+            .SearchableField("userId", x => x.UserId.ToString())
+            .SearchableField("businessId", x => x.BusinessId.ToString())
+            .SearchableEnumField("channel", x => x.Channel)
+            .SearchableEnumField("currency", x => x.Currency)
+            .SearchableEnumField("status", x => x.Status)
+            .Field("amount", x => x.Amount)
+            .SearchableField("channelTradeNo", x => x.ChannelTradeNo)
+            .Field("creationTime", x => x.CreationTime);
+        if (grid != null) query = definition.Filter(query, grid);
         var totalCount = await query.LongCountAsync();
-        var items = await query
-            .OrderByDescending(row => row.CreationTime)
+        var items = await (grid == null
+            ? query.OrderByDescending(row => row.CreationTime)
             .ThenByDescending(row => row.Id)
-            .Skip(input.SkipCount)
-            .Take(Math.Min(input.MaxResultCount, 200))
+            : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
+            .Skip(grid?.SkipCount ?? input.SkipCount)
+            .Take(grid?.MaxResultCount ?? Math.Min(input.MaxResultCount, 200))
             .ToListAsync();
 
         return new PagedResultDto<CollectionPaymentAdminDto>(totalCount, items.Select(Map).ToList());

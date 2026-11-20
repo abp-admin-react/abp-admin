@@ -1,5 +1,7 @@
 import { PageContainer } from '@ant-design/pro-components';
 import { Link, useAccess, useLocation } from '@umijs/max';
+import { RowSelectionModule } from 'ag-grid-community';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -12,14 +14,19 @@ import {
   Select,
   Space,
   Spin,
-  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef as useGridRef,
+  useRef,
+  useState,
+} from 'react';
+import { businessGridQueries, gridScope } from '@/abp/businessGrid';
 import { financeErrorText } from '@/abp/finance';
-import { queryClient } from '@/queryClient';
 import { currencyLabel } from '@/abp/ordering';
 import {
   approveWithdraw,
@@ -35,13 +42,20 @@ import {
   type WithdrawOrderDto,
   type WithdrawStatusDto,
 } from '@/abp/withdrawal';
-import { withdrawalVouchersUrl } from '@/pages/finance/vouchers/navigation';
 import {
   ConfigurationLink,
   ConfigurationPage,
   useConfigurationLocation,
 } from '@/components/ContextConfiguration';
+import {
+  toGridColumns,
+  useSearchableLocalGrid,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { useModuleEnabled } from '@/hooks/useModuleAvailability';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
+import { withdrawalVouchersUrl } from '@/pages/finance/vouchers/navigation';
+import { queryClient } from '@/queryClient';
 import { isValidRecordId, RecordFocus } from './record-focus';
 import {
   memberFundsUrl,
@@ -120,9 +134,8 @@ function WithdrawalRecords({
 }) {
   const access = useAccess();
   const { message, modal } = App.useApp();
+  const refreshGrid = useGridRef<() => void>(undefined);
   const [data, setData] = useState<WithdrawOrderDto[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const focused = withdrawalId !== undefined;
   const invalidId = focused && !isValidRecordId(withdrawalId);
   const [loading, setLoading] = useState(focused && !invalidId);
@@ -140,27 +153,23 @@ function WithdrawalRecords({
   const [walletLoading, setWalletLoading] = useState(true);
   const [walletError, setWalletError] = useState(false);
   const latestLoad = useRef(0);
-  const pageSize = 20;
   const record = focused ? data[0] : undefined;
   const followingPayout =
     record?.status === 'Processing' || record?.status === 'Broadcasting';
 
   const reload = useCallback(
     async (background = false) => {
-      if (invalidId) return;
+      refreshGrid.current?.();
+      if (!focused || invalidId) return;
       const version = ++latestLoad.current;
       if (!background) setLoading(true);
       setLoadFailed(false);
       try {
-        const result = await getWithdrawals(
-          focused
-            ? { skipCount: 0, maxResultCount: 1, withdrawalId }
-            : {
-                skipCount: (page - 1) * pageSize,
-                maxResultCount: pageSize,
-                status: statusFilter,
-              },
-        );
+        const result = await getWithdrawals({
+          skipCount: 0,
+          maxResultCount: 1,
+          withdrawalId,
+        });
         if (version !== latestLoad.current) return;
         const rows = focused
           ? result.items.filter(
@@ -177,7 +186,6 @@ function WithdrawalRecords({
         }
 
         setData(rows);
-        setTotal(focused ? rows.length : result.totalCount);
       } catch {
         if (version === latestLoad.current && focused && !background) {
           setData([]);
@@ -187,7 +195,7 @@ function WithdrawalRecords({
         if (version === latestLoad.current) setLoading(false);
       }
     },
-    [focused, invalidId, page, statusFilter, withdrawalId],
+    [focused, invalidId, withdrawalId],
   );
 
   const reloadCards = useCallback(async () => {
@@ -206,8 +214,8 @@ function WithdrawalRecords({
   }, []);
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (focused) void reload();
+  }, [focused, reload]);
   useEffect(() => {
     reloadCards();
   }, [reloadCards]);
@@ -241,6 +249,9 @@ function WithdrawalRecords({
   const [txHashInput, setTxHashInput] = useState('');
   const [acting, setActing] = useState(false);
   const actionInProgress = useRef(false);
+  const selectionApi = useRef<
+    import('ag-grid-community').GridApi<WithdrawOrderDto> | undefined
+  >(undefined);
   const [selectedIds, setSelectedIds] = useState<React.Key[]>([]);
   const [batchRejectOpen, setBatchRejectOpen] = useState(false);
   const [batchRunning, setBatchRunning] = useState(false);
@@ -279,6 +290,7 @@ function WithdrawalRecords({
         `${okText}：成功 ${ok} 笔，失败 ${fail} 笔（保持待审）。首个错误：${firstErr}`,
       );
     }
+    selectionApi.current?.deselectAll();
     setSelectedIds([]);
     await reload();
     await reloadCards();
@@ -481,6 +493,37 @@ function WithdrawalRecords({
     },
   ];
 
+  const withdrawalsGridScope = gridScope({
+    withdrawalId,
+    status: focused ? undefined : statusFilter,
+  });
+  const recordColumns = toGridColumns<WithdrawOrderDto>(columns, {
+    kinds: {
+      amount: 'decimal',
+      fee: 'decimal',
+      actualAmount: 'decimal',
+      creationTime: 'date',
+    },
+  });
+  const withdrawalsGrid = useSearchableRemoteGrid<WithdrawOrderDto>({
+    ariaLabel: '提现记录',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(
+      businessGridQueries.withdrawals,
+      withdrawalsGridScope,
+    ),
+    columnDefs: recordColumns,
+  });
+  const focusedGrid = useSearchableLocalGrid<WithdrawOrderDto>({
+    ariaLabel: '提现记录',
+    getRowId: ({ data }) => String(data.id),
+    pagination: false,
+    rowData: data,
+    columnDefs: recordColumns,
+    keywordFields: ['txHash', 'toAddress', 'userId', 'currency'],
+  });
+  const visibleGrid = focused ? focusedGrid : withdrawalsGrid;
+  refreshGrid.current = withdrawalsGrid.refresh;
   return (
     <>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
@@ -560,7 +603,6 @@ function WithdrawalRecords({
                   value={statusFilter}
                   onChange={(v) => {
                     setStatusFilter(v);
-                    setPage(1);
                   }}
                   options={[
                     { value: '', label: '全部状态' },
@@ -646,35 +688,40 @@ function WithdrawalRecords({
             />
           )}
           {(!focused || record) && (
-            <Table<WithdrawOrderDto>
-              rowKey="id"
-              loading={loading}
-              dataSource={data}
-              columns={columns}
-              size="small"
-              scroll={{ x: 1500 }}
-              rowSelection={
-                focused
-                  ? undefined
-                  : {
-                      selectedRowKeys: selectedIds,
-                      preserveSelectedRowKeys: true,
-                      onChange: (keys) => setSelectedIds(keys),
-                      getCheckboxProps: (row) => ({
-                        disabled: row.status !== 'Pending',
-                      }),
-                    }
-              }
-              pagination={
-                !focused && {
-                  current: page,
-                  pageSize,
-                  total,
-                  showSizeChanger: false,
-                  onChange: (p) => setPage(p),
+            <>
+              {visibleGrid.searchBox}
+              <AgGridReact<WithdrawOrderDto>
+                {...visibleGrid.gridProps}
+                modules={[
+                  ...(visibleGrid.gridProps.modules ?? []),
+                  RowSelectionModule,
+                ]}
+                rowSelection={
+                  focused
+                    ? undefined
+                    : {
+                        mode: 'multiRow',
+                        headerCheckbox: false,
+                        isRowSelectable: (node) =>
+                          node.data?.status === 'Pending',
+                      }
                 }
-              }
-            />
+                onGridReady={(event) => {
+                  visibleGrid.gridProps.onGridReady?.(event);
+                  selectionApi.current = event.api;
+                }}
+                onGridPreDestroyed={() => {
+                  selectionApi.current = undefined;
+                }}
+                onSelectionChanged={({ api }) =>
+                  setSelectedIds(
+                    api
+                      .getSelectedNodes()
+                      .flatMap((node) => (node.id ? [node.id] : [])),
+                  )
+                }
+              />
+            </>
           )}
         </Card>
       </Space>

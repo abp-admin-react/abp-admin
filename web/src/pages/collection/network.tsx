@@ -1,4 +1,5 @@
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -15,7 +16,6 @@ import {
   Space,
   Spin,
   Switch,
-  Table,
   Tag,
 } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -29,6 +29,7 @@ import {
   type NetworkStatusDto,
   type TokenStatusDto,
 } from '@/abp/chainAdmin';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 import TransactionRpc from './transaction-rpc';
 
 function NetworkEditor({
@@ -102,6 +103,44 @@ function NetworkEditor({
       setBusy(false);
     }
   }
+  const detailGrid1 = useSearchableLocalGrid<TokenStatusDto>({
+    ariaLabel: '代币状态',
+    rowData: status?.tokens,
+    keywordFields: ['symbol'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.id),
+    columnDefs: toGridColumns<TokenStatusDto>(
+      [
+        { title: '代币', dataIndex: 'symbol' },
+        { title: '最低充值', dataIndex: 'minDeposit' },
+        {
+          title: '状态',
+          dataIndex: 'isEnabled',
+          render: (enabled: boolean) => (
+            <Tag color={enabled ? 'success' : 'default'}>
+              {enabled ? '启用' : '停用'}
+            </Tag>
+          ),
+        },
+        {
+          title: '操作',
+          render: (_, row) => (
+            <Button
+              type="link"
+              aria-label={`配置 ${row.symbol} 充值规则`}
+              onClick={() => {
+                tokenForm.setFieldsValue(row);
+                setToken(row);
+              }}
+            >
+              配置
+            </Button>
+          ),
+        },
+      ],
+      { kinds: { isEnabled: 'boolean' } },
+    ),
+  });
   if (loading && !status) return <Spin />;
   if (!status)
     return (
@@ -153,41 +192,8 @@ function NetworkEditor({
       >
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           <Card title={`${network.name} 充值规则`} size="small">
-            <Table<TokenStatusDto>
-              rowKey="id"
-              dataSource={status.tokens}
-              pagination={false}
-              size="small"
-              columns={[
-                { title: '代币', dataIndex: 'symbol' },
-                { title: '最低充值', dataIndex: 'minDeposit' },
-                {
-                  title: '状态',
-                  dataIndex: 'isEnabled',
-                  render: (enabled: boolean) => (
-                    <Tag color={enabled ? 'success' : 'default'}>
-                      {enabled ? '启用' : '停用'}
-                    </Tag>
-                  ),
-                },
-                {
-                  title: '操作',
-                  render: (_, row) => (
-                    <Button
-                      type="link"
-                      aria-label={`配置 ${row.symbol} 充值规则`}
-                      onClick={() => {
-                        tokenForm.setFieldsValue(row);
-                        setToken(row);
-                      }}
-                    >
-                      配置
-                    </Button>
-                  ),
-                },
-              ]}
-              style={{ marginBottom: 16 }}
-            />
+            {detailGrid1.searchBox}
+            <AgGridReact<TokenStatusDto> {...detailGrid1.gridProps} />
             <Row gutter={16}>
               {isBsc && (
                 <Col xs={24} sm={12}>
@@ -306,6 +312,67 @@ export default function NetworkConfigPage({
   useEffect(() => {
     void load();
   }, [load]);
+  const detailGrid2 = useSearchableLocalGrid<CollectionNetworkSummaryDto>({
+    ariaLabel: '链网络',
+    rowData: networks,
+    keywordFields: ['name', 'chainId'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.id),
+    columnDefs: toGridColumns<CollectionNetworkSummaryDto>(
+      [
+        { title: '网络', dataIndex: 'name' },
+        { title: 'Chain ID', dataIndex: 'chainId' },
+        {
+          title: '自动处理',
+          key: 'processing',
+          render: (_, row) => (
+            <Tag color={row.id === networks[0]?.id ? 'success' : 'default'}>
+              {row.id === networks[0]?.id ? '当前运行网络' : '待接入'}
+            </Tag>
+          ),
+        },
+        ...(mode === 'deposit'
+          ? [
+              {
+                title: '充值费率',
+                dataIndex: 'depositFeeRate',
+                render: (rate: number) => `${(rate * 100).toFixed(2)}%`,
+              },
+              {
+                title: '自动放行金额上限',
+                dataIndex: 'autoCreditMaxAmount',
+              },
+            ]
+          : [
+              {
+                title: '交易 RPC',
+                dataIndex: 'rpcConfigured',
+                render: (configured: boolean) => (
+                  <Tag color={configured ? 'success' : 'warning'}>
+                    {configured ? '已配置' : '未配置'}
+                  </Tag>
+                ),
+              },
+            ]),
+        {
+          title: '操作',
+          render: (_, row) => (
+            <Button type="link" onClick={() => setSelected(row)}>
+              {mode === 'deposit' ? '配置充值' : '配置交易 RPC'}
+            </Button>
+          ),
+        },
+      ],
+      {
+        kinds: {
+          chainId: 'number',
+          rpcConfigured: 'boolean',
+          depositFeeRate: 'decimal',
+          autoCreditMaxAmount: 'decimal',
+        },
+      },
+    ),
+  });
   if (!access.canAdminNetwork) {
     return <Empty description="暂无链网络管理权限" />;
   }
@@ -326,58 +393,11 @@ export default function NetworkConfigPage({
           </Button>
         }
       >
-        <Table<CollectionNetworkSummaryDto>
-          rowKey="id"
-          dataSource={networks}
-          loading={loading}
-          scroll={{ x: 720 }}
-          pagination={false}
-          locale={{ emptyText: <Empty description="暂无链网络" /> }}
-          columns={[
-            { title: '网络', dataIndex: 'name' },
-            { title: 'Chain ID', dataIndex: 'chainId' },
-            {
-              title: '自动处理',
-              key: 'processing',
-              render: (_, row) => (
-                <Tag color={row.id === networks[0]?.id ? 'success' : 'default'}>
-                  {row.id === networks[0]?.id ? '当前运行网络' : '待接入'}
-                </Tag>
-              ),
-            },
-            ...(mode === 'deposit'
-              ? [
-                  {
-                    title: '充值费率',
-                    dataIndex: 'depositFeeRate',
-                    render: (rate: number) => `${(rate * 100).toFixed(2)}%`,
-                  },
-                  {
-                    title: '自动放行金额上限',
-                    dataIndex: 'autoCreditMaxAmount',
-                  },
-                ]
-              : [
-                  {
-                    title: '交易 RPC',
-                    dataIndex: 'rpcConfigured',
-                    render: (configured: boolean) => (
-                      <Tag color={configured ? 'success' : 'warning'}>
-                        {configured ? '已配置' : '未配置'}
-                      </Tag>
-                    ),
-                  },
-                ]),
-            {
-              title: '操作',
-              render: (_, row) => (
-                <Button type="link" onClick={() => setSelected(row)}>
-                  {mode === 'deposit' ? '配置充值' : '配置交易 RPC'}
-                </Button>
-              ),
-            },
-          ]}
-        />
+        {!loading && networks.length === 0 && (
+          <Empty description="暂无链网络" />
+        )}
+        {detailGrid2.searchBox}
+        <AgGridReact<CollectionNetworkSummaryDto> {...detailGrid2.gridProps} />
       </Card>
       <Drawer
         title={

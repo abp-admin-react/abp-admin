@@ -10,18 +10,12 @@ import {
   Select,
   Space,
   Statistic,
-  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { businessGridQueries, gridScope } from '@/abp/businessGrid';
 import {
   BALANCE_ACTION_LABELS,
   type BalanceTxnDto,
@@ -33,11 +27,13 @@ import {
 } from '@/abp/collectionAdmin';
 import { getUsers } from '@/abp/identity';
 import { currencyLabel } from '@/abp/ordering';
-import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
 import {
   type RemoteColumn,
+  toGridColumns,
+  useSearchableLocalGrid,
   useSearchableRemoteGrid,
 } from '@/components/remoteGrid';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 import { isValidRecordId } from './record-focus';
 import {
   depositRecordUrl,
@@ -102,15 +98,12 @@ export default function MemberFundsPage() {
     total: number;
   }>();
   const paginationKey = `${userId ?? ''}:${withdrawalId ?? ''}`;
-  const [pagination, setPagination] = useState<{ key: string; page: number }>();
-  const page = pagination?.key === paginationKey ? pagination.page : 1;
-  const queryKey = `${paginationKey}:${txnId ?? ''}:${txnId ? 1 : page}`;
+  const queryKey = `${paginationKey}:${txnId ?? ''}:`;
   const balances = funds?.userId === userId ? (funds?.balances ?? []) : [];
   const txns = funds?.queryKey === queryKey ? funds.txns : [];
-  const total = funds?.queryKey === queryKey ? funds.total : 0;
   const [loading, setLoading] = useState(!!linkedUserId);
   const [loadFailed, setLoadFailed] = useState(false);
-  const pageSize = 20;
+  const refreshTxns = useRef<() => void>(undefined);
   const fundsRequest = useRef(0);
 
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -150,15 +143,18 @@ export default function MemberFundsPage() {
       const request = ++fundsRequest.current;
       if (!background) setLoading(true);
       try {
+        if (background) refreshTxns.current?.();
         const [balanceResult, txnResult] = await Promise.all([
           getMemberBalances(userId),
-          getMemberTxns({
-            userId,
-            skipCount: txnId ? 0 : (page - 1) * pageSize,
-            maxResultCount: txnId ? 1 : pageSize,
-            ...(txnId ? { txnId } : {}),
-            ...(withdrawalId ? { withdrawalId } : {}),
-          }),
+          txnId
+            ? getMemberTxns({
+                userId,
+                skipCount: 0,
+                maxResultCount: 1,
+                ...(txnId ? { txnId } : {}),
+                ...(withdrawalId ? { withdrawalId } : {}),
+              })
+            : Promise.resolve({ items: [], totalCount: 0 }),
         ]);
         // 切换用户或筛选条件后，旧请求不能覆盖当前流水。
         if (request !== fundsRequest.current) return;
@@ -177,7 +173,7 @@ export default function MemberFundsPage() {
         if (request === fundsRequest.current) setLoading(false);
       }
     },
-    [userId, page, queryKey, txnId, withdrawalId],
+    [userId, queryKey, txnId, withdrawalId],
   );
   useEffect(() => {
     void reloadFunds();
@@ -317,11 +313,6 @@ export default function MemberFundsPage() {
     },
   ];
 
-  const {
-    columns: resizableColumns,
-    components,
-    scrollX,
-  } = useResizableColumns(columns);
   const userLabel = (userId && userLabels.current[userId]) || linkedUserId;
   const options =
     userId &&
@@ -342,12 +333,35 @@ export default function MemberFundsPage() {
     setFunds(undefined);
     setLoadFailed(false);
     setLoading(true);
-    setPagination(undefined);
+
     const url = memberFundsUrl(normalized);
     if (userId) history.replace(url);
     else history.push(url);
   }
 
+  const memberTxnsGridScope = gridScope({ userId, txnId, withdrawalId });
+  const recordColumns = toGridColumns<BalanceTxnDto>(columns, {
+    kinds: { amount: 'decimal', balanceAfter: 'decimal', creationTime: 'date' },
+  });
+  const memberTxnsGrid = useSearchableRemoteGrid<BalanceTxnDto>({
+    ariaLabel: '会员余额流水',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(
+      businessGridQueries.memberTxns,
+      memberTxnsGridScope,
+    ),
+    columnDefs: recordColumns,
+  });
+  const focusedGrid = useSearchableLocalGrid<BalanceTxnDto>({
+    ariaLabel: '会员余额流水',
+    getRowId: ({ data }) => String(data.id),
+    pagination: false,
+    rowData: focusedTxn ? [focusedTxn] : [],
+    columnDefs: recordColumns,
+    keywordFields: ['action', 'currency', 'txHash'],
+  });
+  const visibleGrid = txnId ? focusedGrid : memberTxnsGrid;
+  refreshTxns.current = memberTxnsGrid.refresh;
   return (
     <PageContainer title="用户余额">
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
@@ -536,30 +550,8 @@ export default function MemberFundsPage() {
                   style={{ marginBottom: 12 }}
                 />
               )}
-              <Table<BalanceTxnDto>
-                rowKey="id"
-                loading={loading}
-                dataSource={txnId ? (focusedTxn ? [focusedTxn] : []) : txns}
-                columns={resizableColumns}
-                components={components}
-                scroll={{ x: scrollX }}
-                size="small"
-                locale={
-                  withdrawalId && !txnId && !loading && !loadFailed
-                    ? { emptyText: '未找到该提现单的关联流水' }
-                    : undefined
-                }
-                pagination={
-                  !txnId && {
-                    current: page,
-                    pageSize,
-                    total,
-                    showSizeChanger: false,
-                    onChange: (p) =>
-                      setPagination({ key: paginationKey, page: p }),
-                  }
-                }
-              />
+              {visibleGrid.searchBox}
+              <AgGridReact<BalanceTxnDto> {...visibleGrid.gridProps} />
             </Card>
           </>
         ) : (

@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -616,7 +617,16 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
         }
     }
 
-    public virtual async Task<PagedResultDto<DepositOrderListDto>> GetDepositOrdersAsync(
+    public virtual Task<PagedResultDto<DepositOrderListDto>> GetDepositOrdersAsync(
+        int skipCount, int maxResultCount, string? status = null, string? symbol = null,
+        Guid? depositId = null, Guid? sweepTaskId = null) =>
+        ReadDepositOrdersPageAsync(null, skipCount, maxResultCount, status, symbol, depositId, sweepTaskId);
+
+    [HttpPost("api/app/collection-network-admin/deposit-orders/query")]
+    public virtual Task<PagedResultDto<DepositOrderListDto>> QueryDepositOrdersAsync([FromBody] GridQueryInput grid, string? status = null, string? symbol = null, Guid? depositId = null, Guid? sweepTaskId = null) =>
+        ReadDepositOrdersPageAsync(grid, grid.SkipCount, grid.MaxResultCount, status, symbol, depositId, sweepTaskId);
+
+    private async Task<PagedResultDto<DepositOrderListDto>> ReadDepositOrdersPageAsync(GridQueryInput? grid,
         int skipCount, int maxResultCount, string? status = null, string? symbol = null,
         Guid? depositId = null, Guid? sweepTaskId = null)
     {
@@ -648,9 +658,26 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
             query = query.Where(o => tokenIds.Contains(o.TokenId));
         }
 
+        var definition = new GridQueryDefinition<ColDepositOrder>()
+            .SearchableField("id", x => x.Id.ToString())
+            .SearchableField("txHash", x => x.TxHash)
+            .Field("logIndex", x => x.LogIndex)
+            .SearchableField("userId", x => x.UserId.ToString())
+            .SearchableField("symbol", x => dbContext.Tokens.Where(t => t.Id == x.TokenId).Select(t => t.Symbol).FirstOrDefault())
+            .SearchableField("networkName", x => dbContext.Networks.Where(n => n.Id == x.NetworkId).Select(n => n.Name).FirstOrDefault())
+            .Field("amount", x => x.Amount)
+            .Field("fee", x => x.Fee)
+            .Field("actualAmount", x => x.ActualAmount ?? x.Amount)
+            .SearchableEnumField("status", x => x.Status)
+            .Field("blockNumber", x => x.BlockNumber)
+            .SearchableField("toAddress", x => x.ToAddress)
+            .SearchableField("fromAddress", x => x.FromAddress)
+            .Field("creationTime", x => x.CreationTime);
+        if (grid != null) query = definition.Filter(query, grid);
         var total = await query.CountAsync();
-        var items = await query
-            .OrderByDescending(o => o.CreationTime)
+        var items = await (grid == null
+            ? query.OrderByDescending(o => o.CreationTime)
+            : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
             .ToListAsync();
@@ -689,7 +716,15 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
     }
 
     /// <summary>归集任务分页。</summary>
-    public virtual async Task<PagedResultDto<SweepTaskListDto>> GetSweepTasksAsync(
+    public virtual Task<PagedResultDto<SweepTaskListDto>> GetSweepTasksAsync(
+        int skipCount, int maxResultCount, string? status = null, Guid? sweepTaskId = null) =>
+        ReadSweepTasksPageAsync(null, skipCount, maxResultCount, status, sweepTaskId);
+
+    [HttpPost("api/app/collection-network-admin/sweep-tasks/query")]
+    public virtual Task<PagedResultDto<SweepTaskListDto>> QuerySweepTasksAsync([FromBody] GridQueryInput grid, string? status = null, Guid? sweepTaskId = null) =>
+        ReadSweepTasksPageAsync(grid, grid.SkipCount, grid.MaxResultCount, status, sweepTaskId);
+
+    private async Task<PagedResultDto<SweepTaskListDto>> ReadSweepTasksPageAsync(GridQueryInput? grid,
         int skipCount, int maxResultCount, string? status = null, Guid? sweepTaskId = null)
     {
         await CheckOperationsReadAccessAsync();
@@ -708,9 +743,25 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
             query = query.Where(t => t.Status == st);
         }
 
+        var definition = new GridQueryDefinition<ColSweepTask>()
+            .SearchableField("id", x => x.Id.ToString())
+            .SearchableField("userId", x => x.UserId.ToString())
+            .SearchableField("symbol", x => dbContext.Tokens.Where(t => t.Id == x.TokenId).Select(t => t.Symbol).FirstOrDefault())
+            .Field("amount", x => x.Amount)
+            .SearchableEnumField("status", x => x.Status)
+            .SearchableField("address", x => x.Address)
+            .Field("addressIndex", x => x.AddressIndex)
+            .SearchableField("txHash", x => x.TxHash)
+            .Field("nonceUsed", x => x.NonceUsed)
+            .Field("retryable", x => x.Retryable)
+            .SearchableField("failReason", x => x.FailReason)
+            .Field("statusChangedAt", x => x.StatusChangedAt)
+            .Field("creationTime", x => x.CreationTime);
+        if (grid != null) query = definition.Filter(query, grid);
         var total = await query.CountAsync();
-        var items = await query
-            .OrderByDescending(t => t.CreationTime)
+        var items = await (grid == null
+            ? query.OrderByDescending(t => t.CreationTime)
+            : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
             .ToListAsync();
@@ -736,7 +787,15 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
     }
 
     /// <summary>金库核对留痕分页。</summary>
-    public virtual async Task<PagedResultDto<VaultCheckListDto>> GetVaultChecksAsync(
+    public virtual Task<PagedResultDto<VaultCheckListDto>> GetVaultChecksAsync(
+        int skipCount, int maxResultCount) =>
+        ReadVaultChecksPageAsync(null, skipCount, maxResultCount);
+
+    [HttpPost("api/app/collection-network-admin/vault-checks/query")]
+    public virtual Task<PagedResultDto<VaultCheckListDto>> QueryVaultChecksAsync([FromBody] GridQueryInput grid) =>
+        ReadVaultChecksPageAsync(grid, grid.SkipCount, grid.MaxResultCount);
+
+    private async Task<PagedResultDto<VaultCheckListDto>> ReadVaultChecksPageAsync(GridQueryInput? grid,
         int skipCount, int maxResultCount)
     {
         await CheckOperationsReadAccessAsync();
@@ -745,9 +804,18 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var query = dbContext.VaultChecks.AsNoTracking();
 
+        var definition = new GridQueryDefinition<ColVaultCheck>()
+            .SearchableField("symbol", x => x.Symbol)
+            .SearchableField("status", x => x.Difference < 0 ? "缺口" : "正常")
+            .Field("vaultBalance", x => x.VaultBalance)
+            .Field("userTotal", x => x.UserTotal)
+            .Field("difference", x => x.Difference)
+            .Field("checkedAt", x => x.CheckedAt);
+        if (grid != null) query = definition.Filter(query, grid);
         var total = await query.CountAsync();
-        var items = await query
-            .OrderByDescending(v => v.CheckedAt)
+        var items = await (grid == null
+            ? query.OrderByDescending(v => v.CheckedAt)
+            : definition.OrderBy(query, grid, "checkedAt", true, x => x.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
             .ToListAsync();

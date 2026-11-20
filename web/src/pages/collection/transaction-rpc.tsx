@@ -1,3 +1,4 @@
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -9,7 +10,6 @@ import {
   Space,
   Spin,
   Switch,
-  Table,
   Typography,
 } from 'antd';
 import { useEffect, useState } from 'react';
@@ -25,6 +25,7 @@ import {
   type TestNodeCredentialDto,
   testNodeCredential,
 } from '@/abp/chainAdmin';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 import { isNotFound } from '@/requestErrorConfig';
 import { useCredentialProbe } from './useCredentialProbe';
 
@@ -53,6 +54,79 @@ function TransactionKeyPool({
   const probe = useCredentialProbe<TestNodeCredentialDto>();
   const isAnkr = provider === 'RpcBsc';
   const title = isAnkr ? '交易用 Ankr 项目密钥' : 'Etherscan 补查密钥';
+  const detailGrid1 = useSearchableLocalGrid<ChainApiKeyDto>({
+    ariaLabel: '交易 RPC 密钥',
+    rowData: keys,
+    keywordFields: ['label', 'maskedKey'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.id),
+    columnDefs: toGridColumns<ChainApiKeyDto>(
+      [
+        { title: '备注', dataIndex: 'label', ellipsis: true },
+        { title: '密钥', dataIndex: 'maskedKey' },
+        {
+          title: '启用',
+          dataIndex: 'isEnabled',
+          render: (_, row) => (
+            <Switch
+              aria-label={`启用密钥 ${row.maskedKey}`}
+              checked={row.isEnabled}
+              disabled={saving}
+              onChange={(enabled) =>
+                save(
+                  () => setApiKeyEnabled(row.id, enabled, networkId),
+                  '密钥状态已更新',
+                )
+              }
+            />
+          ),
+        },
+        {
+          title: '操作',
+          render: (_, row) => (
+            <Space wrap size="small">
+              <Button
+                type="link"
+                size="small"
+                aria-label={`测试已保存密钥 ${row.maskedKey}`}
+                loading={probe.testing && testedKey === row.id}
+                disabled={saving || probe.testing}
+                onClick={() => {
+                  setTestedKey(row.id);
+                  return probe.test(
+                    () =>
+                      testNodeCredential({
+                        networkId,
+                        provider,
+                        keyId: row.id,
+                      }),
+                    unavailable,
+                  );
+                }}
+              >
+                测试
+              </Button>
+              <Popconfirm
+                title="删除这把密钥？"
+                onConfirm={() => {
+                  probe.clear();
+                  return save(
+                    () => removeApiKey(row.id, networkId),
+                    '密钥已删除',
+                  );
+                }}
+              >
+                <Button danger type="link" size="small" disabled={saving}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </Space>
+          ),
+        },
+      ],
+      { kinds: { isEnabled: 'boolean' } },
+    ),
+  });
   return (
     <Card title={title} size="small">
       <Form
@@ -126,77 +200,8 @@ function TransactionKeyPool({
           </Button>
         </Space>
       </Form>
-      <Table<ChainApiKeyDto>
-        rowKey="id"
-        dataSource={keys}
-        pagination={false}
-        size="small"
-        scroll={{ x: 440 }}
-        style={{ marginBlockStart: 16 }}
-        locale={{ emptyText: '暂无密钥' }}
-        columns={[
-          { title: '备注', dataIndex: 'label', ellipsis: true },
-          { title: '密钥', dataIndex: 'maskedKey' },
-          {
-            title: '启用',
-            render: (_, row) => (
-              <Switch
-                aria-label={`启用密钥 ${row.maskedKey}`}
-                checked={row.isEnabled}
-                disabled={saving}
-                onChange={(enabled) =>
-                  save(
-                    () => setApiKeyEnabled(row.id, enabled, networkId),
-                    '密钥状态已更新',
-                  )
-                }
-              />
-            ),
-          },
-          {
-            title: '操作',
-            render: (_, row) => (
-              <Space wrap size="small">
-                <Button
-                  type="link"
-                  size="small"
-                  aria-label={`测试已保存密钥 ${row.maskedKey}`}
-                  loading={probe.testing && testedKey === row.id}
-                  disabled={saving || probe.testing}
-                  onClick={() => {
-                    setTestedKey(row.id);
-                    return probe.test(
-                      () =>
-                        testNodeCredential({
-                          networkId,
-                          provider,
-                          keyId: row.id,
-                        }),
-                      unavailable,
-                    );
-                  }}
-                >
-                  测试
-                </Button>
-                <Popconfirm
-                  title="删除这把密钥？"
-                  onConfirm={() => {
-                    probe.clear();
-                    return save(
-                      () => removeApiKey(row.id, networkId),
-                      '密钥已删除',
-                    );
-                  }}
-                >
-                  <Button danger type="link" size="small" disabled={saving}>
-                    删除
-                  </Button>
-                </Popconfirm>
-              </Space>
-            ),
-          },
-        ]}
-      />
+      {detailGrid1.searchBox}
+      <AgGridReact<ChainApiKeyDto> {...detailGrid1.gridProps} />
       <div role="status" style={{ marginBlockStart: 8 }}>
         {probe.result && (
           <Typography.Text type={probe.result.passed ? 'success' : 'danger'}>

@@ -1,3 +1,5 @@
+vi.mock('ag-grid-react', () => import('../../../tests/gridTestDouble'));
+
 import { render, screen } from '@testing-library/react';
 import { App } from 'antd';
 import type { ComponentPropsWithoutRef } from 'react';
@@ -53,7 +55,11 @@ const deposit: DepositOrderListDto = {
 };
 
 function show(props: React.ComponentProps<typeof DepositsPage>) {
-  render(<App><DepositsPage embedded {...props} /></App>);
+  render(
+    <App>
+      <DepositsPage embedded {...props} />
+    </App>,
+  );
 }
 
 describe('充值记录关联', () => {
@@ -71,40 +77,68 @@ describe('充值记录关联', () => {
       canViewMemberFunds: true,
       canViewOwnOrders: true,
     });
-    mocks.model.mockReturnValue({ initialState: { currentUser: { userid: userId } } });
+    mocks.model.mockReturnValue({
+      initialState: { currentUser: { userid: userId } },
+    });
     show({ depositId });
     expect(await screen.findByText('已定位充值单')).toBeTruthy();
-    expect(screen.getByRole('link', { name: `查看归集任务 ${sweepTaskId}` })).toHaveAttribute(
-      'href', `/web3/operations?view=sweeps&sweepTaskId=${sweepTaskId}`,
+    expect(
+      screen.getByRole('link', { name: `查看归集任务 ${sweepTaskId}` }),
+    ).toHaveAttribute(
+      'href',
+      `/web3/operations?view=sweeps&sweepTaskId=${sweepTaskId}`,
     );
-    expect(screen.getByRole('link', { name: `查看充值余额流水 ${txnId}` })).toHaveAttribute(
-      'href', `/collection/member-funds?userId=${userId}&txnId=${txnId}`,
+    expect(
+      screen.getByRole('link', { name: `查看充值余额流水 ${txnId}` }),
+    ).toHaveAttribute(
+      'href',
+      `/collection/member-funds?userId=${userId}&txnId=${txnId}`,
     );
-    expect(screen.getByRole('link', { name: `查看充值单 ${depositId} 的充值入账记录` })).toHaveAttribute(
-      'href', `/collection/orders?orderType=TopUp&userId=${userId}&balanceTxnId=${txnId}`,
+    expect(
+      screen.getByRole('link', {
+        name: `查看充值单 ${depositId} 的充值入账记录`,
+      }),
+    ).toHaveAttribute(
+      'href',
+      `/collection/orders?orderType=TopUp&userId=${userId}&balanceTxnId=${txnId}`,
     );
     expect(mocks.deposits).toHaveBeenCalledExactlyOnceWith({
-      depositId, skipCount: 0, maxResultCount: 1,
+      depositId,
+      skipCount: 0,
+      maxResultCount: 1,
     });
   });
 
   it('只读记录角色会显示关联 ID，且本人权限不能从他人充值查看订单', async () => {
     mocks.access.mockReturnValue({ canViewOwnOrders: true });
-    mocks.model.mockReturnValue({ initialState: { currentUser: { userid: txnId } } });
+    mocks.model.mockReturnValue({
+      initialState: { currentUser: { userid: txnId } },
+    });
     show({ depositId });
     expect(await screen.findByText(`余额流水 ${txnId}`)).toBeTruthy();
     expect(screen.getByText(`归集任务 ${sweepTaskId}`)).toBeTruthy();
-    expect(screen.queryByRole('link', { name: /查看充值余额流水|查看归集任务|的充值入账记录/ })).toBeNull();
+    expect(
+      screen.queryByRole('link', {
+        name: /查看充值余额流水|查看归集任务|的充值入账记录/,
+      }),
+    ).toBeNull();
   });
 
   it('归集反查保留实际任务筛选，充值列表为记录提供准确深链', async () => {
     show({ sweepTaskId });
-    expect(await screen.findByRole('link', { name: `查看充值单 ${depositId}` })).toHaveAttribute(
-      'href', `/operations/payments?view=deposits&depositId=${depositId}`,
+    expect(
+      await screen.findByRole('link', { name: `查看充值单 ${depositId}` }),
+    ).toHaveAttribute(
+      'href',
+      `/operations/payments?view=deposits&depositId=${depositId}`,
     );
-    expect(mocks.deposits).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      sweepTaskId, skipCount: 0, maxResultCount: 20,
-    }));
+    expect(mocks.deposits).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        sweepTaskId,
+        skipCount: 0,
+        maxResultCount: 20,
+      }),
+    );
   });
 
   it('无效的归集任务链接不请求充值列表', async () => {
@@ -112,4 +146,24 @@ describe('充值记录关联', () => {
     expect(await screen.findByText('无效的归集任务链接')).toBeTruthy();
     expect(mocks.deposits).not.toHaveBeenCalled();
   });
+});
+
+vi.mock('@/abp/businessGrid', async (original) => {
+  const grid = await original<typeof import('@/abp/businessGrid')>();
+  return {
+    ...grid,
+    businessGridQueries: {
+      ...grid.businessGridQueries,
+      deposits: (
+        input: import('@/abp/gridQuery').GridQuery,
+        _signal: AbortSignal,
+        scope: string,
+      ) =>
+        mocks.deposits({
+          skipCount: input.skipCount,
+          maxResultCount: input.maxResultCount,
+          ...Object.fromEntries(new URLSearchParams(scope)),
+        }),
+    },
+  };
 });

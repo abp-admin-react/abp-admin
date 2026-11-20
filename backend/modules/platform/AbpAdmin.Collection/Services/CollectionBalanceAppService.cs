@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -96,7 +98,15 @@ public class CollectionBalanceAppService : ApplicationService
     /// 充值行批量回填链上凭证：贷记的幂等键 = 进款单 Id（CreditCoreAsync 的写入口径），
     /// 据此查 ColDepositOrders.TxHash——用户对账要能看到链上转账，不只是余额数字。
     /// </summary>
-    public virtual async Task<PagedResultDto<BalanceTxnDto>> GetMyTxnsAsync(
+    public virtual Task<PagedResultDto<BalanceTxnDto>> GetMyTxnsAsync(
+        int skipCount, int maxResultCount, DateTime? fromTime = null, DateTime? toTime = null, Guid? txnId = null) =>
+        ReadMyTxnsPageAsync(null, skipCount, maxResultCount, fromTime, toTime, txnId);
+
+    [HttpPost("api/app/collection-balance/my-txns/query")]
+    public virtual Task<PagedResultDto<BalanceTxnDto>> QueryMyTxnsAsync([FromBody] GridQueryInput grid, DateTime? fromTime = null, DateTime? toTime = null, Guid? txnId = null) =>
+        ReadMyTxnsPageAsync(grid, grid.SkipCount, grid.MaxResultCount, fromTime, toTime, txnId);
+
+    private async Task<PagedResultDto<BalanceTxnDto>> ReadMyTxnsPageAsync(GridQueryInput? grid,
         int skipCount, int maxResultCount, DateTime? fromTime = null, DateTime? toTime = null, Guid? txnId = null)
     {
         AssertHost();
@@ -108,7 +118,7 @@ public class CollectionBalanceAppService : ApplicationService
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var (total, items) = await BalanceQueries.GetTxnsAsync(
-            dbContext, CurrentUser.Id!.Value, skipCount, maxResultCount, fromTime, toTime, txnId);
+            dbContext, CurrentUser.Id!.Value, skipCount, maxResultCount, fromTime, toTime, txnId, null, grid);
         await uow.CompleteAsync();
         return new PagedResultDto<BalanceTxnDto>(total, items);
     }

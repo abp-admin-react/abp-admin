@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -51,17 +53,39 @@ public class OrderAdminAppService : ApplicationService
     }
 
     /// <summary>全部订单；列表可按订单类型、状态和「有异常」过滤（更早的关闭单用这里的过滤查看）。</summary>
-    public virtual async Task<PagedResultDto<OrderDto>> GetListAsync(OrderListFilterDto filter)
+    public virtual Task<PagedResultDto<OrderDto>> GetListAsync(OrderListFilterDto filter) =>
+        ReadListPageAsync(null, filter);
+
+    [HttpPost("api/app/order-admin/query")]
+    public virtual Task<PagedResultDto<OrderDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] OrderListFilterDto filter) =>
+        ReadListPageAsync(grid, filter);
+
+    private async Task<PagedResultDto<OrderDto>> ReadListPageAsync(GridQueryInput? grid, OrderListFilterDto filter)
     {
         AssertHost();
 
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var query = OrderServiceHelpers.ApplyFilter(dbContext.Orders.AsNoTracking(), filter);
 
+        var definition = new GridQueryDefinition<OrdOrder>()
+            .SearchableField("orderNo", x => x.OrderNo)
+            .SearchableField("id", x => x.Id.ToString())
+            .SearchableField("userId", x => x.UserId.ToString())
+            .SearchableField("subject", x => x.Subject)
+            .Field("amount", x => x.Amount)
+            .Field("payAmount", x => x.PayAmount)
+            .SearchableField("currency", x => x.Currency)
+            .SearchableEnumField("status", x => x.Status)
+            .SearchableEnumField("payChannel", x => x.PayChannel)
+            .SearchableEnumField("orderType", x => x.OrderType)
+            .Field("creationTime", x => x.CreationTime)
+            .Field("paymentAnomaly", x => x.PaymentAnomaly);
+        if (grid != null) query = definition.Filter(query, grid);
         var total = await query.CountAsync();
-        var (skip, take) = OrderServiceHelpers.NormalizePaging(filter, def: 50, cap: 500);
-        var items = await query
-            .OrderByDescending(o => o.CreationTime)
+        var (skip, take) = grid == null ? OrderServiceHelpers.NormalizePaging(filter, def: 50, cap: 500) : (grid.SkipCount, grid.MaxResultCount);
+        var items = await (grid == null
+            ? query.OrderByDescending(o => o.CreationTime)
+            : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
             .Skip(skip)
             .Take(take)
             .ToListAsync();

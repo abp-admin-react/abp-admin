@@ -1,3 +1,5 @@
+vi.mock('ag-grid-react', () => import('../../../tests/gridTestDouble'));
+
 import {
   fireEvent,
   render,
