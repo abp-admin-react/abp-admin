@@ -10,11 +10,32 @@
 | 会员资金 | `POST /api/app/collection-balance-admin/member-balance-accounts/query` | 先按会员汇总各币种余额，再筛选和排序，最后返回当页会员 |
 | 用户管理 | `POST /api/app/identity-user-search/query` | 按当前租户及权限查询。账号状态、关键词及其他列条件可叠加，导出沿用筛选和排序 |
 
+### 公共跨列搜索
+
+表格顶部统一使用 Ant Design 搜索框。按回车或点击搜索按钮提交关键词，清空搜索框可以继续使用已有的列头条件。更改关键词后从第一页重新查询。后端先限定当前账号可访问的行，再让已配置的字段按 **OR** 匹配同一个关键词，与列头条件取 **AND**，最后统计、排序和分页。
+
+| 表格 | 顶部搜索的字段 |
+| --- | --- |
+| 用户管理 | 用户名、名、姓。有更新用户权限时也可按邮箱、手机号搜索。用户 Excel 导出沿用已提交的关键词、列条件和排序。 |
+| 操作日志 | 用户名、操作名、业务编号、动作明细。关联 ID、模块和结果可通过各自列头筛选。 |
+| 会员资金账户 | 用户 ID 支持输入片段；有查看用户权限时可搜宿主用户名，同时有更新用户权限时可搜邮箱。金额条件仍通过对应币种的列头精确输入。 |
+
+资源在后端一次声明可搜索的字段。举例：
+
+```csharp
+var grid = new GridQueryDefinition<Customer>()
+    .SearchableField("code", row => row.Code)
+    .SearchableField("name", row => row.Name)
+    .Field("createdAt", row => row.CreatedAt);
+```
+
+这会在编号和名称中查找关键词，创建时间仍可单独排序和筛选。可用 `KeywordOnly(row => row.Property)` 将字段仅用于关键词匹配。仅授权后才可搜索的字段，在后端校验权限后登记。文本和 UUID 按不区分大小写的连续片段匹配；请求只传 `keyword` 和列条件。
+
 ### 新增一张同类表
 
 1. 在资源的 AppService 上沿用业务查询权限，在 `GridQueryDefinition<T>` 中用 `.Field("字段键", row => row.Property)` 登记可查询字段。金额绑定数据库 decimal，时间绑定原始时间值。对授权后的 `IQueryable` 调用 `Filter`，统计总数，再调用 `OrderBy` 并传入唯一键，最后 `Skip`、`Take`。返回 ABP `PagedResultDto`。参考[操作日志服务](../backend/framework-app/AbpAdmin.Application/OperationLogs/OperationLogAppService.cs)。
 2. 在 `web/src/abp` 定义接收 `GridQuery` 和 `AbortSignal` 的 POST 请求函数。列的 `field` 或 `colId` 对应后端字段键。在 `RemoteColumn<T>[]` 声明标题和类型，文本是默认值，自由格式标识符、UUID、数值、金额、日期、布尔、操作列分别用 `identifier`、`uuid`、`number`、`decimal`、`date`、`boolean`、`display`。展示值可用官方 `valueFormatter` 或 `cellRenderer`。参考[操作日志页面](../web/src/pages/operation-logs/index.tsx)。
-3. 调用 `const grid = useRemoteGrid({ columnDefs, query, getRowId })`，渲染 `<AgGridReact {...grid} />`。共享配置处理中文、主题、分页、筛选模型转换、取消过期请求、筛选输入错误提示和加载失败重试。新资源用超过一页的数据验证总数、排序和组合条件。参考[共享配置](../web/src/components/remoteGrid/index.tsx)和[请求转换](../web/src/components/remoteGrid/query.ts)。
+3. 需要跨列搜索时调用 `const { gridProps, searchBox } = useSearchableRemoteGrid({ columnDefs, query, getRowId, ariaLabel })`，将 `{searchBox}` 放入工具栏，渲染 `<AgGridReact {...gridProps} />`。页面直接传查询函数。仅需列头筛选的页面可继续使用 `useRemoteGrid`。共享配置处理中文、主题、分页、筛选模型转换、取消过期请求、筛选输入错误提示和加载失败重试。新资源用超过一页的数据验证总数、排序和组合条件。参考[共享配置](../web/src/components/remoteGrid/index.tsx)和[请求转换](../web/src/components/remoteGrid/query.ts)。
 
 ## 选型与后续规划
 

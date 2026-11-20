@@ -1,4 +1,4 @@
-import type { IGetRowsParams } from 'ag-grid-community';
+import type { GridApi, IGetRowsParams } from 'ag-grid-community';
 import type {
   GridCondition,
   GridFilterOperation,
@@ -56,6 +56,7 @@ export function toGridQuery(
     IGetRowsParams,
     'startRow' | 'endRow' | 'filterModel' | 'sortModel'
   >,
+  keyword?: string,
 ): GridQuery {
   const models: Record<
     string,
@@ -68,6 +69,7 @@ export function toGridQuery(
   return {
     skipCount: params.startRow,
     maxResultCount: params.endRow - params.startRow,
+    ...(keyword ? { keyword } : {}),
     sort: params.sortModel.map(({ colId, sort }) => ({
       field: colId,
       direction: sort,
@@ -81,4 +83,26 @@ export function toGridQuery(
           : [condition(model)],
     })),
   };
+}
+
+/** 导出读取当前表头的筛选与多列排序，并使用已提交的关键词。 */
+export function currentGridQuery<T>(
+  api: GridApi<T>,
+  pageSize: number,
+  keyword: string,
+): GridQuery {
+  const sorts = api
+    .getColumnState()
+    .sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
+  return toGridQuery(
+    {
+      startRow: 0,
+      endRow: pageSize,
+      filterModel: api.getFilterModel(),
+      sortModel: sorts.flatMap(({ colId, sort }) =>
+        sort === 'asc' || sort === 'desc' ? [{ colId, sort }] : [],
+      ),
+    },
+    keyword,
+  );
 }

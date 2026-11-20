@@ -95,6 +95,7 @@ function renderPage() {
 const api = {
   isDestroyed: () => false,
   setGridOption: vi.fn(),
+  paginationGoToFirstPage: vi.fn(),
   updateGridOptions: vi.fn(),
   purgeInfiniteCache: vi.fn(),
   setGridAriaProperty: vi.fn(),
@@ -266,6 +267,8 @@ describe('用户管理网格', () => {
       expect.objectContaining({ keyword: 'alice' }),
       expect.any(AbortSignal),
     );
+    // 草稿还没提交，导出仍应沿用已显示列表的关键词。
+    fireEvent.change(search, { target: { value: '未提交的新词' } });
     api.getFilterModel.mockReturnValueOnce({
       name: { filterType: 'text', type: 'contains', filter: 'li' },
       isLocked: { filterType: 'text', type: 'isFalse' },

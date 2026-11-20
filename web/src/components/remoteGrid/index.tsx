@@ -24,11 +24,11 @@ import type {
   AgGridReactProps,
   CustomFloatingFilterProps,
 } from 'ag-grid-react';
-import { Button, theme } from 'antd';
-import { useMemo } from 'react';
+import { Button, Input, theme } from 'antd';
+import { useMemo, useRef, useState } from 'react';
 import type { GridQuery } from '@/abp/gridQuery';
 import type { PagedResult } from '@/abp/identity';
-import { toGridQuery } from './query';
+import { currentGridQuery, toGridQuery } from './query';
 import { type ColumnKind, inputHint, serverHint } from './validation';
 
 type BooleanLabels = { true: string; false: string };
@@ -200,11 +200,20 @@ function showFilterHint(api: GridApi, message: string) {
 function makeDatasource<T>(
   query: QueryPage<T>,
   columns: RemoteColumn<T>[],
+  keyword: string,
 ): IDatasource {
   let active = new AbortController();
   let currentModel = '';
-  return {
+  const datasource: IDatasource = {
     async getRows(params: IGetRowsParams<T>) {
+      if (params.api.isDestroyed()) return;
+      // AG 可能在替换后才调用旧块的 getRows；StrictMode 重新挂载时也可能再次使用同一数据源。
+      if (
+        active.signal.aborted &&
+        params.api.getGridOption('datasource') !== datasource
+      ) {
+        return params.failCallback();
+      }
       const model = JSON.stringify([params.sortModel, params.filterModel]);
       // 同一查询可并发加载多个块；条件切换或数据源销毁时，旧响应不得覆盖当前状态。
       if (model !== currentModel || active.signal.aborted) {
@@ -213,10 +222,9 @@ function makeDatasource<T>(
         currentModel = model;
       }
       const { signal } = active;
-      if (signal.aborted || params.api.isDestroyed()) return;
       params.api.setGridOption('activeOverlay', undefined);
       try {
-        const input = toGridQuery(params);
+        const input = toGridQuery(params, keyword);
         const help = inputHint(input, columns);
         if (help) {
           params.failCallback();
@@ -241,6 +249,7 @@ function makeDatasource<T>(
       active.abort();
     },
   };
+  return datasource;
 }
 
 interface RemoteGridOptions<T> {
@@ -261,14 +270,18 @@ const containerStyle = {
 };
 
 /** 复用查询与显示配置，业务页面直接渲染 AgGridReact 并可覆盖官方属性。 */
-export function useRemoteGrid<T>({
-  columnDefs,
-  query,
-  getRowId,
-  initialState,
-  pageSize = 20,
-  ariaLabel,
-}: RemoteGridOptions<T>): AgGridReactProps<T> {
+export function useRemoteGrid<T>(
+  options: RemoteGridOptions<T>,
+  keyword = '',
+): AgGridReactProps<T> {
+  const {
+    columnDefs,
+    query,
+    getRowId,
+    initialState,
+    pageSize = 20,
+    ariaLabel,
+  } = options;
   const { token } = theme.useToken();
   const gridTheme = useMemo(
     () =>
@@ -288,8 +301,8 @@ export function useRemoteGrid<T>({
   );
   const columns = useMemo(() => columnDefs.map(buildColumn<T>), [columnDefs]);
   const datasource = useMemo(
-    () => makeDatasource(query, columnDefs),
-    [query, columnDefs],
+    () => makeDatasource(query, columnDefs, keyword),
+    [query, columnDefs, keyword],
   );
   return {
     columnDefs: columns,
@@ -314,6 +327,86 @@ export function useRemoteGrid<T>({
     onFilterChanged: firstPage,
     onGridReady: ({ api }) => {
       if (ariaLabel) api.setGridAriaProperty('label', ariaLabel);
+    },
+  };
+}
+
+interface KeywordSearchOptions {
+  label?: string;
+  placeholder?: string;
+  enterButton?: string;
+}
+
+/** 关键词提交时更换数据源，列条件保存在 AG Grid；可搜索的字段只在后端资源中声明。 */
+export function useSearchableRemoteGrid<T>({
+  search,
+  ...options
+}: RemoteGridOptions<T> & { search?: KeywordSearchOptions }) {
+  const [draft, setDraft] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [hasColumnFilters, setHasColumnFilters] = useState(
+    () =>
+      Object.keys(options.initialState?.filter?.filterModel ?? {}).length > 0,
+  );
+  const api = useRef<GridApi<T> | null>(null);
+  const grid = useRemoteGrid(options, keyword);
+  const gridProps: AgGridReactProps<T> = {
+    ...grid,
+    onGridReady(event) {
+      api.current = event.api;
+      grid.onGridReady?.(event);
+    },
+    onFilterChanged(event) {
+      setHasColumnFilters(Object.keys(event.api.getFilterModel()).length > 0);
+      grid.onFilterChanged?.(event);
+    },
+  };
+  function submit(text: string) {
+    const next = text.trim();
+    setDraft(next);
+    if (next !== keyword) {
+      api.current?.paginationGoToFirstPage();
+      setKeyword(next);
+    }
+  }
+  const searchBox = (
+    <Input.Search
+      aria-label={search?.label ?? `搜索${options.ariaLabel ?? '表格'}`}
+      placeholder={search?.placeholder ?? '输入关键词搜索'}
+      style={{ width: 'min(320px, 100%)' }}
+      allowClear
+      maxLength={512}
+      enterKeyHint="search"
+      autoCapitalize="none"
+      autoCorrect="off"
+      spellCheck={false}
+      enterButton={search?.enterButton}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onSearch={(text, event) => {
+        const key = event?.nativeEvent;
+        if (
+          key instanceof KeyboardEvent &&
+          (key.isComposing || key.keyCode === 229)
+        )
+          return;
+        submit(text);
+      }}
+    />
+  );
+  return {
+    gridProps,
+    searchBox,
+    hasFilters: hasColumnFilters || Boolean(keyword),
+    clearFilters() {
+      submit('');
+      api.current?.setFilterModel(null);
+    },
+    getQuery() {
+      const current = api.current;
+      return current && !current.isDestroyed()
+        ? currentGridQuery(current, options.pageSize ?? 20, keyword)
+        : undefined;
     },
   };
 }

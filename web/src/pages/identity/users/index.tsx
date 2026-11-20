@@ -14,18 +14,8 @@ import type {
   ICellRendererParams,
 } from 'ag-grid-community';
 import { AgGridReact } from 'ag-grid-react';
-import {
-  App,
-  Button,
-  Checkbox,
-  Input,
-  Popover,
-  Space,
-  Tag,
-  Tooltip,
-} from 'antd';
+import { App, Button, Checkbox, Popover, Space, Tag, Tooltip } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { GridQuery } from '@/abp/gridQuery';
 import {
   exportIdentityUserQuery,
   getAssignableRoles,
@@ -36,8 +26,10 @@ import {
 import ClaimModal from '@/components/ClaimModal';
 import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import PermissionModal from '@/components/PermissionModal';
-import { type RemoteColumn, useRemoteGrid } from '@/components/remoteGrid';
-import { toGridQuery } from '@/components/remoteGrid/query';
+import {
+  type RemoteColumn,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { inputHint } from '@/components/remoteGrid/validation';
 import { ResetPasswordForm, UserForm } from './components/UserForms';
 import UserRowActions from './components/UserRowActions';
@@ -99,9 +91,6 @@ function UserList({ preferenceKey }: { preferenceKey: string }) {
   const [resetting, setResetting] = useState<User>();
   const [permissions, setPermissions] = useState<User>();
   const [claims, setClaims] = useState<User>();
-  const [draft, setDraft] = useState('');
-  const [keyword, setKeyword] = useState('');
-  const [hasColumnFilters, setHasColumnFilters] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [initialVisibility] = useState(() => readVisibility(preferenceKey));
   const [visibility, setVisibility] = useState(initialVisibility);
@@ -266,17 +255,14 @@ function UserList({ preferenceKey }: { preferenceKey: string }) {
       ),
     [columns, initialVisibility],
   );
-  const query = useCallback(
-    (input: GridQuery, signal: AbortSignal) =>
-      queryIdentityUsers(keyword ? { ...input, keyword } : input, signal),
-    [keyword],
-  );
-  const grid = useRemoteGrid<User>({
-    columnDefs,
-    query,
-    getRowId: userId,
-    ariaLabel: '用户管理',
-  });
+  const { gridProps, searchBox, hasFilters, clearFilters, getQuery } =
+    useSearchableRemoteGrid<User>({
+      columnDefs,
+      query: queryIdentityUsers,
+      getRowId: userId,
+      ariaLabel: '用户管理',
+      search: { label: '搜索用户' },
+    });
   const [ready, setReady] = useState(false);
 
   function updateVisibility(column: ColDef<User>, visible: boolean) {
@@ -291,20 +277,8 @@ function UserList({ preferenceKey }: { preferenceKey: string }) {
     }
   }
   async function handleExport() {
-    const current = api.current;
-    if (!current || exporting) return;
-    const sorts = current
-      .getColumnState()
-      .sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
-    const input = toGridQuery({
-      startRow: 0,
-      endRow: 20,
-      filterModel: current.getFilterModel(),
-      sortModel: sorts.flatMap(({ colId, sort }) =>
-        sort === 'asc' || sort === 'desc' ? [{ colId, sort }] : [],
-      ),
-    });
-    if (keyword) input.keyword = keyword;
+    const input = getQuery();
+    if (!input || exporting) return;
     const problem = inputHint(input, columns);
     if (problem) {
       message.warning(problem);
@@ -329,28 +303,10 @@ function UserList({ preferenceKey }: { preferenceKey: string }) {
     <PageContainer {...identityOrgHelpHeader('users', '用户')}>
       <div className="identity-user-grid">
         <div className="identity-user-toolbar">
-          <Input.Search
-            aria-label="搜索用户"
-            placeholder={
-              access.canUpdateUsers
-                ? '搜索用户名、姓名、邮箱或手机号'
-                : '搜索用户名或姓名'
-            }
-            allowClear
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onSearch={(v) => setKeyword(v.trim())}
-          />
+          {searchBox}
           <Space size={8} wrap>
-            {(hasColumnFilters || keyword) && (
-              <Button
-                icon={<ClearOutlined />}
-                onClick={() => {
-                  setDraft('');
-                  setKeyword('');
-                  api.current?.setFilterModel(null);
-                }}
-              >
+            {hasFilters && (
+              <Button icon={<ClearOutlined />} onClick={clearFilters}>
                 清除筛选
               </Button>
             )}
@@ -415,16 +371,12 @@ function UserList({ preferenceKey }: { preferenceKey: string }) {
           </Space>
         </div>
         <AgGridReact<User>
-          {...grid}
+          {...gridProps}
           rowHeight={46}
           onGridReady={(e) => {
             api.current = e.api;
-            grid.onGridReady?.(e);
+            gridProps.onGridReady?.(e);
             setReady(true);
-          }}
-          onFilterChanged={(e) => {
-            grid.onFilterChanged?.(e);
-            setHasColumnFilters(Object.keys(e.api.getFilterModel()).length > 0);
           }}
         />
       </div>

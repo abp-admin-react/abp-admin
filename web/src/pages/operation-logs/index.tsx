@@ -6,12 +6,14 @@ import type {
   ICellRendererParams,
 } from 'ag-grid-community';
 import { AgGridReact } from 'ag-grid-react';
-import { Button, Drawer, Input, Space, Tag, Typography } from 'antd';
-import { useCallback, useMemo, useState } from 'react';
-import type { GridQuery } from '@/abp/gridQuery';
-import { queryOperationLogs, type OperationLogDto } from '@/abp/operationLogs';
+import { Button, Drawer, Space, Tag, Typography } from 'antd';
+import { useMemo, useState } from 'react';
+import { type OperationLogDto, queryOperationLogs } from '@/abp/operationLogs';
 import CorrelationIdText from '@/components/CorrelationIdText';
-import { type RemoteColumn, useRemoteGrid } from '@/components/remoteGrid';
+import {
+  type RemoteColumn,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 const formatExtra = (extra?: string | null) => {
   if (!extra) {
@@ -30,7 +32,6 @@ const OperationLogsPage: React.FC = () => {
   const access = useAccess();
   const [detail, setDetail] = useState<OperationLogDto>();
   const [searchParams] = useSearchParams();
-  const [keyword, setKeyword] = useState('');
   // 关联 ID 是深链的初值。用户清除列筛选后可继续查询其他关联记录。
   const [initialState] = useState<GridState>(() => {
     const id = searchParams.get('correlationId');
@@ -44,11 +45,6 @@ const OperationLogsPage: React.FC = () => {
         }
       : {};
   });
-  const load = useCallback(
-    (input: GridQuery, signal: AbortSignal) =>
-      queryOperationLogs(keyword ? { ...input, keyword } : input, signal),
-    [keyword],
-  );
   const columns = useMemo<RemoteColumn<OperationLogDto>[]>(
     () => [
       {
@@ -127,26 +123,20 @@ const OperationLogsPage: React.FC = () => {
     ],
     [access.canManageAuditLogs],
   );
-  const grid = useRemoteGrid({
+  const { gridProps, searchBox } = useSearchableRemoteGrid({
     columnDefs: columns,
-    query: load,
+    query: queryOperationLogs,
     getRowId: logRowId,
     initialState,
     ariaLabel: '操作日志',
+    search: { label: '跨列搜索操作日志', enterButton: '搜索' },
   });
 
   return (
     <PageContainer>
       <Space orientation="vertical" style={{ width: '100%' }}>
-        <Input.Search
-          aria-label="跨列搜索操作日志"
-          placeholder="搜索操作名、明细、业务编号或用户名"
-          style={{ width: 'min(360px, 100%)' }}
-          allowClear
-          enterButton="搜索"
-          onSearch={(value) => setKeyword(value.trim())}
-        />
-        <AgGridReact<OperationLogDto> {...grid} />
+        {searchBox}
+        <AgGridReact<OperationLogDto> {...gridProps} />
       </Space>
       <Drawer
         title={detail ? `${detail.type} · ${detail.subType}` : ''}
