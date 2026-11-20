@@ -37,4 +37,4 @@ openapi 生成器已退役，前端 API 层不再有「生成物」，全部由 
 
 ## 业务表格
 
-列表和明细直接渲染 AG Grid Community 的 `AgGridReact`。服务端分页使用 `useSearchableRemoteGrid`，在原资源的权限和数据范围内先筛选和排序，再分页。完整的本地明细或编辑草稿使用 `useSearchableLocalGrid`，声明 `keywordFields`。两者都返回可放入现有工具栏的 Ant Design 搜索框。新增业务表的接入与验证步骤见 [管理端表格设计](../docs/admin-web-grid-design.md)。
+独立树形表使用 Ant Design `Table`，通过 `children` 保留父子层级。平面列表和明细直接渲染 AG Grid Community 的 `AgGridReact`。服务端分页使用 `useSearchableRemoteGrid`，在原资源的权限和数据范围内先筛选和排序，再分页。完整的本地明细或编辑草稿使用 `useSearchableLocalGrid`，声明 `keywordFields`。两个 hook 都返回可放入工具栏的 Ant Design 搜索框。新增业务表的接入与验证步骤见 [管理端表格设计](../docs/admin-web-grid-design.md)。

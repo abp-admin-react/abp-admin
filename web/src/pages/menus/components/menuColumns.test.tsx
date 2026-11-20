@@ -1,12 +1,9 @@
-import { AgGridReact } from 'ag-grid-react';
-import { toGridColumns } from '@/components/remoteGrid';
-
-vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
-
 import { fireEvent, render, screen } from '@testing-library/react';
+import { Table } from 'antd';
 import { describe, expect, it, vi } from 'vitest';
 import { MENU_TYPE, type MenuTreeDto } from '@/abp/menus';
 import { buildMenuColumns } from './menuColumns';
+import type { MenuRow } from './menuTree';
 
 vi.mock('@umijs/max', () => ({ request: vi.fn() }));
 
@@ -25,18 +22,20 @@ describe('菜单操作权限', () => {
     const onEdit = vi.fn();
     const onAddChild = vi.fn();
     const table = (canCreateMenus: boolean, canUpdateMenus: boolean) => (
-      <AgGridReact<MenuTreeDto>
-        rowData={[catalog]}
-        columnDefs={toGridColumns<MenuTreeDto>(
-          buildMenuColumns({
+      <Table<MenuRow>
+        rowKey={(row) => row.menu.id}
+        pagination={false}
+        dataSource={[{ menu: catalog }]}
+        columns={buildMenuColumns(
+          {
             canCreateMenus,
             canUpdateMenus,
             canDeleteMenus: false,
             onEdit,
             onAddChild,
             onDelete: vi.fn(),
-          }),
-          { pro: true },
+          },
+          {},
         )}
       />
     );
