@@ -1,4 +1,4 @@
-import { PageContainer } from '@ant-design/pro-components';
+import { PageContainer, type ProColumns } from '@ant-design/pro-components';
 import { history, Link, useAccess, useLocation, useModel } from '@umijs/max';
 import {
   Alert,
@@ -42,11 +42,11 @@ const { Text } = Typography;
 const userIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+type MemberBalanceAccountRow = MemberBalanceAccountDto & { userName?: string };
+
 /**
- * 用户余额（/collection/member-funds，收款查看权限）：
- * 无 userId 时列出已有余额账户；?userId= 查看该用户余额与流水。
- * 有用户目录权限时可按用户名或邮箱搜索，否则输入用户 ID。搜索到的用户即使余额为 0 也进入详情。
- * 与用户侧 my-balances/my-txns 同口径（只读）。
+ * 无 userId 时列出余额账户，指定用户时展示该用户的余额与流水。
+ * 用户目录权限只控制按用户名或邮箱搜索，资金详情也可用用户 ID 打开。
  */
 export default function MemberFundsPage() {
   const access = useAccess();
@@ -147,6 +147,7 @@ export default function MemberFundsPage() {
             ...(withdrawalId ? { withdrawalId } : {}),
           }),
         ]);
+        // 切换用户或筛选条件后，旧请求不能覆盖当前流水。
         if (request !== fundsRequest.current) return;
         setFunds({
           userId,
@@ -370,15 +371,12 @@ export default function MemberFundsPage() {
     else history.push(url);
   }
 
-  const accountColumns = [
+  const accountColumns: ProColumns<MemberBalanceAccountRow>[] = [
     {
       title: '用户',
       dataIndex: 'userId',
       width: 220,
-      render: (
-        _: string,
-        row: MemberBalanceAccountDto & { userName?: string },
-      ) => (
+      render: (_, row) => (
         <Space orientation="vertical" size={0}>
           {row.userName ? <span>{row.userName}</span> : null}
           <Text
@@ -418,12 +416,12 @@ export default function MemberFundsPage() {
       title: '最近更新',
       dataIndex: 'updatedAt',
       width: 170,
-      render: (value: string) => fmtTime(value),
+      render: (_, row) => fmtTime(row.updatedAt),
     },
     {
       title: '操作',
       width: 140,
-      render: (_: unknown, row: MemberBalanceAccountDto) => (
+      render: (_, row) => (
         <Space size={8}>
           <Link to={memberFundsUrl(row.userId)}>流水</Link>
           {access.canCreateBalanceAdjustments && (
@@ -653,7 +651,7 @@ export default function MemberFundsPage() {
             </Card>
           </>
         ) : (
-          <AutoHeightProTable<MemberBalanceAccountDto & { userName?: string }>
+          <AutoHeightProTable<MemberBalanceAccountRow>
             rowKey="userId"
             search={false}
             columns={accountColumns}

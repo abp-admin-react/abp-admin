@@ -138,8 +138,8 @@ export default function CollectionDashboardPage({
               statistic={{
                 title: '在途提现净额',
                 value:
-                  (data.withdrawInFlight?.length ?? 0) > 1
-                    ? data.withdrawInFlight!
+                  data.withdrawInFlight && data.withdrawInFlight.length > 1
+                    ? data.withdrawInFlight
                         .map((row) => `${row.currency} ${row.amount}`)
                         .join(' / ')
                     : data.withdrawInFlightAmount,
