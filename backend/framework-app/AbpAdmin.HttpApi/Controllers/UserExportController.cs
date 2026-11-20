@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using AbpAdmin.AuditLogs;
 using AbpAdmin.ClientErrors;
 using AbpAdmin.HttpApi.ClientErrors;
+using AbpAdmin.Grids;
 using AbpAdmin.Identity;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.BlobStoring;
+using Volo.Abp.BackgroundJobs;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 using Volo.Abp.Users;
@@ -68,6 +70,36 @@ public class UserExportController : AbpController
             bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             fileName);
+    }
+
+    /// <summary>导出当前用户表的全量筛选结果，超过同步阈值时返回 202 并排队生成文件。</summary>
+    [HttpPost("export-query")]
+    [Authorize(IdentityPermissions.Users.Default)]
+    [Authorize(AbpAdminPermissions.Identity.Users.Export)]
+    public async Task<IActionResult> ExportQueryAsync(
+        [FromBody] GridQueryInput query, [FromServices] IBackgroundJobManager jobs)
+    {
+        var maskSensitive = !await _permissionChecker.IsGrantedAsync(IdentityPermissions.Users.Update);
+        var asOf = new DateTimeOffset(Clock.Now);
+        var cancellationToken = HttpContext.RequestAborted;
+        var count = await _excelBuilder.CountGridAsync(query, maskSensitive, asOf, cancellationToken);
+        if (count > AuditLogExportConsts.SyncThreshold)
+        {
+            await jobs.EnqueueAsync(new UserExportJobArgs
+            {
+                TenantId = CurrentTenant.Id,
+                UserId = CurrentUser.GetId(),
+                Email = CurrentUser.Email ?? string.Empty,
+                GridQuery = query,
+                MaskSensitive = maskSensitive,
+                StatusAsOf = asOf
+            });
+            return Accepted(UserExportResultDto.Queued());
+        }
+
+        var bytes = await _excelBuilder.BuildGridAsync(query, (int)count, maskSensitive, asOf, cancellationToken);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"users-{Clock.Now:yyyyMMdd-HHmmss}.xlsx");
     }
 
     /// <summary>

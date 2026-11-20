@@ -15,21 +15,6 @@ using Volo.Abp.Timing;
 
 namespace AbpAdmin.Identity;
 
-[BackgroundJobName("abpadmin.user-export")]
-public class UserExportJobArgs
-{
-    public Guid? TenantId { get; set; }
-
-    public Guid UserId { get; set; }
-
-    public string Email { get; set; } = default!;
-
-    public string? Filter { get; set; }
-
-    /// <summary>入队用户无 AbpIdentity.Users.Update 权限时为 true：Excel 邮箱/手机号列脱敏输出。</summary>
-    public bool MaskSensitive { get; set; } = true;
-}
-
 public class UserExportJob : AsyncBackgroundJob<UserExportJobArgs>, ITransientDependency
 {
     /// <summary>
@@ -79,15 +64,19 @@ public class UserExportJob : AsyncBackgroundJob<UserExportJobArgs>, ITransientDe
         using (_currentTenant.Change(args.TenantId))
         {
             // 超限先记警告再截断导出（COUNT 走筛选索引，后台作业可承受）
-            var totalCount = await _userRepository.GetCountAsync(args.Filter);
+            var totalCount = args.GridQuery == null
+                ? await _userRepository.GetCountAsync(args.Filter)
+                : await _excelBuilder.CountGridAsync(args.GridQuery, args.MaskSensitive, args.StatusAsOf);
             if (totalCount > MaxExportRows)
             {
                 _logger.LogWarning(
-                    "User export matched {TotalCount} rows which exceeds the export cap of {MaxExportRows}; only the first {MaxExportRows} rows will be exported. Filter: {Filter}",
-                    totalCount, MaxExportRows, MaxExportRows, args.Filter);
+                    "User export matched {TotalCount} rows which exceeds the export cap of {MaxExportRows}; only the first {MaxExportRows} rows will be exported.",
+                    totalCount, MaxExportRows, MaxExportRows);
             }
 
-            var bytes = await _excelBuilder.BuildAsync(args.Filter, maxResultCount: MaxExportRows, args.MaskSensitive);
+            var bytes = args.GridQuery == null
+                ? await _excelBuilder.BuildAsync(args.Filter, MaxExportRows, args.MaskSensitive)
+                : await _excelBuilder.BuildGridAsync(args.GridQuery, MaxExportRows, args.MaskSensitive, args.StatusAsOf);
 
             var fileName = $"users-{_clock.Now:yyyyMMdd-HHmmss}.xlsx";
             var excelFileId = _guidGenerator.Create();

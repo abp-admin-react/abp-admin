@@ -2,7 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using AbpAdmin.Controllers;
+using AbpAdmin.Grids;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using NSubstitute;
+using Volo.Abp.Authorization.Permissions;
+using Volo.Abp.BackgroundJobs;
+using Volo.Abp.BlobStoring;
+using Volo.Abp.DependencyInjection;
+using Volo.Abp.Domain.Repositories;
 using MiniExcelLibs;
 using Shouldly;
 using Volo.Abp.Identity;
@@ -63,10 +74,6 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         });
     }
 
-    /// <summary>
-    /// 创建包含用户导入数据的 Excel 流（DTO 序列化，表头即 [ExcelColumnName] 中文列名）。
-    /// </summary>
-
     #region 导出测试
 
     [Fact]
@@ -80,6 +87,70 @@ public abstract class UserImportExportTests<TStartupModule> : AbpAdminApplicatio
         result.IsQueued.ShouldBeTrue();
         result.Message.ShouldNotBeNullOrEmpty();
         result.Message.ShouldContain("已排队");
+    }
+
+    [Fact]
+    public async Task GridExport_Should_Keep_Filtered_Order_Across_Pages_And_Mask_Contact_Details()
+    {
+        var prefix = "grid-export-" + Guid.NewGuid().ToString("N")[..8];
+        var usernames = new[] { prefix + "-a", prefix + "-b" };
+        var ids = new List<Guid>();
+        try
+        {
+            foreach (var name in usernames)
+                ids.Add(await CreateTestUserAsync(name, name + "@example.org", "Test@123456"));
+
+            var query = new GridQueryInput
+            {
+                SkipCount = 1, MaxResultCount = 1,
+                Filters = [new() { Field = "userName", Conditions = [new() { Op = "startsWith", Value = prefix }] }],
+                Sort = [new() { Field = "userName", Direction = "desc" }]
+            };
+            var builder = GetRequiredService<IUserExcelBuilder>();
+            var asOf = DateTimeOffset.UtcNow;
+            (await builder.CountGridAsync(query, true, asOf)).ShouldBe(2);
+            using var stream = new MemoryStream(await builder.BuildGridAsync(query, 1000, true, asOf));
+            var rows = stream.Query(useHeaderRow: true).Cast<IDictionary<string, object>>().ToList();
+            rows.Select(r => r[UserExportColumnNames.UserName]?.ToString()).ShouldBe(usernames.Reverse());
+            foreach (var row in rows)
+                row[UserExportColumnNames.Email].ToString().ShouldNotBeNull().ShouldContain("*");
+        }
+        finally
+        {
+            foreach (var id in ids)
+                await CleanupTestUserAsync(id);
+        }
+    }
+
+    [Theory]
+    [InlineData(1000, false)]
+    [InlineData(1001, true)]
+    public async Task GridExport_Should_Choose_Download_Or_Queue_Using_The_Filtered_Count(int total, bool queued)
+    {
+        var query = new GridQueryInput { Keyword = "test" };
+        var builder = Substitute.For<IUserExcelBuilder>();
+        var jobs = Substitute.For<IBackgroundJobManager>();
+        var permissions = Substitute.For<IPermissionChecker>();
+        builder.CountGridAsync(query, true, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns((long)total);
+        builder.BuildGridAsync(query, total, true, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(new byte[] { 1 });
+        var controller = new UserExportController(GetRequiredService<IIdentityUserRepository>(), builder,
+            GetRequiredService<IRepository<UserExcelFile, Guid>>(), GetRequiredService<IBlobContainer<UserExportBlobContainer>>(), permissions)
+        {
+            LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>(),
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        var result = await controller.ExportQueryAsync(query, jobs);
+        if (queued)
+        {
+            result.ShouldBeOfType<AcceptedResult>().Value.ShouldBeOfType<UserExportResultDto>().IsQueued.ShouldBeTrue();
+            await jobs.Received(1).EnqueueAsync(Arg.Is<UserExportJobArgs>(a =>
+                a.GridQuery == query && a.MaskSensitive && a.StatusAsOf != default && a.UserId != Guid.Empty));
+        }
+        else
+        {
+            result.ShouldBeOfType<FileContentResult>().FileContents.ShouldBe(new byte[] { 1 });
+            await jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<UserExportJobArgs>(default!);
+        }
     }
 
     /// <summary>

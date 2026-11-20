@@ -6,11 +6,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.DataDictionaries;
 using AbpAdmin.Desensitization;
+using AbpAdmin.Grids;
 using EasyAbp.Abp.DataDictionary;
 using MiniExcelLibs;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
+using Volo.Abp.Uow;
 
 namespace AbpAdmin.Identity;
 
@@ -37,6 +39,7 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
     private const int OuMembershipBatchSize = 1000;
 
     private readonly IIdentityUserRepository _userRepository;
+    private readonly IRepository<IdentityUser, Guid> _gridUsers;
     private readonly IUserDirectRoleNameLookup _directRoleNameLookup;
     private readonly IRepository<IdentityUserOrganizationUnit> _userOuRepository;
     private readonly IOrganizationUnitRepository _organizationUnitRepository;
@@ -44,12 +47,14 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
 
     public UserExcelBuilder(
         IIdentityUserRepository userRepository,
+        IRepository<IdentityUser, Guid> gridUsers,
         IUserDirectRoleNameLookup directRoleNameLookup,
         IRepository<IdentityUserOrganizationUnit> userOuRepository,
         IOrganizationUnitRepository organizationUnitRepository,
         IDataDictionaryRenderer dataDictionaryRenderer)
     {
         _userRepository = userRepository;
+        _gridUsers = gridUsers;
         _directRoleNameLookup = directRoleNameLookup;
         _userOuRepository = userOuRepository;
         _organizationUnitRepository = organizationUnitRepository;
@@ -98,6 +103,27 @@ public class UserExcelBuilder : IUserExcelBuilder, ITransientDependency
             }
         }
 
+        return await BuildWorkbookAsync(users, maskSensitive, cancellationToken);
+    }
+
+    private async Task<IOrderedQueryable<IdentityUser>> OrderedGridAsync(GridQueryInput input, bool maskSensitive, DateTimeOffset asOf)
+        => IdentityUserGridQuery.Apply(await _gridUsers.GetQueryableAsync(), input, !maskSensitive, asOf);
+
+    [UnitOfWork(isTransactional: false)]
+    public virtual async Task<long> CountGridAsync(GridQueryInput query, bool maskSensitive, DateTimeOffset asOf, CancellationToken cancellationToken = default)
+        => await _gridUsers.AsyncExecuter.LongCountAsync(await OrderedGridAsync(query, maskSensitive, asOf), cancellationToken);
+
+    [UnitOfWork(isTransactional: false)]
+    public virtual async Task<byte[]> BuildGridAsync(GridQueryInput query, int maxResultCount, bool maskSensitive, DateTimeOffset asOf, CancellationToken cancellationToken = default)
+    {
+        // 导出取完整命中集合，保留表头的排序优先级；上限由同步下载或后台作业决定。
+        var ordered = await OrderedGridAsync(query, maskSensitive, asOf);
+        var users = await _gridUsers.AsyncExecuter.ToListAsync(ordered.Take(maxResultCount), cancellationToken);
+        return await BuildWorkbookAsync(users, maskSensitive, cancellationToken);
+    }
+
+    private async Task<byte[]> BuildWorkbookAsync(List<IdentityUser> users, bool maskSensitive, CancellationToken cancellationToken)
+    {
         // 角色列只读 AbpUserRoles。GetRolesAsync 含部门派生，写进这一列会把部门角色显示成直接成员。
         var userIds = users.Select(u => u.Id).ToList();
         var directRoleMap = await _directRoleNameLookup.GetManyAsync(userIds, cancellationToken);
