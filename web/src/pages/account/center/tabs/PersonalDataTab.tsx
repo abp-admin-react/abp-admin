@@ -1,3 +1,4 @@
+import { AgGridReact } from 'ag-grid-react';
 import { App, Button, Input, Space, Tag, Typography } from 'antd';
 import React, { useRef, useState } from 'react';
 import {
@@ -6,22 +7,20 @@ import {
   type GdprRequestDto,
   getGdprDownloadToken,
   getGdprDownloadUrl,
-  getGdprRequests,
   isNewGdprRequestAllowed,
+  queryGdprRequests,
 } from '@/abp/gdpr';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { useAsyncData } from '@/hooks/useAsyncData';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
 
 /** GDPR 个人数据 Tab：发起收集请求 → 就绪后两步下载 ZIP → 删除账户（自 index.tsx 拆分，见重构报告问题 4） */
+
 const PersonalDataTab: React.FC = () => {
   const { message, modal } = App.useApp();
-  const { data, loading, refresh } = useAsyncData(async () => {
-    const [list, canCreate] = await Promise.all([
-      getGdprRequests({ current: 1, pageSize: 20 }),
-      isNewGdprRequestAllowed(),
-    ]);
-    return { requests: list.items ?? [], allowed: !!canCreate };
-  });
+  const { data: allowed, refresh } = useAsyncData(isNewGdprRequestAllowed);
   const [creating, setCreating] = useState(false);
   // modal.confirm 的 content/onOk 是打开瞬间的一次性快照（antd useModal 语义，只有
   // instance.update 会刷新），受控 state 在快照闭包里永远是旧值——首次打开读到空、
@@ -35,6 +34,7 @@ const PersonalDataTab: React.FC = () => {
       await createGdprRequest();
       message.success('已发起个人数据收集请求，数据准备完成后可下载');
       await refresh();
+      grid.refresh();
     } finally {
       setCreating(false);
     }
@@ -45,7 +45,11 @@ const PersonalDataTab: React.FC = () => {
       const token = await getGdprDownloadToken(record.id);
       // 第二步：用 token 换 ZIP。新开标签触发下载（与 files 页一致），而非改写
       // window.location.href——下载失败时后者会把 SPA 整页替换成错误 JSON
-      window.open(getGdprDownloadUrl(record.id, token), '_blank', 'noopener,noreferrer');
+      window.open(
+        getGdprDownloadUrl(record.id, token),
+        '_blank',
+        'noopener,noreferrer',
+      );
     } catch {
       // 错误由全局 errorHandler 统一提示
     }
@@ -87,70 +91,91 @@ const PersonalDataTab: React.FC = () => {
   };
 
   const now = Date.now();
+  const grid = useSearchableRemoteGrid<GdprRequestDto>({
+    columnDefs: toGridColumns<GdprRequestDto>(
+      [
+        { title: '请求编号', dataIndex: 'id', width: 220 },
+        {
+          title: '请求时间',
+          dataIndex: 'creationTime',
+          width: 170,
+          render: (v: string) => new Date(v).toLocaleString(),
+        },
+        {
+          title: '就绪时间',
+          dataIndex: 'readyTime',
+          width: 170,
+          render: (v: string) => new Date(v).toLocaleString(),
+        },
+        {
+          title: '状态',
+          dataIndex: 'ready',
+          width: 110,
+          render: (_, record) =>
+            new Date(record.readyTime).getTime() <= now ? (
+              <Tag color="success">已就绪</Tag>
+            ) : (
+              <Tag color="processing">准备中</Tag>
+            ),
+        },
+        {
+          title: '操作',
+          key: 'actions',
+          width: 90,
+          render: (_, record) => (
+            <Button
+              type="link"
+              size="small"
+              disabled={new Date(record.readyTime).getTime() > now}
+              onClick={() => handleDownload(record)}
+            >
+              下载 ZIP
+            </Button>
+          ),
+        },
+      ],
+      { kinds: { creationTime: 'date', readyTime: 'date', ready: 'boolean' } },
+    ),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '个人数据请求',
+    query: queryGdprRequests,
+    search: { placeholder: '搜索请求编号' },
+  });
+
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <Space>
         <Button
           type="primary"
           loading={creating}
-          disabled={!data?.allowed}
+          disabled={!allowed}
           onClick={handleCreate}
         >
           发起数据收集请求
         </Button>
-        {!data?.allowed && (
+        {!allowed && (
           <Typography.Text type="secondary">
             请求过于频繁，请稍后再试
           </Typography.Text>
         )}
       </Space>
-      <ResizableTable<GdprRequestDto>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        dataSource={data?.requests ?? []}
-        pagination={false}
-        columns={[
-          {
-            title: '请求时间',
-            dataIndex: 'creationTime',
-            width: 170,
-            render: (v: string) => new Date(v).toLocaleString(),
-          },
-          {
-            title: '就绪时间',
-            dataIndex: 'readyTime',
-            width: 170,
-            render: (v: string) => new Date(v).toLocaleString(),
-          },
-          {
-            title: '状态',
-            key: 'status',
-            width: 110,
-            render: (_, record) =>
-              new Date(record.readyTime).getTime() <= now ? (
-                <Tag color="success">已就绪</Tag>
-              ) : (
-                <Tag color="processing">准备中</Tag>
-              ),
-          },
-          {
-            title: '操作',
-            key: 'actions',
-            width: 90,
-            render: (_, record) => (
-              <Button
-                type="link"
-                size="small"
-                disabled={new Date(record.readyTime).getTime() > now}
-                onClick={() => handleDownload(record)}
-              >
-                下载 ZIP
-              </Button>
-            ),
-          },
-        ]}
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {grid.searchBox}
+      </div>
+      <AgGridReact<GdprRequestDto>
+        {...grid.gridProps}
+        containerStyle={{ width: '100%', height: 320 }}
       />
+
       <Button danger onClick={handleDeleteAccount}>
         永久删除我的账户
       </Button>

@@ -1,15 +1,18 @@
-import { App, Button, Form, Input, Modal, Space, Typography,  } from 'antd';
+import { AgGridReact } from 'ag-grid-react';
+import { App, Button, Form, Input, Modal, Space, Typography } from 'antd';
 import React, { useState } from 'react';
 import {
-  getLinkedAccounts,
   type LinkedAccountDto,
   linkAccount,
+  queryLinkedAccounts,
   switchToLinkedAccount,
   unlinkAccount,
 } from '@/abp/accountLink';
 import { applyImpersonatedTokens } from '@/abp/oidc';
-import { useAsyncData } from '@/hooks/useAsyncData';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 /**
  * 从 OpenId 错误信封取服务端消息（response.data.error.message），
@@ -24,16 +27,9 @@ const extractErrorMessage = (error: unknown, fallback: string) => {
 };
 
 /** Linked Accounts 页签：绑定同租户的其他账号（密码确认），并在账号间切换（对标 ABP Pro） */
+
 const LinkedAccountsTab: React.FC = () => {
   const { message, modal } = App.useApp();
-  const {
-    data: items,
-    loading,
-    refresh,
-  } = useAsyncData(async () => {
-    const result = await getLinkedAccounts();
-    return result ?? [];
-  });
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linking, setLinking] = useState(false);
   const [switchingId, setSwitchingId] = useState<string>();
@@ -50,7 +46,7 @@ const LinkedAccountsTab: React.FC = () => {
       message.success('账号已关联');
       setLinkModalOpen(false);
       form.resetFields();
-      await refresh();
+      grid.refresh();
     } catch (error) {
       message.error(
         extractErrorMessage(error, '关联失败：账号不存在、已停用或密码错误'),
@@ -93,10 +89,42 @@ const LinkedAccountsTab: React.FC = () => {
       onOk: async () => {
         await unlinkAccount(record.linkId);
         message.success('已解除关联');
-        await refresh();
+        grid.refresh();
       },
     });
   };
+
+  const grid = useSearchableRemoteGrid<LinkedAccountDto>({
+    columnDefs: toGridColumns<LinkedAccountDto>(
+      [
+        { title: '用户名', dataIndex: 'userName', width: 160 },
+        { title: '邮箱', dataIndex: 'emailAddress', width: 220 },
+        {
+          title: '操作',
+          width: 200,
+          render: (_, record) => (
+            <Space>
+              <Button
+                size="small"
+                type="primary"
+                loading={switchingId === record.linkId}
+                onClick={() => handleSwitch(record)}
+              >
+                切换到此账号
+              </Button>
+              <Button size="small" danger onClick={() => handleUnlink(record)}>
+                解除关联
+              </Button>
+            </Space>
+          ),
+        },
+      ],
+      { kinds: {} },
+    ),
+    getRowId: ({ data }) => data.linkId,
+    ariaLabel: '关联账户',
+    query: queryLinkedAccounts,
+  });
 
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">
@@ -106,39 +134,21 @@ const LinkedAccountsTab: React.FC = () => {
       <Button type="primary" onClick={() => setLinkModalOpen(true)}>
         关联其他账号
       </Button>
-      <ResizableTable<LinkedAccountDto>
-        rowKey="linkId"
-        size="small"
-        loading={loading}
-        dataSource={items ?? []}
-        pagination={false}
-        columns={[
-          { title: '用户名', dataIndex: 'userName', width: 160 },
-          { title: '邮箱', dataIndex: 'emailAddress', width: 220 },
-          {
-            title: '操作',
-            width: 200,
-            render: (_, record) => (
-              <Space>
-                <Button
-                  size="small"
-                  type="primary"
-                  loading={switchingId === record.linkId}
-                  onClick={() => handleSwitch(record)}
-                >
-                  切换到此账号
-                </Button>
-                <Button
-                  size="small"
-                  danger
-                  onClick={() => handleUnlink(record)}
-                >
-                  解除关联
-                </Button>
-              </Space>
-            ),
-          },
-        ]}
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {grid.searchBox}
+      </div>
+      <AgGridReact<LinkedAccountDto>
+        {...grid.gridProps}
+        containerStyle={{ width: '100%', height: 320 }}
       />
 
       {/* destroyOnHidden：关闭即销毁表单，对方密码不残留在受控输入里 */}

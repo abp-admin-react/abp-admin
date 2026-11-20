@@ -1,3 +1,5 @@
+using Volo.Abp.Application.Dtos;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,12 +31,31 @@ public class IdentityUserDelegationAppService : AbpAdminAppService, IIdentityUse
         _accountProAppService = accountProAppService;
     }
 
+    public virtual async Task<PagedResultDto<IdentityUserDelegationDto>> QuerySentAsync(GridQueryInput input)
+    {
+        var rows = await GetDelegatedToOthersAsync();
+        var grid = new GridQueryDefinition<IdentityUserDelegationDto>()
+            .SearchableField("targetUserName", x => x.TargetUserName)
+            .Field("startTime", x => x.StartTime)
+            .Field("endTime", x => x.EndTime);
+        return grid.ReadSnapshot(rows, input, "targetUserName", x => x.Id);
+    }
+
     public virtual async Task<List<IdentityUserDelegationDto>> GetDelegatedToOthersAsync()
     {
         var list = await _delegationManager.GetListAsync(CurrentUser.GetId(), targetUserId: null);
         var dtos = list.Select(Map).ToList();
         await FillUserNamesAsync(dtos);
         return dtos;
+    }
+
+    public virtual async Task<PagedResultDto<IdentityUserDelegationDto>> QueryReceivedAsync(GridQueryInput input)
+    {
+        var rows = await GetDelegatedToMeAsync();
+        var grid = new GridQueryDefinition<IdentityUserDelegationDto>()
+            .SearchableField("sourceUserName", x => x.SourceUserName)
+            .Field("endTime", x => x.EndTime);
+        return grid.ReadSnapshot(rows, input, "sourceUserName", x => x.Id);
     }
 
     public virtual async Task<List<IdentityUserDelegationDto>> GetDelegatedToMeAsync()

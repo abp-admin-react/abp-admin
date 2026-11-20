@@ -1,3 +1,5 @@
+using Volo.Abp.Application.Dtos;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -14,6 +16,8 @@ namespace AbpAdmin.Account;
 public interface IAccountLinkAppService : IApplicationService
 {
     /// <summary>当前用户的关联账号列表（每个关联返回对端账号信息）。</summary>
+    Task<PagedResultDto<LinkedAccountDto>> QueryAsync(GridQueryInput input);
+
     Task<IReadOnlyList<LinkedAccountDto>> GetListAsync();
 
     /// <summary>

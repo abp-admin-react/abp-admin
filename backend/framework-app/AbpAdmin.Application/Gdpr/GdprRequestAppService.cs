@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -106,6 +107,21 @@ public class GdprRequestAppService : AbpAdminAppService, IGdprRequestAppService
         }
 
         return lastRequest.CreationTime.Add(_gdprOptions.RequestTimeInterval) <= Clock.Now;
+    }
+
+    public virtual async Task<PagedResultDto<GdprRequestDto>> QueryAsync(GridQueryInput input)
+    {
+        var userId = CurrentUser.GetId();
+        var now = Clock.Now;
+        var rows = (await _gdprRequestRepository.GetQueryableAsync()).Where(x => x.UserId == userId);
+        var grid = new GridQueryDefinition<GdprRequest>()
+            .SearchableField("id", x => x.Id)
+            .Field("creationTime", x => x.CreationTime)
+            .Field("readyTime", x => x.ReadyTime)
+            .Field("ready", x => x.ReadyTime <= now);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationTime", true, x => x.Id,
+            x => new GdprRequestDto { Id = x.Id, CreationTime = x.CreationTime, ReadyTime = x.ReadyTime });
+        return new PagedResultDto<GdprRequestDto>(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<GdprRequestDto>> GetListAsync(PagedAndSortedResultRequestDto input)

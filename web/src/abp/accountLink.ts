@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 import { request } from '@umijs/max';
 import type { ImpersonationResultDto } from './oidc';
 
@@ -42,4 +43,8 @@ export async function switchToLinkedAccount(id: string) {
   return request<ImpersonationResultDto>(`/api/app/account-link/${id}/switch`, {
     method: 'POST',
   });
+}
+
+export function queryLinkedAccounts(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<LinkedAccountDto>('/api/app/account-link/query', input, signal);
 }

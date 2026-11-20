@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 /**
  * 账户安全：外部登录绑定、会话相关安全操作。
  *
@@ -185,4 +186,20 @@ export function linkExternalLogin(provider: string) {
 
   document.body.appendChild(form);
   form.submit();
+}
+
+export function queryPasskeys(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<UserPasskeyDto>('/api/app/account-passkey/query', input, signal);
+}
+
+export function queryExternalLogins(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<UserLoginDto>('/api/app/account-security/query-logins', input, signal);
+}
+
+export function queryReceivedDelegations(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<IdentityUserDelegationDto>('/api/app/identity-user-delegation/query-received', input, signal);
+}
+
+export function querySentDelegations(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<IdentityUserDelegationDto>('/api/app/identity-user-delegation/query-sent', input, signal);
 }

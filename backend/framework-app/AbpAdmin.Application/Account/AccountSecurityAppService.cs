@@ -1,3 +1,5 @@
+using Volo.Abp.Application.Dtos;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -21,6 +23,15 @@ public class AccountSecurityAppService : AbpAdminAppService, IAccountSecurityApp
     public AccountSecurityAppService(IdentityUserManager userManager)
     {
         _userManager = userManager;
+    }
+
+    public virtual async Task<PagedResultDto<UserLoginDto>> QueryLoginsAsync(GridQueryInput input)
+    {
+        var rows = await GetLoginsAsync();
+        var grid = new GridQueryDefinition<UserLoginDto>()
+            .SearchableField("loginProvider", x => x.LoginProvider)
+            .SearchableField("providerDisplayName", x => x.ProviderDisplayName);
+        return grid.ReadSnapshot(rows, input, "loginProvider", x => x.LoginProvider + ":" + x.ProviderKey);
     }
 
     public virtual async Task<List<UserLoginDto>> GetLoginsAsync()

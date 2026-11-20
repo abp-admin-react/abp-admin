@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,6 +24,15 @@ public class AccountPasskeyAppService : AbpAdminAppService, IAccountPasskeyAppSe
     {
         _userManager = userManager;
         _signInManager = signInManager;
+    }
+
+    public virtual async Task<PagedResultDto<UserPasskeyDto>> QueryAsync(GridQueryInput input)
+    {
+        var rows = (await GetListAsync()).Items;
+        var grid = new GridQueryDefinition<UserPasskeyDto>()
+            .SearchableField("name", x => x.Name)
+            .SearchableField("credentialId", x => x.CredentialId);
+        return grid.ReadSnapshot(rows, input, "name", x => x.CredentialId);
     }
 
     public virtual async Task<ListResultDto<UserPasskeyDto>> GetListAsync()

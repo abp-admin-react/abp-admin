@@ -1,3 +1,5 @@
+using Volo.Abp.Application.Dtos;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -55,6 +57,15 @@ public class AccountLinkAppService : AbpAdminAppService, IAccountLinkAppService
         _linkUserManager = linkUserManager;
         _linkUserRepository = linkUserRepository;
         _tokenExchanger = tokenExchanger;
+    }
+
+    public virtual async Task<PagedResultDto<LinkedAccountDto>> QueryAsync(GridQueryInput input)
+    {
+        var rows = await GetListAsync();
+        var grid = new GridQueryDefinition<LinkedAccountDto>()
+            .SearchableField("userName", x => x.UserName)
+            .SearchableField("emailAddress", x => x.EmailAddress);
+        return grid.ReadSnapshot(rows, input, "userName", x => x.LinkId);
     }
 
     public virtual async Task<IReadOnlyList<LinkedAccountDto>> GetListAsync()

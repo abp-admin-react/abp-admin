@@ -1,14 +1,17 @@
+import { AgGridReact } from 'ag-grid-react';
 import { App, Button, Space } from 'antd';
 import React from 'react';
 import {
   deletePasskey,
   getPasskeyCreationOptions,
-  getPasskeys,
+  queryPasskeys,
   registerPasskey,
   type UserPasskeyDto,
 } from '@/abp/accountSecurity';
-import { useAsyncData } from '@/hooks/useAsyncData';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 // base64url <-> ArrayBuffer（WebAuthn 凭据字段编解码，自 index.tsx 拆分）
 function b64ToBuf(value: string) {
@@ -34,15 +37,43 @@ function bufToB64(buffer: ArrayBuffer) {
 }
 
 /** Passkey Tab：注册 / 删除 Passkey 凭据（自 index.tsx 拆分，见重构报告问题 4） */
+
 const PasskeysTab: React.FC = () => {
   const { message } = App.useApp();
-  const {
-    data: items,
-    loading,
-    refresh,
-  } = useAsyncData(async () => {
-    const result = await getPasskeys();
-    return result.items ?? [];
+
+  const grid = useSearchableRemoteGrid<UserPasskeyDto>({
+    columnDefs: toGridColumns<UserPasskeyDto>(
+      [
+        { title: '名称', dataIndex: 'name', width: 180 },
+        {
+          title: '凭证',
+          dataIndex: 'credentialId',
+          ellipsis: true,
+          width: 240,
+        },
+        {
+          title: '操作',
+          render: (_, record) => (
+            <Button
+              type="link"
+              danger
+              size="small"
+              onClick={async () => {
+                await deletePasskey(record.credentialId);
+                message.success('已删除');
+                grid.refresh();
+              }}
+            >
+              删除
+            </Button>
+          ),
+        },
+      ],
+      { kinds: {} },
+    ),
+    getRowId: ({ data }) => data.credentialId,
+    ariaLabel: '通行密钥',
+    query: queryPasskeys,
   });
 
   return (
@@ -76,38 +107,26 @@ const PasskeysTab: React.FC = () => {
             name: 'browser',
           });
           message.success('Passkey 已注册');
-          await refresh();
+          grid.refresh();
         }}
       >
         注册 Passkey
       </Button>
-      <ResizableTable<UserPasskeyDto>
-        rowKey="credentialId"
-        size="small"
-        loading={loading}
-        dataSource={items ?? []}
-        pagination={false}
-        columns={[
-          { title: '名称', dataIndex: 'name', width: 180 },
-          { title: '凭证', dataIndex: 'credentialId', ellipsis: true, width: 240 },
-          {
-            title: '操作',
-            render: (_, record) => (
-              <Button
-                type="link"
-                danger
-                size="small"
-                onClick={async () => {
-                  await deletePasskey(record.credentialId);
-                  message.success('已删除');
-                  await refresh();
-                }}
-              >
-                删除
-              </Button>
-            ),
-          },
-        ]}
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {grid.searchBox}
+      </div>
+      <AgGridReact<UserPasskeyDto>
+        {...grid.gridProps}
+        containerStyle={{ width: '100%', height: 320 }}
       />
     </Space>
   );

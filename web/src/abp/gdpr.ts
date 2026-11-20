@@ -1,3 +1,4 @@
+import { type GridQuery, postGridQuery } from './gridQuery';
 import { request } from '@umijs/max';
 import type { PagedResult } from './identity';
 
@@ -53,4 +54,8 @@ export async function deleteCurrentUserAccount(password: string) {
     method: 'DELETE',
     data: { password },
   });
+}
+
+export function queryGdprRequests(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<GdprRequestDto>('/api/app/gdpr-request/query', input, signal);
 }

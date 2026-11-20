@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
@@ -9,6 +10,8 @@ namespace AbpAdmin.Account;
 
 public interface IAccountPasskeyAppService : IApplicationService
 {
+    Task<PagedResultDto<UserPasskeyDto>> QueryAsync(GridQueryInput input);
+
     Task<ListResultDto<UserPasskeyDto>> GetListAsync();
 
     Task<PasskeyJsonDto> GetCreationOptionsAsync();

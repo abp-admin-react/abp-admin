@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -9,6 +10,8 @@ namespace AbpAdmin.Account;
 
 public interface IAccountSecurityAppService : IApplicationService
 {
+    Task<PagedResultDto<UserLoginDto>> QueryLoginsAsync(GridQueryInput input);
+
     Task<List<UserLoginDto>> GetLoginsAsync();
 
     Task RemoveLoginAsync(RemoveUserLoginInput input);
@@ -73,7 +76,11 @@ public class AuthenticatorRecoveryCodesDto
 
 public interface IIdentityUserDelegationAppService : IApplicationService
 {
+    Task<PagedResultDto<IdentityUserDelegationDto>> QuerySentAsync(GridQueryInput input);
+
     Task<List<IdentityUserDelegationDto>> GetDelegatedToOthersAsync();
+
+    Task<PagedResultDto<IdentityUserDelegationDto>> QueryReceivedAsync(GridQueryInput input);
 
     Task<List<IdentityUserDelegationDto>> GetDelegatedToMeAsync();
 

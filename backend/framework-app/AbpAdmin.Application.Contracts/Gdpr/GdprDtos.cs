@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
@@ -23,6 +24,8 @@ public interface IGdprRequestAppService : IApplicationService
     /// <summary>
     /// 获取当前用户的历史请求列表。
     /// </summary>
+    Task<PagedResultDto<GdprRequestDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<GdprRequestDto>> GetListAsync(PagedAndSortedResultRequestDto input);
 
     /// <summary>

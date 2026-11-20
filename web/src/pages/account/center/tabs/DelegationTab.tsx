@@ -1,17 +1,20 @@
+import { AgGridReact } from 'ag-grid-react';
 import { App, Button, Select, Space, Typography } from 'antd';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   createDelegation,
   deleteDelegation,
-  getDelegatedToMe,
-  getDelegatedToOthers,
   type IdentityUserDelegationDto,
+  queryReceivedDelegations,
+  querySentDelegations,
   startDelegation,
 } from '@/abp/accountSecurity';
 import { getUsers } from '@/abp/identity';
 import { applyImpersonatedTokens } from '@/abp/oidc';
-import { useAsyncData } from '@/hooks/useAsyncData';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 /**
  * 默认委托时长（天），与后端 AbpAdminAccountConsts.DefaultDelegationDays 对齐
@@ -21,16 +24,86 @@ const DEFAULT_DELEGATION_DAYS = 7;
 const DEFAULT_DELEGATION_MS = DEFAULT_DELEGATION_DAYS * 24 * 60 * 60 * 1000;
 
 /** 权限委托 Tab：委托管理（自 index.tsx 拆分，见重构报告问题 4） */
+
 const DelegationTab: React.FC = () => {
   const { message } = App.useApp();
-  const { data, loading, refresh } = useAsyncData(async () => {
-    const [mine, toMe] = await Promise.all([
-      getDelegatedToOthers(),
-      getDelegatedToMe(),
-    ]);
-    return { mine, toMe };
-  });
   const [targetUserId, setTargetUserId] = useState<string>();
+
+  const received = useSearchableRemoteGrid<IdentityUserDelegationDto>({
+    columnDefs: toGridColumns<IdentityUserDelegationDto>(
+      [
+        { title: '来源用户', dataIndex: 'sourceUserName', width: 150 },
+        {
+          title: '结束',
+          dataIndex: 'endTime',
+          render: (v: string) => new Date(v).toLocaleString(),
+        },
+        {
+          title: '操作',
+          render: (_, record: IdentityUserDelegationDto) =>
+            record.isActive ? (
+              <Button
+                type="link"
+                size="small"
+                onClick={async () => {
+                  const tokens = await startDelegation(record.id);
+                  await applyImpersonatedTokens(tokens);
+                  message.success('已进入委托身份，即将刷新');
+                  window.location.reload();
+                }}
+              >
+                进入委托
+              </Button>
+            ) : null,
+        },
+      ],
+      { kinds: { startTime: 'date', endTime: 'date' } },
+    ),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '收到的委托',
+    query: queryReceivedDelegations,
+  });
+
+  const sent = useSearchableRemoteGrid<IdentityUserDelegationDto>({
+    columnDefs: toGridColumns<IdentityUserDelegationDto>(
+      [
+        { title: '目标用户', dataIndex: 'targetUserName', width: 150 },
+        {
+          title: '开始',
+          dataIndex: 'startTime',
+          width: 165,
+          render: (v: string) => new Date(v).toLocaleString(),
+        },
+        {
+          title: '结束',
+          dataIndex: 'endTime',
+          width: 165,
+          render: (v: string) => new Date(v).toLocaleString(),
+        },
+        {
+          title: '操作',
+          render: (_, record: IdentityUserDelegationDto) => (
+            <Button
+              type="link"
+              danger
+              size="small"
+              onClick={async () => {
+                await deleteDelegation(record.id);
+                message.success('已删除');
+                sent.refresh();
+              }}
+            >
+              删除
+            </Button>
+          ),
+        },
+      ],
+      { kinds: { startTime: 'date', endTime: 'date' } },
+    ),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '发出的委托',
+    query: querySentDelegations,
+  });
 
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">
@@ -51,85 +124,46 @@ const DelegationTab: React.FC = () => {
               endTime: end.toISOString(),
             });
             message.success(`已创建 ${DEFAULT_DELEGATION_DAYS} 天委托`);
-            await refresh();
+            sent.refresh();
           }}
         >
           委托 {DEFAULT_DELEGATION_DAYS} 天
         </Button>
         <UserPicker value={targetUserId} onChange={setTargetUserId} />
       </Space>
-      <ResizableTable
-        size="small"
-        loading={loading}
-        rowKey="id"
-        dataSource={data?.mine ?? []}
-        pagination={false}
-        columns={[
-          { title: '目标用户', dataIndex: 'targetUserName', width: 150 },
-          {
-            title: '开始',
-            dataIndex: 'startTime',
-            width: 165,
-            render: (v: string) => new Date(v).toLocaleString(),
-          },
-          {
-            title: '结束',
-            dataIndex: 'endTime',
-            width: 165,
-            render: (v: string) => new Date(v).toLocaleString(),
-          },
-          {
-            title: '操作',
-            render: (_, record: IdentityUserDelegationDto) => (
-              <Button
-                type="link"
-                danger
-                size="small"
-                onClick={async () => {
-                  await deleteDelegation(record.id);
-                  message.success('已删除');
-                  await refresh();
-                }}
-              >
-                删除
-              </Button>
-            ),
-          },
-        ]}
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {sent.searchBox}
+      </div>
+      <AgGridReact<IdentityUserDelegationDto>
+        {...sent.gridProps}
+        containerStyle={{ width: '100%', height: 280 }}
       />
+
       <Typography.Title level={5}>别人委托给我</Typography.Title>
-      <ResizableTable
-        size="small"
-        loading={loading}
-        rowKey="id"
-        dataSource={data?.toMe ?? []}
-        pagination={false}
-        columns={[
-          { title: '来源用户', dataIndex: 'sourceUserName', width: 150 },
-          {
-            title: '结束',
-            dataIndex: 'endTime',
-            render: (v: string) => new Date(v).toLocaleString(),
-          },
-          {
-            title: '操作',
-            render: (_, record: IdentityUserDelegationDto) =>
-              record.isActive ? (
-                <Button
-                  type="link"
-                  size="small"
-                  onClick={async () => {
-                    const tokens = await startDelegation(record.id);
-                    await applyImpersonatedTokens(tokens);
-                    message.success('已进入委托身份，即将刷新');
-                    window.location.reload();
-                  }}
-                >
-                  进入委托
-                </Button>
-              ) : null,
-          },
-        ]}
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        {received.searchBox}
+      </div>
+      <AgGridReact<IdentityUserDelegationDto>
+        {...received.gridProps}
+        containerStyle={{ width: '100%', height: 280 }}
       />
     </Space>
   );
