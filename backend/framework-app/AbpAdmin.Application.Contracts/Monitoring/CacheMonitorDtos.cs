@@ -8,9 +8,10 @@ namespace AbpAdmin.Monitoring;
 
 public interface ICacheMonitorAppService : IApplicationService
 {
-    /// <summary>缓存后端概览（后端类型、键前缀、Redis 总键数与内存占用）。</summary>
+    /// <summary>查询此前缀下所有可见缓存键，并返回指定的一页。</summary>
     Task<PagedResultDto<CacheKeyDto>> QueryAsync(string? prefix, GridQueryInput input);
 
+    /// <summary>缓存后端概览（后端类型、键前缀、Redis 总键数与内存占用）。</summary>
     Task<CacheMonitorInfoDto> GetInfoAsync();
 
     /// <summary>

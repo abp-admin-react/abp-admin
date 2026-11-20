@@ -32,7 +32,7 @@ const LanguageTextsPage: React.FC = () => {
   const [resourceNames, setResourceNames] = useState<string[]>([]);
   const [languages, setLanguages] = useState<EnabledLanguage[]>([]);
   const [baseCulture, setBaseCulture] = useState<string | undefined>(undefined);
-  // 目标文化：Pro 同款由页面默认选中（第二个启用语言，否则第一个），不放进搜索表单
+  // 默认用第二个启用语言作为目标文化；只有一种时使用第一种。
   const [targetCulture, setTargetCulture] = useState<string | undefined>(
     undefined,
   );
@@ -163,8 +163,6 @@ const LanguageTextsPage: React.FC = () => {
           title: '基准语言',
           dataIndex: 'baseValue',
           ellipsis: true,
-          // 对照列只展示；后端没有按基准值过滤的参数，搜索表单里放行会静默无效
-          search: false,
           render: (_, record) => {
             if (isEditing(record)) {
               return <span style={{ color: '#999' }}>—</span>;

@@ -51,9 +51,9 @@ public class DataDictionaryViewAppService : AbpAdminAppService, IDataDictionaryV
             .Field("isStatic", x => x.IsStatic);
         var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "code", false, x => x.Id,
             d => new DataDictionaryListItemDto
-        {
-            Id = d.Id, Code = d.Code, DisplayText = d.DisplayText, Description = d.Description, IsStatic = d.IsStatic
-        });
+            {
+                Id = d.Id, Code = d.Code, DisplayText = d.DisplayText, Description = d.Description, IsStatic = d.IsStatic
+            });
         return new PagedResultDto<DataDictionaryListItemDto>(page.TotalCount, page.Items);
     }
 
