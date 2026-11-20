@@ -1,169 +1,208 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import dayjs from 'dayjs';
-import { describe, expect, it, vi } from 'vitest';
-import * as operationLogsApi from '@/abp/operationLogs';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { GridApi, IGetRowsParams } from 'ag-grid-community';
+import type { AgGridReactProps } from 'ag-grid-react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { queryOperationLogs, type OperationLogDto } from '@/abp/operationLogs';
+import Page from './index';
 
-// 操作日志页验收：挂载即请求列表、分页参数换算正确（SkipCount 数学）、
-// 成功/失败筛选的字符串→布尔转换（ProTable select 值恒为字符串）。
-let capturedRequest:
-  | ((
-      params: Record<string, unknown>,
-      sorter?: unknown,
-      filter?: Record<string, unknown[]>,
-    ) => Promise<unknown>)
-  | undefined;
-let capturedColumns: any[] | undefined;
-
-// 页面支持 ?correlationId= 跨日志串联入口：mock 可变，供深链用例切换
-let mockSearchParams = new URLSearchParams();
+let grid: AgGridReactProps<OperationLogDto>;
+let url = new URLSearchParams();
 let auditAccess = false;
-
-vi.mock('@umijs/max', () => ({
-  useAccess: () => ({ canManageOperationLogs: true, canManageAuditLogs: auditAccess }),
-  useNavigate: () => vi.fn(),
-  useSearchParams: () => [mockSearchParams, vi.fn()],
-}));
-
-vi.mock('@/abp/operationLogs', () => ({
-  getOperationLogs: vi.fn(),
-}));
-
-vi.mock('@ant-design/pro-components', () => ({
-  PageContainer: ({ children }: any) => (
-    <div data-testid="page-container">{children}</div>
-  ),
-  ProDescriptions: () => <div data-testid="pro-descriptions" />,
-  ProTable: ({ columns, request }: any) => {
-    capturedRequest = request;
-    capturedColumns = columns;
-    // 模拟 ProTable 挂载即请求数据
-    request?.({ current: 1, pageSize: 10 }, {}, {});
-    return (
-      <div data-testid="pro-table">
-        {columns?.map((col: any, i: number) => (
-          <div key={col.dataIndex ?? col.key ?? i} data-testid="column">
-            {col.title}
-          </div>
-        ))}
-      </div>
-    );
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: (props: AgGridReactProps<OperationLogDto>) => {
+    grid = props;
+    return <table />;
   },
 }));
+vi.mock('@umijs/max', () => ({
+  useAccess: () => ({ canManageAuditLogs: auditAccess }),
+  useNavigate: () => vi.fn(),
+  useSearchParams: () => [url, vi.fn()],
+}));
+vi.mock('@/abp/operationLogs', () => ({ queryOperationLogs: vi.fn() }));
+vi.mock('@ant-design/pro-components', () => ({
+  PageContainer: ({ children }: { children: React.ReactNode }) => (
+    <main>{children}</main>
+  ),
+  ProDescriptions: () => null,
+}));
 
-describe('OperationLogsPage', () => {
+function getRows(overrides: Partial<IGetRowsParams<OperationLogDto>> = {}) {
+  const request: IGetRowsParams<OperationLogDto> = {
+    startRow: 0,
+    endRow: 10,
+    filterModel: {},
+    sortModel: [],
+    context: {},
+    api: {
+      isDestroyed: () => false,
+      setGridOption: vi.fn(),
+      updateGridOptions: vi.fn(),
+    } as unknown as GridApi<OperationLogDto>,
+    successCallback: vi.fn(),
+    failCallback: vi.fn(),
+    ...overrides,
+  };
+  if (!grid.datasource) throw new Error('缺少远程数据源');
+  return { request, done: grid.datasource.getRows(request) };
+}
+
+describe('操作日志远程网格', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockSearchParams = new URLSearchParams();
+    vi.resetAllMocks();
+    url = new URLSearchParams();
     auditAccess = false;
+    vi.mocked(queryOperationLogs).mockResolvedValue({
+      items: [],
+      totalCount: 0,
+    });
   });
 
-  it.each([false, true])('关联审计入口遵守目标页记录权限（授权=%s）', async (allowed) => {
+  it.each([true, false])('关联审计链接随目标权限显示（授权=%s）', (allowed) => {
     auditAccess = allowed;
-    vi.mocked(operationLogsApi.getOperationLogs).mockResolvedValue({ items: [], totalCount: 0 });
-    const { default: Page } = await import('./index');
     render(<Page />);
-    const column = capturedColumns?.find(col => col.dataIndex === 'correlationId');
-    render(column.render(null, { correlationId: 'audit-link-test' }));
-    expect(screen.getByText('audit-link-test')).toBeInTheDocument();
+    const col = grid.columnDefs?.find(
+      (column) => 'field' in column && column.field === 'correlationId',
+    );
+    if (!col || !('cellRenderer' in col)) throw new Error('缺少关联 ID 列');
+    render(col.cellRenderer({ value: 'trace-123' }));
+    expect(screen.getByText('trace-123')).toBeInTheDocument();
     expect(!!screen.queryByText('查关联审计日志')).toBe(allowed);
   });
 
-  it('挂载即请求列表，SkipCount 按页码换算', async () => {
-    vi.mocked(operationLogsApi.getOperationLogs).mockResolvedValue({
-      items: [],
-      totalCount: 0,
-    } as never);
-    const { default: Page } = await import('./index');
+  it('深链仅作为原生网格的初始条件，清空后的请求不再包含关联 ID', async () => {
+    url = new URLSearchParams('correlationId=test-id');
     render(<Page />);
-
-    await waitFor(() => {
-      expect(operationLogsApi.getOperationLogs).toHaveBeenCalledWith(
-        expect.objectContaining({ current: 1, pageSize: 10 }),
-      );
+    expect(grid.initialState?.filter?.filterModel).toEqual({
+      correlationId: { filterType: 'text', type: 'equals', filter: 'test-id' },
     });
-
-    // 模拟第 3 页请求：SkipCount 应为 20
-    await capturedRequest?.({ current: 3, pageSize: 10 });
-    expect(operationLogsApi.getOperationLogs).toHaveBeenLastCalledWith(
-      expect.objectContaining({ current: 3, pageSize: 10 }),
+    await getRows().done;
+    expect(queryOperationLogs).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: [] }),
+      expect.any(AbortSignal),
     );
   });
 
-  it('深链 ?correlationId= 预填关联 ID 列头筛选（defaultFilteredValue 非受控初值）', async () => {
-    mockSearchParams = new URLSearchParams('?correlationId=corr-7');
-    vi.mocked(operationLogsApi.getOperationLogs).mockResolvedValue({
-      items: [],
-      totalCount: 0,
-    } as never);
-    const { default: Page } = await import('./index');
+  it('向服务端同时传递分页、失败筛选和耗时排序', async () => {
     render(<Page />);
-
-    // 真实 rc-table 会把 defaultFilteredValue 合入首请求 filter；stub 不模拟
-    // 该内部行为，因此这里锁定列配置本身（官方深链初值机制的事实源）
-    await waitFor(() => {
-      const col = capturedColumns?.find(
-        (c: any) => c.dataIndex === 'correlationId',
-      );
-      expect(col?.defaultFilteredValue).toEqual(['corr-7']);
-      expect(col?.filters?.length).toBeGreaterThan(0);
+    const { request, done } = getRows({
+      startRow: 20,
+      endRow: 30,
+      filterModel: { success: { filterType: 'text', type: 'isFalse' } },
+      sortModel: [{ colId: 'duration', sort: 'desc' }],
     });
-  });
-
-  it('成功/失败筛选把 select 字符串值转成布尔', async () => {
-    vi.mocked(operationLogsApi.getOperationLogs).mockResolvedValue({
-      items: [],
-      totalCount: 0,
-    } as never);
-    const { default: Page } = await import('./index');
-    render(<Page />);
-
-    // 列头漏斗筛选择的值以数组经 filter 传入（字符串 'false' 必须转成布尔 false 下发）
-    await capturedRequest?.(
-      { current: 1, pageSize: 10 },
-      {},
-      { success: ['false'] },
-    );
-    expect(operationLogsApi.getOperationLogs).toHaveBeenLastCalledWith(
-      expect.objectContaining({ Success: false }),
-    );
-
-    await capturedRequest?.(
-      { current: 1, pageSize: 10 },
-      {},
-      { success: ['true'] },
-    );
-    expect(operationLogsApi.getOperationLogs).toHaveBeenLastCalledWith(
-      expect.objectContaining({ Success: true }),
-    );
-
-    // 未选择时不下发该筛选
-    await capturedRequest?.({ current: 1, pageSize: 10 }, {}, {});
-    expect(operationLogsApi.getOperationLogs).toHaveBeenLastCalledWith(
-      expect.objectContaining({ Success: undefined }),
-    );
-  });
-
-  it('时间范围搜索值透传为 StartTime/EndTime', async () => {
-    vi.mocked(operationLogsApi.getOperationLogs).mockResolvedValue({
-      items: [],
-      totalCount: 0,
-    } as never);
-    const { default: Page } = await import('./index');
-    render(<Page />);
-
-    // 列头日期区间筛选提交的是 Dayjs 对象：补齐整天边界（结束日 23:59:59，避免结束日整段被排除）
-    await capturedRequest?.(
-      { current: 1, pageSize: 10 },
-      {},
+    await done;
+    expect(queryOperationLogs).toHaveBeenCalledWith(
       {
-        executionTime: [dayjs('2026-09-01'), dayjs('2026-09-17')],
+        skipCount: 20,
+        maxResultCount: 10,
+        sort: [{ field: 'duration', direction: 'desc' }],
+        filters: [
+          {
+            field: 'success',
+            join: 'and',
+            conditions: [{ op: 'eq', value: 'false' }],
+          },
+        ],
       },
+      expect.any(AbortSignal),
     );
-    expect(operationLogsApi.getOperationLogs).toHaveBeenLastCalledWith(
+    expect(request.successCallback).toHaveBeenCalledWith([], 0);
+  });
+
+  it('保留四字段关键词搜索并与列条件一起传递', async () => {
+    render(<Page />);
+    fireEvent.change(screen.getByLabelText('跨列搜索操作日志'), {
+      target: { value: ' invoice ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '搜 索' }));
+    await getRows({
+      filterModel: {
+        type: { filterType: 'text', type: 'contains', filter: '订单' },
+      },
+    }).done;
+    expect(queryOperationLogs).toHaveBeenCalledWith(
       expect.objectContaining({
-        StartTime: '2026-09-01 00:00:00',
-        EndTime: '2026-09-17 23:59:59',
+        keyword: 'invoice',
+        filters: [
+          {
+            field: 'type',
+            join: 'and',
+            conditions: [{ op: 'contains', value: '订单' }],
+          },
+        ],
       }),
+      expect.any(AbortSignal),
     );
+  });
+
+  it('接口失败时显示可重试状态', async () => {
+    vi.mocked(queryOperationLogs).mockRejectedValue(new Error('加载失败'));
+    render(<Page />);
+    const { request, done } = getRows();
+    await done;
+    await waitFor(() => expect(request.failCallback).toHaveBeenCalledTimes(1));
+    expect(request.successCallback).not.toHaveBeenCalled();
+    expect(request.api.setGridOption).toHaveBeenCalledWith(
+      'activeOverlay',
+      expect.any(Function),
+    );
+  });
+
+  it('更换筛选后，迟到的旧响应不会覆盖当前记录', async () => {
+    let release = () => {};
+    vi.mocked(queryOperationLogs).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ items: [], totalCount: 99 });
+        }),
+    );
+    render(<Page />);
+    const old = getRows();
+    const current = getRows({
+      filterModel: { success: { filterType: 'text', type: 'isTrue' } },
+    });
+    await current.done;
+    release();
+    await old.done;
+    expect(vi.mocked(queryOperationLogs).mock.calls[0][1].aborted).toBe(true);
+    expect(old.request.successCallback).not.toHaveBeenCalled();
+    expect(current.request.successCallback).toHaveBeenCalledWith([], 0);
+  });
+
+  it('服务端校验失败定位到列，修改条件后可继续加载', async () => {
+    vi.mocked(queryOperationLogs).mockRejectedValueOnce({
+      response: {
+        status: 400,
+        data: {
+          error: {
+            details: '不应展示的内部详情',
+            validationErrors: [
+              { members: ['duration'], message: '内部校验消息' },
+            ],
+          },
+        },
+      },
+    });
+    render(<Page />);
+    const invalid = getRows({
+      filterModel: {
+        duration: { filterType: 'number', type: 'equals', filter: 1.5 },
+      },
+    });
+    await invalid.done;
+    expect(invalid.request.api.updateGridOptions).toHaveBeenCalledWith({
+      activeOverlay: expect.any(Function),
+      activeOverlayParams: {
+        message: '「耗时（ms）」筛选值无效。请检查数字的范围和精度。',
+      },
+    });
+    const corrected = getRows({
+      filterModel: {
+        duration: { filterType: 'number', type: 'equals', filter: 1 },
+      },
+    });
+    await corrected.done;
+    expect(corrected.request.successCallback).toHaveBeenCalledWith([], 0);
   });
 });

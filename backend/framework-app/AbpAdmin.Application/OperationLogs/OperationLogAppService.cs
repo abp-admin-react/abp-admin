@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Dynamic.Core;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.IpRegions;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
@@ -15,6 +16,17 @@ namespace AbpAdmin.OperationLogs;
 [Authorize(AbpAdminPermissions.OperationLogs.Default)]
 public class OperationLogAppService : AbpAdminAppService, IOperationLogAppService
 {
+    private static readonly GridQueryDefinition<OperationLog> Grid = new GridQueryDefinition<OperationLog>()
+        .Field("executionTime", row => row.ExecutionTime)
+        .Field("userName", row => row.UserName)
+        .Field("type", row => row.Type)
+        .Field("subType", row => row.SubType)
+        .Field("bizId", row => row.BizId)
+        .Field("action", row => row.Action)
+        .Field("correlationId", row => row.CorrelationId, "eq", "ne")
+        .Field("success", row => row.Success)
+        .Field("duration", row => row.Duration);
+
     private static readonly string[] SortableFields =
     [
         nameof(OperationLog.ExecutionTime),
@@ -41,17 +53,7 @@ public class OperationLogAppService : AbpAdminAppService, IOperationLogAppServic
     {
         ValidateSorting(input.Sorting);
 
-        var queryable = await _repository.GetQueryableAsync();
-
-        if (!string.IsNullOrWhiteSpace(input.Filter))
-        {
-            var filter = input.Filter;
-            queryable = queryable.Where(x =>
-                x.SubType.Contains(filter) ||
-                x.Action!.Contains(filter) ||
-                x.BizId!.Contains(filter) ||
-                x.UserName!.Contains(filter));
-        }
+        var queryable = WithKeyword(await _repository.GetQueryableAsync(), input.Filter);
 
         if (!string.IsNullOrWhiteSpace(input.Type))
         {
@@ -96,8 +98,27 @@ public class OperationLogAppService : AbpAdminAppService, IOperationLogAppServic
         queryable = queryable.OrderBy(string.IsNullOrWhiteSpace(input.Sorting) ? "ExecutionTime desc" : input.Sorting);
 
         var totalCount = await AsyncExecuter.CountAsync(queryable);
+        return await ReadPageAsync(queryable, totalCount, input.SkipCount, input.MaxResultCount);
+    }
+
+    public virtual async Task<PagedResultDto<OperationLogDto>> QueryAsync(GridQueryInput input)
+    {
+        var filtered = Grid.Filter(WithKeyword(await _repository.GetQueryableAsync(), input.Keyword), input);
+        var total = await AsyncExecuter.CountAsync(filtered);
+        var ordered = Grid.OrderBy(filtered, input, "executionTime", true, log => log.Id);
+        return await ReadPageAsync(ordered, total, input.SkipCount, input.MaxResultCount);
+    }
+
+    private static IQueryable<OperationLog> WithKeyword(IQueryable<OperationLog> query, string? filter) =>
+        string.IsNullOrWhiteSpace(filter) ? query : query.Where(x =>
+            x.SubType.Contains(filter) || x.Action!.Contains(filter) ||
+            x.BizId!.Contains(filter) || x.UserName!.Contains(filter));
+
+    private async Task<PagedResultDto<OperationLogDto>> ReadPageAsync(IQueryable<OperationLog> queryable,
+        int totalCount, int skipCount, int maxResultCount)
+    {
         var logs = await AsyncExecuter.ToListAsync(
-            queryable.Skip(input.SkipCount).Take(input.MaxResultCount));
+            queryable.Skip(skipCount).Take(maxResultCount));
 
         // IP 归属地按当页去重解析（内部走缓存），不在查询里 join
         var locationMap = await _ipLocationResolver.ResolveManyAsync(logs.Select(x => x.ClientIpAddress));

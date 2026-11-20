@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.OperationLogs;
 using Shouldly;
 using Volo.Abp;
@@ -92,6 +93,66 @@ public abstract class OperationLogAppServiceTests<TStartupModule> : AbpAdminAppl
         byCorrelationId.TotalCount.ShouldBe(1);
         byCorrelationId.Items[0].SubType.ShouldBe("失败操作");
         byCorrelationId.Items[0].CorrelationId.ShouldBe("corr-002");
+    }
+
+    [Fact]
+    public async Task Grid_query_combines_columns_before_sort_count_and_paging()
+    {
+        var day = new DateTime(2026, 4, 12, 0, 0, 0, DateTimeKind.Utc);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var repo = GetRequiredService<IRepository<OperationLog, Guid>>();
+            foreach (var (name, success, duration, time) in new[]
+            {
+                ("Alpha", false, 8, day),
+                ("Alpha", true, 200, day.AddHours(8)),
+                ("Beta", false, 90, day.AddHours(23)),
+                ("Other", false, 300, day),
+                ("Alpha", false, 100, day.AddDays(1))
+            })
+            {
+                await repo.InsertAsync(new OperationLog(_guidGenerator.Create(), "测试", "示例", null, name, null,
+                    null, "用于关键词筛选", null, success, null, null, null, null, null,
+                    null, duration, time));
+            }
+        });
+
+        var input = new GridQueryInput
+        {
+            Keyword = "关键词",
+            MaxResultCount = 1,
+            Filters =
+            [
+                new() { Field = "success", Conditions = [new() { Op = "eq", Value = "false" }] },
+                new() { Field = "executionTime", Conditions = [new() { Op = "eq", Value = "2026-04-12" }] },
+                new()
+                {
+                    Field = "userName", Join = "or",
+                    Conditions = [new() { Op = "contains", Value = "ALP" }, new() { Op = "eq", Value = "bEtA" }]
+                }
+            ],
+            Sort = [new() { Field = "duration", Direction = "desc" }]
+        };
+        var first = await _appService.QueryAsync(input);
+        first.TotalCount.ShouldBe(2);
+        first.Items.ShouldHaveSingleItem().UserName.ShouldBe("Beta");
+        input.SkipCount = 1;
+        (await _appService.QueryAsync(input)).Items.ShouldHaveSingleItem().UserName.ShouldBe("Alpha");
+        input.Keyword = "不在明细中";
+        (await _appService.QueryAsync(input)).TotalCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Grid_query_rejects_unknown_sort_and_incompatible_filter_types()
+    {
+        await Should.ThrowAsync<AbpValidationException>(() => _appService.QueryAsync(new GridQueryInput
+        {
+            Sort = [new() { Field = "tenantId", Direction = "asc" }]
+        }));
+        await Should.ThrowAsync<AbpValidationException>(() => _appService.QueryAsync(new GridQueryInput
+        {
+            Filters = [new() { Field = "duration", Conditions = [new() { Op = "contains", Value = "8" }] }]
+        }));
     }
 
     [Fact]

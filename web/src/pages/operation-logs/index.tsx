@@ -1,18 +1,17 @@
 import { PageContainer, ProDescriptions } from '@ant-design/pro-components';
 import { useAccess, useSearchParams } from '@umijs/max';
-import { Drawer, Tag, Typography } from 'antd';
-import dayjs, { type Dayjs } from 'dayjs';
-import React, { useState } from 'react';
-import { getOperationLogs, type OperationLogDto } from '@/abp/operationLogs';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import type {
+  GetRowIdParams,
+  GridState,
+  ICellRendererParams,
+} from 'ag-grid-community';
+import { AgGridReact } from 'ag-grid-react';
+import { Button, Drawer, Input, Space, Tag, Typography } from 'antd';
+import { useCallback, useMemo, useState } from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
+import { queryOperationLogs, type OperationLogDto } from '@/abp/operationLogs';
 import CorrelationIdText from '@/components/CorrelationIdText';
-import {
-  dateRangeFilter,
-  enumFilters,
-  firstFilterValue,
-  textFilter,
-} from '@/components/tableColumnFilters';
-import { toDayEnd, toDayStart } from '@/utils/format';
+import { type RemoteColumn, useRemoteGrid } from '@/components/remoteGrid';
 
 const formatExtra = (extra?: string | null) => {
   if (!extra) {
@@ -25,128 +24,130 @@ const formatExtra = (extra?: string | null) => {
   }
 };
 
+const logRowId = ({ data }: GetRowIdParams<OperationLogDto>) => data.id;
+
 const OperationLogsPage: React.FC = () => {
   const access = useAccess();
   const [detail, setDetail] = useState<OperationLogDto>();
-  // 支持从审计日志详情跳转过来（?correlationId=xxx 串联同一次请求的两类日志）。
-  // 只作表单初始值：用户清空筛选后不应被 URL 初始值粘住（审查修复）
   const [searchParams] = useSearchParams();
-  const initialCorrelationId = searchParams.get('correlationId') ?? undefined;
+  const [keyword, setKeyword] = useState('');
+  // 关联 ID 是深链的初值。用户清除列筛选后可继续查询其他关联记录。
+  const [initialState] = useState<GridState>(() => {
+    const id = searchParams.get('correlationId');
+    return id
+      ? {
+          filter: {
+            filterModel: {
+              correlationId: { filterType: 'text', type: 'equals', filter: id },
+            },
+          },
+        }
+      : {};
+  });
+  const load = useCallback(
+    (input: GridQuery, signal: AbortSignal) =>
+      queryOperationLogs(keyword ? { ...input, keyword } : input, signal),
+    [keyword],
+  );
+  const columns = useMemo<RemoteColumn<OperationLogDto>[]>(
+    () => [
+      {
+        field: 'executionTime',
+        headerName: '时间（UTC）',
+        kind: 'date',
+        width: 192,
+        initialSort: 'desc',
+        valueFormatter: ({ value }) =>
+          value
+            ? new Date(value).toLocaleString('zh-CN', {
+                timeZone: 'UTC',
+                hour12: false,
+              })
+            : '',
+      },
+      { field: 'userName', headerName: '用户', width: 150 },
+      { field: 'type', headerName: '模块', width: 140 },
+      { field: 'subType', headerName: '操作名', width: 150 },
+      {
+        field: 'bizId',
+        headerName: '业务编号',
+        width: 180,
+        cellRenderer: ({ value }: ICellRendererParams<OperationLogDto>) =>
+          value && <Typography.Text copyable>{value}</Typography.Text>,
+      },
+      { field: 'action', headerName: '明细', minWidth: 170, flex: 1 },
+      {
+        field: 'correlationId',
+        headerName: '关联 ID',
+        kind: 'identifier',
+        width: access.canManageAuditLogs ? 440 : 320,
+        cellRenderer: ({ value }: ICellRendererParams<OperationLogDto>) => (
+          <CorrelationIdText
+            value={value}
+            linkTo={
+              access.canManageAuditLogs
+                ? '/administration/audit-logs'
+                : undefined
+            }
+            linkText="查关联审计日志"
+          />
+        ),
+      },
+      {
+        field: 'success',
+        headerName: '结果',
+        kind: 'boolean',
+        booleanLabels: { true: '成功', false: '失败' },
+        width: 110,
+        cellRenderer: ({ data }: ICellRendererParams<OperationLogDto>) =>
+          data && (
+            <Tag color={data.success ? 'success' : 'error'}>
+              {data.success ? '成功' : '失败'}
+            </Tag>
+          ),
+      },
+      {
+        field: 'duration',
+        headerName: '耗时（ms）',
+        kind: 'number',
+        width: 140,
+      },
+      {
+        colId: 'details',
+        headerName: '操作',
+        kind: 'display',
+        width: 100,
+        cellRenderer: ({ data }: ICellRendererParams<OperationLogDto>) =>
+          data && (
+            <Button type="link" size="small" onClick={() => setDetail(data)}>
+              详情
+            </Button>
+          ),
+      },
+    ],
+    [access.canManageAuditLogs],
+  );
+  const grid = useRemoteGrid({
+    columnDefs: columns,
+    query: load,
+    getRowId: logRowId,
+    initialState,
+    ariaLabel: '操作日志',
+  });
 
   return (
     <PageContainer>
-      <AutoHeightProTable<OperationLogDto>
-        rowKey="id"
-        search={false}
-        columns={[
-          {
-            title: '时间',
-            dataIndex: 'executionTime',
-            valueType: 'dateTime',
-            width: 160,
-            ...dateRangeFilter(),
-          },
-          { title: '用户', dataIndex: 'userName', width: 120 },
-          { title: '模块', dataIndex: 'type', width: 100, ...textFilter() },
-          { title: '操作', dataIndex: 'subType', width: 130, ...textFilter() },
-          {
-            title: '业务编号',
-            dataIndex: 'bizId',
-            width: 120,
-            copyable: true,
-            ellipsis: true,
-          },
-          {
-            // 原「内容」搜索字段：后端整表匹配（操作名/内容/业务编号/用户名），
-            // 挂在明细列头，placeholder 说清口径
-            title: '明细',
-            dataIndex: 'action',
-            ellipsis: true,
-            ...textFilter('匹配操作名/内容/业务编号/用户名'),
-          },
-          {
-            // 关联 ID 原为隐藏搜索字段 + URL 深链；落为可见列 + 列头筛选，
-            // defaultFilteredValue 作非受控初始值：用户清空后不被 URL 初始值粘住。
-            // 服务端筛选标记由 textFilter 工厂携带（见 tableColumnFilters）
-            title: '关联 ID',
-            dataIndex: 'correlationId',
-            width: 130,
-            copyable: true,
-            ellipsis: true,
-            defaultFilteredValue: initialCorrelationId
-              ? [initialCorrelationId]
-              : undefined,
-            ...textFilter('与审计日志串联的关联 ID'),
-            render: (_, record) => (
-              <CorrelationIdText
-                value={record.correlationId}
-                linkTo={access.canManageAuditLogs ? '/administration/audit-logs' : undefined}
-                linkText="查关联审计日志"
-              />
-            ),
-          },
-          {
-            title: '结果',
-            dataIndex: 'success',
-            width: 80,
-            filterMultiple: false,
-            filters: enumFilters({ 成功: 'true', 失败: 'false' }),
-            render: (_, record) =>
-              record.success ? (
-                <Tag color="success">成功</Tag>
-              ) : (
-                <Tag color="error">失败</Tag>
-              ),
-          },
-          {
-            title: '耗时',
-            dataIndex: 'duration',
-            width: 80,
-            render: (_, record) => `${record.duration} ms`,
-          },
-          {
-            title: '操作',
-            valueType: 'option',
-            width: 70,
-            render: (_, record) => [
-              <a key="detail" onClick={() => setDetail(record)}>
-                详情
-              </a>,
-            ],
-          },
-        ]}
-        request={async (params, _sorter, filter) => {
-          const f = (filter ?? {}) as Record<string, unknown[] | undefined>;
-          // 纯日期 RangePicker 的结束日是 00:00:00，后端为 <= 精确比较：
-          // 补齐到整天边界，避免结束日整段被排除（共享 toDayStart/toDayEnd 约定）
-          const range = f.executionTime ?? [];
-          const start = dayjs.isDayjs(range[0])
-            ? (range[0] as Dayjs).format('YYYY-MM-DD')
-            : undefined;
-          const end = dayjs.isDayjs(range[1])
-            ? (range[1] as Dayjs).format('YYYY-MM-DD')
-            : undefined;
-          const result = await getOperationLogs({
-            current: params.current,
-            pageSize: params.pageSize,
-            Filter: firstFilterValue(f, 'action'),
-            Type: firstFilterValue(f, 'type'),
-            SubType: firstFilterValue(f, 'subType'),
-            Success:
-              firstFilterValue(f, 'success') === undefined
-                ? undefined
-                : firstFilterValue(f, 'success') === 'true',
-            CorrelationId: firstFilterValue(f, 'correlationId'),
-            StartTime: toDayStart(start),
-            EndTime: toDayEnd(end),
-          });
-          return {
-            data: result.items,
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-      />
+      <Space orientation="vertical" style={{ width: '100%' }}>
+        <Input.Search
+          aria-label="跨列搜索操作日志"
+          placeholder="搜索操作名、明细、业务编号或用户名"
+          style={{ width: 'min(360px, 100%)' }}
+          allowClear
+          enterButton="搜索"
+          onSearch={(value) => setKeyword(value.trim())}
+        />
+        <AgGridReact<OperationLogDto> {...grid} />
+      </Space>
       <Drawer
         title={detail ? `${detail.type} · ${detail.subType}` : ''}
         open={!!detail}
@@ -215,7 +216,11 @@ const OperationLogsPage: React.FC = () => {
               render: (_, record) => (
                 <CorrelationIdText
                   value={record?.correlationId}
-                  linkTo={access.canManageAuditLogs ? '/administration/audit-logs' : undefined}
+                  linkTo={
+                    access.canManageAuditLogs
+                      ? '/administration/audit-logs'
+                      : undefined
+                  }
                   linkText="查关联审计日志"
                 />
               ),

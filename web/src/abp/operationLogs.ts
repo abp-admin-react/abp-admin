@@ -1,10 +1,5 @@
-/**
- * 操作日志查询 API（业务操作审计，区别于 ABP AuditLogs）。
- *
- * - 列表分页与 identity 同口径（SkipCount/MaxResultCount）。
- * - success=false 时 errorMessage 供详情展示；列表勿默认弹全局错（按页面 skip 策略）。
- */
 import { request } from '@umijs/max';
+import type { GridQuery } from './gridQuery';
 import type { PagedResult } from './identity';
 
 export type OperationLogDto = {
@@ -40,6 +35,16 @@ export type GetOperationLogListParams = {
   StartTime?: string;
   EndTime?: string;
 };
+
+export function queryOperationLogs(input: GridQuery, signal: AbortSignal) {
+  return request<PagedResult<OperationLogDto>>('/api/app/operation-log/query', {
+    method: 'POST',
+    data: input,
+    signal,
+    // 数据块加载失败时由网格显示重试入口。
+    skipErrorHandler: true,
+  });
+}
 
 export async function getOperationLogs(params: GetOperationLogListParams) {
   return request<PagedResult<OperationLogDto>>('/api/app/operation-log', {
