@@ -1,5 +1,18 @@
 import { useIntl } from '@umijs/max';
-import { App, Button, DatePicker, Form, InputNumber, Modal, Popconfirm, Space, Typography,  } from 'antd';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  DatePicker,
+  Form,
+  Button as GridButton,
+  Space as GridControls,
+  InputNumber,
+  Modal,
+  Popconfirm,
+  Space,
+  Typography,
+} from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -9,7 +22,7 @@ import {
   getAnonymousShareUrl,
   getFileShares,
 } from '@/abp/fileShare';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 
 /** 后端 FileShareLinkConsts：相对现在最多 30 天 */
 const MAX_EXPIRE_DAYS = 30;
@@ -118,6 +131,65 @@ const ShareAction: React.FC<{
     );
   }, []);
 
+  const shareGrid = useSearchableLocalGrid<FileShareLinkDto>({
+    columnDefs: toGridColumns<FileShareLinkDto>(
+      [
+        {
+          title: intl.formatMessage({
+            id: 'pages.files.share.expiresAt',
+          }),
+          dataIndex: 'expireTime',
+          render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
+        },
+        {
+          title: intl.formatMessage({
+            id: 'pages.files.share.downloads',
+          }),
+          dataIndex: 'downloadCount',
+          width: 110,
+          render: (_, record) =>
+            record.maxDownloads == null
+              ? intl.formatMessage(
+                  { id: 'pages.files.share.downloadsCount' },
+                  { count: record.downloadCount },
+                )
+              : intl.formatMessage(
+                  { id: 'pages.files.share.downloadsCountWithMax' },
+                  {
+                    count: record.downloadCount,
+                    max: record.maxDownloads,
+                  },
+                ),
+        },
+        {
+          title: intl.formatMessage({
+            id: 'pages.files.columns.actions',
+          }),
+          width: 90,
+          render: (_, record) => (
+            <Popconfirm
+              title={intl.formatMessage({
+                id: 'pages.files.share.revokeConfirm',
+              })}
+              onConfirm={() => handleRevoke(record.id)}
+            >
+              <a style={{ color: '#ff4d4f' }}>
+                {intl.formatMessage({ id: 'pages.files.share.revoke' })}
+              </a>
+            </Popconfirm>
+          ),
+        },
+      ],
+      { pro: false, kinds: { downloadCount: 'number', expireTime: 'date' } },
+    ),
+    ariaLabel: '文件分享',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    rowData: shares,
+    pagination: false,
+    keywordFields: ['downloadCount', 'expireTime'],
+  });
+
   return (
     <>
       <a onClick={() => setOpen(true)}>
@@ -187,60 +259,16 @@ const ShareAction: React.FC<{
             <Typography.Title level={5} style={{ marginTop: 16 }}>
               {intl.formatMessage({ id: 'pages.files.share.existing' })}
             </Typography.Title>
-            <ResizableTable<FileShareLinkDto>
-              rowKey="id"
-              size="small"
-              pagination={false}
-              dataSource={shares}
-              columns={[
-                {
-                  title: intl.formatMessage({
-                    id: 'pages.files.share.expiresAt',
-                  }),
-                  dataIndex: 'expireTime',
-                  render: (value: string) =>
-                    dayjs(value).format('YYYY-MM-DD HH:mm'),
-                },
-                {
-                  title: intl.formatMessage({
-                    id: 'pages.files.share.downloads',
-                  }),
-                  dataIndex: 'downloadCount',
-                  width: 110,
-                  render: (_, record) =>
-                    record.maxDownloads == null
-                      ? intl.formatMessage(
-                          { id: 'pages.files.share.downloadsCount' },
-                          { count: record.downloadCount },
-                        )
-                      : intl.formatMessage(
-                          { id: 'pages.files.share.downloadsCountWithMax' },
-                          {
-                            count: record.downloadCount,
-                            max: record.maxDownloads,
-                          },
-                        ),
-                },
-                {
-                  title: intl.formatMessage({
-                    id: 'pages.files.columns.actions',
-                  }),
-                  width: 90,
-                  render: (_, record) => (
-                    <Popconfirm
-                      title={intl.formatMessage({
-                        id: 'pages.files.share.revokeConfirm',
-                      })}
-                      onConfirm={() => handleRevoke(record.id)}
-                    >
-                      <a style={{ color: '#ff4d4f' }}>
-                        {intl.formatMessage({ id: 'pages.files.share.revoke' })}
-                      </a>
-                    </Popconfirm>
-                  ),
-                },
-              ]}
-            />
+
+            <GridControls wrap style={{ marginBottom: 8 }}>
+              {shareGrid.searchBox}
+              {shareGrid.hasFilters && (
+                <GridButton onClick={shareGrid.clearFilters}>
+                  清空筛选
+                </GridButton>
+              )}
+            </GridControls>
+            <AgGridReact<FileShareLinkDto> {...shareGrid.gridProps} />
           </>
         )}
       </Modal>

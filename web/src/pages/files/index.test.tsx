@@ -1,4 +1,10 @@
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as imaging from '@/abp/imaging';
 import * as fileManagement from '@/services/fileManagement';
@@ -7,6 +13,7 @@ import * as fileManagement from '@/services/fileManagement';
 let mockAccess: Record<string, boolean> = {};
 
 // 文案已全部走 locales（useIntl）：mock 直接回显 key，断言用 key 值保持稳定
+vi.mock('ag-grid-react', () => import('../../../tests/gridTestDouble'));
 vi.mock('@umijs/max', () => ({
   useAccess: () => mockAccess,
   useIntl: () => ({
@@ -20,7 +27,7 @@ vi.mock('@/abp/imaging', async () => {
     await vi.importActual<typeof import('@/abp/imaging')>('@/abp/imaging');
   return {
     ...actual,
-    getFileListWithThumbnails: vi.fn(),
+    queryFiles: vi.fn(),
   };
 });
 
@@ -52,22 +59,6 @@ vi.mock('@ant-design/pro-components', () => ({
       {children}
     </div>
   ),
-  ProTable: ({ columns, toolBarRender, request, params }: any) => {
-    // 模拟 ProTable 挂载即请求数据
-    request?.({ current: 1, pageSize: 10, ...params }, {}, {});
-    return (
-      <div data-testid="pro-table">
-        <div data-testid="table-columns">
-          {columns?.map((col: any) => (
-            <div key={col.dataIndex} data-testid={`column-${col.dataIndex}`}>
-              {col.title}
-            </div>
-          ))}
-        </div>
-        {toolBarRender && <div data-testid="toolbar">{toolBarRender()}</div>}
-      </div>
-    );
-  },
   ModalForm: ({ children, title, trigger }: any) => (
     <div data-testid="modal-form" data-title={title}>
       {trigger}
@@ -157,10 +148,12 @@ const allPermissions = {
 
 it('文件查看角色预览缩略图无需请求下载凭证', async () => {
   const { result } = renderHook(() => useFileActions(false));
-  await act(() => result.current.handlePreview({
-    id: 'file-id',
-    thumbnailUrl: '/thumbnail',
-  }));
+  await act(() =>
+    result.current.handlePreview({
+      id: 'file-id',
+      thumbnailUrl: '/thumbnail',
+    }),
+  );
   expect(result.current.previewSrc).toBe('/thumbnail');
   expect(fileManagement.getDownloadInfo).not.toHaveBeenCalled();
 });
@@ -192,13 +185,24 @@ describe('FilesPage', () => {
     } as API.PagedResultDto1FileInfoDto);
 
     // 文件表格走「列表 + 缩略图 URL」端点：返回一条有缩略图的图片 + 一条非图片
-    vi.mocked(imaging.getFileListWithThumbnails).mockResolvedValue({
+    vi.mocked(imaging.queryFiles).mockResolvedValue({
       items: [
-        { id: 'img-1', fileName: 'photo.png', fileType: 2, byteSize: 100 },
-        { id: 'txt-1', fileName: 'note.txt', fileType: 2, byteSize: 10 },
+        {
+          id: 'img-1',
+          fileName: 'photo.png',
+          thumbnailUrl: '/api/app/file-thumbnail/img-1',
+          fileType: 2,
+          byteSize: 100,
+        },
+        {
+          id: 'txt-1',
+          fileName: 'note.txt',
+          thumbnailUrl: undefined,
+          fileType: 2,
+          byteSize: 10,
+        },
       ],
       totalCount: 2,
-      thumbnailUrls: { 'img-1': '/api/app/file-thumbnail/img-1' },
     });
   });
 
@@ -207,7 +211,7 @@ describe('FilesPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('dir-tree')).toBeInTheDocument();
-      expect(screen.getByTestId('pro-table')).toBeInTheDocument();
+      expect(screen.getByRole('table')).toBeInTheDocument();
     });
 
     // 目录树加载了根目录
@@ -216,19 +220,19 @@ describe('FilesPage', () => {
     });
 
     // 表格列包含预览/名称/大小（文案走 intl，mock 回显 key）
-    expect(screen.getByTestId('column-thumbnailUrl')).toHaveTextContent(
-      'pages.files.columns.preview',
-    );
-    expect(screen.getByTestId('column-fileName')).toHaveTextContent(
-      'pages.files.columns.name',
-    );
-    expect(screen.getByTestId('column-byteSize')).toHaveTextContent(
-      'pages.files.columns.size',
-    );
+    expect(
+      screen.getByRole('columnheader', { name: 'pages.files.columns.preview' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('columnheader', { name: 'pages.files.columns.name' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('columnheader', { name: 'pages.files.columns.size' }),
+    ).toBeInTheDocument();
 
     // 文件表格的数据请求走「列表 + 缩略图 URL」端点
     await waitFor(() => {
-      expect(imaging.getFileListWithThumbnails).toHaveBeenCalled();
+      expect(imaging.queryFiles).toHaveBeenCalled();
     });
   });
 
@@ -286,7 +290,7 @@ describe('FilesPage', () => {
     render(<FilesPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('pro-table')).toBeInTheDocument();
+      expect(screen.getByRole('table')).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId('upload')).not.toBeInTheDocument();
@@ -299,23 +303,23 @@ describe('FilesPage', () => {
     mockAccess = { ...allPermissions, canDeleteFile: false };
 
     // 让表格 request 返回一条文件记录，操作列才会渲染删除
-    vi.mocked(imaging.getFileListWithThumbnails).mockResolvedValue({
+    vi.mocked(imaging.queryFiles).mockResolvedValue({
       items: [
         {
           id: 'file-1',
+          thumbnailUrl: undefined,
           fileName: 'a.txt',
           fileType: 2,
           byteSize: 3,
         },
       ],
       totalCount: 1,
-      thumbnailUrls: {},
     });
 
     render(<FilesPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('pro-table')).toBeInTheDocument();
+      expect(screen.getByRole('table')).toBeInTheDocument();
     });
 
     expect(

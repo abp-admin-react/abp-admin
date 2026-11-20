@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.IO;
 using System.Linq;
@@ -79,6 +80,18 @@ public abstract class FileThumbnailAppServiceTests<TStartupModule> : AbpAdminApp
         });
         list.ThumbnailUrls.ShouldContainKey(fileId);
         list.ThumbnailUrls[fileId].ShouldBe($"/api/app/file-thumbnail/{fileId}");
+
+        var grid = await _fileThumbnailAppService.QueryAsync(new FileGridInput
+        {
+            FileContainerName = ContainerName,
+            Grid = new GridQueryInput
+            {
+                Keyword = "PHOTO",
+                Filters = [new() { Field = "fileName", Conditions = [new() { Op = "eq", Value = "photo.png" }] }]
+            }
+        });
+        grid.Items.ShouldContain(file => file.Id == fileId && file.FileName == "photo.png");
+        grid.ThumbnailUrls[fileId].ShouldBe(list.ThumbnailUrls[fileId]);
 
         // GetAsync 返回缩略图内容
         var content = await _fileThumbnailAppService.GetAsync(fileId);

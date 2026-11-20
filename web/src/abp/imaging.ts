@@ -1,4 +1,5 @@
 import { request } from '@umijs/max';
+import type { GridQuery } from './gridQuery';
 
 /**
  * T3.1 图片处理（用户头像 + 文件缩略图）语义化 API 封装。
@@ -67,4 +68,27 @@ export async function getFileListWithThumbnails(
       },
     },
   );
+}
+
+export async function queryFiles(
+  fileContainerName: string,
+  parentId: string | undefined,
+  grid: GridQuery,
+  signal: AbortSignal,
+) {
+  const result = await request<FileListWithThumbnailsResult>(
+    '/api/app/file-thumbnail/query',
+    {
+      method: 'POST',
+      data: { fileContainerName, parentId, grid },
+      signal,
+    },
+  );
+  return {
+    totalCount: result.totalCount,
+    items: result.items.map((file) => ({
+      ...file,
+      thumbnailUrl: file.id ? result.thumbnailUrls[file.id] : undefined,
+    })),
+  };
 }

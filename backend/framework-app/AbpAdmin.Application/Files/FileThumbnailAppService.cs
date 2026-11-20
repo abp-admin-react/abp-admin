@@ -2,10 +2,14 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Imaging;
-using EasyAbp.FileManagement.Files;
 using EasyAbp.FileManagement.Files.Dtos;
+using EasyAbp.FileManagement.Files;
+using EasyAbp.FileManagement.Permissions;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
+using Volo.Abp.Application.Dtos;
 using Volo.Abp.BlobStoring;
 using Volo.Abp.Content;
 using Volo.Abp.Domain.Entities;
@@ -36,6 +40,27 @@ public class FileThumbnailAppService : AbpAdminAppService, IFileThumbnailAppServ
         _thumbnailContainer = thumbnailContainer;
     }
 
+    public virtual async Task<GetFileListWithThumbnailsOutput> QueryAsync(FileGridInput input)
+    {
+        // 文件模块按容器、目录和所有者授权；查询范围须与授权资源完全一致。
+        await AuthorizationService.CheckAsync(
+            new FileGetListOperationInfoModel(input.ParentId, input.FileContainerName, input.OwnerUserId),
+            new OperationAuthorizationRequirement { Name = FileManagementPermissions.File.Default });
+        var files = await LazyServiceProvider.LazyGetRequiredService<IFileRepository>().GetQueryableAsync();
+        var rows = files.Where(x => x.ParentId == input.ParentId && x.OwnerUserId == input.OwnerUserId
+            && x.FileContainerName == input.FileContainerName);
+        var grid = new GridQueryDefinition<EasyAbp.FileManagement.Files.File>()
+            .SearchableField("fileName", x => x.FileName)
+            .SearchableField("mimeType", x => x.MimeType)
+            .Field("fileType", x => (int)x.FileType)
+            .Field("byteSize", x => x.ByteSize)
+            .Field("subFilesQuantity", x => x.SubFilesQuantity)
+            .Field("creationTime", x => x.CreationTime);
+        var page = await grid.ReadPageAsync(rows, input.Grid, AsyncExecuter, "fileName", false,
+            x => x.Id, x => ObjectMapper.Map<EasyAbp.FileManagement.Files.File, FileInfoDto>(x));
+        return await WithThumbnailsAsync(new(page.TotalCount, page.Items));
+    }
+
     public virtual async Task<IRemoteStreamContent> GetAsync(Guid id)
     {
         // 模块授权：无权读文件信息时这里直接抛 403/404
@@ -62,6 +87,11 @@ public class FileThumbnailAppService : AbpAdminAppService, IFileThumbnailAppServ
     {
         // 透传模块列表（授权在模块内部生效），再补本页 Done 状态的缩略图 URL
         var result = await _fileAppService.GetListAsync(input);
+        return await WithThumbnailsAsync(result);
+    }
+
+    private async Task<GetFileListWithThumbnailsOutput> WithThumbnailsAsync(PagedResultDto<FileInfoDto> result)
+    {
         var output = new GetFileListWithThumbnailsOutput(result.TotalCount, result.Items);
 
         var fileIds = result.Items.Select(x => x.Id).ToArray();

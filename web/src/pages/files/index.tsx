@@ -1,16 +1,27 @@
 import { UploadOutlined } from '@ant-design/icons';
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   ProCard,
   ProFormText,
 } from '@ant-design/pro-components';
 import { useAccess, useIntl } from '@umijs/max';
-import { App, Button, Image, Upload } from 'antd';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { getFileListWithThumbnails } from '@/abp/imaging';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  Button as GridButton,
+  Space as GridControls,
+  Image,
+  Upload,
+} from 'antd';
+import React, { useCallback, useEffect, useState } from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
+import { queryFiles } from '@/abp/imaging';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import {
   createDirectory,
   FILE_CONTAINER_NAME,
@@ -35,7 +46,6 @@ const FilesPage: React.FC = () => {
   const access = useAccess();
   const intl = useIntl();
   const { message } = App.useApp();
-  const actionRef = useRef<ActionType>(undefined);
 
   // 当前选中目录（undefined = 根目录）
   const [currentDirId, setCurrentDirId] = useState<string | undefined>();
@@ -70,7 +80,7 @@ const FilesPage: React.FC = () => {
   }, [canCreate]);
 
   const reload = useCallback(() => {
-    actionRef.current?.reload();
+    grid.refresh();
   }, []);
 
   const columns = useFileColumns({
@@ -94,6 +104,26 @@ const FilesPage: React.FC = () => {
       setCurrentDirId(record.id);
       setCurrentDirName(record.fileName || '');
     },
+  });
+
+  const grid = useSearchableRemoteGrid<FileRow>({
+    columnDefs: toGridColumns<FileRow>(columns, {
+      pro: true,
+      kinds: {
+        thumbnailUrl: 'display',
+        fileType: 'number',
+        subFilesQuantity: 'number',
+        byteSize: 'number',
+      },
+    }),
+    ariaLabel: '文件',
+    getRowId: ({ data }) => String(data.id),
+    pageSize: 10,
+    query: React.useCallback(
+      (input: GridQuery, signal: AbortSignal) =>
+        queryFiles(FILE_CONTAINER_NAME, currentDirId, input, signal),
+      [currentDirId],
+    ),
   });
 
   return (
@@ -123,36 +153,12 @@ const FilesPage: React.FC = () => {
           )}
           headerBordered
         >
-          <AutoHeightProTable<FileRow>
-            rowKey="id"
-            actionRef={actionRef}
-            search={false}
-            /* 目录树 + 列表的多面板嵌套布局，不撑满视口，保留拖拽列宽与防撑破 */
-            fillViewport={false}
-            params={{ parentId: currentDirId }}
-            columns={columns}
-            request={async (params) => {
-              const result = await getFileListWithThumbnails(
-                FILE_CONTAINER_NAME,
-                {
-                  parentId: params.parentId,
-                  sorting: 'FileName',
-                  skipCount:
-                    ((params.current || 1) - 1) * (params.pageSize || 10),
-                  maxResultCount: params.pageSize || 10,
-                },
-              );
-              const thumbnailUrls = result.thumbnailUrls || {};
-              return {
-                data: (result.items || []).map((item) => ({
-                  ...item,
-                  thumbnailUrl: item.id ? thumbnailUrls[item.id] : undefined,
-                })),
-                total: result.totalCount || 0,
-                success: true,
-              };
-            }}
-            toolBarRender={() => {
+          <GridControls wrap style={{ marginBottom: 8 }}>
+            {grid.searchBox}
+            {grid.hasFilters && (
+              <GridButton onClick={grid.clearFilters}>清空筛选</GridButton>
+            )}{' '}
+            {(() => {
               const tools: React.ReactNode[] = [];
               if (canCreate) {
                 tools.push(
@@ -232,8 +238,9 @@ const FilesPage: React.FC = () => {
                 );
               }
               return tools;
-            }}
-          />
+            })()}
+          </GridControls>
+          <AgGridReact<FileRow> {...grid.gridProps} />
         </ProCard>
       </ProCard>
 

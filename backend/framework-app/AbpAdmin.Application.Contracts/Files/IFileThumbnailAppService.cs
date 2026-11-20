@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using EasyAbp.FileManagement.Files.Dtos;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
@@ -14,6 +15,8 @@ namespace AbpAdmin.Files;
 /// </summary>
 public interface IFileThumbnailAppService : IApplicationService
 {
+    Task<GetFileListWithThumbnailsOutput> QueryAsync(FileGridInput input);
+
     /// <summary>
     /// 读取指定文件的缩略图。复用 EasyAbp 的文件读取授权（无权读文件就拿不到缩略图）；
     /// 文件不存在、无权限或缩略图未就绪都按 NotFound 处理（不暴露状态机细节）。
@@ -40,4 +43,12 @@ public class GetFileListWithThumbnailsOutput : PagedResultDto<FileInfoDto>
         : base(totalCount, items)
     {
     }
+}
+
+public class FileGridInput
+{
+    public string FileContainerName { get; set; } = default!;
+    public Guid? ParentId { get; set; }
+    public Guid? OwnerUserId { get; set; }
+    public GridQueryInput Grid { get; set; } = new();
 }
