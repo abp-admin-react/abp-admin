@@ -24,9 +24,11 @@ FROM nginx:1.29-alpine
 # trivy 复扫 0 CRITICAL / 0 HIGH。不换 nginx:alpine（mainline 大版本，属行为变更，
 # 需另行评估）。
 RUN apk upgrade --no-cache -a
+# 自定义站点使用独立文件；启动脚本遇到原厂 default.conf 时会调用 apk 校验它。
+RUN rm /etc/nginx/conf.d/default.conf
 ENV WEB_PUBLIC_URL=""
 COPY nginx-loopback-origin.conf.template /etc/nginx/templates/loopback-origin.conf.template
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/admin.conf
 COPY nginx-proxy-params.conf /etc/nginx/proxy_params_backend.conf
 # SPA 侧安全响应头（CSP 等，被 nginx.conf 的静态/回退 location include）
 COPY security-headers.conf /etc/nginx/security-headers.conf
