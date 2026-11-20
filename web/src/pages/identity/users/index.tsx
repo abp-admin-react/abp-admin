@@ -1,435 +1,472 @@
-import { DownloadOutlined } from '@ant-design/icons';
 import {
-  type ActionType,
-  PageContainer,
-  type ProColumns,
-} from '@ant-design/pro-components';
+  ClearOutlined,
+  DownloadOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
+import { PageContainer } from '@ant-design/pro-components';
 import { useAccess, useModel } from '@umijs/max';
-import { App, Button, Dropdown, type MenuProps, Tag } from 'antd';
-import React, { useEffect, useRef, useState } from 'react';
-import { impersonateUser } from '@/abp/account';
+import type {
+  ColDef,
+  GetRowIdParams,
+  GridApi,
+  ICellRendererParams,
+} from 'ag-grid-community';
+import { AgGridReact } from 'ag-grid-react';
 import {
-  deleteUser,
-  enqueueExportUsers,
-  exportUsers,
+  App,
+  Button,
+  Checkbox,
+  Input,
+  Popover,
+  Space,
+  Tag,
+  Tooltip,
+} from 'antd';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
+import {
+  exportIdentityUserQuery,
   getAssignableRoles,
-  getTwoFactorStatuses,
-  getUsers,
   type IdentityRoleDto,
-  type IdentityUserDto,
-  isUserLocked,
-  lockUser,
-  requireChangePasswordOnNextLogin,
-  setUserTwoFactorEnabled,
-  unlockUser,
+  queryIdentityUsers,
+  type IdentityUserGridRowDto as User,
 } from '@/abp/identity';
-import { applyImpersonatedTokens } from '@/abp/oidc';
-import { sorterToAbpSorting } from '@/abp/sorting';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import ClaimModal from '@/components/ClaimModal';
 import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
 import PermissionModal from '@/components/PermissionModal';
-import { firstFilterValue, textFilter } from '@/components/tableColumnFilters';
+import { type RemoteColumn, useRemoteGrid } from '@/components/remoteGrid';
+import { toGridQuery } from '@/components/remoteGrid/query';
+import { inputHint } from '@/components/remoteGrid/validation';
 import { ResetPasswordForm, UserForm } from './components/UserForms';
+import UserRowActions from './components/UserRowActions';
+import './index.less';
 
-/**
- * 同步导出阈值（与后端 AuditLogExportConsts.SyncThreshold 一致）：
- * 结果集超过该值时同步导出接口返回 400，必须走异步导出。
- */
-const SYNC_EXPORT_THRESHOLD = 1000;
+const statuses = {
+  active: '正常',
+  inactive: '停用',
+  locked: '已冻结',
+} as const;
+const statusColors = {
+  active: 'success',
+  inactive: 'default',
+  locked: 'warning',
+} as const;
+const dateFormat = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  timeZone: 'UTC',
+});
+const userId = ({ data }: GetRowIdParams<User>) => data.id;
+type Visibility = Record<string, boolean>;
 
-const UsersPage: React.FC = () => {
-  const actionRef = useRef<ActionType>(undefined);
-  // 统一使用 App.useApp() 的 message（消费 ConfigProvider 主题上下文），不再用静态 message
-  const { message, modal } = App.useApp();
-  const { initialState } = useModel('@@initialState');
+function readVisibility(key: string): Visibility {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? '{}');
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(([, v]) => typeof v === 'boolean'),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function yesNo({ data, value }: ICellRendererParams<User>) {
+  if (!data) return null;
+  return value == null ? (
+    '—'
+  ) : value ? (
+    <Tag color="blue">是</Tag>
+  ) : (
+    <Tag>否</Tag>
+  );
+}
+
+function UserList({ preferenceKey }: { preferenceKey: string }) {
+  const api = useRef<GridApi<User> | undefined>(undefined);
+  const { message } = App.useApp();
   const access = useAccess();
+  const { initialState } = useModel('@@initialState');
   const currentUserId = initialState?.currentUser?.userid;
   const [roles, setRoles] = useState<IdentityRoleDto[]>([]);
-  const [permissionTarget, setPermissionTarget] = useState<IdentityUserDto>();
-  const [claimTarget, setClaimTarget] = useState<IdentityUserDto>();
-  // 搜索表单引用：导出时读取当前 filter（与列表 request 的 filter: params.userName 同一来源）
+  const [editing, setEditing] = useState<User>();
+  const [resetting, setResetting] = useState<User>();
+  const [permissions, setPermissions] = useState<User>();
+  const [claims, setClaims] = useState<User>();
+  const [draft, setDraft] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [hasColumnFilters, setHasColumnFilters] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [initialVisibility] = useState(() => readVisibility(preferenceKey));
+  const [visibility, setVisibility] = useState(initialVisibility);
 
   useEffect(() => {
-    if (!access.canManageUserRoles) return;
-    getAssignableRoles()
-      .then((result) =>
-        setRoles([
-          ...new Map(
-            (result.items || []).map((role) => [role.name, role]),
-          ).values(),
-        ]),
-      )
-      .catch(() => undefined);
+    let current = true;
+    if (access.canManageUserRoles) {
+      getAssignableRoles()
+        .then(({ items }) => {
+          if (current)
+            setRoles([
+              ...new Map(items.map((role) => [role.name, role])).values(),
+            ]);
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      current = false;
+    };
   }, [access.canManageUserRoles]);
 
-  const handleExport = async () => {
-    // 导出内容与分流阈值必须同一 filter：与列表共用受控列头筛选状态，
-    // 并用当前 filter 现查 total 再分流（window.open 不会抛异常，不能靠“失败再回退”）
-    const filter = userNameFilter;
-    try {
-      const { totalCount } = await getUsers({
-        current: 1,
-        pageSize: 1,
-        filter,
+  const reload = useCallback(() => api.current?.purgeInfiniteCache(), []);
+  const columns = useMemo<RemoteColumn<User>[]>(() => {
+    const list: RemoteColumn<User>[] = [
+      {
+        field: 'userName',
+        headerName: '用户名',
+        minWidth: 140,
+        width: 212,
+        pinned: 'left',
+        lockVisible: true,
+        initialSort: 'asc',
+        cellRenderer: ({ value, data }: ICellRendererParams<User>) =>
+          data && (
+            <span className="identity-account">
+              <span className="identity-account-initial" aria-hidden="true">
+                {(value ?? '').slice(0, 1).toUpperCase()}
+              </span>
+              <strong>{value}</strong>
+            </span>
+          ),
+      },
+      {
+        field: 'name',
+        headerName: '姓名',
+        width: 140,
+        minWidth: 110,
+        flex: 0.8,
+      },
+      {
+        field: 'email',
+        headerName: '邮箱',
+        minWidth: 180,
+        flex: 1.35,
+        kind: access.canUpdateUsers ? 'text' : 'display',
+      },
+      {
+        field: 'status',
+        headerName: '状态',
+        width: 136,
+        choices: statuses,
+        cellRenderer: ({ data }: ICellRendererParams<User>) =>
+          data && (
+            <Tag color={statusColors[data.status]}>{statuses[data.status]}</Tag>
+          ),
+      },
+      {
+        field: 'creationTime',
+        headerName: '创建时间（UTC）',
+        kind: 'date',
+        width: 194,
+        valueFormatter: ({ value }) =>
+          value ? dateFormat.format(new Date(value)) : '',
+      },
+      {
+        field: 'phoneNumber',
+        headerName: '手机号',
+        width: 160,
+        initialHide: true,
+        kind: access.canUpdateUsers ? 'text' : 'display',
+      },
+      {
+        field: 'emailConfirmed',
+        headerName: '邮箱已确认',
+        width: 120,
+        initialHide: true,
+        kind: 'boolean',
+        cellRenderer: yesNo,
+      },
+      {
+        field: 'isLocked',
+        headerName: '冻结',
+        width: 106,
+        initialHide: true,
+        kind: 'boolean',
+        cellRenderer: yesNo,
+      },
+      {
+        field: 'twoFactorEnabled',
+        headerName: '双因素',
+        width: 110,
+        initialHide: true,
+        kind: access.canUpdateUsers ? 'boolean' : 'display',
+        cellRenderer: yesNo,
+      },
+      {
+        field: 'accessFailedCount',
+        headerName: '失败次数',
+        width: 112,
+        initialHide: true,
+        kind: 'number',
+      },
+      {
+        field: 'id',
+        headerName: '用户 ID',
+        width: 300,
+        initialHide: true,
+        kind: 'uuid',
+      },
+    ];
+    if (
+      access.canUpdateUsers ||
+      access.canManageUserPermissions ||
+      access.canImpersonateUsers ||
+      access.canDeleteUsers
+    ) {
+      list.push({
+        colId: 'actions',
+        headerName: '操作',
+        pinned: 'right',
+        lockVisible: true,
+        kind: 'display',
+        width: access.canUpdateUsers ? 208 : 94,
+        minWidth: 80,
+        cellRenderer: ({ data }: ICellRendererParams<User>) =>
+          data && (
+            <UserRowActions
+              record={data}
+              onEdit={setEditing}
+              onReset={setResetting}
+              onPermissions={setPermissions}
+              onClaims={setClaims}
+              onReload={reload}
+            />
+          ),
       });
-      if (totalCount > SYNC_EXPORT_THRESHOLD) {
-        const result = await enqueueExportUsers(filter);
-        if (result.isQueued) {
-          message.info(
-            result.message || '导出任务已排队，完成后将通过邮件通知您。',
-          );
-        }
-        return;
-      }
+    }
+    return list;
+  }, [
+    access.canUpdateUsers,
+    access.canManageUserPermissions,
+    access.canImpersonateUsers,
+    access.canDeleteUsers,
+    reload,
+  ]);
+  const columnDefs = useMemo(
+    () =>
+      columns.map((col) =>
+        col.field && !col.lockVisible && initialVisibility[col.field] != null
+          ? { ...col, initialHide: !initialVisibility[col.field] }
+          : col,
+      ),
+    [columns, initialVisibility],
+  );
+  const query = useCallback(
+    (input: GridQuery, signal: AbortSignal) =>
+      queryIdentityUsers(keyword ? { ...input, keyword } : input, signal),
+    [keyword],
+  );
+  const grid = useRemoteGrid<User>({
+    columnDefs,
+    query,
+    getRowId: userId,
+    ariaLabel: '用户管理',
+  });
+  const [ready, setReady] = useState(false);
+
+  function updateVisibility(column: ColDef<User>, visible: boolean) {
+    if (!column.field) return;
+    api.current?.setColumnsVisible([column.field], visible);
+    const next = { ...visibility, [column.field]: visible };
+    setVisibility(next);
+    try {
+      localStorage.setItem(preferenceKey, JSON.stringify(next));
     } catch {
-      // 错误由全局 errorHandler 统一提示
+      /* 浏览器不允许持久化时，列设置仍在本页生效。 */
+    }
+  }
+  async function handleExport() {
+    const current = api.current;
+    if (!current || exporting) return;
+    const sorts = current
+      .getColumnState()
+      .sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
+    const input = toGridQuery({
+      startRow: 0,
+      endRow: 20,
+      filterModel: current.getFilterModel(),
+      sortModel: sorts.flatMap(({ colId, sort }) =>
+        sort === 'asc' || sort === 'desc' ? [{ colId, sort }] : [],
+      ),
+    });
+    if (keyword) input.keyword = keyword;
+    const problem = inputHint(input, columns);
+    if (problem) {
+      message.warning(problem);
       return;
     }
-
-    exportUsers(filter);
-    message.success('导出文件已开始下载');
-  };
-
-  // 列头筛选受控状态：导出与列表同口径（导出读同一份状态）
-  const [filters, setFilters] = useState<Record<string, React.Key[] | null>>(
-    {},
-  );
-  const userNameFilter = firstFilterValue(filters, 'userName');
-
-  const columns: ProColumns<IdentityUserDto>[] = [
-    {
-      title: '用户名',
-      dataIndex: 'userName',
-      width: 160,
-      sorter: 'UserName',
-      filteredValue: filters.userName,
-      ...textFilter('按用户名筛选'),
-    },
-    {
-      title: '邮箱',
-      dataIndex: 'email',
-      width: 220,
-      search: false,
-      sorter: 'Email',
-    },
-    { title: '姓名', dataIndex: 'name', search: false },
-    {
-      title: '邮箱已确认',
-      dataIndex: 'emailConfirmed',
-      width: 110,
-      search: false,
-      render: (_, record) =>
-        record.emailConfirmed ? <Tag color="green">是</Tag> : <Tag>否</Tag>,
-    },
-    {
-      title: '状态',
-      dataIndex: 'isActive',
-      width: 90,
-      search: false,
-      render: (_, record) =>
-        !record.isActive ? (
-          <Tag>停用</Tag>
-        ) : isUserLocked(record) ? (
-          <Tag color="orange">已冻结</Tag>
-        ) : (
-          <Tag color="green">正常</Tag>
-        ),
-    },
-    {
-      title: '冻结',
-      dataIndex: 'lockoutEnd',
-      width: 90,
-      search: false,
-      render: (_, record) => (isUserLocked(record) ? '是' : '否'),
-    },
-    {
-      title: '双因素',
-      dataIndex: 'twoFactorEnabled',
-      width: 100,
-      search: false,
-      render: (_, record) =>
-        record.twoFactorEnabled == null ? (
-          '—'
-        ) : record.twoFactorEnabled ? (
-          <Tag color="blue">是</Tag>
-        ) : (
-          <Tag>否</Tag>
-        ),
-    },
-    {
-      title: '失败次数',
-      dataIndex: 'accessFailedCount',
-      width: 100,
-      search: false,
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'creationTime',
-      width: 170,
-      search: false,
-      valueType: 'dateTime',
-      sorter: 'CreationTime',
-    },
-    {
-      title: '操作',
-      valueType: 'option',
-      width: 230,
-      fixed: 'right',
-      render: (_, record) => {
-        const isSelf = record.id === currentUserId;
-        const items: MenuProps['items'] = [];
-        if (access.canManageUserPermissions) {
-          items.push({
-            key: 'permissions',
-            type: 'group',
-            label: '通常通过角色授权',
-            children: [
-              {
-                key: 'extra-permissions',
-                label: '额外权限',
-                onClick: () => setPermissionTarget(record),
-              },
-            ],
-          });
-        }
-        if (access.canUpdateUsers) {
-          if (access.canManageClaimTypes) {
-            items.push({
-              key: 'claims',
-              label: '声明（高级）',
-              onClick: () => setClaimTarget(record),
-            });
-          }
-          items.push({
-            key: 'lock',
-            label: isUserLocked(record) ? '解冻' : '冻结',
-            onClick: () =>
-              modal.confirm({
-                title: isUserLocked(record)
-                  ? '确认解冻该用户？'
-                  : '确认冻结该用户？',
-                onOk: async () => {
-                  if (isUserLocked(record)) {
-                    await unlockUser(record.id);
-                    message.success('已解冻');
-                  } else {
-                    await lockUser(record.id);
-                    message.success('已冻结');
-                  }
-                  actionRef.current?.reload();
-                },
-              }),
-          });
-          if (!isSelf) {
-            items.push(
-              {
-                key: 'force-change-pwd',
-                label: '要求改密',
-                onClick: () =>
-                  modal.confirm({
-                    title: '确认要求该用户下次登录时修改密码？',
-                    onOk: async () => {
-                      await requireChangePasswordOnNextLogin(record.id);
-                      message.success(
-                        '已设置，该用户下次登录时将被要求修改密码',
-                      );
-                    },
-                  }),
-              },
-              {
-                key: 'two-factor',
-                label:
-                  record.twoFactorEnabled == null
-                    ? '双因素（状态未知）'
-                    : record.twoFactorEnabled
-                      ? '禁用双因素'
-                      : '启用双因素',
-                disabled: record.twoFactorEnabled == null,
-                onClick: () =>
-                  modal.confirm({
-                    title: record.twoFactorEnabled
-                      ? '确认禁用该用户的双因素认证？'
-                      : '确认启用该用户的双因素认证？',
-                    content: record.twoFactorEnabled
-                      ? '禁用后该用户登录将不再需要第二因子。'
-                      : '启用前请确认该用户至少有一个已确认的邮箱或手机号，否则登录时无法接收验证码。',
-                    onOk: async () => {
-                      await setUserTwoFactorEnabled(
-                        record.id,
-                        !record.twoFactorEnabled,
-                      );
-                      message.success(
-                        record.twoFactorEnabled
-                          ? '已禁用双因素认证'
-                          : '已启用双因素认证',
-                      );
-                      actionRef.current?.reload();
-                    },
-                  }),
-              },
-            );
-          }
-        }
-        if (!isSelf && access.canImpersonateUsers) {
-          items.push({
-            key: 'impersonate',
-            label: '模拟此用户',
-            onClick: () =>
-              modal.confirm({
-                title: `确认以用户「${record.userName}」的身份登录？`,
-                content:
-                  '您将以该用户的身份进入系统，可随时通过顶部提示条返回。',
-                onOk: async () => {
-                  try {
-                    const result = await impersonateUser(record.id);
-                    await applyImpersonatedTokens(result);
-                    message.success('已切换到模拟身份');
-                    window.location.reload();
-                  } catch {
-                    // 错误由全局 errorHandler 统一提示
-                  }
-                },
-              }),
-          });
-        }
-        if (!isSelf && access.canDeleteUsers) {
-          items.push({
-            key: 'delete',
-            label: '删除用户',
-            danger: true,
-            onClick: () =>
-              modal.confirm({
-                title: '确认删除该用户？',
-                onOk: async () => {
-                  await deleteUser(record.id);
-                  message.success('已删除');
-                  actionRef.current?.reload();
-                },
-              }),
-          });
-        }
-        return [
-          access.canUpdateUsers && (
-            <UserForm
-              key="edit"
-              title="编辑用户"
-              trigger={<a>编辑</a>}
-              roles={roles}
-              canManageRoles={access.canManageUserRoles}
-              record={record}
-              hideActive={isSelf}
-              onSuccess={() => actionRef.current?.reload()}
-            />
-          ),
-          access.canUpdateUsers && (
-            <ResetPasswordForm
-              key="reset"
-              record={record}
-              onSuccess={() => actionRef.current?.reload()}
-            />
-          ),
-          items.length > 0 && (
-            <Dropdown key="more" menu={{ items }} trigger={['click']}>
-              <a>更多</a>
-            </Dropdown>
-          ),
-        ];
-      },
-    },
-  ];
+    setExporting(true);
+    try {
+      const result = await exportIdentityUserQuery(input);
+      if (result.isQueued)
+        message.info(
+          result.message || '导出任务已排队，完成后将通过邮件通知您。',
+        );
+      else message.success('导出文件已开始下载');
+    } catch {
+      // 请求错误由管理端统一提示。
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <PageContainer {...identityOrgHelpHeader('users', '用户')}>
-      <AutoHeightProTable<IdentityUserDto>
-        rowKey="id"
-        actionRef={actionRef}
-        columns={columns}
-        scroll={{ x: 'max-content' }}
-        columnsState={{
-          defaultValue: {
-            emailConfirmed: { show: false },
-            lockoutEnd: { show: false },
-            twoFactorEnabled: { show: false },
-            accessFailedCount: { show: false },
-          },
-        }}
-        search={false}
-        onChange={(_pagination, nextFilters) => {
-          setFilters(nextFilters as Record<string, React.Key[] | null>);
-        }}
-        request={async (params, sorter) => {
-          const result = await getUsers({
-            current: params.current,
-            pageSize: params.pageSize,
-            filter: userNameFilter,
-            sorting: sorterToAbpSorting(sorter),
-          });
-          const items = result.items ?? [];
-          // Volo 用户列表契约不含 twoFactorEnabled：页级批量补齐，
-          // 否则 2FA 列恒为「否」、开关恒发 true（六透镜审查 function-High）
-          let twoFactorByUser: Record<string, boolean> = {};
-          if (items.length > 0 && access.canUpdateUsers) {
-            try {
-              const statuses = await getTwoFactorStatuses(
-                items.map((item) => item.id),
-              );
-              twoFactorByUser = Object.fromEntries(
-                statuses.map((s) => [s.userId, s.twoFactorEnabled]),
-              );
-            } catch {
-              // 状态补齐失败不挡列表；未知状态不开放切换，防止把已启用误判为未启用。
-              twoFactorByUser = {};
+      <div className="identity-user-grid">
+        <div className="identity-user-toolbar">
+          <Input.Search
+            aria-label="搜索用户"
+            placeholder={
+              access.canUpdateUsers
+                ? '搜索用户名、姓名、邮箱或手机号'
+                : '搜索用户名或姓名'
             }
-          }
-          return {
-            data: items.map((item) => ({
-              ...item,
-              twoFactorEnabled: twoFactorByUser[item.id],
-            })),
-            total: result.totalCount,
-            success: true,
-          };
-        }}
-        toolBarRender={() => [
-          access.canExportUsers && (
-            <Button
-              key="export"
-              icon={<DownloadOutlined />}
-              onClick={handleExport}
+            allowClear
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onSearch={(v) => setKeyword(v.trim())}
+          />
+          <Space size={8} wrap>
+            {(hasColumnFilters || keyword) && (
+              <Button
+                icon={<ClearOutlined />}
+                onClick={() => {
+                  setDraft('');
+                  setKeyword('');
+                  api.current?.setFilterModel(null);
+                }}
+              >
+                清除筛选
+              </Button>
+            )}
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              title="显示列"
+              content={
+                <div className="identity-column-list">
+                  {columns.map(
+                    (col) =>
+                      col.field &&
+                      !col.lockVisible && (
+                        <Checkbox
+                          key={col.field}
+                          checked={visibility[col.field] ?? !col.initialHide}
+                          onChange={(e) =>
+                            updateVisibility(col, e.target.checked)
+                          }
+                        >
+                          {col.headerName}
+                        </Checkbox>
+                      ),
+                  )}
+                </div>
+              }
             >
-              导出
-            </Button>
-          ),
-          access.canCreateUsers && (
-            <UserForm
-              key="create"
-              title="新建用户"
-              trigger={<Button type="primary">新建用户</Button>}
-              roles={roles}
-              canManageRoles={access.canManageUserRoles}
-              onSuccess={() => actionRef.current?.reload()}
-            />
-          ),
-        ]}
-      />
+              <Button aria-label="列设置" icon={<SettingOutlined />}>
+                列设置
+              </Button>
+            </Popover>
+            <Tooltip title="刷新">
+              <Button
+                aria-label="刷新"
+                icon={<ReloadOutlined />}
+                onClick={reload}
+              />
+            </Tooltip>
+            {access.canExportUsers && (
+              <Button
+                icon={<DownloadOutlined />}
+                loading={exporting}
+                disabled={!ready}
+                onClick={handleExport}
+              >
+                导出
+              </Button>
+            )}
+            {access.canCreateUsers && (
+              <UserForm
+                title="新建用户"
+                trigger={
+                  <Button type="primary" icon={<PlusOutlined />}>
+                    新建用户
+                  </Button>
+                }
+                roles={roles}
+                canManageRoles={access.canManageUserRoles}
+                onSuccess={reload}
+              />
+            )}
+          </Space>
+        </div>
+        <AgGridReact<User>
+          {...grid}
+          rowHeight={46}
+          onGridReady={(e) => {
+            api.current = e.api;
+            grid.onGridReady?.(e);
+            setReady(true);
+          }}
+          onFilterChanged={(e) => {
+            grid.onFilterChanged?.(e);
+            setHasColumnFilters(Object.keys(e.api.getFilterModel()).length > 0);
+          }}
+        />
+      </div>
+      {editing && (
+        <UserForm
+          title="编辑用户"
+          record={editing}
+          onClose={() => setEditing(undefined)}
+          hideActive={editing.id === currentUserId}
+          roles={roles}
+          canManageRoles={access.canManageUserRoles}
+          onSuccess={reload}
+        />
+      )}
+      {resetting && (
+        <ResetPasswordForm
+          record={resetting}
+          onSuccess={reload}
+          onClose={() => setResetting(undefined)}
+        />
+      )}
       <PermissionModal
-        open={!!permissionTarget}
-        title={`额外权限 - ${permissionTarget?.userName || ''}`}
+        open={!!permissions}
+        title={`额外权限 - ${permissions?.userName || ''}`}
         providerName="U"
-        providerKey={permissionTarget?.id}
-        onClose={() => setPermissionTarget(undefined)}
+        providerKey={permissions?.id}
+        onClose={() => setPermissions(undefined)}
       />
-      {claimTarget && (
+      {claims && (
         <ClaimModal
-          key={claimTarget.id}
-          title={`声明 - ${claimTarget.userName}`}
-          userId={claimTarget.id}
-          onClose={() => setClaimTarget(undefined)}
+          key={claims.id}
+          title={`声明 - ${claims.userName}`}
+          userId={claims.id}
+          onClose={() => setClaims(undefined)}
         />
       )}
     </PageContainer>
   );
-};
+}
 
-export default UsersPage;
+export default function UsersPage() {
+  const { initialState } = useModel('@@initialState');
+  const preferenceKey = `identity-users:columns:v1:${initialState?.currentTenant?.id ?? 'host'}:${initialState?.currentUser?.userid ?? 'anonymous'}`;
+  return <UserList key={preferenceKey} preferenceKey={preferenceKey} />;
+}

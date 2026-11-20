@@ -62,7 +62,9 @@ describe('用户表单角色与更多选项', () => {
       </App>,
     );
     const form = harness.form.mock.calls[0][0];
-    await form.request();
+    await act(async () => {
+      await form.request();
+    });
     await act(() =>
       form.onFinish({
         userName: 'alice',
@@ -185,9 +187,11 @@ describe('用户表单角色与更多选项', () => {
       </App>,
     );
     const form = harness.form.mock.calls[0][0];
-    expect(await form.request()).toMatchObject({
-      isActive: true,
-      lockoutEnabled: true,
+    await act(async () => {
+      expect(await form.request()).toMatchObject({
+        isActive: true,
+        lockoutEnabled: true,
+      });
     });
     await act(() =>
       form.onFinish({

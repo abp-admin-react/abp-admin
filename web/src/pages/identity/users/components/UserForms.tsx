@@ -67,13 +67,18 @@ export const fillRandomPassword = (form?: ProFormInstance) => {
 export const ResetPasswordForm: React.FC<{
   record: IdentityUserDto;
   onSuccess: () => void;
-}> = ({ record, onSuccess }) => {
+  onClose?: () => void;
+}> = ({ record, onSuccess, onClose }) => {
   const { message } = App.useApp();
   const formRef = useRef<ProFormInstance>(undefined);
   return (
     <ModalForm<{ password: string }>
       title={`重置密码 - ${record.userName}`}
-      trigger={<a>重置密码</a>}
+      trigger={!onClose ? <a>重置密码</a> : undefined}
+      open={onClose ? true : undefined}
+      onOpenChange={(open) => {
+        if (!open) onClose?.();
+      }}
       formRef={formRef}
       modalProps={{ destroyOnHidden: true }}
       width={420}
@@ -127,7 +132,8 @@ type UserFormValues = {
 
 export const UserForm: React.FC<{
   title: string;
-  trigger: React.ReactElement;
+  trigger?: React.ReactElement;
+  onClose?: () => void;
   roles: IdentityRoleDto[];
   canManageRoles?: boolean;
   record?: IdentityUserDto;
@@ -136,6 +142,7 @@ export const UserForm: React.FC<{
 }> = ({
   title,
   trigger,
+  onClose,
   roles,
   canManageRoles = false,
   record,
@@ -150,6 +157,10 @@ export const UserForm: React.FC<{
     <ModalForm
       title={title}
       trigger={trigger}
+      open={onClose ? true : undefined}
+      onOpenChange={(open) => {
+        if (!open) onClose?.();
+      }}
       width={560}
       modalProps={{ destroyOnHidden: true }}
       request={async () => {
@@ -159,10 +170,16 @@ export const UserForm: React.FC<{
         if (!record) {
           return { isActive: true, lockoutEnabled: true, roleNames: [] };
         }
+        const values = {
+          ...record,
+          name: record.name ?? undefined,
+          surname: record.surname ?? undefined,
+          phoneNumber: record.phoneNumber ?? undefined,
+        };
         // 已选只放直接角色。部门角色放进多选会让人以为勾上就能离开部门后保留，
         // 但 ABP SetRolesAsync 看到「已经通过部门持有」就不会写入 AbpUserRoles。
         if (!canManageRoles) {
-          return { ...record, roleNames: undefined };
+          return { ...values, roleNames: undefined };
         }
         const [directRoles, effectiveNames] = await Promise.all([
           getUserDirectRoleNames(record.id),
@@ -179,7 +196,7 @@ export const UserForm: React.FC<{
         setInheritedList(inherited);
         loadedRoles.current = new Set(roleNames);
         return {
-          ...record,
+          ...values,
           roleNames,
         };
       }}

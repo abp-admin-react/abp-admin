@@ -1,11 +1,17 @@
 import { AG_GRID_LOCALE_ZH_CN } from '@ag-grid-community/locale';
 import {
   CellStyleModule,
+  type ColDef,
   ColumnApiModule,
   CustomFilterModule,
   DateFilterModule,
+  type GridApi,
+  type GridOptions,
   GridStateModule,
+  type IDatasource,
+  type IGetRowsParams,
   InfiniteRowModelModule,
+  type IOverlayParams,
   LocaleModule,
   NumberFilterModule,
   PaginationModule,
@@ -13,12 +19,6 @@ import {
   TextFilterModule,
   TooltipModule,
   themeQuartz,
-  type ColDef,
-  type GridApi,
-  type GridOptions,
-  type IDatasource,
-  type IGetRowsParams,
-  type IOverlayParams,
 } from 'ag-grid-community';
 import type {
   AgGridReactProps,
@@ -35,6 +35,7 @@ type BooleanLabels = { true: string; false: string };
 export type RemoteColumn<T> = ColDef<T> & {
   kind?: ColumnKind;
   booleanLabels?: BooleanLabels;
+  choices?: Readonly<Record<string, string>>;
 };
 type QueryPage<T> = (
   input: GridQuery,
@@ -72,12 +73,12 @@ const comparisonOps = [
   'inRange',
   'notEqual',
 ];
-function BooleanFilter({
+function ChoiceFilter({
   model,
   onModelChange,
-  labels,
+  options,
   column,
-}: CustomFloatingFilterProps & { labels: BooleanLabels }) {
+}: CustomFloatingFilterProps & { options: Record<string, string> }) {
   return (
     <select
       aria-label={`筛选${column.getColDef().headerName ?? ''}`}
@@ -96,8 +97,11 @@ function BooleanFilter({
       }
     >
       <option value="">全部</option>
-      <option value="isTrue">{labels.true}</option>
-      <option value="isFalse">{labels.false}</option>
+      {Object.entries(options).map(([key, label]) => (
+        <option key={key} value={key}>
+          {label}
+        </option>
+      ))}
     </select>
   );
 }
@@ -105,6 +109,7 @@ function BooleanFilter({
 function buildColumn<T>({
   kind = 'text',
   booleanLabels = { true: '是', false: '否' },
+  choices,
   ...column
 }: RemoteColumn<T>): ColDef<T> {
   if (kind === 'display')
@@ -117,26 +122,31 @@ function buildColumn<T>({
         ? 'agNumberColumnFilter'
         : 'agTextColumnFilter';
   // 十进制金额使用文本输入保存尾数，由后端 decimal 执行数字比较。
+  const options = choices
+    ? Object.fromEntries(
+        Object.entries(choices).map(([value, label]) => [
+          `choice:${value}`,
+          label,
+        ]),
+      )
+    : kind === 'boolean'
+      ? { isTrue: booleanLabels.true, isFalse: booleanLabels.false }
+      : undefined;
   const filterOptions =
     numeric || kind === 'date'
       ? comparisonOps
-      : kind === 'boolean'
+      : options
         ? [
             'empty',
-            {
-              displayKey: 'isTrue',
-              displayName: booleanLabels.true,
+            ...Object.entries(options).map(([key, label]) => ({
+              displayKey: key,
+              displayName: label,
               numberOfInputs: 0,
               predicate: (_inputs: unknown[], value: unknown) =>
-                String(value) === 'true',
-            },
-            {
-              displayKey: 'isFalse',
-              displayName: booleanLabels.false,
-              numberOfInputs: 0,
-              predicate: (_inputs: unknown[], value: unknown) =>
-                String(value) === 'false',
-            },
+                choices
+                  ? key === `choice:${value}`
+                  : String(value) === String(key === 'isTrue'),
+            })),
           ]
         : kind === 'identifier' || kind === 'uuid'
           ? ['equals', 'notEqual']
@@ -148,16 +158,16 @@ function buildColumn<T>({
     floatingFilter: true,
     filterParams: {
       filterOptions,
-      maxNumConditions: kind === 'boolean' ? 1 : 2,
+      maxNumConditions: options ? 1 : 2,
       debounceMs: 400,
       trimInput: true,
       inRangeInclusive: true,
       browserDatePicker: true,
     },
-    ...(kind === 'boolean'
+    ...(options
       ? {
-          floatingFilterComponent: BooleanFilter,
-          floatingFilterComponentParams: { labels: booleanLabels },
+          floatingFilterComponent: ChoiceFilter,
+          floatingFilterComponentParams: { options },
         }
       : {}),
     ...(numeric ? { type: 'numericColumn' } : {}),

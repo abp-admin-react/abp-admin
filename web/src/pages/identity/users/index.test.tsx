@@ -1,13 +1,26 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import type {
+  ColDef,
+  ColumnState,
+  FilterModel,
+  GridApi,
+  GridReadyEvent,
+  IGetRowsParams,
+} from 'ag-grid-community';
+import type { AgGridReactProps } from 'ag-grid-react';
 import { App as AntdApp } from 'antd';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as identity from '@/abp/identity';
+import Page from './index';
 
-// T2.6 验收：「补充导入导出按钮的权限控制断言」。
-// 权限可变的 mock：默认全量权限，单个用例可覆盖
-let mockAccess: Record<string, boolean> = {
-  canExportUsers: true,
-};
 const fullAccess = {
   canExportUsers: true,
   canCreateUsers: true,
@@ -16,239 +29,324 @@ const fullAccess = {
   canManageUserRoles: true,
   canManageUserPermissions: true,
 };
-let mockRow: identity.IdentityUserDto | undefined;
-let mockColumnsState: any;
+let access: Record<string, boolean>;
+let grid: AgGridReactProps<identity.IdentityUserGridRowDto>;
+let row: identity.IdentityUserGridRowDto;
+const viewer = { initialState: { currentUser: { userid: 'u-admin' } } };
 
 vi.mock('@umijs/max', () => ({
-  useAccess: () => mockAccess,
-  useModel: () => ({ initialState: { currentUser: { userid: 'u-admin' } } }),
+  useAccess: () => access,
+  useModel: () => viewer,
 }));
-
-// Mock 服务层：页面不直接依赖生成客户端，mock 这一层即可
-vi.mock('@/abp/identity', async () => {
-  const actual =
-    await vi.importActual<typeof import('@/abp/identity')>('@/abp/identity');
-  return {
-    ...actual,
-    getUsers: vi.fn(),
-    getAssignableRoles: vi.fn(),
-    exportUsers: vi.fn(),
-    enqueueExportUsers: vi.fn(),
-    getTwoFactorStatuses: vi.fn(),
-    setUserTwoFactorEnabled: vi.fn(),
-  };
-});
-
+vi.mock('@/abp/identity', async (original) => ({
+  ...(await original<typeof import('@/abp/identity')>()),
+  queryIdentityUsers: vi.fn(),
+  exportIdentityUserQuery: vi.fn(),
+  getAssignableRoles: vi.fn(),
+  getTwoFactorStatuses: vi.fn(),
+  deleteUser: vi.fn(),
+}));
 vi.mock('@/abp/account', () => ({ impersonateUser: vi.fn() }));
 vi.mock('@/abp/oidc', () => ({ applyImpersonatedTokens: vi.fn() }));
 vi.mock('@/components/ClaimModal', () => ({ default: () => null }));
 vi.mock('@/components/PermissionModal', () => ({ default: () => null }));
-
-// Mock ProComponents：保留语义化 testid，便于断言
 vi.mock('@ant-design/pro-components', () => ({
-  PageContainer: ({ children }: any) => (
-    <div data-testid="page-container">{children}</div>
-  ),
-  ProTable: ({ columns, toolBarRender, request, columnsState }: any) => {
-    mockColumnsState = columnsState;
-    request?.({ current: 1, pageSize: 10 }, {}, {});
-    return (
-      <div data-testid="pro-table">
-        <div data-testid="table-columns">
-          {columns?.map((col: any, i: number) => (
-            <div key={col.dataIndex ?? col.key ?? i} data-testid="column">
-              {col.title}
-            </div>
-          ))}
-        </div>
-        {toolBarRender && <div data-testid="toolbar">{toolBarRender()}</div>}
-        {mockRow && (
-          <>
-            <div data-testid="row-actions">
-              {columns
-                .find((col: any) => col.valueType === 'option')
-                .render(undefined, mockRow)}
-            </div>
-            <div data-testid="two-factor-status">
-              {columns
-                .find((col: any) => col.dataIndex === 'twoFactorEnabled')
-                .render(undefined, mockRow)}
-            </div>
-          </>
-        )}
-      </div>
-    );
-  },
-  ModalForm: ({ children, title, trigger }: any) => (
-    <div data-testid="modal-form" data-title={title}>
-      {trigger}
-      {children}
-    </div>
-  ),
-  ProFormText: Object.assign(({ label }: any) => <input aria-label={label} />, {
-    Password: ({ label }: any) => <input type="password" aria-label={label} />,
-  }),
-  ProFormSelect: ({ label }: any) => <select aria-label={label} />,
-  ProFormSwitch: ({ label }: any) => (
-    <input type="checkbox" aria-label={label} />
+  PageContainer: ({ children }: { children: ReactNode }) => (
+    <main>{children}</main>
   ),
 }));
+vi.mock('./components/UserForms', () => ({
+  UserForm: ({ trigger }: { trigger: ReactNode }) => trigger,
+  ResetPasswordForm: () => null,
+}));
 
-describe('UsersPage', () => {
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: (props: AgGridReactProps<identity.IdentityUserGridRowDto>) => {
+    grid = props;
+    const Actions = columns().find(
+      (column) => column.headerName === '操作',
+    )?.cellRenderer;
+    const TwoFactor = columns().find(
+      (column) => column.field === 'twoFactorEnabled',
+    )?.cellRenderer;
+    return (
+      <section aria-label="表格">
+        <div data-testid="actions">{Actions && <Actions data={row} />}</div>
+        <div data-testid="two-factor">
+          {TwoFactor && <TwoFactor data={row} value={row.twoFactorEnabled} />}
+        </div>
+      </section>
+    );
+  },
+}));
+
+function columns(): ColDef<identity.IdentityUserGridRowDto>[] {
+  return (grid.columnDefs ?? []) as ColDef<identity.IdentityUserGridRowDto>[];
+}
+
+function renderPage() {
+  return render(
+    <AntdApp>
+      <Page />
+    </AntdApp>,
+  );
+}
+
+const api = {
+  isDestroyed: () => false,
+  setGridOption: vi.fn(),
+  updateGridOptions: vi.fn(),
+  purgeInfiniteCache: vi.fn(),
+  setGridAriaProperty: vi.fn(),
+  setColumnsVisible: vi.fn(),
+  getColumnState: vi.fn<() => ColumnState[]>(() => []),
+  getFilterModel: vi.fn<() => FilterModel>(() => ({})),
+};
+function readyGrid() {
+  act(() => {
+    grid.onGridReady?.({
+      api,
+    } as unknown as GridReadyEvent<identity.IdentityUserGridRowDto>);
+  });
+}
+async function requestBlock(
+  overrides: Partial<IGetRowsParams<identity.IdentityUserGridRowDto>> = {},
+) {
+  const params: IGetRowsParams<identity.IdentityUserGridRowDto> = {
+    startRow: 0,
+    endRow: 20,
+    filterModel: {},
+    sortModel: [],
+    context: {},
+    api: api as unknown as GridApi<identity.IdentityUserGridRowDto>,
+    successCallback: vi.fn(),
+    failCallback: vi.fn(),
+    ...overrides,
+  };
+  const source = grid.datasource;
+  if (!source) throw new Error('用户列表缺少远程数据源');
+  await act(async () => {
+    await source.getRows(params);
+  });
+  return params;
+}
+
+describe('用户管理网格', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAccess = { ...fullAccess };
-    mockRow = undefined;
-    vi.mocked(identity.getUsers).mockResolvedValue({
-      items: [],
-      totalCount: 0,
-    } as never);
-    vi.mocked(identity.getAssignableRoles).mockResolvedValue({
-      items: [],
-    } as never);
-    vi.mocked(identity.getTwoFactorStatuses).mockResolvedValue([] as never);
-  });
-
-  it('挂载即请求用户列表与角色', async () => {
-    const { default: Page } = await import('./index');
-    render(
-      <AntdApp>
-        <Page />
-      </AntdApp>,
-    );
-
-    await waitFor(() => {
-      expect(identity.getUsers).toHaveBeenCalledWith(
-        expect.objectContaining({ current: 1, pageSize: 10 }),
-      );
-    });
-    await waitFor(() => {
-      expect(identity.getAssignableRoles).toHaveBeenCalled();
-    });
-  });
-
-  it('有导出权限时显示导出按钮', async () => {
-    const { default: Page } = await import('./index');
-    render(
-      <AntdApp>
-        <Page />
-      </AntdApp>,
-    );
-
-    const toolbar = await screen.findByTestId('toolbar');
-    expect(toolbar.textContent).toContain('导出');
-    expect(toolbar.textContent).not.toContain('导入');
-  });
-
-  it('无导出权限时导出按钮隐藏', async () => {
-    mockAccess = {
-      ...fullAccess,
-      canExportUsers: false,
+    localStorage.clear();
+    viewer.initialState.currentUser.userid = 'u-admin';
+    access = { ...fullAccess };
+    row = {
+      id: 'u-1',
+      userName: 'alice',
+      email: 'alice@example.test',
+      name: 'Alice',
+      surname: null,
+      emailConfirmed: false,
+      phoneNumber: null,
+      phoneNumberConfirmed: false,
+      isActive: true,
+      lockoutEnabled: true,
+      accessFailedCount: 0,
+      lockoutEnd: null,
+      creationTime: '2026-01-01T00:00:00Z',
+      lastPasswordChangeTime: null,
+      concurrencyStamp: 'stamp',
+      isLocked: false,
+      status: 'active',
+      twoFactorEnabled: true,
     };
-    const { default: Page } = await import('./index');
-    render(
-      <AntdApp>
-        <Page />
-      </AntdApp>,
-    );
-
-    const toolbar = await screen.findByTestId('toolbar');
-    expect(toolbar.textContent).not.toContain('导出');
-    expect(toolbar.textContent).not.toContain('导入');
-    // 与权限无关的入口仍在
-    expect(toolbar.textContent).toContain('新建用户');
+    vi.mocked(identity.queryIdentityUsers).mockResolvedValue({
+      items: [row],
+      totalCount: 121,
+    });
+    vi.mocked(identity.getAssignableRoles).mockResolvedValue({ items: [] });
   });
 
-  it('列表含「双因素」列，且按当前页用户批量补齐 2FA 状态', async () => {
-    // Volo 用户列表契约不含 twoFactorEnabled：页面必须调批量端点补齐，
-    // 缺失时 2FA 列恒为「否」、开关恒发 true（六透镜审查 function-High 的回归锚）
-    vi.mocked(identity.getUsers).mockResolvedValue({
-      items: [
-        { id: 'u-1', userName: 'alice', email: 'a@t.com', isActive: true },
-        { id: 'u-2', userName: 'bob', email: 'b@t.com', isActive: true },
+  it('把行区间、多列筛选和排序一并发给后端，并将总数和双因素状态交给网格', async () => {
+    renderPage();
+    const params = await requestBlock({
+      startRow: 40,
+      endRow: 60,
+      sortModel: [
+        { colId: 'creationTime', sort: 'desc' },
+        { colId: 'userName', sort: 'asc' },
       ],
-      totalCount: 2,
-    } as never);
-    vi.mocked(identity.getTwoFactorStatuses).mockResolvedValue([
-      { userId: 'u-1', twoFactorEnabled: true },
-      { userId: 'u-2', twoFactorEnabled: false },
-    ] as never);
-
-    const { default: Page } = await import('./index');
-    render(
-      <AntdApp>
-        <Page />
-      </AntdApp>,
+      filterModel: {
+        userName: { filterType: 'text', type: 'startsWith', filter: 'ali' },
+        status: { filterType: 'text', type: 'choice:active' },
+      },
+    });
+    expect(identity.queryIdentityUsers).toHaveBeenCalledWith(
+      {
+        skipCount: 40,
+        maxResultCount: 20,
+        filters: [
+          {
+            field: 'userName',
+            join: 'and',
+            conditions: [{ op: 'startsWith', value: 'ali' }],
+          },
+          {
+            field: 'status',
+            join: 'and',
+            conditions: [{ op: 'eq', value: 'active' }],
+          },
+        ],
+        sort: [
+          { field: 'creationTime', direction: 'desc' },
+          { field: 'userName', direction: 'asc' },
+        ],
+      },
+      expect.any(AbortSignal),
     );
-
-    const columns = await screen.findByTestId('table-columns');
-    expect(columns.textContent).toContain('双因素');
-    expect(mockColumnsState.defaultValue).toMatchObject({
-      emailConfirmed: { show: false },
-      twoFactorEnabled: { show: false },
-      accessFailedCount: { show: false },
-    });
-
-    await waitFor(() => {
-      expect(identity.getTwoFactorStatuses).toHaveBeenCalledWith([
-        'u-1',
-        'u-2',
-      ]);
-    });
+    expect(params.successCallback).toHaveBeenCalledWith([row], 121);
+    expect(identity.getAssignableRoles).toHaveBeenCalled();
+    expect(identity.getTwoFactorStatuses).not.toHaveBeenCalled();
   });
 
-  it('常用操作只展示编辑和重置密码，额外权限及账号安全操作收进更多', async () => {
-    mockRow = {
-      id: 'u-1',
-      userName: 'alice',
-      email: 'a@t.com',
-      isActive: true,
-      lockoutEnabled: true,
-    };
-    const { default: Page } = await import('./index');
-    render(
-      <AntdApp>
-        <Page />
-      </AntdApp>,
+  it('保留高级列、创建和导出入口', async () => {
+    renderPage();
+    await requestBlock();
+    expect(
+      screen.getByRole('button', { name: /新建用户/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /导\s*出/ })).toBeInTheDocument();
+    expect(screen.queryByText('导入')).not.toBeInTheDocument();
+    const hidden = columns()
+      .filter((c) => c.initialHide || c.hide)
+      .map((c) => c.colId ?? c.field);
+    expect(hidden).toEqual(
+      expect.arrayContaining([
+        'emailConfirmed',
+        'isLocked',
+        'twoFactorEnabled',
+        'accessFailedCount',
+      ]),
     );
-    const actions = screen.getByTestId('row-actions');
-    expect(actions.textContent).toContain('编辑');
-    expect(actions.textContent).toContain('重置密码');
-    expect(actions.textContent).not.toContain('额外权限');
-    expect(actions.textContent).not.toContain('冻结');
-    fireEvent.click(screen.getByText('更多'));
-    expect(await screen.findByText('额外权限')).toBeTruthy();
-    expect(screen.getByText('通常通过角色授权')).toBeTruthy();
-    expect(screen.getByText('删除用户')).toBeTruthy();
+  });
+
+  it('列设置调用网格 API，同一用户下次打开仍显示已选列', async () => {
+    const page = renderPage();
+    readyGrid();
+    fireEvent.click(screen.getByRole('button', { name: '列设置' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: '失败次数' }));
+    expect(api.setColumnsVisible).toHaveBeenCalledWith(
+      ['accessFailedCount'],
+      true,
+    );
+    page.unmount();
+    const remembered = renderPage();
+    await requestBlock();
+    expect(
+      columns().find((c) => c.field === 'accessFailedCount')?.initialHide,
+    ).toBe(false);
+    remembered.unmount();
+    viewer.initialState.currentUser.userid = 'another-user';
+    renderPage();
+    await requestBlock();
+    expect(
+      columns().find((c) => c.field === 'accessFailedCount')?.initialHide,
+    ).toBe(true);
+  });
+
+  it('导出使用点击时生效的列组合条件和多列排序，刷新重新读取服务端数据', async () => {
+    vi.mocked(identity.exportIdentityUserQuery).mockResolvedValue({
+      isQueued: true,
+      message: '已排队',
+    });
+    renderPage();
+    readyGrid();
+    const search = screen.getByLabelText('搜索用户');
+    fireEvent.change(search, { target: { value: '  alice  ' } });
+    fireEvent.keyDown(search, { key: 'Enter', keyCode: 13 });
+    await requestBlock();
+    expect(identity.queryIdentityUsers).toHaveBeenCalledWith(
+      expect.objectContaining({ keyword: 'alice' }),
+      expect.any(AbortSignal),
+    );
+    api.getFilterModel.mockReturnValueOnce({
+      name: { filterType: 'text', type: 'contains', filter: 'li' },
+      isLocked: { filterType: 'text', type: 'isFalse' },
+    });
+    api.getColumnState.mockReturnValueOnce([
+      { colId: 'creationTime', sort: 'desc', sortIndex: 1 },
+      { colId: 'userName', sort: 'asc', sortIndex: 0 },
+      { colId: 'email' },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: /导\s*出/ }));
+    await waitFor(() =>
+      expect(identity.exportIdentityUserQuery).toHaveBeenCalledTimes(1),
+    );
+    expect(identity.exportIdentityUserQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keyword: 'alice',
+        skipCount: 0,
+        filters: [
+          {
+            field: 'name',
+            join: 'and',
+            conditions: [{ op: 'contains', value: 'li' }],
+          },
+          {
+            field: 'isLocked',
+            join: 'and',
+            conditions: [{ op: 'eq', value: 'false' }],
+          },
+        ],
+        sort: [
+          { field: 'userName', direction: 'asc' },
+          { field: 'creationTime', direction: 'desc' },
+        ],
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }));
+    expect(api.purgeInfiniteCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('额外权限与账号操作在更多菜单，确认后才删除', async () => {
+    renderPage();
+    const actions = within(screen.getByTestId('actions'));
+    expect(actions.getByText('编辑')).toBeInTheDocument();
+    expect(actions.getByText('重置密码')).toBeInTheDocument();
+    expect(actions.queryByText('额外权限')).not.toBeInTheDocument();
+    fireEvent.click(actions.getByText('更多'));
+    expect(await screen.findByText('额外权限')).toBeInTheDocument();
+    expect(screen.getByText('通常通过角色授权')).toBeInTheDocument();
+    expect(screen.getByText('禁用双因素')).toBeInTheDocument();
     fireEvent.click(screen.getByText('删除用户'));
-    expect((await screen.findByRole('dialog')).textContent).toContain(
-      '确认删除该用户？',
-    );
+    const confirm = await screen.findByRole('dialog');
+    expect(confirm).toHaveTextContent('确认删除该用户？');
+    expect(identity.deleteUser).not.toHaveBeenCalled();
   });
 
-  it('只有查看权限时不显示写操作，也不读取角色候选和2FA管理端点', async () => {
-    mockAccess = {};
-    mockRow = {
-      id: 'u-1',
-      userName: 'alice',
-      email: 'a@t.com',
-      isActive: true,
-      lockoutEnabled: true,
-    };
-    vi.mocked(identity.getUsers).mockResolvedValue({
-      items: [mockRow],
-      totalCount: 1,
-    });
-    const { default: Page } = await import('./index');
-    render(
-      <AntdApp>
-        <Page />
-      </AntdApp>,
-    );
-    expect(screen.getByTestId('row-actions').textContent).toBe('');
-    expect(screen.getByTestId('two-factor-status').textContent).toBe('—');
-    expect(screen.getByTestId('toolbar').textContent).not.toContain('新建用户');
-    await waitFor(() => expect(identity.getUsers).toHaveBeenCalled());
+  it('当前账号没有删除、模拟登录和切换双因素入口', async () => {
+    row = { ...row, id: 'u-admin' };
+    access.canImpersonateUsers = true;
+    renderPage();
+    fireEvent.click(within(screen.getByTestId('actions')).getByText('更多'));
+    expect(await screen.findByText('额外权限')).toBeInTheDocument();
+    for (const label of ['删除用户', '模拟此用户', '禁用双因素', '要求改密']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it('只读角色保留列表，不能用敏感字段排序或筛选，也不读取角色和双因素管理端点', async () => {
+    access = {};
+    row = { ...row, twoFactorEnabled: null };
+    renderPage();
+    await requestBlock();
+    expect(screen.getByTestId('actions')).toBeEmptyDOMElement();
+    expect(
+      screen.queryByRole('button', { name: /新建用户|导\s*出/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('two-factor')).toHaveTextContent('—');
+    for (const field of ['email', 'phoneNumber', 'twoFactorEnabled']) {
+      const column = columns().find((c) => c.field === field);
+      if (column)
+        expect(column).toMatchObject({ sortable: false, filter: false });
+    }
     expect(identity.getAssignableRoles).not.toHaveBeenCalled();
     expect(identity.getTwoFactorStatuses).not.toHaveBeenCalled();
   });

@@ -29,6 +29,9 @@ interface NativeCondition {
 }
 
 function condition(model: NativeCondition): GridCondition {
+  if (model.type.startsWith('choice:')) {
+    return { op: 'eq', value: model.type.slice('choice:'.length) };
+  }
   if (model.type === 'isTrue' || model.type === 'isFalse') {
     return { op: 'eq', value: String(model.type === 'isTrue') };
   }

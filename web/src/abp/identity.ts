@@ -9,17 +9,18 @@
  *   app.tsx getInitialState 用它决定是否强制跳转 `/account/force-change-password`。
  */
 import { request } from '@umijs/max';
+import { type GridQuery, postGridQuery } from './gridQuery';
 
 export type IdentityUserDto = {
   id: string;
   userName: string;
-  name?: string;
-  surname?: string;
+  name?: string | null;
+  surname?: string | null;
   email: string;
   emailConfirmed?: boolean;
-  phoneNumber?: string;
+  phoneNumber?: string | null;
   phoneNumberConfirmed?: boolean;
-  twoFactorEnabled?: boolean;
+  twoFactorEnabled?: boolean | null;
   isActive: boolean;
   lockoutEnabled: boolean;
   accessFailedCount?: number;
@@ -38,6 +39,23 @@ export type IdentityRoleDto = {
   concurrencyStamp?: string;
   extraProperties?: { Remark?: string | null };
 };
+
+/** 对应 IdentityUserGridRowDto，双因素对没有更新用户权限的账号返回 null。 */
+export type IdentityUserGridRowDto = Required<
+  Omit<IdentityUserDto, 'twoFactorEnabled'>
+> & {
+  isLocked: boolean;
+  status: 'active' | 'inactive' | 'locked';
+  twoFactorEnabled: boolean | null;
+};
+
+export function queryIdentityUsers(input: GridQuery, signal: AbortSignal) {
+  return postGridQuery<IdentityUserGridRowDto>(
+    '/api/app/identity-user-search/query',
+    input,
+    signal,
+  );
+}
 
 export type PagedResult<T> = {
   items: T[];
@@ -89,9 +107,12 @@ export async function createUser(data: IdentityUserCreateDto) {
 }
 
 export function getUser(id: string) {
-  return request<IdentityUserDto>(`/api/identity/users/${encodeURIComponent(id)}`, {
-    method: 'GET',
-  });
+  return request<IdentityUserDto>(
+    `/api/identity/users/${encodeURIComponent(id)}`,
+    {
+      method: 'GET',
+    },
+  );
 }
 
 export async function updateUser(id: string, data: IdentityUserUpdateDto) {
@@ -261,7 +282,7 @@ export type UserTwoFactorStatusDto = {
 };
 
 /**
- * 批量取用户 2FA 状态（Volo 用户列表契约不含 twoFactorEnabled，列表页据此补齐）。
+ * 为使用标准 Identity 用户 DTO 的调用者批量读取 2FA 状态。
  * GET 查询串用重复 userIds 键：手动拼接，避免 axios 数组序列化加 [] 导致后端绑定失败。
  */
 export async function getTwoFactorStatuses(
@@ -295,9 +316,9 @@ export async function resetUserPassword(
   return updateUser(user.id, {
     userName: user.userName,
     email: user.email,
-    name: user.name,
-    surname: user.surname,
-    phoneNumber: user.phoneNumber,
+    name: user.name ?? undefined,
+    surname: user.surname ?? undefined,
+    phoneNumber: user.phoneNumber ?? undefined,
     isActive: user.isActive,
     lockoutEnabled: user.lockoutEnabled,
     password,
@@ -311,6 +332,33 @@ export type UserExportResultDto = {
   isQueued: boolean;
   message?: string;
 };
+
+/** 导出与网格使用同一组条件，服务端根据完整结果数量选择立即下载或后台排队。 */
+export async function exportIdentityUserQuery(
+  input: GridQuery,
+): Promise<UserExportResultDto> {
+  const response = await request<Blob>(
+    '/api/app/identity-user-admin/export-query',
+    {
+      method: 'POST',
+      data: input,
+      responseType: 'blob',
+      getResponse: true,
+    },
+  );
+  if (response.status === 202) {
+    return JSON.parse(await response.data.text()) as UserExportResultDto;
+  }
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(response.data);
+  link.href = url;
+  link.download = '用户列表.xlsx';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { isQueued: false, message: '' };
+}
 
 /** 同步导出用户（≤1000 条时直接下载文件） */
 export function exportUsers(filter?: string) {
