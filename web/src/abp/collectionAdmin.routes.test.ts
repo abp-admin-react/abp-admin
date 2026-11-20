@@ -13,6 +13,7 @@ import {
   getTreasuryDashboard,
   queryCollectionPayment,
   queryCollectionRefund,
+  queryMemberBalanceAccounts,
   requestCollectionRefund,
 } from './collectionAdmin';
 
@@ -86,6 +87,27 @@ describe('collectionAdmin endpoint URL shapes', () => {
     await getMemberBalances('u1');
     expect(request.mock.calls[0][0]).toBe(
       '/api/app/collection-balance-admin/member-balances/u1',
+    );
+  });
+
+  it('POST 会员账户条件保留金额原始精度和取消信号', async () => {
+    const signal = new AbortController().signal;
+    const input = {
+      skipCount: 20,
+      maxResultCount: 20,
+      filters: [
+        {
+          field: 'usdtBalance',
+          join: 'and' as const,
+          conditions: [{ op: 'eq' as const, value: '9.000000000000000001' }],
+        },
+      ],
+      sort: [{ field: 'usdcFrozen', direction: 'desc' as const }],
+    };
+    await queryMemberBalanceAccounts(input, signal);
+    expect(request).toHaveBeenCalledWith(
+      '/api/app/collection-balance-admin/member-balance-accounts/query',
+      { method: 'POST', data: input, signal, skipErrorHandler: true },
     );
   });
 

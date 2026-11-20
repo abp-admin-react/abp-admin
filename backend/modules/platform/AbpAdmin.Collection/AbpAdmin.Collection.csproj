@@ -25,6 +25,7 @@
     <PackageReference Include="Volo.Abp.Ddd.Application" />
     <PackageReference Include="Volo.Abp.AspNetCore.Mvc" />
     <PackageReference Include="Volo.Abp.Authorization" />
+    <PackageReference Include="Volo.Abp.Identity.Application.Contracts" />
     <PackageReference Include="Volo.Abp.Localization" />
     <PackageReference Include="Volo.Abp.VirtualFileSystem" />
     <!-- 嵌入清单生成任务依赖此包（缺它则 GenerateEmbeddedFilesManifest 静默不生效） -->

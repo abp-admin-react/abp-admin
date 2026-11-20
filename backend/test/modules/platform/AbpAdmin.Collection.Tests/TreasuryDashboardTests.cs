@@ -6,13 +6,16 @@ using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Services;
+using AbpAdmin.Grids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.Identity;
 using Volo.Abp.MultiTenancy;
 using Volo.Abp.Uow;
+using Volo.Abp.Validation;
 using Xunit;
 
 namespace AbpAdmin.Collection;
@@ -82,12 +85,75 @@ public class TreasuryDashboardTests : CollectionTestBase
     }
 
     [Fact]
+    public async Task Account_Grid_Sorts_And_Filters_All_Aggregated_Accounts_With_Exact_Decimals()
+    {
+        var oldest = Guid.NewGuid();
+        var middle = Guid.NewGuid();
+        var newest = Guid.NewGuid();
+        var day = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        await InsertBalanceAsync(oldest, CollectionCurrency.Usdt, 10.000000000000000002m, 1m, day);
+        await InsertBalanceAsync(oldest, CollectionCurrency.Usdc, 6m, 3m, day.AddHours(23));
+        await InsertBalanceAsync(middle, CollectionCurrency.Usdt, 10.000000000000000001m, 1m, day.AddDays(1));
+        await InsertBalanceAsync(newest, CollectionCurrency.Usdt, 2m, 1m, day.AddDays(2));
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
+        {
+            await GetRequiredService<IIdentityUserRepository>().InsertAsync(
+                new IdentityUser(oldest, "grid-member", "grid-member@example.test"));
+            await uow.CompleteAsync();
+        }
+
+        var admin = GetRequiredService<CollectionBalanceAdminAppService>();
+        var input = new GridQueryInput { MaxResultCount = 1 };
+        (await admin.QueryMemberBalanceAccountsAsync(input)).Items.Single().UserId.ShouldBe(newest);
+        input.Sort = [new() { Field = "usdtBalance", Direction = "desc" }];
+        var sorted = await admin.QueryMemberBalanceAccountsAsync(input);
+        sorted.TotalCount.ShouldBe(3);
+        sorted.Items.Single().UserId.ShouldBe(oldest);
+        sorted.Items.Single().UserName.ShouldBe("grid-member");
+        sorted.Items.Single().UsdtBalance.ShouldBe("10.000000000000000002");
+
+        input.Filters =
+        [
+            new() { Field = "usdtBalance", Join = "or", Conditions =
+                [new() { Op = "eq", Value = "2" }, new() { Op = "eq", Value = "10.000000000000000002" }] },
+            new() { Field = "usdtFrozen", Conditions = [new() { Op = "gte", Value = "1" }] }
+        ];
+        input.SkipCount = 1;
+        var second = await admin.QueryMemberBalanceAccountsAsync(input);
+        second.TotalCount.ShouldBe(2);
+        second.Items.Single().UserId.ShouldBe(newest);
+        second.Items.Single().UsdcBalance.ShouldBe("0");
+
+        input.SkipCount = 0;
+        input.Filters.Add(new() { Field = "usdcFrozen", Conditions = [new() { Op = "between", Value = "3", ValueTo = "4" }] });
+        input.Filters.Add(new() { Field = "updatedAt", Conditions = [new() { Op = "eq", Value = "2026-01-01" }] });
+        var precise = await admin.QueryMemberBalanceAccountsAsync(input);
+        precise.TotalCount.ShouldBe(1);
+        precise.Items.Single().UserId.ShouldBe(oldest);
+        precise.Items.Single().UpdatedAt.ShouldBe(day.AddHours(23));
+    }
+
+    [Fact]
+    public async Task Account_Grid_Rejects_Identity_Fields_And_Keywords()
+    {
+        var admin = GetRequiredService<CollectionBalanceAdminAppService>();
+        await Should.ThrowAsync<AbpValidationException>(() => admin.QueryMemberBalanceAccountsAsync(
+            new GridQueryInput { Filters = [new() { Field = "email", Conditions = [new() { Op = "contains", Value = "alice" }] }] }));
+        await Should.ThrowAsync<AbpValidationException>(() => admin.QueryMemberBalanceAccountsAsync(
+            new GridQueryInput { Sort = [new() { Field = "userName" }] }));
+        await Should.ThrowAsync<AbpValidationException>(() => admin.QueryMemberBalanceAccountsAsync(
+            new GridQueryInput { Keyword = "alice" }));
+    }
+
+    [Fact]
     public async Task Tenant_Cannot_List_Member_Balance_Accounts()
     {
         var admin = GetRequiredService<CollectionBalanceAdminAppService>();
         using var tenant = GetRequiredService<ICurrentTenant>().Change(Guid.NewGuid());
         var error = await Should.ThrowAsync<BusinessException>(() => admin.GetMemberBalanceAccountsAsync(0, 20));
         error.Code.ShouldBe(CollectionErrorCodes.HostOnly);
+        var gridError = await Should.ThrowAsync<BusinessException>(() => admin.QueryMemberBalanceAccountsAsync(new GridQueryInput()));
+        gridError.Code.ShouldBe(CollectionErrorCodes.HostOnly);
     }
 
     [Fact]

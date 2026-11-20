@@ -5,6 +5,8 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import type { ColDef, GridApi } from 'ag-grid-community';
+import type { AgGridReactProps } from 'ag-grid-react';
 import {
   type ComponentPropsWithoutRef,
   type ReactNode,
@@ -12,11 +14,11 @@ import {
   useState,
 } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MemberBalanceGridRowDto } from '@/abp/collectionAdmin';
 import MemberFundsPage from './member-funds';
 
 const mocks = vi.hoisted(() => ({
   users: vi.fn(),
-  user: vi.fn(),
   accounts: vi.fn(),
   balances: vi.fn(),
   transactions: vi.fn(),
@@ -41,62 +43,55 @@ vi.mock('@ant-design/pro-components', () => ({
 }));
 vi.mock('@/abp/identity', () => ({
   getUsers: mocks.users,
-  getUser: mocks.user,
 }));
 vi.mock('@/abp/collectionAdmin', () => ({
   BALANCE_ACTION_LABELS: {},
-  getMemberBalanceAccounts: mocks.accounts,
+  queryMemberBalanceAccounts: mocks.accounts,
   getMemberBalances: mocks.balances,
   getMemberTxns: mocks.transactions,
 }));
-vi.mock('@/components/AutoHeightProTable', () => ({
-  default: ({
-    request,
-    columns,
-  }: {
-    request?: (params: {
-      current: number;
-      pageSize: number;
-    }) => Promise<{ data?: Array<Record<string, unknown>> }>;
-    columns: Array<{
-      title: string;
-      dataIndex?: string;
-      hideInTable?: boolean;
-      render?: (value: unknown, row: Record<string, unknown>) => ReactNode;
-    }>;
-  }) => {
-    const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: ({
+    datasource,
+    columnDefs,
+  }: AgGridReactProps<MemberBalanceGridRowDto>) => {
+    const [rows, setRows] = useState<MemberBalanceGridRowDto[]>([]);
     useEffect(() => {
-      let active = true;
-      void request?.({ current: 1, pageSize: 20 }).then((result) => {
-        if (active) setRows(result?.data ?? []);
+      let destroyed = false;
+      void datasource?.getRows({
+        startRow: 0,
+        endRow: 20,
+        context: {},
+        filterModel: {},
+        sortModel: [{ colId: 'updatedAt', sort: 'desc' }],
+        api: {
+          isDestroyed: () => destroyed,
+          setGridOption: vi.fn(),
+          updateGridOptions: vi.fn(),
+        } as unknown as GridApi<MemberBalanceGridRowDto>,
+        successCallback: setRows,
+        failCallback: vi.fn(),
       });
       return () => {
-        active = false;
+        destroyed = true;
       };
-    }, [request]);
-    const visible = columns.filter((column) => !column.hideInTable);
+    }, [datasource]);
+    const columns =
+      columnDefs?.filter(
+        (column): column is ColDef<MemberBalanceGridRowDto> =>
+          !('children' in column),
+      ) ?? [];
     return (
       <table>
-        <thead>
-          <tr>
-            {visible.map((column) => (
-              <th key={column.title}>{column.title}</th>
-            ))}
-          </tr>
-        </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={String(row.userId)}>
-              {visible.map((column) => (
-                <td key={column.title}>
-                  {column.render
-                    ? column.render(
-                        column.dataIndex ? row[column.dataIndex] : undefined,
-                        row,
-                      )
-                    : column.dataIndex
-                      ? String(row[column.dataIndex] ?? '')
+            <tr key={row.userId}>
+              {columns.map((column) => (
+                <td key={column.field ?? column.colId}>
+                  {column.cellRenderer
+                    ? column.cellRenderer({ data: row })
+                    : column.field
+                      ? row[column.field]
                       : null}
                 </td>
               ))}
@@ -182,7 +177,6 @@ describe('用户余额查询', () => {
       }),
     );
     mocks.accounts.mockResolvedValue({ items: [], totalCount: 0 });
-    mocks.user.mockResolvedValue({ userName: 'user' });
     mocks.transactions.mockResolvedValue({ items: [], totalCount: 0 });
   });
 
@@ -197,13 +191,10 @@ describe('用户余额查询', () => {
           usdcBalance: '0',
           usdcFrozen: '0',
           updatedAt: '2026-11-17T01:00:00Z',
+          userName: 'alice',
+          email: 'a@x.com',
         },
       ],
-    });
-    mocks.user.mockResolvedValue({
-      id: userId,
-      userName: 'alice',
-      email: 'a@x.com',
     });
     renderPage();
     expect(await screen.findByText('alice (a@x.com)')).toBeTruthy();
@@ -214,10 +205,15 @@ describe('用户余额查询', () => {
       `/collection/member-funds?userId=${userId}`,
     );
     expect(mocks.balances).not.toHaveBeenCalled();
-    expect(mocks.accounts).toHaveBeenCalledWith({
-      skipCount: 0,
-      maxResultCount: 20,
-    });
+    expect(mocks.accounts).toHaveBeenCalledWith(
+      {
+        skipCount: 0,
+        maxResultCount: 20,
+        filters: [],
+        sort: [{ field: 'updatedAt', direction: 'desc' }],
+      },
+      expect.any(AbortSignal),
+    );
   });
 
   it('更换用户后忽略旧余额查询，并保留精确金额和调账入口', async () => {

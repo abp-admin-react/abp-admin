@@ -1,96 +1,134 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Desensitization;
+using AbpAdmin.Grids;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
+using Volo.Abp.Authorization;
+using Volo.Abp.Domain.Repositories;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.Identity;
 using Volo.Abp.Uow;
+using Volo.Abp.Validation;
 
 namespace AbpAdmin.Collection.Services;
 
-/// <summary>
-/// 会员资金查询 + 资金看板（管理端只读，收款查看权限 Collections.Default——与菜单/路由同位）：
-/// member-balance-accounts 分页列出已有余额行的用户（一人一行，按最近更新倒序）；
-/// member-\* 按 userId 查该用户余额与流水，查询内核与用户侧 my-\* 单源共享（<see cref="BalanceQueries"/>，
-/// 含充值行链上凭证回填口径）；用户名解析在前端走 identity 搜索（模块不做身份耦合——
-/// 用户不存在时余额返回 0 行不报错，与「新用户无余额行」同形，因此不会出现在账户列表里）。
-/// dashboard 是纯 DB 聚合的看板（今日 = UTC 日界，与当日笔数限额同口径），不碰链——
-/// RPC 不进看板关键路径（热钱包余额/熔断在热钱包监控页）。
-/// AssertHost 双保险（同模块其余 Admin 服务纪律）。
-/// </summary>
+/// <summary>宿主端会员余额、流水和资金看板，使用收款查看权限。账户以用户为单位，缺少的币种余额按零计。</summary>
 [Authorize(AbpAdmin.Collection.Permissions.CollectionPermissions.Collections.Default)]
 public class CollectionBalanceAdminAppService : ApplicationService
 {
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
+    private readonly IRepository<IdentityUser, Guid> _users;
 
-    public CollectionBalanceAdminAppService(
-        IDbContextProvider<CollectionDbContext> dbContextProvider)
+    public CollectionBalanceAdminAppService(IDbContextProvider<CollectionDbContext> dbContextProvider,
+        IRepository<IdentityUser, Guid> users)
     {
         _dbContextProvider = dbContextProvider;
+        _users = users;
     }
 
-    /// <summary>
-    /// 已有余额行的用户（一人一行）。没有发生过资金往来的用户没有余额行，不出现在这里。
-    /// 缺一种币时该币可用/冻结为 0。用户名不在此解析。
-    /// </summary>
+    private sealed class AccountTotals
+    {
+        public Guid UserId { get; init; }
+        public DateTime UpdatedAt { get; init; }
+        public decimal UsdtBalance { get; init; }
+        public decimal UsdtFrozen { get; init; }
+        public decimal UsdcBalance { get; init; }
+        public decimal UsdcFrozen { get; init; }
+    }
+
+    private static readonly GridQueryDefinition<AccountTotals> AccountGrid = new GridQueryDefinition<AccountTotals>()
+        .Field("userId", row => row.UserId, "eq", "ne")
+        .Field("usdtBalance", row => row.UsdtBalance)
+        .Field("usdtFrozen", row => row.UsdtFrozen)
+        .Field("usdcBalance", row => row.UsdcBalance)
+        .Field("usdcFrozen", row => row.UsdcFrozen)
+        .Field("updatedAt", row => row.UpdatedAt);
+
+    /// <summary>原分页入口沿用更新时间倒序和原有的页大小归一规则。</summary>
     public virtual async Task<PagedResultDto<MemberBalanceAccountDto>> GetMemberBalanceAccountsAsync(
         int skipCount, int maxResultCount)
     {
         AssertHost();
-        if (maxResultCount <= 0 || maxResultCount > 200)
+        var page = await ReadAccountPageAsync(new GridQueryInput
         {
-            maxResultCount = 20;
-        }
-
-        if (skipCount < 0)
-        {
-            skipCount = 0;
-        }
-
-        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var grouped = dbContext.Balances.AsNoTracking()
-            .GroupBy(b => b.UserId)
-            .Select(g => new { UserId = g.Key, UpdatedAt = g.Max(b => b.UpdatedAt) });
-        var total = await grouped.CountAsync();
-        var page = await grouped
-            .OrderByDescending(x => x.UpdatedAt)
-            .ThenBy(x => x.UserId)
-            .Skip(skipCount)
-            .Take(maxResultCount)
-            .ToListAsync();
-        var userIds = page.Select(x => x.UserId).ToList();
-        var rows = userIds.Count == 0
-            ? new List<ColBalance>()
-            : await dbContext.Balances.AsNoTracking()
-                .Where(b => userIds.Contains(b.UserId))
-                .ToListAsync();
-        var items = page.Select(entry =>
-        {
-            var mine = rows.Where(b => b.UserId == entry.UserId).ToList();
-            return new MemberBalanceAccountDto
-            {
-                UserId = entry.UserId,
-                UpdatedAt = entry.UpdatedAt,
-                UsdtBalance = CollectionAmounts.Format(Sum(mine, CollectionCurrency.Usdt, b => b.Balance)),
-                UsdtFrozen = CollectionAmounts.Format(Sum(mine, CollectionCurrency.Usdt, b => b.Frozen)),
-                UsdcBalance = CollectionAmounts.Format(Sum(mine, CollectionCurrency.Usdc, b => b.Balance)),
-                UsdcFrozen = CollectionAmounts.Format(Sum(mine, CollectionCurrency.Usdc, b => b.Frozen)),
-            };
-        }).ToList();
-        await uow.CompleteAsync();
-        return new PagedResultDto<MemberBalanceAccountDto>(total, items);
+            SkipCount = Math.Max(0, skipCount),
+            MaxResultCount = maxResultCount is > 0 and <= 200 ? maxResultCount : 20
+        }, false, default);
+        return new PagedResultDto<MemberBalanceAccountDto>(page.TotalCount, page.Items);
     }
 
-    private static decimal Sum(List<ColBalance> rows, CollectionCurrency currency, Func<ColBalance, decimal> selector)
-        => rows.Where(b => b.Currency == currency).Sum(selector);
+    [HttpPost("api/app/collection-balance-admin/member-balance-accounts/query")]
+    public virtual async Task<PagedResultDto<MemberBalanceGridRowDto>> QueryMemberBalanceAccountsAsync(
+        [FromBody] GridQueryInput input, CancellationToken cancellationToken = default)
+    {
+        AssertHost();
+        if (!string.IsNullOrWhiteSpace(input.Keyword))
+        {
+            throw new AbpValidationException("余额账户请按列筛选，按用户名或邮箱查找请使用用户目录。");
+        }
+
+        return await ReadAccountPageAsync(input, true, cancellationToken);
+    }
+
+    private async Task<PagedResultDto<MemberBalanceGridRowDto>> ReadAccountPageAsync(
+        GridQueryInput input, bool includeIdentity, CancellationToken cancellationToken)
+    {
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
+        var db = await _dbContextProvider.GetDbContextAsync();
+        // 先按用户汇总数据库 decimal，分页完成后才格式化，保证余额比较使用全量精确值。
+        var accounts = db.Balances.AsNoTracking().GroupBy(b => b.UserId).Select(g => new AccountTotals
+        {
+            UserId = g.Key,
+            UpdatedAt = g.Max(b => b.UpdatedAt),
+            UsdtBalance = g.Sum(b => b.Currency == CollectionCurrency.Usdt ? b.Balance : 0m),
+            UsdtFrozen = g.Sum(b => b.Currency == CollectionCurrency.Usdt ? b.Frozen : 0m),
+            UsdcBalance = g.Sum(b => b.Currency == CollectionCurrency.Usdc ? b.Balance : 0m),
+            UsdcFrozen = g.Sum(b => b.Currency == CollectionCurrency.Usdc ? b.Frozen : 0m)
+        });
+        var filtered = AccountGrid.Filter(accounts, input);
+        var total = await filtered.LongCountAsync(cancellationToken);
+        var page = await AccountGrid.OrderBy(filtered, input, "updatedAt", true, row => row.UserId)
+            .Skip(input.SkipCount).Take(input.MaxResultCount).ToListAsync(cancellationToken);
+        var items = page.Select(row => new MemberBalanceGridRowDto
+        {
+            UserId = row.UserId,
+            UpdatedAt = row.UpdatedAt,
+            UsdtBalance = CollectionAmounts.Format(row.UsdtBalance),
+            UsdtFrozen = CollectionAmounts.Format(row.UsdtFrozen),
+            UsdcBalance = CollectionAmounts.Format(row.UsdcBalance),
+            UsdcFrozen = CollectionAmounts.Format(row.UsdcFrozen)
+        }).ToList();
+
+        if (includeIdentity && items.Count > 0 && await AuthorizationService.IsGrantedAsync(IdentityPermissions.Users.Default))
+        {
+            var userIds = items.Select(row => row.UserId).ToArray();
+            var users = await _users.GetQueryableAsync();
+            var labels = await users.AsNoTracking().Where(u => u.TenantId == null && userIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.UserName, u.Email }).ToDictionaryAsync(u => u.Id, cancellationToken);
+            foreach (var item in items)
+            {
+                if (labels.TryGetValue(item.UserId, out var label))
+                {
+                    item.UserName = label.UserName;
+                    item.Email = label.Email;
+                }
+            }
+        }
+
+        await uow.CompleteAsync(cancellationToken);
+        return new PagedResultDto<MemberBalanceGridRowDto>(total, items);
+    }
 
     /// <summary>某用户的两种稳定币余额（没有余额行时返回 0，不缺项）。</summary>
     public virtual async Task<ListResultDto<MyBalanceDto>> GetMemberBalancesAsync(Guid userId)
@@ -289,6 +327,15 @@ public class MemberBalanceAccountDto
     public string UsdcFrozen { get; set; } = "0";
 
     public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>有身份目录权限时附带当前页的用户标签，邮箱沿用 IdentityUserDto 的脱敏规则。</summary>
+public class MemberBalanceGridRowDto : MemberBalanceAccountDto
+{
+    public string? UserName { get; set; }
+
+    [Masked(MaskKindEnum.Email, PlaintextPermission = IdentityPermissions.Users.Update)]
+    public string? Email { get; set; }
 }
 
 /// <summary>资金看板（纯 DB 聚合，不碰链——RPC 不进看板关键路径；热钱包余额/熔断在热钱包监控页）。</summary>

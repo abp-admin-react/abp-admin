@@ -1,5 +1,6 @@
-import { PageContainer, type ProColumns } from '@ant-design/pro-components';
+import { PageContainer } from '@ant-design/pro-components';
 import { history, Link, useAccess, useLocation, useModel } from '@umijs/max';
+import { AgGridReact, type CustomCellRendererProps } from 'ag-grid-react';
 import {
   Alert,
   Button,
@@ -14,20 +15,26 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   BALANCE_ACTION_LABELS,
   type BalanceTxnDto,
-  getMemberBalanceAccounts,
   getMemberBalances,
   getMemberTxns,
-  type MemberBalanceAccountDto,
   type MemberBalanceDto,
+  type MemberBalanceGridRowDto,
+  queryMemberBalanceAccounts,
 } from '@/abp/collectionAdmin';
-import { getUser, getUsers } from '@/abp/identity';
+import { getUsers } from '@/abp/identity';
 import { currencyLabel } from '@/abp/ordering';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
+import { type RemoteColumn, useRemoteGrid } from '@/components/remoteGrid';
 import { isValidRecordId } from './record-focus';
 import {
   depositRecordUrl,
@@ -42,11 +49,14 @@ const { Text } = Typography;
 const userIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-type MemberBalanceAccountRow = MemberBalanceAccountDto & { userName?: string };
+const fmtTime = (value: string) => {
+  const time = new Date(value);
+  return Number.isNaN(time.getTime()) ? value : time.toLocaleString();
+};
 
 /**
  * 无 userId 时列出余额账户，指定用户时展示该用户的余额与流水。
- * 用户目录权限只控制按用户名或邮箱搜索，资金详情也可用用户 ID 打开。
+ * 用户目录权限控制账户身份标签和按用户名或邮箱搜索。资金详情也可用用户 ID 打开。
  */
 export default function MemberFundsPage() {
   const access = useAccess();
@@ -220,11 +230,6 @@ export default function MemberFundsPage() {
     );
   }
 
-  const fmtTime = (v: string) => {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
-  };
-
   const columns = [
     {
       title: '时间',
@@ -314,37 +319,6 @@ export default function MemberFundsPage() {
     components,
     scrollX,
   } = useResizableColumns(columns);
-  const loadAccounts = useCallback(
-    async (params: { current?: number; pageSize?: number }) => {
-      const maxResultCount = params.pageSize ?? pageSize;
-      const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
-      try {
-        const result = await getMemberBalanceAccounts({
-          skipCount,
-          maxResultCount,
-        });
-        const items = result.items ?? [];
-        const data = access.canManageUsers
-          ? await Promise.all(
-              items.map(async (item) => {
-                try {
-                  const user = await getUser(item.userId);
-                  const userName = `${user.userName}${user.email ? ` (${user.email})` : ''}`;
-                  return { ...item, userName };
-                } catch {
-                  return item;
-                }
-              }),
-            )
-          : items;
-        return { data, total: result.totalCount ?? 0, success: true as const };
-      } catch {
-        return { data: [], total: 0, success: false as const };
-      }
-    },
-    [access.canManageUsers],
-  );
-
   const userLabel = (userId && userLabels.current[userId]) || linkedUserId;
   const options =
     userId &&
@@ -370,71 +344,6 @@ export default function MemberFundsPage() {
     if (userId) history.replace(url);
     else history.push(url);
   }
-
-  const accountColumns: ProColumns<MemberBalanceAccountRow>[] = [
-    {
-      title: '用户',
-      dataIndex: 'userId',
-      width: 220,
-      render: (_, row) => (
-        <Space orientation="vertical" size={0}>
-          {row.userName ? <span>{row.userName}</span> : null}
-          <Text
-            copyable={{ text: row.userId }}
-            style={{ fontFamily: 'monospace' }}
-          >
-            {row.userId.slice(0, 8)}…
-          </Text>
-        </Space>
-      ),
-    },
-    {
-      title: 'USDT 可用',
-      dataIndex: 'usdtBalance',
-      width: 120,
-      align: 'right' as const,
-    },
-    {
-      title: 'USDT 冻结',
-      dataIndex: 'usdtFrozen',
-      width: 120,
-      align: 'right' as const,
-    },
-    {
-      title: 'USDC 可用',
-      dataIndex: 'usdcBalance',
-      width: 120,
-      align: 'right' as const,
-    },
-    {
-      title: 'USDC 冻结',
-      dataIndex: 'usdcFrozen',
-      width: 120,
-      align: 'right' as const,
-    },
-    {
-      title: '最近更新',
-      dataIndex: 'updatedAt',
-      width: 170,
-      render: (_, row) => fmtTime(row.updatedAt),
-    },
-    {
-      title: '操作',
-      width: 140,
-      render: (_, row) => (
-        <Space size={8}>
-          <Link to={memberFundsUrl(row.userId)}>流水</Link>
-          {access.canCreateBalanceAdjustments && (
-            <Link
-              to={`/finance/balance-adjustments?createFor=${encodeURIComponent(row.userId)}`}
-            >
-              申请调整
-            </Link>
-          )}
-        </Space>
-      ),
-    },
-  ];
 
   return (
     <PageContainer title="用户余额">
@@ -651,16 +560,123 @@ export default function MemberFundsPage() {
             </Card>
           </>
         ) : (
-          <AutoHeightProTable<MemberBalanceAccountRow>
-            rowKey="userId"
-            search={false}
-            columns={accountColumns}
-            request={loadAccounts}
-            pagination={{ pageSize, showSizeChanger: false }}
-            locale={{ emptyText: '还没有用户余额' }}
+          <MemberBalanceAccounts
+            canManageUsers={access.canManageUsers}
+            canAdjust={access.canCreateBalanceAdjustments}
           />
         )}
       </Space>
     </PageContainer>
   );
+}
+
+const getAccountRowId = ({ data }: { data: MemberBalanceGridRowDto }) =>
+  data.userId;
+
+function MemberBalanceAccounts({
+  canManageUsers,
+  canAdjust,
+}: {
+  canManageUsers: boolean;
+  canAdjust: boolean;
+}) {
+  const columnDefs = useMemo<RemoteColumn<MemberBalanceGridRowDto>[]>(
+    () => [
+      {
+        field: 'userId',
+        headerName: '用户 ID',
+        headerTooltip:
+          '此列按完整用户 ID 查询。用户名或邮箱请在上方按权限查找。',
+        kind: 'uuid',
+        width: 270,
+        cellRenderer: ({
+          data,
+        }: CustomCellRendererProps<MemberBalanceGridRowDto>) =>
+          data && (
+            <Space>
+              <Text
+                copyable={{ text: data.userId }}
+                title={data.userId}
+                style={{ fontFamily: 'monospace' }}
+              >
+                {data.userId.slice(0, 8)}…
+              </Text>
+              {canManageUsers && data.userName ? (
+                <span>
+                  {data.userName}
+                  {data.email ? ` (${data.email})` : ''}
+                </span>
+              ) : null}
+            </Space>
+          ),
+      },
+      {
+        field: 'usdtBalance',
+        headerName: 'USDT 可用',
+        kind: 'decimal',
+        minWidth: 145,
+        flex: 1,
+      },
+      {
+        field: 'usdtFrozen',
+        headerName: 'USDT 冻结',
+        kind: 'decimal',
+        minWidth: 145,
+        flex: 1,
+      },
+      {
+        field: 'usdcBalance',
+        headerName: 'USDC 可用',
+        kind: 'decimal',
+        minWidth: 145,
+        flex: 1,
+      },
+      {
+        field: 'usdcFrozen',
+        headerName: 'USDC 冻结',
+        kind: 'decimal',
+        minWidth: 145,
+        flex: 1,
+      },
+      {
+        field: 'updatedAt',
+        headerName: '最近更新（UTC）',
+        kind: 'date',
+        width: 190,
+        sort: 'desc',
+        valueFormatter: ({ value }) =>
+          value ? String(value).replace('T', ' ').slice(0, 19) : '',
+      },
+      {
+        colId: 'actions',
+        headerName: '操作',
+        kind: 'display',
+        width: 150,
+        cellRenderer: ({
+          data,
+        }: CustomCellRendererProps<MemberBalanceGridRowDto>) =>
+          data && (
+            <Space>
+              <Link to={memberFundsUrl(data.userId)}>流水</Link>
+              {canAdjust && (
+                <Link
+                  to={`/finance/balance-adjustments?createFor=${encodeURIComponent(data.userId)}`}
+                >
+                  申请调整
+                </Link>
+              )}
+            </Space>
+          ),
+      },
+    ],
+    [canAdjust, canManageUsers],
+  );
+
+  const grid = useRemoteGrid<MemberBalanceGridRowDto>({
+    columnDefs,
+    query: queryMemberBalanceAccounts,
+    getRowId: getAccountRowId,
+    ariaLabel: '会员资金账户',
+  });
+  return <AgGridReact<MemberBalanceGridRowDto> {...grid} />;
 }

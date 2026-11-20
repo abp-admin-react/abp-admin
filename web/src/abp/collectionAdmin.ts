@@ -1,9 +1,9 @@
 /**
  * 余额域管理端 API 镜像（对应 CollectionBalanceAdminAppService，收款查看权限）：
- * 会员资金（member-*）+ 资金看板（dashboard）。用户名 → userId 解析走 identity 的
- * getUsers（模块不做身份耦合）。余额 DTO/动作色板在此单源，用户侧 collection.ts 复用。
+ * 会员资金（member-*）和资金看板（dashboard）。会员目录搜索沿用 identity.getUsers。
  */
 import { request } from '@umijs/max';
+import { type GridQuery, postGridQuery } from './gridQuery';
 
 const BASE = '/api/app/collection-balance-admin';
 const PAYMENTS_BASE = '/api/app/collection-payment-admin';
@@ -121,6 +121,23 @@ export type MemberBalanceAccountDto = {
   usdcFrozen: string;
   updatedAt: string;
 };
+
+/** 身份字段仅在操作者可查看会员目录时返回，邮箱沿用身份模块的脱敏权限。 */
+export type MemberBalanceGridRowDto = MemberBalanceAccountDto & {
+  userName: string | null;
+  email: string | null;
+};
+
+export function queryMemberBalanceAccounts(
+  input: GridQuery,
+  signal: AbortSignal,
+): Promise<{ totalCount: number; items: MemberBalanceGridRowDto[] }> {
+  return postGridQuery<MemberBalanceGridRowDto>(
+    `${BASE}/member-balance-accounts/query`,
+    input,
+    signal,
+  );
+}
 
 export async function getMemberBalanceAccounts(params: {
   skipCount?: number;

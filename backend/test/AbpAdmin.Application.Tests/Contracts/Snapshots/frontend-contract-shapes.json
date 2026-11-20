@@ -942,6 +942,43 @@
       }
     }
   },
+  "AbpAdmin.Collection.Services.MemberBalanceGridRowDto": {
+    "kind": "dto",
+    "properties": {
+      "Email": {
+        "type": "string",
+        "nullable": true
+      },
+      "UpdatedAt": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "UsdcBalance": {
+        "type": "string",
+        "nullable": false
+      },
+      "UsdcFrozen": {
+        "type": "string",
+        "nullable": false
+      },
+      "UsdtBalance": {
+        "type": "string",
+        "nullable": false
+      },
+      "UsdtFrozen": {
+        "type": "string",
+        "nullable": false
+      },
+      "UserId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "UserName": {
+        "type": "string",
+        "nullable": true
+      }
+    }
+  },
   "AbpAdmin.Collection.Services.NetworkStatusDto": {
     "kind": "dto",
     "properties": {

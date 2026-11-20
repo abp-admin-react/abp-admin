@@ -68,6 +68,7 @@ public class FrontendContractSnapshotTests
         typeof(AbpAdmin.Collection.Services.CollectionNetworkSummaryDto),
         typeof(AbpAdmin.Collection.Services.BalanceTxnDto),
         typeof(AbpAdmin.Collection.Services.MemberBalanceAccountDto),
+        typeof(AbpAdmin.Collection.Services.MemberBalanceGridRowDto),
         typeof(AbpAdmin.Collection.Services.DepositOrderListDto),
         typeof(AbpAdmin.Collection.Services.CollectionWalletStatusDto),
         typeof(AbpAdmin.Collection.Services.NetworkStatusDto),
