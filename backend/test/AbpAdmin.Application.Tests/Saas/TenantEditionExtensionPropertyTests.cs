@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using AbpAdmin.Grids;
 using System.Threading.Tasks;
 using AbpAdmin.Editions;
 using Shouldly;
@@ -57,5 +59,14 @@ public abstract class TenantEditionExtensionPropertyTests<TStartupModule> : AbpA
         dto.ExtraProperties[EditionConsts.TenantEditionPropertyName]!
             .ToString()!.ToLowerInvariant()
             .ShouldBe(edition.Id.ToString().ToLowerInvariant());
+
+        var grid = await _tenantAppService.QueryAsync(new GridQueryInput
+        {
+            Keyword = "EXT-PROP-EDITION",
+            Filters = [new() { Field = "id", Conditions = [new() { Op = "eq", Value = tenantId.ToString() }] }],
+            Sort = [new() { Field = "activationState", Direction = "asc" }, new() { Field = "editionEnd", Direction = "desc" }]
+        });
+        grid.TotalCount.ShouldBe(1);
+        grid.Items.Single().Id.ShouldBe(tenantId);
     }
 }
