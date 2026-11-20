@@ -136,8 +136,9 @@ function buildColumn<T>({
   if (kind === 'display')
     return { ...column, sortable: false, filter: false, floatingFilter: false };
   const numeric = kind === 'number' || kind === 'decimal';
-  const filter =
-    kind === 'date'
+  const filter = choices
+    ? 'agTextColumnFilter'
+    : kind === 'date'
       ? 'agDateColumnFilter'
       : kind === 'number'
         ? 'agNumberColumnFilter'
@@ -153,25 +154,24 @@ function buildColumn<T>({
     : kind === 'boolean'
       ? { isTrue: booleanLabels.true, isFalse: booleanLabels.false }
       : undefined;
-  const filterOptions =
-    numeric || kind === 'date'
+  const filterOptions = options
+    ? [
+        'empty',
+        ...Object.entries(options).map(([key, label]) => ({
+          displayKey: key,
+          displayName: label,
+          numberOfInputs: 0,
+          predicate: (_inputs: unknown[], value: unknown) =>
+            choices
+              ? key === `choice:${value}`
+              : String(value) === String(key === 'isTrue'),
+        })),
+      ]
+    : numeric || kind === 'date'
       ? comparisonOps
-      : options
-        ? [
-            'empty',
-            ...Object.entries(options).map(([key, label]) => ({
-              displayKey: key,
-              displayName: label,
-              numberOfInputs: 0,
-              predicate: (_inputs: unknown[], value: unknown) =>
-                choices
-                  ? key === `choice:${value}`
-                  : String(value) === String(key === 'isTrue'),
-            })),
-          ]
-        : kind === 'identifier' || kind === 'uuid'
-          ? ['equals', 'notEqual']
-          : textOps;
+      : kind === 'identifier' || kind === 'uuid'
+        ? ['equals', 'notEqual']
+        : textOps;
   return {
     cellDataType: false,
     tooltipField: column.field,
@@ -343,7 +343,15 @@ export function useRemoteGrid<T>(
     localeText: AG_GRID_LOCALE_ZH_CN,
     loadThemeGoogleFonts: false,
     rowModelType: 'infinite',
-    cacheBlockSize: pageSize,
+    cacheBlockSize: initialState?.pagination?.pageSize ?? pageSize,
+    onPaginationChanged({ api, newPageSize }) {
+      // Infinite 模型的块不能小于当前页，切换每页条数时按新的页长取数。
+      if (
+        newPageSize &&
+        api.getGridOption('cacheBlockSize') !== api.paginationGetPageSize()
+      )
+        api.setGridOption('cacheBlockSize', api.paginationGetPageSize());
+    },
     maxBlocksInCache: 5,
     pagination: true,
     paginationPageSize: pageSize,
