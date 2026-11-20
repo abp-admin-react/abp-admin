@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -40,6 +41,24 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
         _scheduler = scheduler;
         _handlers = handlers;
         _triggerCache = triggerCache;
+    }
+
+    public virtual async Task<PagedResultDto<ScheduledJobDto>> QueryAsync(GridQueryInput input)
+    {
+        var rows = (await _jobRepository.GetQueryableAsync())
+            .WhereIf(CurrentTenant.Id != null, x => !HostOnlyScheduledJobTypes.All.Contains(x.JobType));
+        var grid = new GridQueryDefinition<ScheduledJob>()
+            .SearchableField("name", x => x.Name)
+            .SearchableField("jobType", x => x.JobType)
+            .SearchableField("cronExpression", x => x.CronExpression)
+            .Field("isEnabled", x => x.IsEnabled)
+            .Field("lastRunTime", x => x.LastRunTime)
+            .Field("lastRunSuccess", x => x.LastRunSuccess)
+            .Field("nextRunTime", x => x.NextRunTime)
+            .Field("creationTime", x => x.CreationTime);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationTime", true, x => x.Id,
+            x => Map(x));
+        return new PagedResultDto<ScheduledJobDto>(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<ScheduledJobDto>> GetListAsync(GetScheduledJobsInput input)
@@ -216,6 +235,19 @@ public class ScheduledJobAppService : AbpAdminAppService, IScheduledJobAppServic
         }
 
         await _scheduler.TriggerAsync(id);
+    }
+
+    public virtual async Task<PagedResultDto<ScheduledJobExecutionDto>> QueryExecutionsAsync(Guid id, GridQueryInput input)
+    {
+        var rows = (await _executionRepository.GetQueryableAsync()).Where(x => x.ScheduledJobId == id);
+        var grid = new GridQueryDefinition<ScheduledJobExecution>()
+            .Field("startTime", x => x.StartTime)
+            .Field("success", x => x.Success)
+            .Field("durationMs", x => x.DurationMs)
+            .SearchableField("message", x => x.Message);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "startTime", true, x => x.Id,
+            x => MapExecution(x));
+        return new PagedResultDto<ScheduledJobExecutionDto>(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<ScheduledJobExecutionDto>> GetExecutionsAsync(

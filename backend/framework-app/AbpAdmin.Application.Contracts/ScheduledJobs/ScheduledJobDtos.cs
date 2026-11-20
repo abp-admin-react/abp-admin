@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
@@ -8,6 +9,8 @@ namespace AbpAdmin.ScheduledJobs;
 
 public interface IScheduledJobAppService : IApplicationService
 {
+    Task<PagedResultDto<ScheduledJobDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<ScheduledJobDto>> GetListAsync(GetScheduledJobsInput input);
 
     Task<ScheduledJobDto> GetAsync(Guid id);
@@ -21,6 +24,8 @@ public interface IScheduledJobAppService : IApplicationService
     Task<ScheduledJobDto> SetEnabledAsync(Guid id, bool isEnabled);
 
     Task TriggerAsync(Guid id);
+
+    Task<PagedResultDto<ScheduledJobExecutionDto>> QueryExecutionsAsync(Guid id, GridQueryInput input);
 
     Task<PagedResultDto<ScheduledJobExecutionDto>> GetExecutionsAsync(Guid id, PagedAndSortedResultRequestDto input);
 

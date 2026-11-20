@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -21,6 +22,21 @@ public class BackgroundJobAppService : AbpAdminAppService, IBackgroundJobAppServ
     public BackgroundJobAppService(IRepository<BackgroundJobRecord, Guid> jobRepository)
     {
         _jobRepository = jobRepository;
+    }
+
+    public virtual async Task<PagedResultDto<BackgroundJobDto>> QueryAsync(GridQueryInput input)
+    {
+        var rows = await _jobRepository.GetQueryableAsync();
+        var grid = new GridQueryDefinition<BackgroundJobRecord>()
+            .SearchableField("jobName", x => x.JobName)
+            .Field("isAbandoned", x => x.IsAbandoned)
+            .Field("tryCount", x => x.TryCount)
+            .Field("nextTryTime", x => x.NextTryTime)
+            .Field("creationTime", x => x.CreationTime)
+            .Field("completionTime", x => x.CompletionTime);
+        var page = await grid.ReadPageAsync(rows, input, AsyncExecuter, "creationTime", true, x => x.Id,
+            x => Map(x));
+        return new PagedResultDto<BackgroundJobDto>(page.TotalCount, page.Items);
     }
 
     public virtual async Task<PagedResultDto<BackgroundJobDto>> GetListAsync(GetBackgroundJobListInput input)

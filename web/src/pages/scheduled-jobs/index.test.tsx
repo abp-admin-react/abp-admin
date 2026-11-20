@@ -1,3 +1,8 @@
+import { postGridQuery } from '@/abp/gridQuery';
+
+vi.mock('@/abp/gridQuery', () => ({ postGridQuery: vi.fn() }));
+vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import type React from 'react';
@@ -5,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as service from './service';
 
 let jobAccess: Record<string, boolean> = {};
-let jobColumns: any[] = [];
+
 vi.mock('@umijs/max', () => ({ useAccess: () => jobAccess }));
 
 // Mock 服务层：页面不直接依赖生成客户端，mock 这一层即可
@@ -30,22 +35,6 @@ vi.mock('@ant-design/pro-components', () => ({
   PageContainer: ({ children }: any) => (
     <div data-testid="page-container">{children}</div>
   ),
-  ProTable: ({ columns, toolBarRender, request, params }: any) => {
-    jobColumns = columns;
-    request?.({ current: 1, pageSize: 10, ...params }, {}, {});
-    return (
-      <div data-testid="pro-table">
-        <div data-testid="table-columns">
-          {columns?.map((col: any, i: number) => (
-            <div key={col.dataIndex ?? col.key ?? i} data-testid="column">
-              {col.title}
-            </div>
-          ))}
-        </div>
-        {toolBarRender && <div data-testid="toolbar">{toolBarRender()}</div>}
-      </div>
-    );
-  },
   ModalForm: ({ children, title, trigger }: any) => (
     <div data-testid="modal-form" data-title={title}>
       {trigger}
@@ -86,10 +75,12 @@ describe('ScheduledJobsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     jobAccess = {
-      canCreateScheduledJobs: true, canUpdateScheduledJobs: true,
-      canDeleteScheduledJobs: true, canTriggerScheduledJobs: true,
+      canCreateScheduledJobs: true,
+      canUpdateScheduledJobs: true,
+      canDeleteScheduledJobs: true,
+      canTriggerScheduledJobs: true,
     };
-    vi.mocked(service.getScheduledJobs).mockResolvedValue(mockJobs as never);
+    vi.mocked(postGridQuery).mockResolvedValue(mockJobs as never);
     vi.mocked(service.getJobTypes).mockResolvedValue({
       items: [
         {
@@ -105,8 +96,10 @@ describe('ScheduledJobsPage', () => {
     renderPage(<Page />);
 
     await waitFor(() => {
-      expect(service.getScheduledJobs).toHaveBeenCalledWith(
-        expect.objectContaining({ current: 1, pageSize: 10 }),
+      expect(postGridQuery).toHaveBeenCalledWith(
+        expect.stringContaining('/query'),
+        expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+        expect.any(AbortSignal),
       );
     });
   });
@@ -115,8 +108,8 @@ describe('ScheduledJobsPage', () => {
     const { default: Page } = await import('./index');
     renderPage(<Page />);
 
-    const columns = await screen.findAllByTestId('column');
-    const titles = columns.map((c) => c.textContent);
+    const columns = await screen.findAllByRole('columnheader');
+    const titles = columns.map((c) => c.getAttribute('aria-label'));
     expect(titles).toContain('名称');
     expect(titles).toContain('作业类型');
     expect(titles).toContain('cron 表达式');
@@ -131,8 +124,7 @@ describe('ScheduledJobsPage', () => {
     const { default: Page } = await import('./index');
     renderPage(<Page />);
 
-    const toolbar = await screen.findByTestId('toolbar');
-    expect(toolbar.textContent).toContain('新建作业');
+    expect(await screen.findByText('新建作业')).toBeInTheDocument();
   });
 
   it('表单加载作业类型下拉数据', async () => {
@@ -158,9 +150,7 @@ describe('ScheduledJobsPage', () => {
     jobAccess = {};
     const { default: Page } = await import('./index');
     renderPage(<Page />);
-    await waitFor(() => expect(service.getScheduledJobs).toHaveBeenCalled());
-    renderPage(<>{jobColumns.find(col => col.dataIndex === 'isEnabled').render(null, mockJobs.items[0])}
-      {jobColumns.find(col => col.valueType === 'option').render(null, mockJobs.items[0])}</>);
+    await screen.findByText('历史');
     expect(screen.getByRole('switch')).toBeDisabled();
     expect(screen.getByText('历史')).toBeInTheDocument();
     for (const label of ['新建作业', '编辑', '删除', '立即触发']) {
@@ -175,8 +165,7 @@ describe('ScheduledJobsPage', () => {
     jobAccess = { canTriggerScheduledJobs: true };
     const { default: Page } = await import('./index');
     renderPage(<Page />);
-    await waitFor(() => expect(service.getScheduledJobs).toHaveBeenCalled());
-    renderPage(<div>{jobColumns.find(col => col.valueType === 'option').render(null, mockJobs.items[0])}</div>);
+    await screen.findByText('历史');
     expect(screen.getByText('立即触发')).toBeInTheDocument();
     expect(screen.getByText('历史')).toBeInTheDocument();
     expect(screen.queryByText('编辑')).not.toBeInTheDocument();
@@ -185,10 +174,13 @@ describe('ScheduledJobsPage', () => {
   });
 
   it('停用任务保留历史与获准的编辑操作，不显示会被后端拒绝的立即触发', async () => {
+    vi.mocked(postGridQuery).mockResolvedValueOnce({
+      items: [{ ...mockJobs.items[0], isEnabled: false }],
+      totalCount: 1,
+    });
     const { default: Page } = await import('./index');
     renderPage(<Page />);
-    await waitFor(() => expect(service.getScheduledJobs).toHaveBeenCalled());
-    renderPage(<div>{jobColumns.find(col => col.valueType === 'option').render(null, { ...mockJobs.items[0], isEnabled: false })}</div>);
+    await screen.findByText('历史');
     expect(screen.getByText('历史')).toBeInTheDocument();
     expect(screen.getByText('编辑')).toBeInTheDocument();
     expect(screen.queryByText('立即触发')).not.toBeInTheDocument();

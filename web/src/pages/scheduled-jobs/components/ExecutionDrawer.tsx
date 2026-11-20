@@ -1,7 +1,13 @@
+import { AgGridReact } from 'ag-grid-react';
 import { Drawer, Tag } from 'antd';
-import React, { useEffect, useState } from 'react';
-import { getExecutions, type ScheduledJobExecution } from '../service';
-import { ResizableTable } from '@/components/AutoHeightProTable/useResizableColumns';
+import React from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
+import { queryExecutions } from '@/abp/scheduledJobs';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import type { ScheduledJobExecution } from '../service';
 
 interface ExecutionDrawerProps {
   jobId?: string;
@@ -17,84 +23,71 @@ const ExecutionDrawer: React.FC<ExecutionDrawerProps> = ({
   open,
   onClose,
 }) => {
-  const [items, setItems] = useState<ScheduledJobExecution[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(1);
-
-  useEffect(() => {
-    if (!open || !jobId) {
-      return;
-    }
-
-    const load = async () => {
-      setLoading(true);
-      try {
-        const result = await getExecutions(jobId, {
-          current: page,
-          pageSize: 10,
-        });
-        setItems(result.items ?? []);
-        setTotal(result.totalCount ?? 0);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    // 错误提示由全局 request 拦截器统一弹出，这里只需兜住 rejection 避免 unhandled rejection
-    load().catch(() => undefined);
-  }, [open, jobId, page]);
+  const gridQuery = React.useCallback(
+    (input: GridQuery, signal: AbortSignal) =>
+      jobId
+        ? queryExecutions(jobId, input, signal)
+        : Promise.resolve({ items: [], totalCount: 0 }),
+    [jobId],
+  );
+  const grid = useSearchableRemoteGrid<ScheduledJobExecution>({
+    columnDefs: toGridColumns<ScheduledJobExecution>(
+      [
+        {
+          title: '开始时间',
+          dataIndex: 'startTime',
+          width: 165,
+          render: (v: string) => new Date(v).toLocaleString(),
+        },
+        {
+          title: '结果',
+          dataIndex: 'success',
+          width: 80,
+          render: (v: boolean) =>
+            v ? <Tag color="green">成功</Tag> : <Tag color="red">失败</Tag>,
+        },
+        {
+          title: '耗时',
+          dataIndex: 'durationMs',
+          width: 100,
+          render: (v: number) => `${v} ms`,
+        },
+        {
+          title: '消息',
+          dataIndex: 'message',
+          ellipsis: true,
+          render: (v: string | null) => v ?? '—',
+        },
+      ],
+      {
+        kinds: { startTime: 'date', success: 'boolean', durationMs: 'number' },
+      },
+    ),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '执行历史',
+    query: gridQuery,
+  });
 
   return (
     <Drawer
       title={`执行历史 - ${jobName ?? ''}`}
       size={720}
       open={open}
-      onClose={() => {
-        setPage(1);
-        onClose();
-      }}
+      onClose={onClose}
       destroyOnHidden
     >
-      <ResizableTable<ScheduledJobExecution>
-        rowKey="id"
-        size="small"
-        loading={loading}
-        dataSource={items}
-        pagination={{
-          current: page,
-          pageSize: 10,
-          total,
-          onChange: setPage,
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
         }}
-        columns={[
-          {
-            title: '开始时间',
-            dataIndex: 'startTime',
-            width: 165,
-            render: (v: string) => new Date(v).toLocaleString(),
-          },
-          {
-            title: '结果',
-            dataIndex: 'success',
-            width: 80,
-            render: (v: boolean) =>
-              v ? <Tag color="green">成功</Tag> : <Tag color="red">失败</Tag>,
-          },
-          {
-            title: '耗时',
-            dataIndex: 'durationMs',
-            width: 100,
-            render: (v: number) => `${v} ms`,
-          },
-          {
-            title: '消息',
-            dataIndex: 'message',
-            ellipsis: true,
-            render: (v: string | null) => v ?? '—',
-          },
-        ]}
-      />
+      >
+        {grid.searchBox}
+      </div>
+      <AgGridReact<ScheduledJobExecution> {...grid.gridProps} />
     </Drawer>
   );
 };

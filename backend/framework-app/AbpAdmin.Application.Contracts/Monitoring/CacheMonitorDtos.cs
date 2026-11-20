@@ -1,3 +1,5 @@
+using Volo.Abp.Application.Dtos;
+using AbpAdmin.Grids;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Volo.Abp.Application.Services;
@@ -7,6 +9,8 @@ namespace AbpAdmin.Monitoring;
 public interface ICacheMonitorAppService : IApplicationService
 {
     /// <summary>缓存后端概览（后端类型、键前缀、Redis 总键数与内存占用）。</summary>
+    Task<PagedResultDto<CacheKeyDto>> QueryAsync(string? prefix, GridQueryInput input);
+
     Task<CacheMonitorInfoDto> GetInfoAsync();
 
     /// <summary>

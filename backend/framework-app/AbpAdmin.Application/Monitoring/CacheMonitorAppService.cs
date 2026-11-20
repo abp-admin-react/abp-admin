@@ -1,3 +1,5 @@
+using Volo.Abp.Application.Dtos;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -40,6 +42,46 @@ public class CacheMonitorAppService : AbpAdminAppService, ICacheMonitorAppServic
     {
         _redisConnection = redisConnection;
         _cacheOptions = cacheOptions.Value;
+    }
+
+    public virtual async Task<PagedResultDto<CacheKeyDto>> QueryAsync(string? prefix, GridQueryInput input)
+    {
+        var grid = new GridQueryDefinition<CacheKeyDto>()
+            .SearchableField("key", x => x.Key)
+            .SearchableField("type", x => x.Type)
+            .Field("sizeBytes", x => x.SizeBytes)
+            .Field("ttlSeconds", x => x.TtlSeconds);
+        // 先校验条件再遍历键空间，Redis SCAN 可能返回重复键。
+        grid.Filter(Array.Empty<CacheKeyDto>().AsQueryable(), input);
+        var database = await RequireDatabaseAsync();
+        var pattern = BuildScanPattern(prefix, _cacheOptions.KeyPrefix);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var cancellation = LazyServiceProvider.LazyGetRequiredService<Volo.Abp.Threading.ICancellationTokenProvider>().Token;
+        long cursor = 0;
+        do
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var chunk = await ScanPageAsync(database, cursor, pattern, 200);
+            cursor = chunk.Cursor;
+            names.UnionWith(chunk.Keys.Where(IsAllowedKey));
+        } while (cursor != 0);
+
+        // 默认浏览或仅按键名查询时，只读取当前页的 TTL、类型及大小。
+        if (string.IsNullOrWhiteSpace(input.Keyword) && input.Filters.All(f => f.Field == "key")
+            && input.Sort.All(s => s.Field == "key"))
+        {
+            var page = grid.ReadSnapshot(names.Select(k => new CacheKeyDto { Key = k }), input, "key", x => x.Key);
+            var details = await HydrateKeysAsync(database, page.Items.Select(row => row.Key).ToList());
+            return new PagedResultDto<CacheKeyDto>(page.TotalCount, details);
+        }
+
+        var snapshot = new List<CacheKeyDto>(names.Count);
+        foreach (var batch in names.Chunk(200))
+        {
+            cancellation.ThrowIfCancellationRequested();
+            snapshot.AddRange(await HydrateKeysAsync(database, batch.ToList()));
+        }
+        return grid.ReadSnapshot(snapshot, input, "key", x => x.Key);
     }
 
     public virtual async Task<CacheMonitorInfoDto> GetInfoAsync()

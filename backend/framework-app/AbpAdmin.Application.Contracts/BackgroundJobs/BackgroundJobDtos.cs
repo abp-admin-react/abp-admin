@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Threading.Tasks;
 using Volo.Abp.Application.Dtos;
@@ -7,6 +8,8 @@ namespace AbpAdmin.BackgroundJobs;
 
 public interface IBackgroundJobAppService : IApplicationService
 {
+    Task<PagedResultDto<BackgroundJobDto>> QueryAsync(GridQueryInput input);
+
     Task<PagedResultDto<BackgroundJobDto>> GetListAsync(GetBackgroundJobListInput input);
 
     Task<BackgroundJobDto> GetAsync(Guid id);

@@ -1,15 +1,19 @@
-import { type ActionType, PageContainer } from '@ant-design/pro-components';
+import { PageContainer } from '@ant-design/pro-components';
 import { useAccess } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import { App, Button, Popconfirm, Switch, Tag } from 'antd';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import React, { useCallback, useEffect, useState } from 'react';
+import { queryScheduledJobs } from '@/abp/scheduledJobs';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import ExecutionDrawer from './components/ExecutionDrawer';
 import ScheduledJobForm from './components/ScheduledJobForm';
 import {
   createScheduledJob,
   deleteScheduledJob,
   getJobTypes,
-  getScheduledJobs,
   type JobTypeOption,
   type ScheduledJob,
   setJobEnabled,
@@ -25,17 +29,11 @@ import {
 const ScheduledJobsPage: React.FC = () => {
   const access = useAccess();
   const { message } = App.useApp();
-  const actionRef = useRef<ActionType>(undefined);
   const [historyJob, setHistoryJob] = useState<ScheduledJob>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [jobTypes, setJobTypes] = useState<JobTypeOption[]>([]);
 
-  // 作业类型下拉数据页面级只拉一次：ProTable 操作列每行渲染一个 ScheduledJobForm 实例，
-  // 加工具栏一个，pageSize 默认 20 时一次页面加载约挂载 21 个实例——若由表单各自在
-  // 挂载时拉取，会放大成 21 个相同请求和 21 条错误提示。
-  // 该请求已 skipErrorHandler（见 service.getJobTypes），失败只在这里弹一条
-  // 「加载作业类型失败，请刷新页面重试」；恢复手段是浏览器刷新页面：
-  // 表单实例随页面常驻不重挂载，仅开关弹窗无法重新触发该请求。
+  // 共用处理器清单，表单打开时无需逐行重新请求。
   const loadJobTypes = useCallback(async () => {
     try {
       const result = await getJobTypes();
@@ -46,73 +44,73 @@ const ScheduledJobsPage: React.FC = () => {
   }, [message]);
 
   useEffect(() => {
-    if (access.canCreateScheduledJobs || access.canUpdateScheduledJobs) loadJobTypes();
-  }, [loadJobTypes, access.canCreateScheduledJobs, access.canUpdateScheduledJobs]);
+    if (access.canCreateScheduledJobs || access.canUpdateScheduledJobs)
+      loadJobTypes();
+  }, [
+    loadJobTypes,
+    access.canCreateScheduledJobs,
+    access.canUpdateScheduledJobs,
+  ]);
 
-  return (
-    <PageContainer>
-      <AutoHeightProTable<ScheduledJob>
-        rowKey="id"
-        actionRef={actionRef}
-        columns={[
-          { title: '名称', dataIndex: 'name', ellipsis: true },
-          { title: '作业类型', dataIndex: 'jobType', ellipsis: true },
-          {
-            title: 'cron 表达式',
-            dataIndex: 'cronExpression',
-            search: false,
+  const grid = useSearchableRemoteGrid<ScheduledJob>({
+    columnDefs: toGridColumns<ScheduledJob>(
+      [
+        { title: '名称', dataIndex: 'name', ellipsis: true },
+        { title: '作业类型', dataIndex: 'jobType', ellipsis: true },
+        {
+          title: 'cron 表达式',
+          dataIndex: 'cronExpression',
+        },
+        {
+          title: '启用',
+          dataIndex: 'isEnabled',
+
+          render: (_, record) => (
+            <Switch
+              checked={record.isEnabled}
+              disabled={!access.canUpdateScheduledJobs}
+              onChange={async (checked) => {
+                await setJobEnabled(record.id, checked);
+                message.success(checked ? '已启用' : '已停用');
+                grid.refresh();
+              }}
+            />
+          ),
+        },
+        {
+          title: '上次执行',
+          dataIndex: 'lastRunTime',
+          valueType: 'dateTime',
+        },
+        {
+          title: '上次结果',
+          dataIndex: 'lastRunSuccess',
+
+          render: (_, record) => {
+            if (
+              record.lastRunSuccess === null ||
+              record.lastRunSuccess === undefined
+            ) {
+              return '—';
+            }
+            return record.lastRunSuccess ? (
+              <Tag color="green">成功</Tag>
+            ) : (
+              <Tag color="red">失败</Tag>
+            );
           },
-          {
-            title: '启用',
-            dataIndex: 'isEnabled',
-            search: false,
-            render: (_, record) => (
-              <Switch
-                checked={record.isEnabled}
-                disabled={!access.canUpdateScheduledJobs}
-                onChange={async (checked) => {
-                  await setJobEnabled(record.id, checked);
-                  message.success(checked ? '已启用' : '已停用');
-                  actionRef.current?.reload();
-                }}
-              />
-            ),
-          },
-          {
-            title: '上次执行',
-            dataIndex: 'lastRunTime',
-            valueType: 'dateTime',
-            search: false,
-          },
-          {
-            title: '上次结果',
-            dataIndex: 'lastRunSuccess',
-            search: false,
-            render: (_, record) => {
-              if (
-                record.lastRunSuccess === null ||
-                record.lastRunSuccess === undefined
-              ) {
-                return '—';
-              }
-              return record.lastRunSuccess ? (
-                <Tag color="green">成功</Tag>
-              ) : (
-                <Tag color="red">失败</Tag>
-              );
-            },
-          },
-          {
-            title: '下次执行',
-            dataIndex: 'nextRunTime',
-            valueType: 'dateTime',
-            search: false,
-          },
-          {
-            title: '操作',
-            valueType: 'option',
-            render: (_, record) => [
-              access.canUpdateScheduledJobs && <ScheduledJobForm
+        },
+        {
+          title: '下次执行',
+          dataIndex: 'nextRunTime',
+          valueType: 'dateTime',
+        },
+        {
+          title: '操作',
+          valueType: 'option',
+          render: (_, record) => [
+            access.canUpdateScheduledJobs && (
+              <ScheduledJobForm
                 key="edit"
                 title="编辑定时作业"
                 trigger={<a>编辑</a>}
@@ -134,11 +132,13 @@ const ScheduledJobsPage: React.FC = () => {
                     await setJobEnabled(record.id, values.isEnabled);
                   }
                   message.success('已保存');
-                  actionRef.current?.reload();
+                  grid.refresh();
                   return true;
                 }}
-              />,
-              access.canTriggerScheduledJobs && record.isEnabled && <Popconfirm
+              />
+            ),
+            access.canTriggerScheduledJobs && record.isEnabled && (
+              <Popconfirm
                 key="trigger"
                 title="确认立即触发一次？"
                 description="不影响原有 cron 计划"
@@ -154,69 +154,82 @@ const ScheduledJobsPage: React.FC = () => {
                 }}
               >
                 <a>立即触发</a>
-              </Popconfirm>,
-              <a
-                key="history"
-                onClick={() => {
-                  setHistoryJob(record);
-                  setDrawerOpen(true);
-                }}
-              >
-                历史
-              </a>,
-              access.canDeleteScheduledJobs && <Popconfirm
+              </Popconfirm>
+            ),
+            <a
+              key="history"
+              onClick={() => {
+                setHistoryJob(record);
+                setDrawerOpen(true);
+              }}
+            >
+              历史
+            </a>,
+            access.canDeleteScheduledJobs && (
+              <Popconfirm
                 key="delete"
                 title="确认删除该作业？"
                 onConfirm={async () => {
                   await deleteScheduledJob(record.id);
                   message.success('已删除');
-                  actionRef.current?.reload();
+                  grid.refresh();
                 }}
               >
                 <a>删除</a>
-              </Popconfirm>,
-            ],
-          },
-        ]}
-        request={async (params) => {
-          const result = await getScheduledJobs({
-            current: params.current,
-            pageSize: params.pageSize,
-            name: params.name,
-            jobType: params.jobType,
-          });
-          return {
-            data: result.items ?? [],
-            total: result.totalCount ?? 0,
-            success: true,
-          };
+              </Popconfirm>
+            ),
+          ],
+        },
+      ],
+      { pro: true, kinds: { isEnabled: 'boolean', lastRunSuccess: 'boolean' } },
+    ),
+    getRowId: ({ data }) => data.id,
+    ariaLabel: '定时作业',
+    query: queryScheduledJobs,
+  });
+
+  return (
+    <PageContainer>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 8,
         }}
-        toolBarRender={() => [
-          access.canCreateScheduledJobs && <ScheduledJobForm
-            key="create"
-            title="新建定时作业"
-            trigger={<Button type="primary">新建作业</Button>}
-            jobTypes={jobTypes}
-            onFinish={async (values) => {
-              if (!values.jobType) {
-                message.error('请选择作业类型');
-                return false;
-              }
-              await createScheduledJob({
-                name: values.name,
-                jobType: values.jobType,
-                cronExpression: values.cronExpression,
-                isEnabled: values.isEnabled,
-                description: values.description,
-                payload: values.payload,
-              });
-              message.success('已创建');
-              actionRef.current?.reload();
-              return true;
-            }}
-          />,
+      >
+        {grid.searchBox}
+        {[
+          access.canCreateScheduledJobs && (
+            <ScheduledJobForm
+              key="create"
+              title="新建定时作业"
+              trigger={<Button type="primary">新建作业</Button>}
+              jobTypes={jobTypes}
+              onFinish={async (values) => {
+                if (!values.jobType) {
+                  message.error('请选择作业类型');
+                  return false;
+                }
+                await createScheduledJob({
+                  name: values.name,
+                  jobType: values.jobType,
+                  cronExpression: values.cronExpression,
+                  isEnabled: values.isEnabled,
+                  description: values.description,
+                  payload: values.payload,
+                });
+                message.success('已创建');
+                grid.refresh();
+                return true;
+              }}
+            />
+          ),
         ]}
-      />
+      </div>
+      <AgGridReact<ScheduledJob> {...grid.gridProps} />
+
       <ExecutionDrawer
         jobId={historyJob?.id}
         jobName={historyJob?.name}

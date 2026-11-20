@@ -1,3 +1,8 @@
+vi.mock('ag-grid-react', () => import('@/../tests/gridTestDouble'));
+vi.mock('@/abp/gridQuery', () => ({
+  postGridQuery: (url: string, input: unknown) => mockGetCacheKeys(url, input),
+}));
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import type React from 'react';
@@ -21,7 +26,8 @@ const mockGetCacheValue = vi.fn();
 const mockUpdateCacheValue = vi.fn();
 const mockRefreshCacheKey = vi.fn();
 
-vi.mock('@/abp/proModules', () => ({
+vi.mock('@/abp/proModules', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/abp/proModules')>()),
   getCacheMonitorInfo: (...args: unknown[]) => mockGetCacheMonitorInfo(...args),
   getCacheKeys: (...args: unknown[]) => mockGetCacheKeys(...args),
   getCacheValue: (...args: unknown[]) => mockGetCacheValue(...args),
@@ -57,7 +63,7 @@ describe('CacheMonitorPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAccess = { canManageCache: true };
-    mockGetCacheKeys.mockResolvedValue({ keys: [], nextCursor: 0 });
+    mockGetCacheKeys.mockResolvedValue({ items: [], totalCount: 1 });
   });
 
   it('挂载自动扫第一页：恰好一次、带默认过滤词 c:（keyPrefix 为空时）', async () => {
@@ -70,14 +76,17 @@ describe('CacheMonitorPage', () => {
     });
     // 默认过滤词 c:（对齐输入框种子的 keyPrefix || 'c:'）；口径漂移（漏传 prefix
     // 变 [ct]:** 全量）会让"继续扫描"混入租户键——这里钉住首页口径
-    expect(mockGetCacheKeys).toHaveBeenCalledWith({
-      prefix: 'c:',
-      cursor: 0,
-    });
+    expect(mockGetCacheKeys).toHaveBeenCalledWith(
+      '/api/app/cache-monitor/query?prefix=c%3A',
+      expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+    );
   });
 
   it('配置了隔离前缀时默认过滤词是 keyPrefix（89b0e9 的头号特性：默认只列本应用键）', async () => {
-    mockGetCacheMonitorInfo.mockResolvedValue({ ...redisInfo, keyPrefix: 'AbpAdmin:' });
+    mockGetCacheMonitorInfo.mockResolvedValue({
+      ...redisInfo,
+      keyPrefix: 'AbpAdmin:',
+    });
 
     renderPage();
 
@@ -86,10 +95,10 @@ describe('CacheMonitorPage', () => {
     });
     // 种子若退化为恒定 'c:'，共享 Redis 部署会默认列出别家应用的键（服务端守卫兜底
     // 不返回，但口径本身必须钉住：默认只看本应用）
-    expect(mockGetCacheKeys).toHaveBeenCalledWith({
-      prefix: 'AbpAdmin:',
-      cursor: 0,
-    });
+    expect(mockGetCacheKeys).toHaveBeenCalledWith(
+      '/api/app/cache-monitor/query?prefix=AbpAdmin%3A',
+      expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+    );
   });
 
   it('后端为 memory 时不自动扫描', async () => {
@@ -138,8 +147,8 @@ describe('CacheMonitorPage', () => {
   it('刷新按钮：重新拉概览并按当前输入框的词重扫首页（清表后的"空表"不该像丢数据）', async () => {
     mockGetCacheMonitorInfo.mockResolvedValue(redisInfo);
     mockGetCacheKeys.mockResolvedValue({
-      keys: [{ key: 'c:demo', type: 'hash', sizeBytes: 1, ttlSeconds: null }],
-      nextCursor: 0,
+      items: [{ key: 'c:demo', type: 'hash', sizeBytes: 1, ttlSeconds: null }],
+      totalCount: 1,
     });
 
     renderPage();
@@ -154,19 +163,24 @@ describe('CacheMonitorPage', () => {
       expect(mockGetCacheKeys).toHaveBeenCalledTimes(2);
     });
     // 刷新重扫沿用当前输入框的词（默认种子 c:），保持与首页同一口径
-    expect(mockGetCacheKeys).toHaveBeenLastCalledWith({
-      prefix: 'c:',
-      cursor: 0,
-    });
+    expect(mockGetCacheKeys).toHaveBeenLastCalledWith(
+      '/api/app/cache-monitor/query?prefix=c%3A',
+      expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+    );
   });
 
   it('写值：hash 键预填 data 字段原文，写值请求携带编辑后的值与过期输入', async () => {
     mockGetCacheMonitorInfo.mockResolvedValue(redisInfo);
     mockGetCacheKeys.mockResolvedValue({
-      keys: [
-        { key: 'c:Demo.Cache,k:AbpAdmin:x', type: 'hash', sizeBytes: 1, ttlSeconds: 600 },
+      items: [
+        {
+          key: 'c:Demo.Cache,k:AbpAdmin:x',
+          type: 'hash',
+          sizeBytes: 1,
+          ttlSeconds: 600,
+        },
       ],
-      nextCursor: 0,
+      totalCount: 1,
     });
     mockGetCacheValue.mockResolvedValue({
       key: 'c:Demo.Cache,k:AbpAdmin:x',
