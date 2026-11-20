@@ -33,16 +33,27 @@ public sealed partial class GridQueryDefinition<T>
                 _ => throw Invalid(field, "文本列不支持此运算符。")
             };
         }
-        else if (type == typeof(DateTime))
+        else if (type == typeof(DateTime) || type == typeof(DateTimeOffset))
         {
             test = CompareDay(actual, op, value, end, field);
         }
         else
         {
-            var ordered = type == typeof(decimal) || type == typeof(int) || type == typeof(long);
+            var ordered = type == typeof(decimal) || type == typeof(int) || type == typeof(long) ||
+                type == typeof(byte) || type == typeof(short) || type == typeof(double);
             if (!ordered && op is not ("eq" or "ne"))
             {
                 throw Invalid(field, "此列仅支持相等或不等比较。");
+            }
+            // 枚举比较使用其存储类型；接受已定义的名称或数值。
+            if (type.IsEnum)
+            {
+                if (!Enum.TryParse(type, value, true, out var parsed) || !Enum.IsDefined(type, parsed))
+                    throw Invalid(field, "无效的枚举值。");
+                var underlying = Enum.GetUnderlyingType(type);
+                value = Convert.ChangeType(parsed, underlying, CultureInfo.InvariantCulture)!.ToString()!;
+                actual = Expression.Convert(actual, underlying);
+                type = underlying;
             }
             var first = Parse(type, value, field);
             test = op switch
@@ -72,15 +83,17 @@ public sealed partial class GridQueryDefinition<T>
                 ? day : throw Invalid(field, "日期须使用 yyyy-MM-dd（UTC）。");
 
         // UTC 日范围使用半开区间，保留索引可用性及数据库时间戳的子秒精度。
+        Expression At(DateTime day) => member.Type == typeof(DateTimeOffset)
+            ? Parameter(new DateTimeOffset(day)) : Parameter(day);
         Expression Through(DateTime day) => day == DateTime.MaxValue.Date
-            ? Expression.Constant(true) : Expression.LessThan(member, Parameter(day.AddDays(1)));
+            ? Expression.Constant(true) : Expression.LessThan(member, At(day.AddDays(1)));
         var start = Read(value);
-        var atOrAfter = Expression.GreaterThanOrEqual(member, Parameter(start));
+        var atOrAfter = Expression.GreaterThanOrEqual(member, At(start));
         return op switch
         {
             "eq" => Expression.AndAlso(atOrAfter, Through(start)),
             "ne" => Expression.Not(Expression.AndAlso(atOrAfter, Through(start))),
-            "lt" => Expression.LessThan(member, Parameter(start)),
+            "lt" => Expression.LessThan(member, At(start)),
             "lte" => Through(start),
             "gt" => Expression.Not(Through(start)),
             "gte" => atOrAfter,
@@ -109,6 +122,12 @@ public sealed partial class GridQueryDefinition<T>
             return Parameter(integer);
         if (type == typeof(long) && long.TryParse(text, NumberStyles.Integer, culture, out var longValue))
             return Parameter(longValue);
+        if (type == typeof(byte) && byte.TryParse(text, NumberStyles.Integer, culture, out var octet))
+            return Parameter(octet);
+        if (type == typeof(short) && short.TryParse(text, NumberStyles.Integer, culture, out var shortValue))
+            return Parameter(shortValue);
+        if (type == typeof(double) && double.TryParse(text, NumberStyles.Float, culture, out var floatingPoint) && double.IsFinite(floatingPoint))
+            return Parameter(floatingPoint);
         if (type == typeof(bool) && bool.TryParse(text, out var boolean))
             return Parameter(boolean);
         if (type == typeof(Guid) && Guid.TryParseExact(text, "D", out var id))
