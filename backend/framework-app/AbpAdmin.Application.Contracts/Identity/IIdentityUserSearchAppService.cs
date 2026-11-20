@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
 using AbpAdmin.Desensitization;
+using AbpAdmin.Grids;
 using AbpAdmin.Linq.DynamicQueryable;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
@@ -17,6 +18,8 @@ namespace AbpAdmin.Identity;
 /// </summary>
 public interface IIdentityUserSearchAppService : IApplicationService
 {
+    Task<PagedResultDto<IdentityUserGridRowDto>> QueryAsync(GridQueryInput input);
+
     /// <summary>
     /// 可用字段元数据（字段名/类型/可用操作符），前端据此动态渲染筛选器。
     /// </summary>
@@ -24,6 +27,20 @@ public interface IIdentityUserSearchAppService : IApplicationService
 
     /// <summary>按动态条件分页搜索用户。空条件组返回全部（分页内）。</summary>
     Task<PagedResultDto<IdentityUserSearchItemDto>> SearchAsync(IdentityUserDynamicSearchInput input);
+}
+
+/// <summary>用户管理列表和编辑表单共用的行。明文字段沿用搜索结果的序列化脱敏。</summary>
+public class IdentityUserGridRowDto : IdentityUserSearchItemDto
+{
+    public bool PhoneNumberConfirmed { get; set; }
+    public bool LockoutEnabled { get; set; }
+    public DateTimeOffset? LockoutEnd { get; set; }
+    public bool IsLocked { get; set; }
+    public string Status => !IsActive ? "inactive" : IsLocked ? "locked" : "active";
+    public bool? TwoFactorEnabled { get; set; }
+    public int AccessFailedCount { get; set; }
+    public DateTimeOffset? LastPasswordChangeTime { get; set; }
+    public string ConcurrencyStamp { get; set; } = default!;
 }
 
 /// <summary>动态搜索请求：条件组 + 分页 + 排序（白名单校验）。</summary>

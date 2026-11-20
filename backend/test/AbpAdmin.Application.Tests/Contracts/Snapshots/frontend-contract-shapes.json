@@ -1483,6 +1483,83 @@
       }
     }
   },
+  "AbpAdmin.Identity.IdentityUserGridRowDto": {
+    "kind": "dto",
+    "properties": {
+      "AccessFailedCount": {
+        "type": "int",
+        "nullable": false
+      },
+      "ConcurrencyStamp": {
+        "type": "string",
+        "nullable": false
+      },
+      "CreationTime": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Email": {
+        "type": "string",
+        "nullable": false
+      },
+      "EmailConfirmed": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "IsActive": {
+        "type": "bool",
+        "nullable": false
+      },
+      "IsLocked": {
+        "type": "bool",
+        "nullable": false
+      },
+      "LastPasswordChangeTime": {
+        "type": "DateTimeOffset?",
+        "nullable": true
+      },
+      "LockoutEnabled": {
+        "type": "bool",
+        "nullable": false
+      },
+      "LockoutEnd": {
+        "type": "DateTimeOffset?",
+        "nullable": true
+      },
+      "Name": {
+        "type": "string",
+        "nullable": true
+      },
+      "PhoneNumber": {
+        "type": "string",
+        "nullable": true
+      },
+      "PhoneNumberConfirmed": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Status": {
+        "type": "string",
+        "nullable": false
+      },
+      "Surname": {
+        "type": "string",
+        "nullable": true
+      },
+      "TwoFactorEnabled": {
+        "type": "bool?",
+        "nullable": true
+      },
+      "UserName": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Identity.IdentityUserSearchItemDto": {
     "kind": "dto",
     "properties": {

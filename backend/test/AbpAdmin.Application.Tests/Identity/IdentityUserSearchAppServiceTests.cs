@@ -1,12 +1,18 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Linq.DynamicQueryable;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
+using Volo.Abp.Authorization.Permissions;
+using Volo.Abp.DependencyInjection;
+using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Guids;
 using Volo.Abp.Identity;
 using Volo.Abp.Modularity;
+using Volo.Abp.MultiTenancy;
 using Volo.Abp.Validation;
 using Xunit;
 
@@ -141,6 +147,67 @@ public abstract class IdentityUserSearchAppServiceTests<TStartupModule> : AbpAdm
             {
                 Sorting = "PasswordHash ASC",
             }));
+    }
+
+    [Fact]
+    public async Task Grid_should_filter_and_sort_all_users_before_paging()
+    {
+        var prefix = $"grid_{_guidGenerator.Create():N}";
+        await CreateUserAsync(prefix + "_alice");
+        var betty = await CreateUserAsync(prefix + "_betty");
+        var carl = await CreateUserAsync(prefix + "_carl");
+        (await _userManager.SetLockoutEndDateAsync(betty, DateTimeOffset.UtcNow.AddDays(1))).Succeeded.ShouldBeTrue();
+        (await _userManager.SetTwoFactorEnabledAsync(carl, true)).Succeeded.ShouldBeTrue();
+
+        var query = new GridQueryInput { Keyword = prefix, MaxResultCount = 1 };
+        (await _searchAppService.QueryAsync(query)).Items.Single().UserName.ShouldBe(prefix + "_alice");
+        query.Filters =
+        [
+            new() { Field = "status", Join = "or", Conditions = [
+                new() { Op = "eq", Value = "active" }, new() { Op = "eq", Value = "locked" }] },
+            new() { Field = "userName", Conditions = [new() { Op = "notContains", Value = "alice" }] }
+        ];
+        query.Sort = [new() { Field = "twoFactorEnabled", Direction = "desc" }, new() { Field = "userName" }];
+        var first = await _searchAppService.QueryAsync(query);
+        first.TotalCount.ShouldBe(2);
+        first.Items.Single().Id.ShouldBe(carl.Id);
+        first.Items.Single().TwoFactorEnabled.ShouldBe(true);
+        query.SkipCount = 1;
+        var second = await _searchAppService.QueryAsync(query);
+        second.Items.Single().Status.ShouldBe("locked");
+        second.Items.Single().IsLocked.ShouldBeTrue();
+        second.Items.Single().ConcurrencyStamp.ShouldBe(betty.ConcurrencyStamp);
+        using (GetRequiredService<ICurrentTenant>().Change(Guid.NewGuid()))
+        {
+            (await _searchAppService.QueryAsync(query)).TotalCount.ShouldBe(0);
+        }
+    }
+
+    [Fact]
+    public async Task Grid_should_restrict_contact_and_two_factor_fields_for_read_only_accounts()
+    {
+        var user = await CreateUserAsync($"private_{_guidGenerator.Create():N}");
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var readOnly = new IdentityUserSearchAppService(GetRequiredService<IRepository<IdentityUser, Guid>>(),
+                Substitute.For<IPermissionChecker>())
+            {
+                LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>()
+            };
+            var input = new GridQueryInput { Keyword = user.Email };
+            (await readOnly.QueryAsync(input)).TotalCount.ShouldBe(0);
+            (await _searchAppService.QueryAsync(input)).Items.Single().Id.ShouldBe(user.Id);
+            input.Keyword = user.UserName;
+            (await readOnly.QueryAsync(input)).Items.Single().TwoFactorEnabled.ShouldBeNull();
+
+            foreach (var field in new[] { "email", "phoneNumber", "twoFactorEnabled" })
+            {
+                var filter = new GridQueryInput { Filters = [new() { Field = field, Conditions = [new() { Op = "eq", Value = "true" }] }] };
+                await Should.ThrowAsync<AbpValidationException>(() => readOnly.QueryAsync(filter));
+                var sort = new GridQueryInput { Sort = [new() { Field = field }] };
+                await Should.ThrowAsync<AbpValidationException>(() => readOnly.QueryAsync(sort));
+            }
+        });
     }
 
     private async Task<IdentityUser> CreateUserAsync(string userName)

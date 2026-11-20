@@ -3,11 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Dynamic.Core;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Linq.DynamicQueryable;
 using AbpAdmin.Permissions;
 using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
+using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 using Volo.Abp.Validation;
@@ -100,10 +102,42 @@ public class IdentityUserSearchAppService : AbpAdminAppService, IIdentityUserSea
     private const int MaxConditions = 32;
 
     private readonly IRepository<IdentityUser, Guid> _userRepository;
+    private readonly IPermissionChecker _permissionChecker;
 
-    public IdentityUserSearchAppService(IRepository<IdentityUser, Guid> userRepository)
+    public IdentityUserSearchAppService(IRepository<IdentityUser, Guid> userRepository, IPermissionChecker permissionChecker)
     {
         _userRepository = userRepository;
+        _permissionChecker = permissionChecker;
+    }
+
+    public virtual async Task<PagedResultDto<IdentityUserGridRowDto>> QueryAsync(GridQueryInput input)
+    {
+        var canUpdate = await _permissionChecker.IsGrantedAsync(IdentityPermissions.Users.Update);
+        var now = new DateTimeOffset(Clock.Now);
+        var ordered = IdentityUserGridQuery.Apply(await _userRepository.GetQueryableAsync(), input, canUpdate, now);
+        var total = await AsyncExecuter.LongCountAsync(ordered);
+        var rows = await AsyncExecuter.ToListAsync(ordered.Skip(input.SkipCount).Take(input.MaxResultCount)
+            .Select(u => new IdentityUserGridRowDto
+            {
+                Id = u.Id,
+                UserName = u.UserName,
+                Name = u.Name,
+                Surname = u.Surname,
+                Email = u.Email,
+                EmailConfirmed = u.EmailConfirmed,
+                PhoneNumber = u.PhoneNumber,
+                PhoneNumberConfirmed = u.PhoneNumberConfirmed,
+                IsActive = u.IsActive,
+                LockoutEnabled = u.LockoutEnabled,
+                LockoutEnd = u.LockoutEnd,
+                IsLocked = u.LockoutEnd > now,
+                TwoFactorEnabled = canUpdate ? u.TwoFactorEnabled : null,
+                AccessFailedCount = u.AccessFailedCount,
+                CreationTime = u.CreationTime,
+                LastPasswordChangeTime = u.LastPasswordChangeTime,
+                ConcurrencyStamp = u.ConcurrencyStamp
+            }));
+        return new PagedResultDto<IdentityUserGridRowDto>(total, rows);
     }
 
     public virtual Task<List<DynamicSearchFieldDto>> GetAvailableFieldsAsync()
