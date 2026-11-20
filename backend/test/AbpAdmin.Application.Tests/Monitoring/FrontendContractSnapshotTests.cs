@@ -47,6 +47,8 @@ public class FrontendContractSnapshotTests
         typeof(CacheSetValueInput),
         typeof(CacheRefreshInput),
         typeof(CacheValueDto),
+        typeof(AbpAdmin.VirtualFileExplorer.VirtualFileItemDto),
+        typeof(AbpAdmin.VirtualFileExplorer.VirtualFileContentDto),
         // 实体变更回滚（web 抽屉回滚按钮消费 EntityRestoreResultDto；嵌套 Skipped DTO 自动递归）
         typeof(AbpAdmin.AuditLogs.RestoreEntityChangeInput),
         typeof(AbpAdmin.AuditLogs.EntityRestoreResultDto),

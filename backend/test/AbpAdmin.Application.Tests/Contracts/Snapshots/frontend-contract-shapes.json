@@ -2162,5 +2162,59 @@
         "nullable": false
       }
     }
+  },
+  "AbpAdmin.VirtualFileExplorer.VirtualFileContentDto": {
+    "kind": "dto",
+    "properties": {
+      "Content": {
+        "type": "string",
+        "nullable": true
+      },
+      "IsBinary": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Length": {
+        "type": "long",
+        "nullable": false
+      },
+      "Name": {
+        "type": "string",
+        "nullable": false
+      },
+      "Path": {
+        "type": "string",
+        "nullable": false
+      },
+      "Truncated": {
+        "type": "bool",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.VirtualFileExplorer.VirtualFileItemDto": {
+    "kind": "dto",
+    "properties": {
+      "Exists": {
+        "type": "bool",
+        "nullable": false
+      },
+      "IsDirectory": {
+        "type": "bool",
+        "nullable": false
+      },
+      "Length": {
+        "type": "long",
+        "nullable": false
+      },
+      "Name": {
+        "type": "string",
+        "nullable": false
+      },
+      "Path": {
+        "type": "string",
+        "nullable": false
+      }
+    }
   }
 }

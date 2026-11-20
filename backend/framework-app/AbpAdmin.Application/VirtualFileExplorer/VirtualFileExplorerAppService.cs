@@ -3,7 +3,9 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
 using AbpAdmin.Permissions;
+using Volo.Abp.Application.Dtos;
 using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
 using Volo.Abp.VirtualFileSystem;
@@ -44,6 +46,20 @@ public class VirtualFileExplorerAppService : AbpAdminAppService, IVirtualFileExp
             ParentPath = GetParent(path),
             Items = items
         });
+    }
+
+    public virtual async Task<PagedResultDto<VirtualFileItemDto>> QueryAsync(string path, GridQueryInput input)
+    {
+        var directory = await GetListAsync(new GetVirtualFileListInput { Path = path });
+        var grid = new GridQueryDefinition<VirtualFileItemDto>()
+            .SearchableField("name", row => row.Name)
+            .KeywordOnly(row => row.Path)
+            .Field("isDirectory", row => row.IsDirectory)
+            .Field("length", row => row.Length);
+        // 保留文件浏览器默认的目录优先顺序。路径在当前目录中唯一。
+        var matches = grid.Filter(directory.Items.AsQueryable(), input).ToList();
+        var ordered = grid.OrderBy(matches.AsQueryable(), input, "isDirectory", true, row => row.Path);
+        return new(matches.Count, ordered.Skip(input.SkipCount).Take(input.MaxResultCount).ToList());
     }
 
     public virtual async Task<VirtualFileContentDto> GetContentAsync(GetVirtualFileContentInput input)

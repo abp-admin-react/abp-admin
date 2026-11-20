@@ -2,28 +2,88 @@ import {
   PageContainer,
   ProCard,
   ProDescriptions,
-  ProTable,
 } from '@ant-design/pro-components';
+import type { ICellRendererParams } from 'ag-grid-community';
+import { AgGridReact } from 'ag-grid-react';
 import { App, Breadcrumb, Button, Drawer, Typography } from 'antd';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
+import type { GridQuery } from '@/abp/gridQuery';
 import {
-  getApiAppVirtualFileExplorer,
-  getApiAppVirtualFileExplorerContent,
-} from '@/services/abpadmin/virtualFileExplorer';
+  getVirtualFileContent,
+  queryVirtualFiles,
+  type VirtualFileContentDto,
+  type VirtualFileItemDto,
+} from '@/abp/virtualFileExplorer';
+import {
+  type RemoteColumn,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 
 const VirtualFileExplorerPage: React.FC = () => {
   const { message } = App.useApp();
   const [path, setPath] = useState('/');
-  const [parentPath, setParentPath] = useState<string>();
-  const [preview, setPreview] = useState<{
-    name?: string;
-    path?: string;
-    length?: number;
-    isBinary?: boolean;
-    truncated?: boolean;
-    content?: string;
-  }>();
-
+  const parentPath =
+    path === '/' ? undefined : path.slice(0, path.lastIndexOf('/')) || '/';
+  const [preview, setPreview] = useState<VirtualFileContentDto>();
+  const query = useCallback(
+    (input: GridQuery, signal: AbortSignal) =>
+      queryVirtualFiles(path, input, signal),
+    [path],
+  );
+  const columns: RemoteColumn<VirtualFileItemDto>[] = [
+    {
+      field: 'name',
+      headerName: '名称',
+      minWidth: 210,
+      flex: 1,
+      cellRenderer: ({ data }: ICellRendererParams<VirtualFileItemDto>) =>
+        data?.isDirectory ? (
+          <Button type="link" onClick={() => setPath(data.path)}>
+            {data.name}/
+          </Button>
+        ) : (
+          data?.name
+        ),
+    },
+    {
+      field: 'isDirectory',
+      headerName: '类型',
+      kind: 'boolean',
+      booleanLabels: { true: '目录', false: '文件' },
+      valueFormatter: ({ value }) => (value ? '目录' : '文件'),
+    },
+    { field: 'length', headerName: '大小', kind: 'number' },
+    {
+      colId: 'actions',
+      headerName: '操作',
+      kind: 'display',
+      width: 110,
+      cellRenderer: ({ data }: ICellRendererParams<VirtualFileItemDto>) =>
+        data ? (
+          <Button
+            type="link"
+            onClick={async () => {
+              if (data.isDirectory) {
+                setPath(data.path);
+                return;
+              }
+              const content = await getVirtualFileContent(data.path);
+              setPreview(content);
+              if (content.isBinary) message.info('二进制文件，仅显示元数据');
+            }}
+          >
+            {data.isDirectory ? '打开' : '预览'}
+          </Button>
+        ) : null,
+    },
+  ];
+  const { gridProps, searchBox } = useSearchableRemoteGrid({
+    columnDefs: columns,
+    query,
+    getRowId: ({ data }) => data.path,
+    ariaLabel: '当前目录',
+    search: { placeholder: '搜索当前目录的名称或路径' },
+  });
   const crumbs = path
     .split('/')
     .filter(Boolean)
@@ -59,65 +119,8 @@ const VirtualFileExplorerPage: React.FC = () => {
             返回上级
           </Button>
         ) : null}
-        <ProTable
-          rowKey="path"
-          search={false}
-          pagination={false}
-          params={{ path }}
-          columns={[
-            {
-              title: '名称',
-              dataIndex: 'name',
-              render: (_, record) =>
-                record.isDirectory ? (
-                  <a onClick={() => setPath(record.path ?? '/')}>
-                    {record.name}/
-                  </a>
-                ) : (
-                  record.name
-                ),
-            },
-            {
-              title: '类型',
-              dataIndex: 'isDirectory',
-              render: (_, record) => (record.isDirectory ? '目录' : '文件'),
-            },
-            { title: '大小', dataIndex: 'length' },
-            {
-              title: '操作',
-              valueType: 'option',
-              render: (_, record) =>
-                record.isDirectory
-                  ? [
-                      <a key="open" onClick={() => setPath(record.path ?? '/')}>
-                        打开
-                      </a>,
-                    ]
-                  : [
-                      <a
-                        key="preview"
-                        onClick={async () => {
-                          const content =
-                            await getApiAppVirtualFileExplorerContent({
-                              Path: record.path,
-                            });
-                          setPreview(content);
-                          if (content.isBinary) {
-                            message.info('二进制文件，仅显示元数据');
-                          }
-                        }}
-                      >
-                        预览
-                      </a>,
-                    ],
-            },
-          ]}
-          request={async () => {
-            const result = await getApiAppVirtualFileExplorer({ Path: path });
-            setParentPath(result.parentPath);
-            return { data: result.items ?? [], success: true };
-          }}
-        />
+        <div style={{ marginBlock: 12 }}>{searchBox}</div>
+        <AgGridReact {...gridProps} />
       </ProCard>
       <Drawer
         title={preview?.name}

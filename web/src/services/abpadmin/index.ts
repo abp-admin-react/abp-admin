@@ -50,7 +50,6 @@ import * as timeZoneSettings from "./timeZoneSettings";
 import * as user from "./user";
 import * as userExport from "./userExport";
 import * as userLookup from "./userLookup";
-import * as virtualFileExplorer from "./virtualFileExplorer";
 export default {
   abpApiDefinition,
   abpApplicationConfiguration,
@@ -100,5 +99,4 @@ export default {
   user,
   userExport,
   userLookup,
-  virtualFileExplorer,
 };

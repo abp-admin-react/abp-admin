@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using AbpAdmin.Grids;
+using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 
 namespace AbpAdmin.VirtualFileExplorer;
@@ -7,6 +9,8 @@ namespace AbpAdmin.VirtualFileExplorer;
 public interface IVirtualFileExplorerAppService : IApplicationService
 {
     Task<VirtualFileDirectoryDto> GetListAsync(GetVirtualFileListInput input);
+
+    Task<PagedResultDto<VirtualFileItemDto>> QueryAsync(string path, GridQueryInput input);
 
     Task<VirtualFileContentDto> GetContentAsync(GetVirtualFileContentInput input);
 }
