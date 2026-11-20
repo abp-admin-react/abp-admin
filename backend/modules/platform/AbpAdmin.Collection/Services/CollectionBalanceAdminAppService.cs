@@ -14,12 +14,10 @@ using Microsoft.EntityFrameworkCore;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
-using Volo.Abp.Authorization;
-using Volo.Abp.Domain.Repositories;
+using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Identity;
 using Volo.Abp.Uow;
-using Volo.Abp.Validation;
 
 namespace AbpAdmin.Collection.Services;
 
@@ -28,18 +26,20 @@ namespace AbpAdmin.Collection.Services;
 public class CollectionBalanceAdminAppService : ApplicationService
 {
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
-    private readonly IRepository<IdentityUser, Guid> _users;
+    private readonly IPermissionChecker _permissions;
 
     public CollectionBalanceAdminAppService(IDbContextProvider<CollectionDbContext> dbContextProvider,
-        IRepository<IdentityUser, Guid> users)
+        IPermissionChecker permissions)
     {
         _dbContextProvider = dbContextProvider;
-        _users = users;
+        _permissions = permissions;
     }
 
     private sealed class AccountTotals
     {
         public Guid UserId { get; init; }
+        public string? UserName { get; init; }
+        public string? Email { get; init; }
         public DateTime UpdatedAt { get; init; }
         public decimal UsdtBalance { get; init; }
         public decimal UsdtFrozen { get; init; }
@@ -47,13 +47,23 @@ public class CollectionBalanceAdminAppService : ApplicationService
         public decimal UsdcFrozen { get; init; }
     }
 
-    private static readonly GridQueryDefinition<AccountTotals> AccountGrid = new GridQueryDefinition<AccountTotals>()
-        .Field("userId", row => row.UserId, "eq", "ne")
-        .Field("usdtBalance", row => row.UsdtBalance)
-        .Field("usdtFrozen", row => row.UsdtFrozen)
-        .Field("usdcBalance", row => row.UsdcBalance)
-        .Field("usdcFrozen", row => row.UsdcFrozen)
-        .Field("updatedAt", row => row.UpdatedAt);
+    private static GridQueryDefinition<AccountTotals> AccountGrid(bool canReadDirectory, bool canReadPlainEmail)
+    {
+        var grid = new GridQueryDefinition<AccountTotals>()
+            .SearchableField("userId", row => row.UserId, "eq", "ne")
+            .Field("usdtBalance", row => row.UsdtBalance)
+            .Field("usdtFrozen", row => row.UsdtFrozen)
+            .Field("usdcBalance", row => row.UsdcBalance)
+            .Field("usdcFrozen", row => row.UsdcFrozen)
+            .Field("updatedAt", row => row.UpdatedAt);
+        if (canReadDirectory)
+        {
+            grid.KeywordOnly(row => row.UserName);
+            if (canReadPlainEmail)
+                grid.KeywordOnly(row => row.Email);
+        }
+        return grid;
+    }
 
     /// <summary>原分页入口沿用更新时间倒序和原有的页大小归一规则。</summary>
     public virtual async Task<PagedResultDto<MemberBalanceAccountDto>> GetMemberBalanceAccountsAsync(
@@ -73,11 +83,6 @@ public class CollectionBalanceAdminAppService : ApplicationService
         [FromBody] GridQueryInput input, CancellationToken cancellationToken = default)
     {
         AssertHost();
-        if (!string.IsNullOrWhiteSpace(input.Keyword))
-        {
-            throw new AbpValidationException("余额账户请按列筛选，按用户名或邮箱查找请使用用户目录。");
-        }
-
         return await ReadAccountPageAsync(input, true, cancellationToken);
     }
 
@@ -86,45 +91,46 @@ public class CollectionBalanceAdminAppService : ApplicationService
     {
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var db = await _dbContextProvider.GetDbContextAsync();
-        // 先按用户汇总数据库 decimal，分页完成后才格式化，保证余额比较使用全量精确值。
-        var accounts = db.Balances.AsNoTracking().GroupBy(b => b.UserId).Select(g => new AccountTotals
+        var canReadDirectory = includeIdentity && await _permissions.IsGrantedAsync(IdentityPermissions.Users.Default);
+        var canReadPlainEmail = canReadDirectory && await _permissions.IsGrantedAsync(IdentityPermissions.Users.Update);
+        var grid = AccountGrid(canReadDirectory, canReadPlainEmail);
+        var balanceRows = db.Balances.AsNoTracking();
+        var source = balanceRows.Select(b => new { Balance = b, UserName = (string?)null, Email = (string?)null });
+        if (canReadDirectory)
         {
-            UserId = g.Key,
-            UpdatedAt = g.Max(b => b.UpdatedAt),
-            UsdtBalance = g.Sum(b => b.Currency == CollectionCurrency.Usdt ? b.Balance : 0m),
-            UsdtFrozen = g.Sum(b => b.Currency == CollectionCurrency.Usdt ? b.Frozen : 0m),
-            UsdcBalance = g.Sum(b => b.Currency == CollectionCurrency.Usdc ? b.Balance : 0m),
-            UsdcFrozen = g.Sum(b => b.Currency == CollectionCurrency.Usdc ? b.Frozen : 0m)
+            // 左连接保留无登录身份的资金账户；软删和租户身份均不提供搜索字段或展示标签。
+            var directory = db.Set<AccountDirectoryEntry>().Where(u => u.TenantId == null && !u.IsDeleted);
+            source = from balance in balanceRows
+                     join user in directory on balance.UserId equals user.Id into users
+                     from user in users.DefaultIfEmpty()
+                     select new { Balance = balance, UserName = (string?)user.UserName, Email = (string?)user.Email };
+        }
+
+        // 每个会员只有一个目录条目。缺少某个币种时，条件求和得到零。
+        var accounts = source.GroupBy(row => new { row.Balance.UserId, row.UserName, row.Email }).Select(g => new AccountTotals
+        {
+            UserId = g.Key.UserId, UserName = g.Key.UserName, Email = g.Key.Email,
+            UpdatedAt = g.Max(row => row.Balance.UpdatedAt),
+            UsdtBalance = g.Sum(row => row.Balance.Currency == CollectionCurrency.Usdt ? row.Balance.Balance : 0m),
+            UsdtFrozen = g.Sum(row => row.Balance.Currency == CollectionCurrency.Usdt ? row.Balance.Frozen : 0m),
+            UsdcBalance = g.Sum(row => row.Balance.Currency == CollectionCurrency.Usdc ? row.Balance.Balance : 0m),
+            UsdcFrozen = g.Sum(row => row.Balance.Currency == CollectionCurrency.Usdc ? row.Balance.Frozen : 0m)
         });
-        var filtered = AccountGrid.Filter(accounts, input);
+        var filtered = grid.Filter(accounts, input);
         var total = await filtered.LongCountAsync(cancellationToken);
-        var page = await AccountGrid.OrderBy(filtered, input, "updatedAt", true, row => row.UserId)
+        var page = await grid.OrderBy(filtered, input, "updatedAt", true, row => row.UserId)
             .Skip(input.SkipCount).Take(input.MaxResultCount).ToListAsync(cancellationToken);
         var items = page.Select(row => new MemberBalanceGridRowDto
         {
             UserId = row.UserId,
+            UserName = row.UserName,
+            Email = row.Email,
             UpdatedAt = row.UpdatedAt,
             UsdtBalance = CollectionAmounts.Format(row.UsdtBalance),
             UsdtFrozen = CollectionAmounts.Format(row.UsdtFrozen),
             UsdcBalance = CollectionAmounts.Format(row.UsdcBalance),
             UsdcFrozen = CollectionAmounts.Format(row.UsdcFrozen)
         }).ToList();
-
-        if (includeIdentity && items.Count > 0 && await AuthorizationService.IsGrantedAsync(IdentityPermissions.Users.Default))
-        {
-            var userIds = items.Select(row => row.UserId).ToArray();
-            var users = await _users.GetQueryableAsync();
-            var labels = await users.AsNoTracking().Where(u => u.TenantId == null && userIds.Contains(u.Id))
-                .Select(u => new { u.Id, u.UserName, u.Email }).ToDictionaryAsync(u => u.Id, cancellationToken);
-            foreach (var item in items)
-            {
-                if (labels.TryGetValue(item.UserId, out var label))
-                {
-                    item.UserName = label.UserName;
-                    item.Email = label.Email;
-                }
-            }
-        }
 
         await uow.CompleteAsync(cancellationToken);
         return new PagedResultDto<MemberBalanceGridRowDto>(total, items);

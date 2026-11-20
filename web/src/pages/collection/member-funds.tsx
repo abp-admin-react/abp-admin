@@ -34,7 +34,10 @@ import {
 import { getUsers } from '@/abp/identity';
 import { currencyLabel } from '@/abp/ordering';
 import { useResizableColumns } from '@/components/AutoHeightProTable/useResizableColumns';
-import { type RemoteColumn, useRemoteGrid } from '@/components/remoteGrid';
+import {
+  type RemoteColumn,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { isValidRecordId } from './record-focus';
 import {
   depositRecordUrl,
@@ -586,7 +589,7 @@ function MemberBalanceAccounts({
         field: 'userId',
         headerName: '用户 ID',
         headerTooltip:
-          '此列按完整用户 ID 查询。用户名或邮箱请在上方按权限查找。',
+          '列筛选需要完整用户 ID，搜索余额账户时可以输入 ID 片段。',
         kind: 'uuid',
         width: 270,
         cellRenderer: ({
@@ -672,11 +675,18 @@ function MemberBalanceAccounts({
     [canAdjust, canManageUsers],
   );
 
-  const grid = useRemoteGrid<MemberBalanceGridRowDto>({
-    columnDefs,
-    query: queryMemberBalanceAccounts,
-    getRowId: getAccountRowId,
-    ariaLabel: '会员资金账户',
-  });
-  return <AgGridReact<MemberBalanceGridRowDto> {...grid} />;
+  const { gridProps, searchBox } =
+    useSearchableRemoteGrid<MemberBalanceGridRowDto>({
+      columnDefs,
+      query: queryMemberBalanceAccounts,
+      getRowId: getAccountRowId,
+      ariaLabel: '会员资金账户',
+      search: { label: '搜索余额账户', placeholder: '输入关键词搜索余额账户' },
+    });
+  return (
+    <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+      {searchBox}
+      <AgGridReact<MemberBalanceGridRowDto> {...gridProps} />
+    </Space>
+  );
 }

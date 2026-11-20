@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Volo.Abp.Data;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.EntityFrameworkCore.Modeling;
+using Volo.Abp.Identity;
 
 namespace AbpAdmin.Collection.Data;
 
@@ -57,6 +58,13 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        // 只读映射到 Identity 已有的表，收款模块迁移不创建或维护该表。
+        builder.Entity<AccountDirectoryEntry>(b =>
+        {
+            b.HasNoKey();
+            b.ToView(AbpIdentityDbProperties.DbTablePrefix + "Users", AbpIdentityDbProperties.DbSchema);
+        });
 
         builder.ApplyConfiguration(new CollectionRefundConfiguration());
         builder.ApplyConfiguration(new CollectionBalanceAdjustmentConfiguration());
@@ -354,4 +362,14 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.HasIndex(x => x.TokenId).IsUnique();
         });
     }
+}
+
+/// <summary>会员余额表搜索和展示使用的身份目录字段。</summary>
+internal sealed class AccountDirectoryEntry
+{
+    public System.Guid Id { get; set; }
+    public System.Guid? TenantId { get; set; }
+    public bool IsDeleted { get; set; }
+    public string UserName { get; set; } = default!;
+    public string Email { get; set; } = default!;
 }

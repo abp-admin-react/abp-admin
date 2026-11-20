@@ -9,8 +9,11 @@ using AbpAdmin.Collection.Services;
 using AbpAdmin.Grids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Shouldly;
 using Volo.Abp;
+using Volo.Abp.Authorization.Permissions;
+using Volo.Abp.DependencyInjection;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Identity;
 using Volo.Abp.MultiTenancy;
@@ -134,15 +137,63 @@ public class TreasuryDashboardTests : CollectionTestBase
     }
 
     [Fact]
-    public async Task Account_Grid_Rejects_Identity_Fields_And_Keywords()
+    public async Task Account_Grid_Rejects_Directory_Fields_In_Column_Filters_And_Sorts()
     {
         var admin = GetRequiredService<CollectionBalanceAdminAppService>();
         await Should.ThrowAsync<AbpValidationException>(() => admin.QueryMemberBalanceAccountsAsync(
             new GridQueryInput { Filters = [new() { Field = "email", Conditions = [new() { Op = "contains", Value = "alice" }] }] }));
         await Should.ThrowAsync<AbpValidationException>(() => admin.QueryMemberBalanceAccountsAsync(
             new GridQueryInput { Sort = [new() { Field = "userName" }] }));
-        await Should.ThrowAsync<AbpValidationException>(() => admin.QueryMemberBalanceAccountsAsync(
-            new GridQueryInput { Keyword = "alice" }));
+    }
+
+    [Fact]
+    public async Task Account_Grid_Combines_Authorized_Identity_Matches_With_Amount_Filters_Before_Paging()
+    {
+        var idHit = Guid.NewGuid();
+        var token = idHit.ToString("D")[..8];
+        var nameHit = Guid.NewGuid();
+        var emailHit = Guid.NewGuid();
+        var deleted = Guid.NewGuid();
+        var tenantUser = Guid.NewGuid();
+        var day = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        foreach (var (id, n) in new[] { (idHit, 1), (nameHit, 2), (emailHit, 3), (deleted, 4), (tenantUser, 5) })
+            await InsertBalanceAsync(id, CollectionCurrency.Usdt, n, 0m, day.AddDays(n));
+
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
+        {
+            var users = GetRequiredService<IIdentityUserRepository>();
+            await users.InsertAsync(new IdentityUser(nameHit, "member-" + token, "public@example.test"));
+            await users.InsertAsync(new IdentityUser(emailHit, "email-user", token + "@secret.example.test"));
+            var removed = await users.InsertAsync(new IdentityUser(deleted, "removed-" + token, "removed@example.test"), autoSave: true);
+            await users.DeleteAsync(removed);
+            await users.InsertAsync(new IdentityUser(tenantUser, "tenant-" + token, "tenant@example.test", tenantId: Guid.NewGuid()));
+            await uow.CompleteAsync();
+        }
+
+        var permissions = Substitute.For<IPermissionChecker>();
+        var admin = new CollectionBalanceAdminAppService(GetRequiredService<IDbContextProvider<CollectionDbContext>>(), permissions)
+        {
+            LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>()
+        };
+        var input = new GridQueryInput { Keyword = "  " + token.ToUpperInvariant() + "  ", MaxResultCount = 1 };
+        var byId = await admin.QueryMemberBalanceAccountsAsync(input);
+        byId.TotalCount.ShouldBe(1);
+        byId.Items.Single().UserId.ShouldBe(idHit);
+        byId.Items.Single().UserName.ShouldBeNull();
+
+        permissions.IsGrantedAsync(IdentityPermissions.Users.Default).Returns(true);
+        var byName = await admin.QueryMemberBalanceAccountsAsync(input);
+        byName.TotalCount.ShouldBe(2);
+        byName.Items.Single().UserId.ShouldBe(nameHit);
+        input.Filters = [new() { Field = "usdtBalance", Conditions = [new() { Op = "gt", Value = "1" }] }];
+        (await admin.QueryMemberBalanceAccountsAsync(input)).TotalCount.ShouldBe(1);
+
+        permissions.IsGrantedAsync(IdentityPermissions.Users.Update).Returns(true);
+        var byEmail = await admin.QueryMemberBalanceAccountsAsync(input);
+        byEmail.TotalCount.ShouldBe(2);
+        byEmail.Items.Single().UserId.ShouldBe(emailHit);
+        input.SkipCount = 1;
+        (await admin.QueryMemberBalanceAccountsAsync(input)).Items.Single().UserId.ShouldBe(nameHit);
     }
 
     [Fact]

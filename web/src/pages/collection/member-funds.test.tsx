@@ -216,6 +216,22 @@ describe('用户余额查询', () => {
     );
   });
 
+  it('余额账户关键词交给资金接口，用户目录和流水不受影响', async () => {
+    renderPage();
+    await waitFor(() => expect(mocks.accounts).toHaveBeenCalled());
+    const input = screen.getByLabelText('搜索余额账户');
+    fireEvent.change(input, { target: { value: '  member  ' } });
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 13 });
+    await waitFor(() =>
+      expect(mocks.accounts).toHaveBeenCalledWith(
+        expect.objectContaining({ keyword: 'member', skipCount: 0 }),
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(mocks.users).not.toHaveBeenCalled();
+    expect(mocks.transactions).not.toHaveBeenCalled();
+  });
+
   it('更换用户后忽略旧余额查询，并保留精确金额和调账入口', async () => {
     let resolveOld!: (value: ReturnType<typeof balance>) => void;
     mocks.balances.mockImplementation((id) =>
