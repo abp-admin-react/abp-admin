@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
@@ -57,7 +58,14 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
     /// 列表：任一 Voucher.View / Adjust.* 权限可看。Status 多值；StartTime/EndTime 为 CreationTime 左闭右开（UTC）；
     /// Filter 只匹配 reason。按 CreationTime 倒序分页。
     /// </summary>
-    public virtual async Task<PagedResultDto<FinManualAdjustDto>> GetListAsync(FinManualAdjustListInput input)
+    public virtual Task<PagedResultDto<FinManualAdjustDto>> GetListAsync(FinManualAdjustListInput input) =>
+        ReadListPageAsync(null, input);
+
+    [HttpPost("api/app/fin-manual-adjust/query")]
+    public virtual Task<PagedResultDto<FinManualAdjustDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] FinManualAdjustListInput input) =>
+        ReadListPageAsync(grid, input);
+
+    private async Task<PagedResultDto<FinManualAdjustDto>> ReadListPageAsync(GridQueryInput? grid, FinManualAdjustListInput input)
     {
         await RequireViewAsync();
         var db = await _dbContextProvider.GetDbContextAsync();
@@ -88,9 +96,22 @@ public class FinManualAdjustAppService : FinanceAppServiceBase
             q = q.Where(x => x.Reason != null && x.Reason.Contains(input.Filter));
         }
 
+        var definition = new GridQueryDefinition<FinManualAdjust>()
+            .SearchableField("id", x => x.Id.ToString())
+            .SearchableField("adjustNo", x => "ADJ-" + x.Id.ToString().Substring(0, 8))
+            .SearchableField("summary", x => x.Reason)
+            .Field("amount", x => x.Amount)
+            .SearchableEnumField("status", x => x.Status)
+            .SearchableField("applicantName", x => x.ApplicantId.ToString())
+            .SearchableField("applicantId", x => x.ApplicantId.ToString())
+            .SearchableField("rejectReason", x => x.RejectReason)
+            .Field("creationTime", x => x.CreationTime);
+        if (grid != null) q = definition.Filter(q, grid);
         var total = await q.CountAsync();
-        var (skip, take) = Paging(input);
-        var items = await q.OrderByDescending(x => x.CreationTime).Skip(skip).Take(take).ToListAsync();
+        var (skip, take) = grid == null ? Paging(input) : (grid.SkipCount, grid.MaxResultCount);
+        var items = await (grid == null
+            ? q.OrderByDescending(x => x.CreationTime)
+            : definition.OrderBy(q, grid, "creationTime", true, x => x.Id)).Skip(skip).Take(take).ToListAsync();
 
         // 整页科目一次取齐：原逐行 MapAsync 每行一发科目查询，页大小 100 时即 100 次额外查询，
         // 而一页涉及的科目去重后通常只有两三个

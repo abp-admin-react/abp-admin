@@ -4,7 +4,8 @@ import {
   StatisticCard,
 } from '@ant-design/pro-components';
 import { Link, useAccess, useIntl } from '@umijs/max';
-import { Alert, Space, Spin, Table } from 'antd';
+import { AgGridReact } from 'ag-grid-react';
+import { Alert, Space, Spin } from 'antd';
 import { useEffect, useState } from 'react';
 import { type FinOverviewDto, getFinanceOverview } from '@/abp/finance';
 import {
@@ -18,6 +19,7 @@ import {
   FinanceStateView,
   useFinanceLoad,
 } from '@/components/FinanceState';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 import { SettingsForm } from '../../settings/channel';
 import { FinanceAccounts } from '../accounts';
 import { FinancePeriod } from '../period';
@@ -37,34 +39,52 @@ export default function OverviewPage() {
     {
       key: 'accounts',
       allowed: access.canViewFinanceAccounts,
-      label: formatMessage({ id: 'menu.navigation.finance-accounts', defaultMessage: '会计科目' }),
+      label: formatMessage({
+        id: 'menu.navigation.finance-accounts',
+        defaultMessage: '会计科目',
+      }),
       content: <FinanceAccounts />,
       help: <FinanceHelpIcon page="A2" />,
     },
     {
       key: 'rules',
       allowed: access.canViewFinanceRules,
-      label: formatMessage({ id: 'menu.navigation.finance-rules', defaultMessage: '自动记账规则' }),
+      label: formatMessage({
+        id: 'menu.navigation.finance-rules',
+        defaultMessage: '自动记账规则',
+      }),
       content: <FinancePostingRules />,
       help: <FinanceHelpIcon page="A2b" />,
     },
     {
       key: 'period',
       allowed: access.canViewFinancePeriod,
-      label: formatMessage({ id: 'menu.navigation.finance-period', defaultMessage: '会计期间' }),
+      label: formatMessage({
+        id: 'menu.navigation.finance-period',
+        defaultMessage: '会计期间',
+      }),
       content: <FinancePeriod />,
       help: <FinanceHelpIcon page="A4" />,
     },
     {
       key: 'ledger',
       allowed: access.canManagePaymentSettings,
-      label: formatMessage({ id: 'menu.navigation.finance-settings', defaultMessage: '高级运行设置' }),
+      label: formatMessage({
+        id: 'menu.navigation.finance-settings',
+        defaultMessage: '高级运行设置',
+      }),
       content: <SettingsForm path="/finance/settings" />,
     },
   ].filter(({ allowed }) => allowed);
   const current = sections.find(({ key }) => key === setting) ?? sections[0];
-  const overview = formatMessage({ id: 'menu.navigation.finance-overview', defaultMessage: '会计概览' });
-  const configuration = formatMessage({ id: 'menu.navigation.finance-config', defaultMessage: '会计设置' });
+  const overview = formatMessage({
+    id: 'menu.navigation.finance-overview',
+    defaultMessage: '会计概览',
+  });
+  const configuration = formatMessage({
+    id: 'menu.navigation.finance-config',
+    defaultMessage: '会计设置',
+  });
   if (current && (setting || !canViewRecords)) {
     return (
       <ConfigurationPage
@@ -79,7 +99,11 @@ export default function OverviewPage() {
                 key={key}
                 to={link(key)}
                 aria-current={key === current.key ? 'page' : undefined}
-                style={key === current.key ? { fontWeight: 600, textDecoration: 'underline' } : undefined}
+                style={
+                  key === current.key
+                    ? { fontWeight: 600, textDecoration: 'underline' }
+                    : undefined
+                }
               >
                 {label}
               </Link>
@@ -101,7 +125,11 @@ export default function OverviewPage() {
   ) : null;
 }
 
-function OverviewRecords({ title, configurationTitle, configurationPath }: {
+function OverviewRecords({
+  title,
+  configurationTitle,
+  configurationPath,
+}: {
   title: string;
   configurationTitle: string;
   configurationPath?: string;
@@ -127,16 +155,61 @@ function OverviewRecords({ title, configurationTitle, configurationPath }: {
     };
   }, [guard, nonce]);
 
-  const hasDifference = !!data && (!data.balanced || data.unreconciledCount > 0);
+  const hasDifference =
+    !!data && (!data.balanced || data.unreconciledCount > 0);
 
+  const detailGrid1 = useSearchableLocalGrid<
+    NonNullable<FinOverviewDto['currencyTotals']>[number]
+  >({
+    ariaLabel: '币种资金汇总',
+    rowData: data?.currencyTotals,
+    keywordFields: ['currency'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.currency),
+    columnDefs: toGridColumns<
+      NonNullable<FinOverviewDto['currencyTotals']>[number]
+    >(
+      [
+        { title: '币种', dataIndex: 'currency' },
+        { title: '今日收款', dataIndex: 'todayIncome' },
+        { title: '今日支出', dataIndex: 'todayExpense' },
+        { title: '可用', dataIndex: 'available' },
+        { title: '冻结', dataIndex: 'frozen' },
+        { title: '预收', dataIndex: 'unearned' },
+        {
+          title: '试算',
+          dataIndex: 'isBalanced',
+          render: (value: boolean) => (value ? '平衡' : '不平衡'),
+        },
+      ],
+      {
+        kinds: {
+          isBalanced: 'boolean',
+          todayIncome: 'decimal',
+          todayExpense: 'decimal',
+          available: 'decimal',
+          frozen: 'decimal',
+          unearned: 'decimal',
+        },
+      },
+    ),
+  });
   return (
     <PageContainer
       {...financeHelpHeader('A1', title)}
-      extra={configurationPath && (
-        <ConfigurationLink to={configurationPath}>{configurationTitle}</ConfigurationLink>
-      )}
+      extra={
+        configurationPath && (
+          <ConfigurationLink to={configurationPath}>
+            {configurationTitle}
+          </ConfigurationLink>
+        )
+      }
     >
-      <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
+      <FinanceStateView
+        state={load.state}
+        errorText={load.errorText}
+        onRetry={load.retry}
+      >
         <Spin spinning={loading}>
           {data ? (
             <>
@@ -159,52 +232,68 @@ function OverviewRecords({ title, configurationTitle, configurationPath }: {
               )}
               <StatisticCard.Group direction="row">
                 <StatisticCard
-                  statistic={{ title: '今日收款', value: amounts.format(data.todayIn) }}
+                  statistic={{
+                    title: '今日收款',
+                    value: amounts.format(data.todayIn),
+                  }}
                 />
                 <StatisticCard
-                  statistic={{ title: '今日退款与支出', value: amounts.format(data.todayOut) }}
+                  statistic={{
+                    title: '今日退款与支出',
+                    value: amounts.format(data.todayOut),
+                  }}
                 />
                 <StatisticCard
-                  statistic={{ title: '借贷试算', value: data.balanced ? '平衡' : '不平衡' }}
+                  statistic={{
+                    title: '借贷试算',
+                    value: data.balanced ? '平衡' : '不平衡',
+                  }}
                 />
                 <StatisticCard
-                  statistic={{ title: '有差异的对账批次', value: data.unreconciledCount }}
+                  statistic={{
+                    title: '有差异的对账批次',
+                    value: data.unreconciledCount,
+                  }}
                 />
               </StatisticCard.Group>
-              <ProCard title="账面余额与收入" style={{ marginTop: 16 }} gutter={16} wrap>
+              <ProCard
+                title="账面余额与收入"
+                style={{ marginTop: 16 }}
+                gutter={16}
+                wrap
+              >
                 <StatisticCard
-                  statistic={{ title: '可用余额合计', value: amounts.format(data.availableTotal) }}
+                  statistic={{
+                    title: '可用余额合计',
+                    value: amounts.format(data.availableTotal),
+                  }}
                 />
                 <StatisticCard
-                  statistic={{ title: '冻结余额合计', value: amounts.format(data.frozenTotal) }}
+                  statistic={{
+                    title: '冻结余额合计',
+                    value: amounts.format(data.frozenTotal),
+                  }}
                 />
                 <StatisticCard
-                  statistic={{ title: '预收款合计', value: amounts.format(data.prepaymentTotal) }}
+                  statistic={{
+                    title: '预收款合计',
+                    value: amounts.format(data.prepaymentTotal),
+                  }}
                 />
                 <StatisticCard
-                  statistic={{ title: '已确认收入', value: amounts.format(data.recognizedIncome) }}
+                  statistic={{
+                    title: '已确认收入',
+                    value: amounts.format(data.recognizedIncome),
+                  }}
                 />
               </ProCard>
               {(data.currencyTotals?.length ?? 0) > 0 && (
                 <ProCard title="按币种" style={{ marginTop: 16 }}>
-                  <Table
-                    rowKey="currency"
-                    pagination={false}
-                    size="small"
-                    dataSource={data.currencyTotals}
-                    columns={[
-                      { title: '币种', dataIndex: 'currency' },
-                      { title: '今日收款', dataIndex: 'todayIncome' },
-                      { title: '今日支出', dataIndex: 'todayExpense' },
-                      { title: '可用', dataIndex: 'available' },
-                      { title: '冻结', dataIndex: 'frozen' },
-                      { title: '预收', dataIndex: 'unearned' },
-                      {
-                        title: '试算',
-                        dataIndex: 'isBalanced',
-                        render: (value: boolean) => (value ? '平衡' : '不平衡'),
-                      },
-                    ]}
+                  {detailGrid1.searchBox}
+                  <AgGridReact<
+                    NonNullable<FinOverviewDto['currencyTotals']>[number]
+                  >
+                    {...detailGrid1.gridProps}
                   />
                 </ProCard>
               )}

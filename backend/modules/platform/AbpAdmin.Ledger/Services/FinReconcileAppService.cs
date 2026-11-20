@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Text.Json;
@@ -34,7 +36,22 @@ public class FinReconcileAppService : FinanceAppServiceBase
         _unitOfWorkManager = unitOfWorkManager;
     }
 
-    public virtual async Task<PagedResultDto<FinReconcileRunDto>> GetListAsync(FinReconcileListInput input)
+    private sealed class ReconcileMetrics
+    {
+        public Guid Id { get; set; }
+        public DateTime? RangeStart { get; set; }
+        public DateTime? RangeEnd { get; set; }
+        public int DiffCount { get; set; }
+    }
+
+    public virtual Task<PagedResultDto<FinReconcileRunDto>> GetListAsync(FinReconcileListInput input) =>
+        ReadListPageAsync(null, input);
+
+    [HttpPost("api/app/fin-reconcile/query")]
+    public virtual Task<PagedResultDto<FinReconcileRunDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] FinReconcileListInput input) =>
+        ReadListPageAsync(grid, input);
+
+    private async Task<PagedResultDto<FinReconcileRunDto>> ReadListPageAsync(GridQueryInput? grid, FinReconcileListInput input)
     {
         // 代理切片 fail closed（sectest b05 / 审计 NV-02 残余）：对账结果是租户级全量汇总
         //（DiffJson 含平台借贷合计与各代理子账户投影差），Finance.Scope.Agent 持有者没有
@@ -55,9 +72,29 @@ public class FinReconcileAppService : FinanceAppServiceBase
 
         if (input.StartTime != null) q = q.Where(r => r.CreationTime >= input.StartTime);
         if (input.EndTime != null) q = q.Where(r => r.CreationTime < input.EndTime);
+        // 两个快照列以 jsonb 存储。提取为有类型的值，使 UTC 日期与差异项数在分页前比较。
+        var metrics = db.Database.SqlQuery<ReconcileMetrics>($"""
+            SELECT "Id", NULLIF("ScopeJson"->>'rangeStart', '')::timestamptz AS "RangeStart",
+                   NULLIF("ScopeJson"->>'rangeEnd', '')::timestamptz AS "RangeEnd",
+                   GREATEST(COALESCE(jsonb_array_length("DiffJson"->'projectionDiffs'), 0)
+                            + CASE WHEN "DiffJson"->>'unbalanced' = 'true' THEN 1 ELSE 0 END,
+                            CASE WHEN "HasDiff" THEN 1 ELSE 0 END) AS "DiffCount"
+            FROM "FinReconcileRuns"
+            """);
+        var definition = new GridQueryDefinition<FinReconcileRun>()
+            .Field("rangeStart", x => metrics.Where(r => r.Id == x.Id).Select(r => r.RangeStart).FirstOrDefault())
+            .Field("rangeEnd", x => metrics.Where(r => r.Id == x.Id).Select(r => r.RangeEnd).FirstOrDefault())
+            .Field("diffCount", x => metrics.Where(r => r.Id == x.Id).Select(r => r.DiffCount).FirstOrDefault())
+            .SearchableField("type", x => x.RunType)
+            .SearchableField("status", x => x.HasDiff ? "HasDiff" : "Done")
+            .Field("excludedDemo", x => !x.IncludeDemo)
+            .Field("createdAt", x => x.CreationTime);
+        if (grid != null) q = definition.Filter(q, grid);
         var total = await q.CountAsync();
-        var (skip, take) = Paging(input);
-        var items = await q.OrderByDescending(r => r.CreationTime).Skip(skip).Take(take).ToListAsync();
+        var (skip, take) = grid == null ? Paging(input) : (grid.SkipCount, grid.MaxResultCount);
+        var items = await (grid == null
+            ? q.OrderByDescending(r => r.CreationTime)
+            : definition.OrderBy(q, grid, "createdAt", true, x => x.Id)).Skip(skip).Take(take).ToListAsync();
         return new PagedResultDto<FinReconcileRunDto>(total, items.Select(Map).ToList());
     }
 

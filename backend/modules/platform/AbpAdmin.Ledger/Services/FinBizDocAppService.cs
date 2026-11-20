@@ -1,3 +1,6 @@
+using AbpAdmin.Ledger.Entities;
+using Microsoft.AspNetCore.Mvc;
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -24,7 +27,14 @@ public class FinBizDocAppService : FinanceAppServiceBase
 
     public FinBizDocAppService(IDbContextProvider<LedgerDbContext> db) => _db = db;
 
-    public virtual async Task<PagedResultDto<FinVoucherDto>> GetListAsync(FinBizDocListInput input)
+    public virtual Task<PagedResultDto<FinVoucherDto>> GetListAsync(FinBizDocListInput input) =>
+        ReadListPageAsync(null, input);
+
+    [HttpPost("api/app/fin-biz-doc/query")]
+    public virtual Task<PagedResultDto<FinVoucherDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] FinBizDocListInput input, string? bizRefId = null) =>
+        ReadListPageAsync(grid, input, bizRefId);
+
+    private async Task<PagedResultDto<FinVoucherDto>> ReadListPageAsync(GridQueryInput? grid, FinBizDocListInput input, string? bizRefId = null)
     {
         // 代理数据边界统一走基类助手（替代与助手逐字等价的手写内联）
         var agentId = (await ResolveAgentScopeAsync()) ?? input.AgentId;
@@ -32,6 +42,7 @@ public class FinBizDocAppService : FinanceAppServiceBase
         var db = await _db.GetDbContextAsync();
         var q = db.Vouchers.AsNoTracking().Where(v => v.ReversalOf == null); // 业务视角：正本
         if (agentId != null) q = q.Where(v => v.AgentId == agentId);
+        if (!string.IsNullOrWhiteSpace(bizRefId)) q = q.Where(v => v.BizRefId == bizRefId);
         if (input.IsDemo != null) q = q.Where(v => v.IsDemo == input.IsDemo);
         if (!string.IsNullOrWhiteSpace(input.BizType)) q = q.Where(v => v.BizType == input.BizType);
         if (!input.IncludeDeprecated)
@@ -54,9 +65,24 @@ public class FinBizDocAppService : FinanceAppServiceBase
         if (!string.IsNullOrWhiteSpace(input.Filter))
             q = q.Where(v => v.BizRefId.Contains(input.Filter) || (v.Summary != null && v.Summary.Contains(input.Filter)));
 
+        var definition = new GridQueryDefinition<FinVoucher>()
+            .SearchableField("id", x => x.Id.ToString())
+            .SearchableField("userId", x => x.UserId.ToString())
+            .SearchableField("bizRefId", x => x.BizRefId)
+            .SearchableField("bizType", x => x.BizType)
+            .SearchableField("phase", x => x.Phase)
+            .SearchableEnumField("status", x => x.Status)
+            .SearchableField("agentId", x => x.AgentId.ToString())
+            .Field("isDemo", x => x.IsDemo)
+            .Field("creationTime", x => x.CreationTime)
+            .SearchableField("summary", x => x.Summary)
+            .Field("amount", x => x.Amount);
+        if (grid != null) q = definition.Filter(q, grid);
         var total = await q.CountAsync();
-        var (skip, take) = Paging(input);
-        var items = await q.OrderByDescending(v => v.CreationTime).Skip(skip).Take(take).ToListAsync();
+        var (skip, take) = grid == null ? Paging(input) : (grid.SkipCount, grid.MaxResultCount);
+        var items = await (grid == null
+            ? q.OrderByDescending(v => v.CreationTime)
+            : definition.OrderBy(q, grid, "creationTime", true, x => x.Id)).Skip(skip).Take(take).ToListAsync();
         return new PagedResultDto<FinVoucherDto>(total, items.Select(v => new FinVoucherDto
         {
             Id = v.Id, BizType = v.BizType, BizRefId = v.BizRefId, Phase = v.Phase, BatchKey = v.BatchKey,

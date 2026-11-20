@@ -1,16 +1,16 @@
-import type { ProFormInstance } from '@ant-design/pro-components';
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   ProCard,
   type ProColumns,
   ProFormDigit,
+  type ProFormInstance,
   ProFormSelect,
   ProFormText,
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { Link, useAccess, useLocation, useModel } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -28,6 +28,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { gridScope } from '@/abp/businessGrid';
 import {
   ADJUST_STATUS_LABEL,
   type AdjustStatus,
@@ -40,10 +41,9 @@ import {
   financeErrorCode,
   financeErrorFields,
   financeErrorText,
+  financeGridQueries,
   finOwnerTypeName,
-  getAdjusts,
   getVoucher,
-  getVouchers,
   rejectAdjust,
   reopenAdjust,
   resolveFinanceUserId,
@@ -52,28 +52,47 @@ import {
   submitAdjust,
   updateAdjust,
 } from '@/abp/finance';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { financeHelpHeader } from '@/components/FinanceHelp';
+import { FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
 import {
-  FinanceEmpty,
-  FinanceStateView,
-  useFinanceLoad,
-} from '@/components/FinanceState';
+  toGridColumns,
+  useSearchableLocalGrid,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { useModuleEnabled } from '@/hooks/useModuleAvailability';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 import { isValidRecordId } from '@/pages/collection/record-focus';
 import { isNotFound } from '@/requestErrorConfig';
 import { formatForDisplay } from '@/utils/time';
 import {
   balanceAdjustmentUrl,
+  depositRecordUrl,
   voucherBusinessTypes,
   voucherEntriesUrl,
   voucherSourceUrl,
-  depositRecordUrl,
   withdrawalRecordUrl,
 } from './navigation';
 
 type AdjustTab = 'drafts' | 'pending' | 'posted';
 type TabKey = 'vouchers' | AdjustTab;
+
+function useAdjustmentGrid(
+  columns: ProColumns<FinManualAdjustDto>[],
+  status: string,
+) {
+  return useSearchableRemoteGrid<FinManualAdjustDto>({
+    ariaLabel: '账簿调账',
+    getRowId: ({ data }) => data.id,
+    query: useScopedGridQuery(
+      financeGridQueries.adjustments,
+      gridScope({ status }),
+    ),
+    columnDefs: toGridColumns(columns, {
+      pro: true,
+      kinds: { amount: 'decimal', creationTime: 'date' },
+    }),
+  });
+}
 
 const VouchersPage: React.FC = () => {
   const { message } = App.useApp();
@@ -86,10 +105,10 @@ const VouchersPage: React.FC = () => {
   const meId = resolveFinanceUserId(currentUser);
   const meName = currentUser?.name || currentUser?.userName || '当前用户';
 
-  const voucherRef = useRef<ActionType>(undefined);
-  const draftRef = useRef<ActionType>(undefined);
-  const pendingRef = useRef<ActionType>(undefined);
-  const postedRef = useRef<ActionType>(undefined);
+  const voucherRef = useRef<{ reload: () => void }>(undefined);
+  const draftRef = useRef<{ reload: () => void }>(undefined);
+  const pendingRef = useRef<{ reload: () => void }>(undefined);
+  const postedRef = useRef<{ reload: () => void }>(undefined);
   const adjustFormRef = useRef<ProFormInstance>(undefined);
   const [pendingFieldErrors, setPendingFieldErrors] = useState<string[]>([]);
 
@@ -205,16 +224,20 @@ const VouchersPage: React.FC = () => {
     return () => {
       voucherRequest.current++;
     };
-  }, [canViewVouchers, deepVoucherId, recordType, focusedRecordId, openVoucher]);
+  }, [
+    canViewVouchers,
+    deepVoucherId,
+    recordType,
+    focusedRecordId,
+    openVoucher,
+  ]);
 
   const statusTag = (s: AdjustStatus) => {
     const cfg = ADJUST_STATUS_LABEL[s];
     return <Tag color={cfg.color}>{cfg.text}</Tag>;
   };
 
-  const adjustColumns = (
-    mode: AdjustTab,
-  ): ProColumns<FinManualAdjustDto>[] => [
+  const adjustColumns = (mode: AdjustTab): ProColumns<FinManualAdjustDto>[] => [
     { title: '单号', dataIndex: 'adjustNo', width: 120 },
     { title: '摘要', dataIndex: 'summary', ellipsis: true },
     {
@@ -255,7 +278,6 @@ const VouchersPage: React.FC = () => {
     {
       title: '创建时间',
       dataIndex: 'creationTime',
-      search: false,
       render: (_: unknown, r: any) => formatForDisplay(r.creationTime),
       width: 170,
     },
@@ -325,7 +347,10 @@ const VouchersPage: React.FC = () => {
                 title="单据将回到草稿，可修改后再提交。驳回意见会保留。"
                 onConfirm={async () => {
                   try {
-                    const draft = await reopenAdjust(r.id, { id: meId, canCreate });
+                    const draft = await reopenAdjust(r.id, {
+                      id: meId,
+                      canCreate,
+                    });
                     setEditingAdjust(draft);
                     message.success('已回到草稿');
                     reloadAdjusts();
@@ -413,16 +438,19 @@ const VouchersPage: React.FC = () => {
 
   const adjustmentTabs = [
     {
-      key: 'drafts', ref: draftRef, allowed: canViewDrafts,
-      label: '账簿调账草稿', status: 'Draft,Rejected', empty: '没有草稿或被驳回的账簿调账',
+      key: 'drafts',
+      allowed: canViewDrafts,
+      label: '账簿调账草稿',
     },
     {
-      key: 'pending', ref: pendingRef, allowed: canApprove || canReject,
-      label: '账簿调账待审批', status: 'Pending', empty: '暂无待审批的账簿调账',
+      key: 'pending',
+      allowed: canApprove || canReject,
+      label: '账簿调账待审批',
     },
     {
-      key: 'posted', ref: postedRef, allowed: canReverse,
-      label: '已过账调账', status: 'Posted,Reversed', empty: '暂无已过账调账',
+      key: 'posted',
+      allowed: canReverse,
+      label: '已过账调账',
     },
   ] as const;
   const availableTabs = [
@@ -430,6 +458,177 @@ const VouchersPage: React.FC = () => {
     ...adjustmentTabs.filter(({ allowed }) => allowed).map(({ key }) => key),
   ];
 
+  const detailGrid2 = useSearchableLocalGrid<
+    NonNullable<FinVoucherDto['entries']>[number]
+  >({
+    ariaLabel: '凭证分录',
+    rowData: detail?.entries || [],
+    keywordFields: ['accountCode', 'accountName', 'ownerId', 'bucket'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.seq),
+    columnDefs: toGridColumns<NonNullable<FinVoucherDto['entries']>[number]>(
+      [
+        { title: '#', dataIndex: 'seq', width: 50 },
+        { title: '科目', dataIndex: 'accountCode', width: 90 },
+        { title: '名称', dataIndex: 'accountName', width: 120 },
+        { title: '归属', dataIndex: 'ownerId', width: 150 },
+        { title: '余额桶', dataIndex: 'bucket', width: 100 },
+        { title: '借', dataIndex: 'debit', width: 90 },
+        { title: '贷', dataIndex: 'credit', width: 90 },
+        {
+          title: '变动后余额',
+          dataIndex: 'balanceAfterText',
+          width: 140,
+        },
+      ],
+      {
+        pro: true,
+        kinds: {
+          seq: 'number',
+          debit: 'decimal',
+          credit: 'decimal',
+          balanceAfterText: 'decimal',
+        },
+      },
+    ),
+  });
+  const detailGrid1 = useSearchableLocalGrid<
+    FinManualAdjustDto['lines'][number]
+  >({
+    ariaLabel: '调账分录',
+    rowData: adjustDetail?.lines,
+    keywordFields: ['accountCode', 'summary'],
+    pagination: false,
+    getRowId: ({ data }) => String((adjustDetail?.lines ?? []).indexOf(data)),
+    columnDefs: toGridColumns<FinManualAdjustDto['lines'][number]>(
+      [
+        { title: '科目', dataIndex: 'accountCode', width: 90 },
+        { title: '借', dataIndex: 'debit', width: 90 },
+        { title: '贷', dataIndex: 'credit', width: 90 },
+        { title: '摘要', dataIndex: 'summary', ellipsis: true },
+      ],
+      { pro: true, kinds: { debit: 'decimal', credit: 'decimal' } },
+    ),
+  });
+  const adjustGrids = {
+    drafts: useAdjustmentGrid(adjustColumns('drafts'), 'Draft,Rejected'),
+    pending: useAdjustmentGrid(adjustColumns('pending'), 'Pending'),
+    posted: useAdjustmentGrid(adjustColumns('posted'), 'Posted,Reversed'),
+  };
+  draftRef.current = { reload: adjustGrids.drafts.refresh };
+  pendingRef.current = { reload: adjustGrids.pending.refresh };
+  postedRef.current = { reload: adjustGrids.posted.refresh };
+  const vouchersGridScope = gridScope({
+    bizType: focusedRecordId ? recordType : undefined,
+    bizRefId: focusedRecordId,
+  });
+  const vouchersGrid = useSearchableRemoteGrid<FinVoucherDto>({
+    ariaLabel: '会计凭证',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(financeGridQueries.vouchers, vouchersGridScope),
+    columnDefs: toGridColumns<FinVoucherDto>(
+      [
+        {
+          title: '凭证号',
+          dataIndex: 'voucherNo',
+          width: 150,
+        },
+        {
+          title: '业务类型',
+          dataIndex: 'bizType',
+          width: 130,
+          valueEnum: voucherBusinessTypes,
+        },
+        {
+          title: '业务单号',
+          dataIndex: 'bizRefId',
+          width: 120,
+        },
+        {
+          title: '业务阶段',
+          dataIndex: 'phase',
+          width: 100,
+        },
+        {
+          title: '期间',
+          dataIndex: 'periodLabel',
+          width: 90,
+        },
+        {
+          title: '状态',
+          dataIndex: 'status',
+          width: 90,
+          render: (_, r) => (
+            <Tag color={r.status === 'Posted' ? 'success' : 'error'}>
+              {r.status === 'Posted' ? '已过账' : '已冲销'}
+            </Tag>
+          ),
+        },
+        {
+          title: '借方合计',
+          dataIndex: 'debitTotal',
+          width: 100,
+        },
+        {
+          title: '贷方合计',
+          dataIndex: 'creditTotal',
+          width: 100,
+        },
+        {
+          title: '时间',
+          dataIndex: 'creationTime',
+          render: (_: unknown, r: any) => formatForDisplay(r.creationTime),
+          width: 170,
+        },
+        {
+          title: '操作',
+          valueType: 'option',
+          width: 160,
+          render: (_, r) => {
+            const acts = [
+              <a key="d" onClick={() => openVoucher(r.id)}>
+                详情
+              </a>,
+            ];
+            if (
+              access.canReverseFinanceVouchers &&
+              r.status === 'Posted' &&
+              r.bizType === 'manual-adjust' &&
+              !r.reversalOf
+            ) {
+              acts.push(
+                <Popconfirm
+                  key="rev"
+                  title="红冲将生成反向凭证，确认？"
+                  onConfirm={async () => {
+                    try {
+                      await reverseVoucher(r.id);
+                      message.success('已红冲');
+                      voucherRef.current?.reload();
+                    } catch (e) {
+                      message.error(financeErrorText(e));
+                    }
+                  }}
+                >
+                  <a>红冲</a>
+                </Popconfirm>,
+              );
+            }
+            return acts;
+          },
+        },
+      ],
+      {
+        pro: true,
+        kinds: {
+          debitTotal: 'decimal',
+          creditTotal: 'decimal',
+          creationTime: 'date',
+        },
+      },
+    ),
+  });
+  voucherRef.current = { reload: vouchersGrid.refresh };
   return (
     <PageContainer
       {...financeHelpHeader('A3', canViewVouchers ? '会计凭证' : '账簿调账')}
@@ -509,192 +708,28 @@ const VouchersPage: React.FC = () => {
                         }
                       />
                     )}
-                    <AutoHeightProTable<FinVoucherDto>
+                    {vouchersGrid.searchBox}
+                    <AgGridReact<FinVoucherDto>
+                      {...vouchersGrid.gridProps}
                       key={
                         focusedRecordId
                           ? `${recordType}:${focusedRecordId}`
                           : 'all'
                       }
-                      rowKey="id"
-                      actionRef={voucherRef}
-                      locale={{
-                        emptyText: (
-                          <FinanceEmpty
-                            text={
-                              focusedRecordId
-                                ? `未找到该${recordLabel}的凭证`
-                                : '暂无凭证'
-                            }
-                          />
-                        ),
-                      }}
-                      search={focusedRecordId ? false : { labelWidth: 'auto' }}
-                      request={async (params) => {
-                        const maxResultCount = params.pageSize ?? 20;
-                        const skipCount =
-                          ((params.current ?? 1) - 1) * maxResultCount;
-                        const result = await load.guard(() =>
-                          getVouchers({
-                            skipCount,
-                            maxResultCount,
-                            filter: focusedRecordId
-                              ? undefined
-                              : params.voucherNo || params.summary,
-                            bizType: focusedRecordId
-                              ? recordType
-                              : params.bizType,
-                            bizRefId: focusedRecordId ?? params.bizRefId,
-                          }),
-                        );
-                        if (!result)
-                          return { data: [], total: 0, success: false };
-                        return {
-                          data: result.items,
-                          total: result.totalCount,
-                          success: true,
-                        };
-                      }}
-                      columns={[
-                        // 凭证号由 ID 派生，检索使用业务单号或摘要。
-                        {
-                          title: '凭证号',
-                          dataIndex: 'voucherNo',
-                          width: 150,
-                          search: false,
-                        },
-                        {
-                          title: '业务类型',
-                          dataIndex: 'bizType',
-                          width: 130,
-                          valueEnum: voucherBusinessTypes,
-                        },
-                        {
-                          title: '业务单号',
-                          dataIndex: 'bizRefId',
-                          width: 120,
-                        },
-                        {
-                          title: '业务阶段',
-                          dataIndex: 'phase',
-                          width: 100,
-                          search: false,
-                        },
-                        {
-                          title: '期间',
-                          dataIndex: 'periodLabel',
-                          width: 90,
-                          search: false,
-                        },
-                        {
-                          title: '状态',
-                          dataIndex: 'status',
-                          width: 90,
-                          search: false,
-                          render: (_, r) => (
-                            <Tag
-                              color={
-                                r.status === 'Posted' ? 'success' : 'error'
-                              }
-                            >
-                              {r.status === 'Posted' ? '已过账' : '已冲销'}
-                            </Tag>
-                          ),
-                        },
-                        {
-                          title: '借方合计',
-                          dataIndex: 'debitTotal',
-                          width: 100,
-                          search: false,
-                        },
-                        {
-                          title: '贷方合计',
-                          dataIndex: 'creditTotal',
-                          width: 100,
-                          search: false,
-                        },
-                        {
-                          title: '时间',
-                          dataIndex: 'creationTime',
-                          search: false,
-                          render: (_: unknown, r: any) =>
-                            formatForDisplay(r.creationTime),
-                          width: 170,
-                        },
-                        {
-                          title: '操作',
-                          valueType: 'option',
-                          width: 160,
-                          render: (_, r) => {
-                            const acts = [
-                              <a key="d" onClick={() => openVoucher(r.id)}>
-                                详情
-                              </a>,
-                            ];
-                            if (
-                              access.canReverseFinanceVouchers &&
-                              r.status === 'Posted' &&
-                              r.bizType === 'manual-adjust' &&
-                              !r.reversalOf
-                            ) {
-                              acts.push(
-                                <Popconfirm
-                                  key="rev"
-                                  title="红冲将生成反向凭证，确认？"
-                                  onConfirm={async () => {
-                                    try {
-                                      await reverseVoucher(r.id);
-                                      message.success('已红冲');
-                                      voucherRef.current?.reload();
-                                    } catch (e) {
-                                      message.error(financeErrorText(e));
-                                    }
-                                  }}
-                                >
-                                  <a>红冲</a>
-                                </Popconfirm>,
-                              );
-                            }
-                            return acts;
-                          },
-                        },
-                      ]}
                     />
                   </>
                 ),
               },
-              ...adjustmentTabs.map(({ key, ref, label, status, empty }) => ({
+              ...adjustmentTabs.map(({ key, label }) => ({
                 key,
                 label,
                 children: (
-                  <AutoHeightProTable<FinManualAdjustDto>
-                    rowKey="id"
-                    actionRef={ref}
-                    search={false}
-                    locale={{
-                      emptyText: <FinanceEmpty text={empty} />,
-                    }}
-                    params={{ tab: key }}
-                    request={async (params) => {
-                      const maxResultCount = params.pageSize ?? 20;
-                      const skipCount =
-                        ((params.current ?? 1) - 1) * maxResultCount;
-                      const result = await load.guard(() =>
-                        getAdjusts({
-                          skipCount,
-                          maxResultCount,
-                          status,
-                        }),
-                      );
-                      if (!result)
-                        return { data: [], total: 0, success: false };
-                      return {
-                        data: result.items,
-                        total: result.totalCount,
-                        success: true,
-                      };
-                    }}
-                    columns={adjustColumns(key)}
-                  />
+                  <>
+                    {adjustGrids[key].searchBox}
+                    <AgGridReact<FinManualAdjustDto>
+                      {...adjustGrids[key].gridProps}
+                    />
+                  </>
                 ),
               })),
             ].filter(({ key }) => availableTabs.includes(key)),
@@ -810,7 +845,11 @@ const VouchersPage: React.FC = () => {
         <ProFormText
           name="debitOwnerId"
           label="借方 OwnerId"
-          fieldProps={{ autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false }}
+          fieldProps={{
+            autoCapitalize: 'none',
+            autoCorrect: 'off',
+            spellCheck: false,
+          }}
         />
         <ProFormText
           name="creditAccountCode"
@@ -900,20 +939,9 @@ const VouchersPage: React.FC = () => {
                 </Descriptions.Item>
               ) : null}
             </Descriptions>
-            <AutoHeightProTable
-              rowKey={(l: { accountCode: string }, i?: number) =>
-                `${l.accountCode}-${i}`
-              }
-              search={false}
-              pagination={false}
-              toolBarRender={false}
-              dataSource={adjustDetail.lines}
-              columns={[
-                { title: '科目', dataIndex: 'accountCode', width: 90 },
-                { title: '借', dataIndex: 'debit', width: 90 },
-                { title: '贷', dataIndex: 'credit', width: 90 },
-                { title: '摘要', dataIndex: 'summary', ellipsis: true },
-              ]}
+            {detailGrid1.searchBox}
+            <AgGridReact<FinManualAdjustDto['lines'][number]>
+              {...detailGrid1.gridProps}
             />
             {adjustDetail.status === 'Rejected' &&
               adjustDetail.applicantId === meId &&
@@ -1011,27 +1039,9 @@ const VouchersPage: React.FC = () => {
                 {detail.debitTotal} / {detail.creditTotal}
               </Descriptions.Item>
             </Descriptions>
-            <AutoHeightProTable
-              fillViewport={false}
-              rowKey="seq"
-              search={false}
-              pagination={false}
-              toolBarRender={false}
-              dataSource={detail.entries || []}
-              columns={[
-                { title: '#', dataIndex: 'seq', width: 50 },
-                { title: '科目', dataIndex: 'accountCode', width: 90 },
-                { title: '名称', dataIndex: 'accountName', width: 120 },
-                { title: '归属', dataIndex: 'ownerId', width: 150 },
-                { title: '余额桶', dataIndex: 'bucket', width: 100 },
-                { title: '借', dataIndex: 'debit', width: 90 },
-                { title: '贷', dataIndex: 'credit', width: 90 },
-                {
-                  title: '变动后余额',
-                  dataIndex: 'balanceAfterText',
-                  width: 140,
-                },
-              ]}
+            {detailGrid2.searchBox}
+            <AgGridReact<NonNullable<FinVoucherDto['entries']>[number]>
+              {...detailGrid2.gridProps}
             />
           </>
         )}

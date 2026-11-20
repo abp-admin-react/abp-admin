@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -40,7 +42,14 @@ public class FinVoucherAppService : FinanceAppServiceBase
         _users = users;
     }
 
-    public virtual async Task<PagedResultDto<FinVoucherDto>> GetListAsync(FinVoucherListInput input)
+    public virtual Task<PagedResultDto<FinVoucherDto>> GetListAsync(FinVoucherListInput input) =>
+        ReadListPageAsync(null, input);
+
+    [HttpPost("api/app/fin-voucher/query")]
+    public virtual Task<PagedResultDto<FinVoucherDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] FinVoucherListInput input) =>
+        ReadListPageAsync(grid, input);
+
+    private async Task<PagedResultDto<FinVoucherDto>> ReadListPageAsync(GridQueryInput? grid, FinVoucherListInput input)
     {
         var db = await _dbContextProvider.GetDbContextAsync();
         var q = db.Vouchers.AsNoTracking();
@@ -75,9 +84,31 @@ public class FinVoucherAppService : FinanceAppServiceBase
             q = q.Where(v => v.BizRefId.Contains(input.Filter) || (v.Summary != null && v.Summary.Contains(input.Filter)));
         }
 
+        var definition = new GridQueryDefinition<FinVoucher>()
+            .SearchableField("id", x => x.Id.ToString())
+            .SearchableField("userId", x => x.UserId.ToString())
+            .SearchableField("bizRefId", x => x.BizRefId)
+            .SearchableField("bizType", x => x.BizType)
+            .SearchableField("phase", x => x.Phase)
+            .SearchableEnumField("status", x => x.Status)
+            .SearchableField("agentId", x => x.AgentId.ToString())
+            .Field("isDemo", x => x.IsDemo)
+            .Field("creationTime", x => x.CreationTime)
+            .SearchableField("summary", x => x.Summary)
+            .Field("amount", x => x.Amount)
+            .SearchableField("voucherNo", x => "V-" + x.Id.ToString().Replace("-", "").Substring(0, 10).ToUpper())
+            .Field("amountText", x => x.Amount)
+            .Field("balanced", x => db.Entries.Where(e => e.VoucherId == x.Id).Sum(e => e.Debit) == db.Entries.Where(e => e.VoucherId == x.Id).Sum(e => e.Credit))
+            .Field("entryCount", x => db.Entries.Count(e => e.VoucherId == x.Id))
+            .Field("debitTotal", x => db.Entries.Where(e => e.VoucherId == x.Id).Sum(e => e.Debit))
+            .Field("creditTotal", x => db.Entries.Where(e => e.VoucherId == x.Id).Sum(e => e.Credit))
+            .SearchableField("periodLabel", x => db.Periods.Where(p => p.Id == x.PeriodId).Select(p => p.Year.ToString() + "-" + (p.Month < 10 ? "0" : "") + p.Month.ToString()).FirstOrDefault());
+        if (grid != null) q = definition.Filter(q, grid);
         var total = await q.CountAsync();
-        var (skip, take) = Paging(input);
-        var items = await q.OrderByDescending(v => v.CreationTime).ThenByDescending(v => v.Id).Skip(skip).Take(take).ToListAsync();
+        var (skip, take) = grid == null ? Paging(input) : (grid.SkipCount, grid.MaxResultCount);
+        var items = await (grid == null
+            ? q.OrderByDescending(v => v.CreationTime).ThenByDescending(v => v.Id)
+            : definition.OrderBy(q, grid, "creationTime", true, x => x.Id)).Skip(skip).Take(take).ToListAsync();
         var ids = items.Select(v => v.Id).ToList();
         var entryTotals = await db.Entries.AsNoTracking()
             .Where(entry => ids.Contains(entry.VoucherId))

@@ -1,13 +1,61 @@
-import type { ActionType } from '@ant-design/pro-components';
+import { AgGridReact } from 'ag-grid-react';
 import { Alert, Tag } from 'antd';
-import { useRef } from 'react';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
-import { FinanceEmpty, FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
+import { useEffect, useState } from 'react';
 import { type FinPostingRuleDto, getPostingRules } from '@/abp/finance';
+import { FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
+import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
 
 export function FinancePostingRules() {
-  const actionRef = useRef<ActionType>(undefined);
   const load = useFinanceLoad();
+  const [rules, setRules] = useState<FinPostingRuleDto[]>([]);
+  const { guard, nonce } = load;
+  useEffect(() => {
+    let active = true;
+    void guard(() => getPostingRules()).then((page) => {
+      if (active) setRules(page?.items ?? []);
+    });
+    return () => {
+      active = false;
+    };
+  }, [guard, nonce]);
+  const grid = useSearchableLocalGrid<FinPostingRuleDto>({
+    ariaLabel: '过账规则',
+    rowData: rules,
+    keywordFields: [
+      'bizType',
+      'phase',
+      'status',
+      'summary',
+      'debitAccountCode',
+      'creditAccountCode',
+    ],
+    getRowId: ({ data }) => data.id,
+    columnDefs: toGridColumns<FinPostingRuleDto>(
+      [
+        { title: 'BizType', dataIndex: 'bizType', width: 140 },
+        { title: 'Phase', dataIndex: 'phase', width: 120 },
+        { title: '版本', dataIndex: 'version', width: 70 },
+        {
+          title: '状态',
+          dataIndex: 'status',
+          width: 90,
+          render: (_, r) => <Tag color="green">{r.status}</Tag>,
+        },
+        {
+          title: '借方科目',
+          dataIndex: 'debitAccountCode',
+          width: 110,
+        },
+        {
+          title: '贷方科目',
+          dataIndex: 'creditAccountCode',
+          width: 110,
+        },
+        { title: '说明', dataIndex: 'summary', ellipsis: true },
+      ],
+      { pro: true, kinds: { version: 'number' } },
+    ),
+  });
   return (
     <>
       <Alert
@@ -16,53 +64,13 @@ export function FinancePostingRules() {
         style={{ marginBottom: 16 }}
         title="本阶段只读：改规则走配置发布，管理端不提供编辑。"
       />
-      <FinanceStateView state={load.state} errorText={load.errorText} onRetry={load.retry}>
-      <AutoHeightProTable<FinPostingRuleDto>
-        key={load.nonce}
-        rowKey="id"
-        locale={{ emptyText: <FinanceEmpty text={'暂无过账规则'} /> }}
-        actionRef={actionRef}
-        search={{ labelWidth: 'auto' }}
-        toolBarRender={false}
-        request={async (params) => {
-          const maxResultCount = params.pageSize ?? 20;
-          const skipCount = ((params.current ?? 1) - 1) * maxResultCount;
-          const result = await load.guard(() =>
-            getPostingRules({
-            skipCount,
-            maxResultCount,
-            filter: params.bizType,
-          }),
-          );
-          if (!result) return { data: [], total: 0, success: false };
-          return { data: result.items, total: result.totalCount, success: true };
-        }}
-        columns={[
-          { title: 'BizType', dataIndex: 'bizType', width: 140 },
-          { title: 'Phase', dataIndex: 'phase', width: 120 },
-          { title: '版本', dataIndex: 'version', width: 70, search: false },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            width: 90,
-            search: false,
-            render: (_, r) => <Tag color="green">{r.status}</Tag>,
-          },
-          {
-            title: '借方科目',
-            dataIndex: 'debitAccountCode',
-            width: 110,
-            search: false,
-          },
-          {
-            title: '贷方科目',
-            dataIndex: 'creditAccountCode',
-            width: 110,
-            search: false,
-          },
-          { title: '说明', dataIndex: 'summary', ellipsis: true, search: false },
-        ]}
-      />
+      <FinanceStateView
+        state={load.state}
+        errorText={load.errorText}
+        onRetry={load.retry}
+      >
+        {grid.searchBox}
+        <AgGridReact {...grid.gridProps} />
       </FinanceStateView>
     </>
   );

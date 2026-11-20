@@ -1,3 +1,7 @@
+using System.Text.Json.Serialization;
+using AbpAdmin.Grids;
+using Microsoft.AspNetCore.Mvc;
+using Volo.Abp.MultiTenancy;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -30,6 +34,70 @@ public class FinLedgerAppService : FinanceAppServiceBase
         _dbContextProvider = dbContextProvider;
         _engine = engine;
         _rules = rules;
+    }
+
+    public sealed class BalanceGridRow
+    {
+        public string Id { get; set; } = "";
+        public string OwnerId { get; set; } = "";
+        public string? OwnerName { get; set; }
+        public string Currency { get; set; } = "";
+        [JsonNumberHandling(JsonNumberHandling.WriteAsString)]
+        public decimal Available { get; set; }
+        [JsonNumberHandling(JsonNumberHandling.WriteAsString)]
+        public decimal Frozen { get; set; }
+        [JsonNumberHandling(JsonNumberHandling.WriteAsString)]
+        public decimal Prepayment { get; set; }
+        [JsonNumberHandling(JsonNumberHandling.WriteAsString)]
+        public decimal LedgerDerived { get; set; }
+    }
+
+    /// <summary>用户按归属与币种合并，其他归属按子户列出。在数据库内完成聚合、过滤及分页。</summary>
+    [HttpPost("api/app/fin-ledger/balance-projections/query")]
+    public virtual async Task<PagedResultDto<BalanceGridRow>> QueryBalanceProjectionsAsync([FromBody] GridQueryInput input)
+    {
+        await RequireAnyAsync(null, FinancePermissions.Ledger.View, FinancePermissions.Balance.View);
+        var agent = await ResolveAgentScopeAsync();
+        var tenant = CurrentTenant.Id;
+        var db = await _dbContextProvider.GetDbContextAsync();
+        using (DataFilter.Disable<IMultiTenant>())
+        {
+            // 科目模板可来自宿主，子户和投影始终限定当前租户。
+            var rows = from sub in db.SubAccounts.AsNoTracking()
+                       join projection in db.BalanceProjections on sub.Id equals projection.SubAccountId
+                       join account in db.Accounts on sub.AccountId equals account.Id
+                       where sub.TenantId == tenant && projection.TenantId == tenant
+                             && (account.TenantId == tenant || account.TenantId == null)
+                       select new { sub, account.Code, projection.Balance };
+            if (agent.HasValue)
+            {
+                var ownerId = agent.Value.ToString();
+                rows = rows.Where(r => r.sub.OwnerType == FinOwnerType.Agent && r.sub.OwnerId == ownerId);
+            }
+            var grouped = from row in rows
+                          group row by new { row.sub.OwnerType, row.sub.OwnerId, row.sub.Currency,
+                              SubId = row.sub.OwnerType == FinOwnerType.User ? (Guid?)null : row.sub.Id,
+                              Code = row.sub.OwnerType == FinOwnerType.User ? null : row.Code } into g
+                          select new BalanceGridRow
+                          {
+                              Id = g.Key.SubId == null ? g.Key.OwnerId + "|" + g.Key.Currency : g.Key.SubId.ToString()!,
+                              OwnerId = g.Key.OwnerId, OwnerName = g.Key.Code, Currency = g.Key.Currency,
+                              Available = g.Sum(r => r.sub.OwnerType != FinOwnerType.User || r.Code == "2201" ? r.Balance : 0m),
+                              Frozen = g.Sum(r => r.sub.OwnerType == FinOwnerType.User && r.Code == "2202" ? r.Balance : 0m),
+                              Prepayment = g.Sum(r => r.sub.OwnerType == FinOwnerType.User && r.Code == "2205" ? r.Balance : 0m),
+                              LedgerDerived = g.Sum(r => r.sub.OwnerType != FinOwnerType.User || r.Code == "2201" || r.Code == "2202" || r.Code == "2205" ? r.Balance : 0m),
+                          };
+            var definition = new GridQueryDefinition<BalanceGridRow>()
+                .SearchableField("ownerName", x => x.OwnerName).SearchableField("ownerId", x => x.OwnerId)
+                .SearchableField("currency", x => x.Currency).Field("available", x => x.Available)
+                .Field("frozen", x => x.Frozen).Field("prepayment", x => x.Prepayment)
+                .Field("ledgerDerived", x => x.LedgerDerived);
+            var query = definition.Filter(grouped, input);
+            var total = await query.LongCountAsync();
+            var items = await definition.OrderBy(query, input, "ownerId", false, x => x.Id)
+                .Skip(input.SkipCount).Take(input.MaxResultCount).ToListAsync();
+            return new(total, items);
+        }
     }
 
     [Authorize(FinancePermissions.Ledger.View)]

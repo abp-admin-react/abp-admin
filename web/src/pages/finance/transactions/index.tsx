@@ -1,15 +1,31 @@
 import { PageContainer, type ProColumns } from '@ant-design/pro-components';
 import { Link, useAccess, useLocation } from '@umijs/max';
-import { App, Button, Descriptions, Drawer, Tag } from 'antd';
+import { AgGridReact } from 'ag-grid-react';
+import {
+  App,
+  Button,
+  DatePicker,
+  Descriptions,
+  Drawer,
+  Form,
+  Input,
+  Tag,
+} from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { gridScope } from '@/abp/businessGrid';
 import {
   type FinVoucherDto,
   financeErrorText,
+  financeGridQueries,
   getVoucher,
-  getVouchers,
 } from '@/abp/finance';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
 import { FinanceStateView, useFinanceLoad } from '@/components/FinanceState';
+import {
+  toGridColumns,
+  useSearchableLocalGrid,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
+import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 import { isNotFound } from '@/requestErrorConfig';
 import { formatForDisplay } from '@/utils/time';
 import {
@@ -28,19 +44,24 @@ export default function TransactionsPage() {
   const load = useFinanceLoad();
   const linkedVoucher = new URLSearchParams(location.search).get('voucherId');
 
-  const openDetail = useCallback(async (id: string) => {
-    const request = ++detailRequest.current;
-    try {
-      const result = await getVoucher(id);
-      if (request === detailRequest.current) setDetail(result);
-    } catch (error) {
-      if (request === detailRequest.current) {
-        message.error(
-          isNotFound(error) ? '找不到该笔凭证的分录' : financeErrorText(error),
-        );
+  const openDetail = useCallback(
+    async (id: string) => {
+      const request = ++detailRequest.current;
+      try {
+        const result = await getVoucher(id);
+        if (request === detailRequest.current) setDetail(result);
+      } catch (error) {
+        if (request === detailRequest.current) {
+          message.error(
+            isNotFound(error)
+              ? '找不到该笔凭证的分录'
+              : financeErrorText(error),
+          );
+        }
       }
-    }
-  }, [message]);
+    },
+    [message],
+  );
 
   useEffect(() => {
     setDetail(undefined);
@@ -51,16 +72,13 @@ export default function TransactionsPage() {
   }, [linkedVoucher, openDetail]);
 
   const columns: ProColumns<FinVoucherDto>[] = [
-    { title: '凭证 ID', dataIndex: 'voucherId', hideInTable: true },
     {
       title: '凭证号',
       dataIndex: 'voucherNo',
       width: 150,
-      search: false,
       ellipsis: true,
     },
     { title: '用户 ID', dataIndex: 'userId', width: 200, ellipsis: true },
-    { title: '用户邮箱', dataIndex: 'email', hideInTable: true },
     {
       title: '业务类型',
       dataIndex: 'bizType',
@@ -70,32 +88,23 @@ export default function TransactionsPage() {
     { title: '业务单号', dataIndex: 'bizRefId', width: 190, ellipsis: true },
     { title: '业务阶段', dataIndex: 'phase', width: 100 },
     {
-      title: '时间范围',
-      dataIndex: 'dateRange',
-      valueType: 'dateTimeRange',
-      hideInTable: true,
-    },
-    {
       title: '摘要',
       dataIndex: 'summary',
       width: 230,
-      search: false,
       ellipsis: true,
     },
     {
       title: '金额',
       dataIndex: 'amountText',
       width: 150,
-      search: false,
       render: (_, row) =>
         `${row.amountText ?? row.debitTotal} ${row.currency ?? ''}`,
     },
-    { title: '分录数', dataIndex: 'entryCount', width: 85, search: false },
+    { title: '分录数', dataIndex: 'entryCount', width: 85 },
     {
       title: '平衡',
-      key: 'balanced',
+      dataIndex: 'balanced',
       width: 85,
-      search: false,
       render: (_, row) =>
         row.debitTotalText === row.creditTotalText ? (
           <Tag color="success">平衡</Tag>
@@ -107,7 +116,6 @@ export default function TransactionsPage() {
       title: '时间',
       dataIndex: 'creationTime',
       width: 180,
-      search: false,
       render: (_, row) => formatForDisplay(row.creationTime),
     },
     {
@@ -122,6 +130,88 @@ export default function TransactionsPage() {
     },
   ];
 
+  const detailGrid1 = useSearchableLocalGrid<
+    NonNullable<FinVoucherDto['entries']>[number]
+  >({
+    ariaLabel: '资金流水分录',
+    rowData: detail?.entries ?? [],
+    keywordFields: ['accountCode', 'accountName', 'ownerId', 'bucket'],
+    pagination: false,
+    getRowId: ({ data }) => String(data.seq),
+    columnDefs: toGridColumns<NonNullable<FinVoucherDto['entries']>[number]>(
+      [
+        { title: '科目', dataIndex: 'accountCode', width: 90 },
+        { title: '名称', dataIndex: 'accountName', width: 140 },
+        {
+          title: '归属类型',
+          dataIndex: 'ownerType',
+          width: 90,
+          valueEnum: {
+            Platform: '平台',
+            User: '用户',
+            Agent: '代理',
+            Channel: '渠道',
+          },
+        },
+        {
+          title: '归属 ID',
+          dataIndex: 'ownerId',
+          width: 190,
+          ellipsis: true,
+        },
+        {
+          title: '余额桶',
+          dataIndex: 'bucket',
+          width: 100,
+          renderText: (value: string) => value || '—',
+        },
+        {
+          title: '变动金额',
+          dataIndex: 'changeAmountText',
+          width: 160,
+          renderText: (value: string) => (
+            <span style={{ whiteSpace: 'nowrap' }}>{value}</span>
+          ),
+        },
+        {
+          title: '变动后余额',
+          dataIndex: 'balanceAfterText',
+          width: 240,
+          renderText: (value: string | null) => (
+            <span style={{ whiteSpace: 'nowrap' }}>{value ?? '—'}</span>
+          ),
+        },
+      ],
+      {
+        pro: true,
+        kinds: { balanceAfterText: 'decimal', changeAmountText: 'decimal' },
+      },
+    ),
+  });
+  const [scope, setScope] = useState<{
+    voucherId?: string;
+    email?: string;
+    startTime?: string;
+    endTime?: string;
+  }>({});
+  const vouchersGridScope = gridScope({
+    ...scope,
+    voucherId: linkedVoucher || scope.voucherId,
+  });
+  const vouchersGrid = useSearchableRemoteGrid<FinVoucherDto>({
+    ariaLabel: '会计凭证',
+    getRowId: ({ data }) => String(data.id),
+    query: useScopedGridQuery(financeGridQueries.vouchers, vouchersGridScope),
+    columnDefs: toGridColumns<FinVoucherDto>(columns, {
+      pro: true,
+      kinds: {
+        balanced: 'boolean',
+        amountText: 'decimal',
+        entryCount: 'number',
+        creationTime: 'date',
+      },
+    }),
+  });
   return (
     <PageContainer
       title={false}
@@ -137,42 +227,44 @@ export default function TransactionsPage() {
         errorText={load.errorText}
         onRetry={load.retry}
       >
-        <AutoHeightProTable<FinVoucherDto>
+        <Form
+          layout="inline"
+          onFinish={(values: {
+            voucherId?: string;
+            email?: string;
+            dateRange?: [import('dayjs').Dayjs, import('dayjs').Dayjs];
+          }) =>
+            setScope({
+              voucherId: values.voucherId?.trim(),
+              email: values.email?.trim(),
+              startTime: values.dateRange?.[0].toISOString(),
+              endTime: values.dateRange?.[1].toISOString(),
+            })
+          }
+        >
+          {!linkedVoucher && (
+            <Form.Item name="voucherId" label="凭证 ID">
+              <Input allowClear />
+            </Form.Item>
+          )}
+          <Form.Item name="email" label="用户邮箱">
+            <Input allowClear />
+          </Form.Item>
+          <Form.Item name="dateRange" label="时间范围">
+            <DatePicker.RangePicker showTime />
+          </Form.Item>
+          <Button htmlType="submit">查询</Button>
+        </Form>
+        {vouchersGrid.searchBox}
+        <AgGridReact<FinVoucherDto>
+          {...vouchersGrid.gridProps}
           key={`${load.nonce}:${linkedVoucher ?? ''}`}
-          rowKey="id"
-          columns={columns}
-          form={{ initialValues: { voucherId: linkedVoucher ?? undefined } }}
-          request={async (params) => {
-            const range = params.dateRange as string[] | undefined;
-            const result = await load.guard(() =>
-              getVouchers({
-                skipCount:
-                  ((params.current ?? 1) - 1) * (params.pageSize ?? 20),
-                maxResultCount: params.pageSize ?? 20,
-                voucherId: params.voucherId,
-                userId: params.userId,
-                email: params.email,
-                bizType: params.bizType,
-                bizRefId: params.bizRefId,
-                phase: params.phase,
-                startTime: range?.[0]
-                  ? new Date(range[0]).toISOString()
-                  : undefined,
-                endTime: range?.[1]
-                  ? new Date(range[1]).toISOString()
-                  : undefined,
-              }),
-            );
-            return {
-              data: result?.items ?? [],
-              total: result?.totalCount ?? 0,
-              success: !!result,
-            };
-          }}
         />
       </FinanceStateView>
       <Drawer
-        title={detail?.voucherNo ? `分录明细 · ${detail.voucherNo}` : '分录明细'}
+        title={
+          detail?.voucherNo ? `分录明细 · ${detail.voucherNo}` : '分录明细'
+        }
         size={1150}
         open={!!detail}
         onClose={() => {
@@ -189,7 +281,9 @@ export default function TransactionsPage() {
                 {
                   key: 'id',
                   label: '凭证 ID',
-                  children: <Link to={voucherDetailsUrl(detail.id)}>{detail.id}</Link>,
+                  children: (
+                    <Link to={voucherDetailsUrl(detail.id)}>{detail.id}</Link>
+                  ),
                 },
                 {
                   key: 'time',
@@ -199,18 +293,26 @@ export default function TransactionsPage() {
                 {
                   key: 'type',
                   label: '业务类型',
-                  children: voucherBusinessTypes[detail.bizType] ?? detail.bizType,
+                  children:
+                    voucherBusinessTypes[detail.bizType] ?? detail.bizType,
                 },
                 { key: 'phase', label: '业务阶段', children: detail.phase },
                 {
                   key: 'ref',
                   label: '业务单号',
                   children:
-                    detail.bizType === 'wallet-adjust' && access.canViewBalanceAdjustments
-                      ? <Link to={balanceAdjustmentUrl(detail.bizRefId)}>{detail.bizRefId}</Link>
-                      : access.canViewFinanceBizDocs
-                        ? <Link to={voucherSourceUrl(detail.bizRefId)}>{detail.bizRefId}</Link>
-                        : detail.bizRefId,
+                    detail.bizType === 'wallet-adjust' &&
+                    access.canViewBalanceAdjustments ? (
+                      <Link to={balanceAdjustmentUrl(detail.bizRefId)}>
+                        {detail.bizRefId}
+                      </Link>
+                    ) : access.canViewFinanceBizDocs ? (
+                      <Link to={voucherSourceUrl(detail.bizRefId)}>
+                        {detail.bizRefId}
+                      </Link>
+                    ) : (
+                      detail.bizRefId
+                    ),
                 },
                 {
                   key: 'user',
@@ -225,53 +327,9 @@ export default function TransactionsPage() {
                 },
               ]}
             />
-            <AutoHeightProTable
-              fillViewport={false}
-              rowKey="seq"
-              search={false}
-              pagination={false}
-              toolBarRender={false}
-              scroll={{ x: 1010 }}
-              dataSource={detail.entries ?? []}
-              columns={[
-                { title: '科目', dataIndex: 'accountCode', width: 90 },
-                { title: '名称', dataIndex: 'accountName', width: 140 },
-                {
-                  title: '归属类型',
-                  dataIndex: 'ownerType',
-                  width: 90,
-                  valueEnum: {
-                    Platform: '平台',
-                    User: '用户',
-                    Agent: '代理',
-                    Channel: '渠道',
-                  },
-                },
-                {
-                  title: '归属 ID',
-                  dataIndex: 'ownerId',
-                  width: 190,
-                  ellipsis: true,
-                },
-                {
-                  title: '余额桶',
-                  dataIndex: 'bucket',
-                  width: 100,
-                  renderText: (value: string) => value || '—',
-                },
-                {
-                  title: '变动金额',
-                  dataIndex: 'changeAmountText',
-                  width: 160,
-                  renderText: (value: string) => <span style={{ whiteSpace: 'nowrap' }}>{value}</span>,
-                },
-                {
-                  title: '变动后余额',
-                  dataIndex: 'balanceAfterText',
-                  width: 240,
-                  renderText: (value: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{value ?? '—'}</span>,
-                },
-              ]}
+            {detailGrid1.searchBox}
+            <AgGridReact<NonNullable<FinVoucherDto['entries']>[number]>
+              {...detailGrid1.gridProps}
             />
           </>
         )}

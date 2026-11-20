@@ -1,5 +1,4 @@
 import {
-  type ActionType,
   ModalForm,
   PageContainer,
   type ProColumns,
@@ -8,6 +7,7 @@ import {
   ProFormTextArea,
 } from '@ant-design/pro-components';
 import { history, useAccess, useLocation, useModel } from '@umijs/max';
+import { AgGridReact } from 'ag-grid-react';
 import {
   Alert,
   App,
@@ -20,19 +20,22 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo as useGridMemo, useRef, useState } from 'react';
 import {
   approveBalanceAdjustment,
   type BalanceAdjustmentDto,
-  type BalanceAdjustmentStatus,
   type CreateBalanceAdjustmentInput,
   createBalanceAdjustment,
   getBalanceAdjustment,
-  getBalanceAdjustments,
   rejectBalanceAdjustment,
 } from '@/abp/balanceAdjustments';
+import { businessGridQueries, gridScope } from '@/abp/businessGrid';
+import type { GridQuery } from '@/abp/gridQuery';
 import { getUser, type IdentityUserDto } from '@/abp/identity';
-import AutoHeightProTable from '@/components/AutoHeightProTable';
+import {
+  toGridColumns,
+  useSearchableRemoteGrid,
+} from '@/components/remoteGrid';
 import { queryClient } from '@/queryClient';
 import { isNotFound } from '@/requestErrorConfig';
 import { formatForDisplay } from '@/utils/time';
@@ -62,7 +65,7 @@ export default function BalanceAdjustmentsPage() {
   const location = useLocation();
   const { initialState } = useModel('@@initialState');
   const currentUserId = initialState?.currentUser?.userid;
-  const actionRef = useRef<ActionType>(undefined);
+  const actionRef = useRef<{ reload: () => void }>(undefined);
   const query = new URLSearchParams(location.search);
   const statusParam = query.get('status');
   const status =
@@ -154,16 +157,13 @@ export default function BalanceAdjustmentsPage() {
       title: '申请 ID',
       dataIndex: 'id',
       width: 200,
-      search: false,
       ellipsis: true,
     },
     { title: '用户 ID', dataIndex: 'userId', width: 200, ellipsis: true },
-    { title: '原因', dataIndex: 'filter', hideInTable: true },
     {
       title: '调整金额',
       dataIndex: 'amount',
       width: 180,
-      search: false,
       render: (_, row) =>
         `${row.amount.startsWith('-') ? '' : '+'}${row.amount} ${currencyLabels[row.currency] ?? row.currency}`,
     },
@@ -171,7 +171,6 @@ export default function BalanceAdjustmentsPage() {
       title: '状态',
       dataIndex: 'status',
       width: 90,
-      search: false,
       render: (_, row) => (
         <Tag color={statusLabels[row.status].color}>
           {statusLabels[row.status].text}
@@ -182,21 +181,18 @@ export default function BalanceAdjustmentsPage() {
       title: '原因',
       dataIndex: 'reason',
       width: 220,
-      search: false,
       ellipsis: true,
     },
     {
       title: '申请人',
       dataIndex: 'applicantId',
       width: 180,
-      search: false,
       ellipsis: true,
     },
     {
       title: '申请时间',
       dataIndex: 'creationTime',
       width: 180,
-      search: false,
       render: (_, row) => formatForDisplay(row.creationTime),
     },
     {
@@ -247,6 +243,35 @@ export default function BalanceAdjustmentsPage() {
     },
   ];
 
+  const balanceAdjustmentsGridScope = gridScope({
+    status: status === 'all' ? undefined : status,
+  });
+  const balanceAdjustmentsGrid = useSearchableRemoteGrid<BalanceAdjustmentDto>({
+    ariaLabel: '余额调账',
+    getRowId: ({ data }) => String(data.id),
+    query: useGridMemo(
+      () => async (input: GridQuery, signal: AbortSignal) => {
+        try {
+          const page = await businessGridQueries.balanceAdjustments(
+            input,
+            signal,
+            balanceAdjustmentsGridScope,
+          );
+          if (!signal.aborted) setLoadFailed(false);
+          return page;
+        } catch (error) {
+          if (!signal.aborted) setLoadFailed(true);
+          throw error;
+        }
+      },
+      [balanceAdjustmentsGridScope],
+    ),
+    columnDefs: toGridColumns<BalanceAdjustmentDto>(columns, {
+      pro: true,
+      kinds: { amount: 'decimal', creationTime: 'date' },
+    }),
+  });
+  actionRef.current = { reload: balanceAdjustmentsGrid.refresh };
   return (
     <PageContainer
       title="余额调整审批"
@@ -281,34 +306,9 @@ export default function BalanceAdjustmentsPage() {
           }
         />
       )}
-      <AutoHeightProTable<BalanceAdjustmentDto>
-        actionRef={actionRef}
-        rowKey="id"
-        columns={columns}
-        params={{ statusFilter: status }}
-        request={async (params) => {
-          try {
-            const result = await getBalanceAdjustments({
-              skipCount: ((params.current ?? 1) - 1) * (params.pageSize ?? 20),
-              maxResultCount: params.pageSize ?? 20,
-              userId: params.userId,
-              filter: params.filter,
-              status:
-                status === 'all'
-                  ? undefined
-                  : (Number(status) as BalanceAdjustmentStatus),
-            });
-            setLoadFailed(false);
-            return {
-              data: result.items,
-              total: result.totalCount,
-              success: true,
-            };
-          } catch {
-            setLoadFailed(true);
-            return { data: [], total: 0, success: false };
-          }
-        }}
+      {balanceAdjustmentsGrid.searchBox}
+      <AgGridReact<BalanceAdjustmentDto>
+        {...balanceAdjustmentsGrid.gridProps}
       />
       <ModalForm<{
         userId: string;

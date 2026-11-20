@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using AbpAdmin.Grids;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -31,7 +33,14 @@ public class FinAccountAppService : FinanceAppServiceBase
     /// 分页列表。需 Ledger.View 或 Account.Manage；无权 → 403（无业务码）。
     /// 默认只返回启用科目（IsActive 未传时等价 IsActive=true）；科目树/下拉依赖此默认，避免停用科目泄漏到前端。
     /// </summary>
-    public virtual async Task<PagedResultDto<FinAccountDto>> GetListAsync(FinAccountListInput input)
+    public virtual Task<PagedResultDto<FinAccountDto>> GetListAsync(FinAccountListInput input) =>
+        ReadListPageAsync(null, input);
+
+    [HttpPost("api/app/fin-account/query")]
+    public virtual Task<PagedResultDto<FinAccountDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] FinAccountListInput input) =>
+        ReadListPageAsync(grid, input);
+
+    private async Task<PagedResultDto<FinAccountDto>> ReadListPageAsync(GridQueryInput? grid, FinAccountListInput input)
     {
         await RequireAnyAsync(null, FinancePermissions.Ledger.View, FinancePermissions.Account.Manage);
         var db = await _db.GetDbContextAsync();
@@ -43,10 +52,20 @@ public class FinAccountAppService : FinanceAppServiceBase
         if (input.IsActive.HasValue) { q = q.Where(a => a.IsActive == input.IsActive.Value); }
         else { q = q.Where(a => a.IsActive); }
 
+        var definition = new GridQueryDefinition<FinAccount>()
+            .SearchableField("code", x => x.Code)
+            .SearchableField("name", x => x.Name)
+            .SearchableEnumField("type", x => x.Type)
+            .SearchableEnumField("normalSide", x => x.NormalSide)
+            .Field("isSystem", x => x.IsSystem)
+            .Field("enabled", x => x.IsActive);
+        if (grid != null) q = definition.Filter(q, grid);
         var total = await q.CountAsync();
-        var skip = Math.Max(0, input.SkipCount);
-        var take = input.MaxResultCount <= 0 ? DefaultPageSize : Math.Min(MaxPageSize, input.MaxResultCount);
-        var rows = await q.OrderBy(a => a.Code).Skip(skip).Take(take)
+        var skip = grid?.SkipCount ?? Math.Max(0, input.SkipCount);
+        var take = grid?.MaxResultCount ?? (input.MaxResultCount <= 0 ? DefaultPageSize : Math.Min(MaxPageSize, input.MaxResultCount));
+        var rows = await (grid == null
+            ? q.OrderBy(a => a.Code)
+            : definition.OrderBy(q, grid, "code", false, x => x.Id)).Skip(skip).Take(take)
             .Select(a => new
             {
                 A = a,

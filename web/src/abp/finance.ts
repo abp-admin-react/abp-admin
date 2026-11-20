@@ -1,3 +1,6 @@
+import { request } from '@umijs/max';
+import { type GridQuery, postGridQuery } from './gridQuery';
+import { STORAGE_KEYS } from './storageKeys';
 /**
  * 财务 / Ledger 接口封装（定稿 §5）。
  *
@@ -18,8 +21,6 @@
  * - 调账五态：Draft → Pending → Posted|Rejected；Posted → Reversed；术语与 ADJUST_STATUS_LABEL 一致。
  * - 自批禁止：真码 `Finance:Adjust:SelfApproveNotAllowed`（403）；Legacy 仅兼容旧 mock。
  */
-import { request } from '@umijs/max';
-import { STORAGE_KEYS } from './storageKeys';
 
 export type PagedResultDto<T> = { totalCount: number; items: T[] };
 
@@ -1123,7 +1124,47 @@ export async function deleteAccount(id: string): Promise<void> {
 export async function getPostingRules(
   q: FinanceListQuery = {},
 ): Promise<PagedResultDto<FinPostingRuleDto>> {
-  if (!isMock()) return liveGet(API.postingRule, q as Record<string, unknown>);
+  if (!isMock()) {
+    const response = await liveGet<{
+      items: {
+        id: string;
+        bizType: string;
+        phase: string;
+        version: number;
+        status: number | string;
+        templateJson: string;
+        description?: string;
+      }[];
+    }>(API.postingRule, q as Record<string, unknown>);
+    const items = response.items.map((rule) => {
+      const lines = JSON.parse(rule.templateJson) as {
+        debit?: string;
+        credit?: string;
+        Debit?: string;
+        Credit?: string;
+      }[];
+      return {
+        id: rule.id,
+        bizType: rule.bizType,
+        phase: rule.phase,
+        version: rule.version,
+        status:
+          typeof rule.status === 'number'
+            ? ['Draft', 'Approved', 'Deprecated'][rule.status]
+            : rule.status,
+        debitAccountCode: lines
+          .map((line) => line.debit ?? line.Debit)
+          .filter(Boolean)
+          .join(' / '),
+        creditAccountCode: lines
+          .map((line) => line.credit ?? line.Credit)
+          .filter(Boolean)
+          .join(' / '),
+        summary: rule.description ?? '',
+      };
+    });
+    return { items, totalCount: items.length };
+  }
   return pageOf(mockRules, q);
 }
 
@@ -1430,7 +1471,9 @@ function fromLiveAdjust(raw: Record<string, unknown>): FinManualAdjustDto {
     debitOwnerId:
       raw.debitOwnerId != null ? String(raw.debitOwnerId) : 'default',
     creditOwnerType:
-      raw.creditOwnerType == null ? undefined : finOwnerTypeName(raw.creditOwnerType),
+      raw.creditOwnerType == null
+        ? undefined
+        : finOwnerTypeName(raw.creditOwnerType),
     creditOwnerId: (raw.creditOwnerId as string | null) ?? null,
     creationTime: String(
       raw.creationTime || raw.submittedAt || new Date().toISOString(),
@@ -1953,4 +1996,179 @@ export async function getBalanceProjections(
     );
   }
   return pageOf(list, q);
+}
+
+/** 演示开关启用时，列表和写操作必须使用同一组内存记录。 */
+function readDemoGrid<T extends { id: string }>(
+  rows: readonly T[],
+  input: GridQuery,
+  searchable: readonly (keyof T)[],
+  scope: string,
+) {
+  type Value = string | boolean | number | null | undefined;
+  const cell = (row: T, key: string) => (row as Record<string, Value>)[key];
+  const compare = (a: Value, b: Value) =>
+    typeof a === 'number' || typeof b === 'number'
+      ? Number(a) - Number(b)
+      : String(a ?? '').localeCompare(String(b ?? ''), 'zh-CN', {
+          numeric: true,
+          sensitivity: 'base',
+        });
+  const params = new URLSearchParams(scope);
+  const term = input.keyword?.trim().toLowerCase();
+  const matchScope = (row: T) => {
+    for (const [key, value] of params) {
+      if (key === 'includeDemo') {
+        if (value === 'false' && cell(row, 'excludedDemo') === false)
+          return false;
+      } else if (key === 'startTime' || key === 'endTime') {
+        const date = String(cell(row, 'creationTime') ?? '');
+        if (key === 'startTime' ? date < value : date >= value) return false;
+      } else if (
+        !value
+          .split(',')
+          .includes(String(cell(row, key === 'voucherId' ? 'id' : key) ?? ''))
+      )
+        return false;
+    }
+    return true;
+  };
+  const items = rows.filter(
+    (row) =>
+      matchScope(row) &&
+      (!term ||
+        searchable.some((key) =>
+          String(row[key] ?? '')
+            .toLowerCase()
+            .includes(term),
+        )) &&
+      input.filters.every((group) => {
+        const raw = cell(row, group.field);
+        if (raw == null) return false;
+        const values = group.conditions.map((condition) => {
+          const a = String(raw).toLowerCase(),
+            b = condition.value.toLowerCase();
+          const date = /^\d{4}-\d{2}-\d{2}$/.test(b) ? a.slice(0, 10) : raw;
+          const order = compare(date, condition.value);
+          switch (condition.op) {
+            case 'contains':
+              return a.includes(b);
+            case 'notContains':
+              return !a.includes(b);
+            case 'startsWith':
+              return a.startsWith(b);
+            case 'endsWith':
+              return a.endsWith(b);
+            case 'eq':
+              return order === 0;
+            case 'ne':
+              return order !== 0;
+            case 'lt':
+              return order < 0;
+            case 'lte':
+              return order <= 0;
+            case 'gt':
+              return order > 0;
+            case 'gte':
+              return order >= 0;
+            case 'between':
+              return order >= 0 && compare(date, condition.valueTo) <= 0;
+            default:
+              return false;
+          }
+        });
+        return group.join === 'or'
+          ? values.some(Boolean)
+          : values.every(Boolean);
+      }),
+  );
+  if (input.sort.length)
+    items.sort((a, b) => {
+      for (const sort of input.sort) {
+        const order = compare(cell(a, sort.field), cell(b, sort.field));
+        if (order) return sort.direction === 'desc' ? -order : order;
+      }
+      return a.id.localeCompare(b.id);
+    });
+  return {
+    totalCount: items.length,
+    items: items.slice(input.skipCount, input.skipCount + input.maxResultCount),
+  };
+}
+
+export const financeGridQueries = {
+  accounts: mappedFinanceGrid(
+    API.account,
+    (row) => normalizeAccount(row as unknown as FinAccountDto),
+    () => mockAccounts,
+    ['code', 'name', 'type', 'normalSide'],
+  ),
+  vouchers: mappedFinanceGrid(
+    API.voucher,
+    fromLiveVoucher,
+    () => mockVouchers,
+    [
+      'id',
+      'voucherNo',
+      'userId',
+      'bizRefId',
+      'bizType',
+      'phase',
+      'status',
+      'agentId',
+      'summary',
+    ],
+  ),
+  adjustments: mappedFinanceGrid(
+    API.manualAdjust,
+    fromLiveAdjust,
+    () => mockAdjusts,
+    ['id', 'adjustNo', 'applicantId', 'summary', 'status', 'rejectReason'],
+  ),
+  reconciles: mappedFinanceGrid(
+    API.reconcileRun,
+    fromLiveReconcile,
+    () => mockReconciles,
+    ['type', 'status'],
+  ),
+};
+
+export const demoLedgerLists = {
+  balances: (input: GridQuery, scope: string) =>
+    readDemoGrid(
+      mockBalances.map((row) => ({
+        ...row,
+        available: String(row.available),
+        frozen: String(row.frozen),
+        prepayment: String(row.prepayment),
+        ledgerDerived: String(row.ledgerDerived),
+      })),
+      input,
+      ['ownerId', 'ownerName', 'currency'],
+      scope,
+    ),
+  bizDocs: (input: GridQuery, scope: string) =>
+    readDemoGrid(
+      mockBizDocs,
+      input,
+      ['id', 'bizRefId', 'bizType', 'phase', 'status', 'agentId'],
+      scope,
+    ),
+};
+
+function mappedFinanceGrid<T extends { id: string }>(
+  route: string,
+  map: (row: Record<string, unknown>) => T,
+  demo: () => T[],
+  searchable: readonly (keyof T)[],
+) {
+  return async (input: GridQuery, signal: AbortSignal, scope = '') => {
+    if (isMock()) return readDemoGrid(demo(), input, searchable, scope);
+    const page = await postGridQuery<Record<string, unknown>>(
+      `${route}/query${scope}`,
+      input,
+      signal,
+    );
+    return { ...page, items: page.items.map(map) };
+  };
 }

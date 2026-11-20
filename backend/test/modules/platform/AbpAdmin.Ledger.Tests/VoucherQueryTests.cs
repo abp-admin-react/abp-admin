@@ -1,3 +1,4 @@
+using AbpAdmin.Grids;
 using System;
 using System.Threading.Tasks;
 using AbpAdmin.Ledger.Data;
@@ -18,6 +19,47 @@ namespace AbpAdmin.Ledger;
 
 public class VoucherQueryTests : LedgerScenarioTestBase
 {
+    [Fact]
+    public async Task Grid_Filters_Reconcile_Snapshot_Dates_And_Sorts_Difference_Counts()
+    {
+        using (As(TestUsers.AccountantA))
+        {
+            var service = GetRequiredService<FinReconcileAppService>();
+            var start = new DateTime(2026, 1, 7, 0, 0, 0, DateTimeKind.Utc);
+            var first = await service.RunAsync(new FinReconcileRunInput { RangeStart = start, RangeEnd = start.AddDays(1) });
+            await service.RunAsync(new FinReconcileRunInput { RangeStart = start.AddDays(1), RangeEnd = start.AddDays(2) });
+            var page = await service.QueryListAsync(new GridQueryInput
+            {
+                Filters = [new() { Field = "rangeStart", Conditions = [new() { Op = "eq", Value = "2026-01-07" }] }],
+                Sort = [new() { Field = "diffCount", Direction = "desc" }],
+            }, new FinReconcileListInput());
+            page.TotalCount.ShouldBe(1);
+            page.Items[0].Id.ShouldBe(first.Id);
+        }
+    }
+
+    [Fact]
+    public async Task Grid_Matches_All_Pages_Before_Sorting_Decimals_And_Aggregates()
+    {
+        var user = Guid.NewGuid();
+        await Ledger.PostAsync(CreditPay("grid-older", 2m, user));
+        await Ledger.PostAsync(CreditPay("grid-newer", 10.000000000000000001m, user));
+        var service = GetRequiredService<FinVoucherAppService>();
+        var query = new GridQueryInput
+        {
+            Keyword = "GRID-", SkipCount = 1, MaxResultCount = 1,
+            Filters = [new() { Field = "entryCount", Conditions = [new() { Op = "eq", Value = "2" }] }],
+            Sort = [new() { Field = "amountText", Direction = "desc" }],
+        };
+        var page = await service.QueryListAsync(query, new() { UserId = user });
+        page.TotalCount.ShouldBe(2);
+        page.Items[0].AmountText.ShouldBe("2");
+        var balances = await GetRequiredService<FinLedgerAppService>().QueryBalanceProjectionsAsync(
+            new GridQueryInput { Keyword = user.ToString(), Sort = [new() { Field = "ledgerDerived", Direction = "desc" }] });
+        balances.TotalCount.ShouldBe(1);
+        balances.Items[0].OwnerId.ShouldBe(user.ToString());
+    }
+
     [Fact]
     public async Task Transaction_Query_Filters_By_User_Email_And_Voucher_And_Preserves_Amounts()
     {
