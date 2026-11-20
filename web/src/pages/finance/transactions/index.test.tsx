@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { actionCell, fetchGridBlock } from '@root/tests/gridInteraction';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TransactionsPage from './index';
@@ -17,14 +24,15 @@ vi.mock('@umijs/max', () => ({
   useAccess: mocks.access,
   useLocation: mocks.location,
 }));
-vi.mock('@/components/AutoHeightProTable', () => ({
-  default: (props: unknown) => {
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: (props: unknown) => {
     mocks.table(props);
     return null;
   },
 }));
 vi.mock('@/abp/finance', () => ({
   getVouchers: mocks.list,
+  financeGridQueries: { vouchers: mocks.list },
   getVoucher: mocks.detail,
   financeErrorText: () => '加载失败',
   isFinanceForbidden: () => false,
@@ -45,30 +53,60 @@ describe('分录查询页', () => {
         <TransactionsPage />
       </AntdApp>,
     );
-    const table = mocks.table.mock.calls[0][0];
-    await table.request({
-      current: 2,
-      pageSize: 10,
-      voucherId: 'voucher',
-      userId: 'user',
-      email: 'user@example.test',
-      bizType: 'deposit',
-      bizRefId: 'deposit-id',
-      phase: 'pay',
-      dateRange: ['2026-11-01T00:00:00Z', '2026-11-02T00:00:00Z'],
+    fireEvent.change(screen.getByLabelText('凭证 ID'), {
+      target: { value: 'voucher' },
     });
-    expect(mocks.list).toHaveBeenCalledWith({
-      skipCount: 10,
-      maxResultCount: 10,
-      voucherId: 'voucher',
-      userId: 'user',
-      email: 'user@example.test',
-      bizType: 'deposit',
-      bizRefId: 'deposit-id',
-      phase: 'pay',
-      startTime: '2026-11-01T00:00:00.000Z',
-      endTime: '2026-11-02T00:00:00.000Z',
+    fireEvent.change(screen.getByLabelText('用户邮箱'), {
+      target: { value: 'user@example.test' },
     });
+    const form = screen.getByLabelText('用户邮箱').closest('form');
+    if (!form) throw new Error('缺少分录查询表单');
+    await act(async () => fireEvent.submit(form));
+    const table = mocks.table.mock.lastCall?.[0];
+    const text = (filter: string) => ({
+      filterType: 'text',
+      type: 'equals',
+      filter,
+    });
+    const filterModel = {
+      userId: text('user'),
+      bizRefId: text('deposit-id'),
+      phase: text('pay'),
+      creationTime: {
+        filterType: 'date',
+        type: 'inRange',
+        dateFrom: '2026-11-01',
+        dateTo: '2026-11-02',
+      },
+    };
+    await fetchGridBlock(table, { startRow: 10, endRow: 20, filterModel });
+    expect(mocks.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipCount: 10,
+        maxResultCount: 10,
+        filters: expect.arrayContaining([
+          {
+            field: 'userId',
+            join: 'and',
+            conditions: [{ op: 'eq', value: 'user' }],
+          },
+          {
+            field: 'bizRefId',
+            join: 'and',
+            conditions: [{ op: 'eq', value: 'deposit-id' }],
+          },
+          {
+            field: 'creationTime',
+            join: 'and',
+            conditions: [
+              { op: 'between', value: '2026-11-01', valueTo: '2026-11-02' },
+            ],
+          },
+        ]),
+      }),
+      expect.any(AbortSignal),
+      '?voucherId=voucher&email=user%40example.test',
+    );
     expect(screen.queryByRole('button', { name: '新建账簿调账' })).toBeNull();
     expect(
       screen.getByRole('link', { name: '返回会计凭证' }).getAttribute('href'),
@@ -109,7 +147,7 @@ describe('分录查询页', () => {
       expect(
         mocks.table.mock.calls.some(
           ([props]) =>
-            props.dataSource?.[0]?.balanceAfterText === '10.000000000000000001',
+            props.rowData?.[0]?.balanceAfterText === '10.000000000000000001',
         ),
       ).toBe(true),
     );
@@ -123,38 +161,50 @@ describe('分录查询页', () => {
       '/finance/balance-adjustments?adjustmentId=adjustment',
     );
     const detailTable = mocks.table.mock.calls.find(
-      ([props]) => props.dataSource,
+      ([props]) => props.rowData,
     )?.[0];
     expect(
-      detailTable.columns.map(
-        (column: { dataIndex: string }) => column.dataIndex,
-      ),
+      detailTable.columnDefs.map((column: { field: string }) => column.field),
     ).toContain('bucket');
     expect(
-      detailTable.columns.map(
-        (column: { dataIndex: string }) => column.dataIndex,
-      ),
+      detailTable.columnDefs.map((column: { field: string }) => column.field),
     ).toContain('balanceAfterText');
   });
 
   it('只展示最后选中的流水，忽略迟到的链接或表格请求', async () => {
     mocks.location.mockReturnValue({ search: '?voucherId=linked' });
     const replies: Record<string, (value: unknown) => void> = {};
-    mocks.detail.mockImplementation((id: string) => new Promise((resolve) => { replies[id] = resolve; }));
-    render(<AntdApp><TransactionsPage /></AntdApp>);
+    mocks.detail.mockImplementation(
+      (id: string) =>
+        new Promise((resolve) => {
+          replies[id] = resolve;
+        }),
+    );
+    render(
+      <AntdApp>
+        <TransactionsPage />
+      </AntdApp>,
+    );
     await waitFor(() => expect(replies.linked).toBeTruthy());
     const table = mocks.table.mock.calls[0][0];
-    const operation = table.columns.find((column: { valueType?: string }) => column.valueType === 'option');
-    const first = render(operation.render(null, { id: 'first' }));
+    const first = render(actionCell(table, { id: 'first' }));
     fireEvent.click(first.getByRole('button', { name: '查看分录' }));
     first.unmount();
-    const second = render(operation.render(null, { id: 'second' }));
+    const second = render(actionCell(table, { id: 'second' }));
     fireEvent.click(second.getByRole('button', { name: '查看分录' }));
     second.unmount();
-    const result = (id: string) => ({ id, bizType: 'wallet-adjust', creationTime: '2026-11-13T00:00:00Z', entries: [] });
+    const result = (id: string) => ({
+      id,
+      bizType: 'wallet-adjust',
+      creationTime: '2026-11-13T00:00:00Z',
+      entries: [],
+    });
     await act(async () => replies.second(result('second')));
     expect(await screen.findByText('second')).toBeTruthy();
-    await act(async () => { replies.first(result('first')); replies.linked(result('linked')); });
+    await act(async () => {
+      replies.first(result('first'));
+      replies.linked(result('linked'));
+    });
     expect(screen.getByText('second')).toBeTruthy();
     expect(screen.queryByText('first')).toBeNull();
     expect(screen.queryByText('linked')).toBeNull();

@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { actionCell, fetchGridBlock } from '@root/tests/gridInteraction';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { App } from 'antd';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,13 +26,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@umijs/max', () => ({
   useAccess: mocks.access,
   useLocation: mocks.location,
-  useModel: () => ({ initialState: { currentUser: { userid: 'operator', name: '审批员' } } }),
+  useModel: () => ({
+    initialState: { currentUser: { userid: 'operator', name: '审批员' } },
+  }),
   Link: ({ to, children }: { to: string; children: ReactNode }) => (
     <a href={to}>{children}</a>
   ),
 }));
-vi.mock('@/components/AutoHeightProTable', () => ({
-  default: (props: unknown) => {
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: (props: unknown) => {
     mocks.table(props);
     return null;
   },
@@ -35,6 +44,10 @@ vi.mock('@/abp/finance', async (original) => ({
   getAdjusts: mocks.getAdjusts,
   getVoucher: mocks.getVoucher,
   getVouchers: mocks.getVouchers,
+  financeGridQueries: {
+    vouchers: mocks.getVouchers,
+    adjustments: mocks.getAdjusts,
+  },
   approveAdjust: mocks.approveAdjust,
   updateAdjust: mocks.updateAdjust,
 }));
@@ -70,15 +83,12 @@ describe('会计凭证的提现单链接', () => {
     });
     const view = render(vouchers());
     const table = mocks.table.mock.lastCall?.[0];
-    expect(table.search).toBe(false);
-    await table.request({ current: 1, pageSize: 20 });
-    expect(mocks.getVouchers).toHaveBeenCalledExactlyOnceWith({
-      skipCount: 0,
-      maxResultCount: 20,
-      bizType: 'withdraw',
-      bizRefId: withdrawalId,
-      filter: undefined,
-    });
+    await fetchGridBlock(table);
+    expect(mocks.getVouchers).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+      expect.any(AbortSignal),
+      `?bizType=withdraw&bizRefId=${withdrawalId}`,
+    );
     expect(screen.getByRole('link', { name: '返回提现单' })).toHaveAttribute(
       'href',
       withdrawalPath,
@@ -91,11 +101,24 @@ describe('会计凭证的提现单链接', () => {
     mocks.location.mockReturnValue({ search: '' });
     view.rerender(vouchers());
     const unfilteredTable = mocks.table.mock.lastCall?.[0];
-    expect(unfilteredTable.search).toEqual({ labelWidth: 'auto' });
     expect(screen.queryByRole('link', { name: '返回提现单' })).toBeNull();
-    await unfilteredTable.request({ bizType: 'payment', bizRefId: 'order' });
+    await fetchGridBlock(unfilteredTable, {
+      filterModel: {
+        bizRefId: { filterType: 'text', type: 'equals', filter: 'order' },
+      },
+    });
     expect(mocks.getVouchers).toHaveBeenLastCalledWith(
-      expect.objectContaining({ bizType: 'payment', bizRefId: 'order' }),
+      expect.objectContaining({
+        filters: [
+          {
+            field: 'bizRefId',
+            join: 'and',
+            conditions: [{ op: 'eq', value: 'order' }],
+          },
+        ],
+      }),
+      expect.any(AbortSignal),
+      '',
     );
   });
 
@@ -119,14 +142,12 @@ describe('会计凭证的提现单链接', () => {
     });
     render(vouchers());
     const table = mocks.table.mock.lastCall?.[0];
-    await table.request({ current: 1, pageSize: 20, bizType: 'withdraw' });
-    expect(mocks.getVouchers).toHaveBeenCalledExactlyOnceWith({
-      skipCount: 0,
-      maxResultCount: 20,
-      bizType: 'deposit',
-      bizRefId: withdrawalId,
-      filter: undefined,
-    });
+    await fetchGridBlock(table);
+    expect(mocks.getVouchers).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+      expect.any(AbortSignal),
+      `?bizType=deposit&bizRefId=${withdrawalId}`,
+    );
     expect(screen.getByRole('link', { name: '返回充值单' })).toHaveAttribute(
       'href',
       `/operations/payments?view=deposits&depositId=${withdrawalId}`,
@@ -174,36 +195,47 @@ describe('会计凭证的提现单链接', () => {
     ['canRejectFinanceAdjust', '账簿调账待审批', 'Pending'],
     ['canSubmitFinanceAdjust', '账簿调账草稿', 'Draft,Rejected'],
     ['canReverseFinanceAdjust', '已过账调账', 'Posted,Reversed'],
-  ])('独立的 %s 角色只加载已有权限的调账列表', async (permission, label, status) => {
-    mocks.access.mockReturnValue({ [permission]: true });
-    mocks.location.mockReturnValue({ search: '?voucherId=voucher' });
-    render(vouchers());
+  ])(
+    '独立的 %s 角色只加载已有权限的调账列表',
+    async (permission, label, status) => {
+      mocks.access.mockReturnValue({ [permission]: true });
+      mocks.location.mockReturnValue({ search: '?voucherId=voucher' });
+      render(vouchers());
 
-    expect(screen.getByRole('tab', { name: label, selected: true })).toBeTruthy();
-    expect(screen.queryByRole('tab', { name: '凭证列表' })).toBeNull();
-    const table = mocks.table.mock.lastCall?.[0];
-    await table.request({ current: 1, pageSize: 20 });
-    expect(mocks.getAdjusts).toHaveBeenCalledExactlyOnceWith({
-      skipCount: 0,
-      maxResultCount: 20,
-      status,
-    });
-    expect(mocks.getVouchers).not.toHaveBeenCalled();
-    expect(mocks.getVoucher).not.toHaveBeenCalled();
-  });
+      expect(
+        screen.getByRole('tab', { name: label, selected: true }),
+      ).toBeTruthy();
+      expect(screen.queryByRole('tab', { name: '凭证列表' })).toBeNull();
+      const table = mocks.table.mock.lastCall?.[0];
+      await fetchGridBlock(table);
+      expect(mocks.getAdjusts).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ skipCount: 0, maxResultCount: 20 }),
+        expect.any(AbortSignal),
+        `?status=${encodeURIComponent(status)}`,
+      );
+      expect(mocks.getVouchers).not.toHaveBeenCalled();
+      expect(mocks.getVoucher).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['canReverseFinanceAdjust', false],
     ['canReverseFinanceVouchers', true],
   ])('凭证红冲动作按 %s 对应的服务端权限显示', (permission, visible) => {
-    mocks.access.mockReturnValue({ canViewFinanceVouchers: true, [permission]: true });
+    mocks.access.mockReturnValue({
+      canViewFinanceVouchers: true,
+      [permission]: true,
+    });
     mocks.location.mockReturnValue({ search: '' });
     render(vouchers());
 
     const table = mocks.table.mock.lastCall?.[0];
-    const actionColumn = table.columns.find((column: { title: string }) => column.title === '操作');
-    const actions = actionColumn.render(null, { id: 'voucher', status: 'Posted', bizType: 'manual-adjust' });
-    const row = render(<>{actions}</>);
+    const actions = actionCell(table, {
+      id: 'voucher',
+      status: 'Posted',
+      bizType: 'manual-adjust',
+    });
+    const row = render(actions);
     expect(!!row.queryByText('红冲')).toBe(visible);
   });
 
@@ -211,18 +243,32 @@ describe('会计凭证的提现单链接', () => {
     mocks.access.mockReturnValue({ canApproveFinanceAdjust: true });
     mocks.location.mockReturnValue({ search: '' });
     render(
-      <ModuleAvailabilityContext.Provider value={{ version: 1, initialized: true, states: { Finance: false } }}>
+      <ModuleAvailabilityContext.Provider
+        value={{ version: 1, initialized: true, states: { Finance: false } }}
+      >
         {vouchers()}
       </ModuleAvailabilityContext.Provider>,
     );
     expect(screen.getByText('财务工作区已停止受理新调账')).toBeTruthy();
     const table = mocks.table.mock.lastCall?.[0];
-    const actionColumn = table.columns.find((column: { title: string }) => column.title === '操作');
-    const row = render(<App>{actionColumn.render(null, { id: 'adjustment', status: 'Pending', applicantId: 'other' })}</App>);
+    const row = render(
+      <App>
+        {actionCell(table, {
+          id: 'adjustment',
+          status: 'Pending',
+          applicantId: 'other',
+        })}
+      </App>,
+    );
     fireEvent.click(row.getByText('审批'));
     const confirmation = await screen.findByRole('tooltip');
     fireEvent.click(within(confirmation).getByRole('button', { name: 'OK' }));
-    await waitFor(() => expect(mocks.approveAdjust).toHaveBeenCalledExactlyOnceWith('adjustment', { id: 'operator', name: '审批员' }));
+    await waitFor(() =>
+      expect(mocks.approveAdjust).toHaveBeenCalledExactlyOnceWith(
+        'adjustment',
+        { id: 'operator', name: '审批员' },
+      ),
+    );
     expect(mocks.getVouchers).not.toHaveBeenCalled();
   });
 
@@ -231,24 +277,43 @@ describe('会计凭证的提现单链接', () => {
     mocks.location.mockReturnValue({ search: '' });
     render(vouchers());
     const table = mocks.table.mock.lastCall?.[0];
-    const actionColumn = table.columns.find((column: { title: string }) => column.title === '操作');
-    const row = render(<>{actionColumn.render(null, {
-      id: 'adjustment', adjustNo: 'ADJ-1', status: 'Draft', applicantId: 'operator',
-      amount: 15, currency: 'USD', summary: '原摘要',
-      debitOwnerType: 'Platform', debitOwnerId: '',
-      creditOwnerType: 'User', creditOwnerId: 'customer',
-      lines: [{ accountCode: '1002' }, { accountCode: '2002' }],
-    })}</>);
+    const row = render(
+      actionCell(table, {
+        id: 'adjustment',
+        adjustNo: 'ADJ-1',
+        status: 'Draft',
+        applicantId: 'operator',
+        amount: 15,
+        currency: 'USD',
+        summary: '原摘要',
+        debitOwnerType: 'Platform',
+        debitOwnerId: '',
+        creditOwnerType: 'User',
+        creditOwnerId: 'customer',
+        lines: [{ accountCode: '1002' }, { accountCode: '2002' }],
+      }),
+    );
     fireEvent.click(row.getByText('编辑'));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText('贷方科目编码（可空，默认 3101）')).toHaveValue('2002');
+    expect(
+      within(dialog).getByLabelText('贷方科目编码（可空，默认 3101）'),
+    ).toHaveValue('2002');
     const ownerId = within(dialog).getByLabelText('借方 OwnerId');
     expect(ownerId).toHaveValue('');
     const form = ownerId.closest('form');
     if (form) fireEvent.submit(form);
-    await waitFor(() => expect(mocks.updateAdjust).toHaveBeenCalledWith('adjustment', expect.objectContaining({
-      debitAccountCode: '1002', debitOwnerType: 'Platform', debitOwnerId: '',
-      creditAccountCode: '2002', creditOwnerType: 'User', creditOwnerId: 'customer',
-    })));
+    await waitFor(() =>
+      expect(mocks.updateAdjust).toHaveBeenCalledWith(
+        'adjustment',
+        expect.objectContaining({
+          debitAccountCode: '1002',
+          debitOwnerType: 'Platform',
+          debitOwnerId: '',
+          creditAccountCode: '2002',
+          creditOwnerType: 'User',
+          creditOwnerId: 'customer',
+        }),
+      ),
+    );
   });
 });

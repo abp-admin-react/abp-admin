@@ -1,3 +1,4 @@
+import { actionCell, fetchGridBlock } from '@root/tests/gridInteraction';
 import {
   act,
   fireEvent,
@@ -26,7 +27,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@umijs/max', () => ({
   request: mocks.request,
   useAccess: mocks.access,
-  useLocation: () => ({ pathname: '/collection/orders', search: mocks.search() }),
+  useLocation: () => ({
+    pathname: '/collection/orders',
+    search: mocks.search(),
+  }),
   useModel: mocks.model,
   history: { push: mocks.push, replace: mocks.replace },
   Link: ({ to, ...props }: ComponentPropsWithoutRef<'a'> & { to: string }) => (
@@ -34,34 +38,25 @@ vi.mock('@umijs/max', () => ({
   ),
 }));
 vi.mock('@/requestErrorConfig', () => ({
-  isNotFound: (error: { response?: { status?: number } }) => error.response?.status === 404,
+  isNotFound: (error: { response?: { status?: number } }) =>
+    error.response?.status === 404,
 }));
-vi.mock('@/components/AutoHeightProTable', () => ({
-  default: ({
-    toolBarRender,
-    columns,
-    request,
-  }: {
-    toolBarRender?: () => React.ReactNode;
-    request?: (p: { current: number; pageSize: number }) => Promise<unknown>;
-    columns: {
-      title: string;
-      render?: (value: unknown, order: typeof mocks.order) => React.ReactNode;
-    }[];
-  }) => {
-    mocks.tableRequest(request);
-    return (
-      <>
-        {toolBarRender?.()}
-        {columns.find((column) => column.title === '操作')?.render?.(null, mocks.order)}
-      </>
-    );
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: (props: any) => {
+    mocks.tableRequest(props);
+    return actionCell(props, mocks.order);
   },
 }));
 
 function renderPage(acceptsOrders = true) {
   render(
-    <ModuleAvailabilityContext.Provider value={{ version: 1, initialized: true, states: { Orders: acceptsOrders, Collection: acceptsOrders } }}>
+    <ModuleAvailabilityContext.Provider
+      value={{
+        version: 1,
+        initialized: true,
+        states: { Orders: acceptsOrders, Collection: acceptsOrders },
+      }}
+    >
       <ConfigProvider theme={{ token: { motion: false } }}>
         <AntdApp>
           <OrderingPage />
@@ -125,20 +120,34 @@ describe('订单操作', () => {
       submit.click();
     });
     await waitFor(() => expect(method).toBeDisabled());
-    expect(within(dialog).getByRole('button', { name: /取\s*消/ })).toBeDisabled();
+    expect(
+      within(dialog).getByRole('button', { name: /取\s*消/ }),
+    ).toBeDisabled();
     await act(async () =>
       payment.resolve({
         outcome: 'ChannelCreated',
         channelPayload: 'weixin://wxpay/test-order',
       }),
     );
-    expect(await within(dialog).findByText('weixin://wxpay/test-order')).toBeTruthy();
-    expect(within(dialog).queryByRole('button', { name: '发起支付' })).toBeNull();
-    expect(within(dialog).getByRole('button', { name: '复制支付凭据' })).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole('button', { name: '更换支付方式' }));
+    expect(
+      await within(dialog).findByText('weixin://wxpay/test-order'),
+    ).toBeTruthy();
+    expect(
+      within(dialog).queryByRole('button', { name: '发起支付' }),
+    ).toBeNull();
+    expect(
+      within(dialog).getByRole('button', { name: '复制支付凭据' }),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: '更换支付方式' }),
+    );
     expect(within(dialog).queryByText('weixin://wxpay/test-order')).toBeNull();
-    expect(within(dialog).getByRole('combobox', { name: '支付方式' })).toBeEnabled();
-    expect(mocks.request.mock.calls.filter(([path]) => path === requestPath)).toHaveLength(1);
+    expect(
+      within(dialog).getByRole('combobox', { name: '支付方式' }),
+    ).toBeEnabled();
+    expect(
+      mocks.request.mock.calls.filter(([path]) => path === requestPath),
+    ).toHaveLength(1);
   });
 
   it('停止受理后保留我的订单和旧订单取消动作', async () => {
@@ -158,12 +167,17 @@ describe('订单操作', () => {
     mocks.request.mockResolvedValue({ items: [], totalCount: 0 });
     await act(async () => renderPage());
     const tableRequest = mocks.tableRequest.mock.lastCall?.[0];
-    await tableRequest({ current: 1, pageSize: 10 });
-    expect(mocks.request).toHaveBeenCalledWith('/api/app/order', expect.objectContaining({
-      method: 'GET',
-      params: expect.objectContaining({ OrderType: orderType }),
-    }));
-    expect(!!screen.queryByRole('button', { name: /创建订单/ })).toBe(orderType === 'Business');
+    await fetchGridBlock(tableRequest, { endRow: 10 });
+    expect(mocks.request).toHaveBeenCalledWith(
+      `/api/app/order/query?orderType=${orderType}`,
+      expect.objectContaining({
+        method: 'POST',
+        data: expect.objectContaining({ maxResultCount: 10 }),
+      }),
+    );
+    expect(!!screen.queryByRole('button', { name: /创建订单/ })).toBe(
+      orderType === 'Business',
+    );
   });
 
   it('精确打开充值订单并用真实流水号链接，保留充值口径', async () => {
@@ -171,7 +185,10 @@ describe('订单操作', () => {
     const owner = '74326c91-6b75-4ef0-9429-3f6e8af7c65f';
     const txnId = '50326c91-6b75-4ef0-9429-3f6e8af7c65f';
     mocks.search.mockReturnValue(`?orderId=${orderId}`);
-    mocks.access.mockReturnValue({ canViewAllOrders: true, canViewMemberFunds: true });
+    mocks.access.mockReturnValue({
+      canViewAllOrders: true,
+      canViewMemberFunds: true,
+    });
     mocks.request.mockResolvedValue({
       id: orderId,
       orderNo: 'TOPUP-785',
@@ -190,11 +207,15 @@ describe('订单操作', () => {
     expect(within(dialog).getByText('账户充值 · 入账 7.13 USDT')).toBeTruthy();
     expect(within(dialog).getByText('已入账')).toBeTruthy();
     expect(within(dialog).queryByText(/余额支付/)).toBeNull();
-    expect(within(dialog).getByRole('link', { name: `查看余额流水 ${txnId}` })).toHaveAttribute(
-      'href', `/collection/member-funds?userId=${owner}&txnId=${txnId}`,
+    expect(
+      within(dialog).getByRole('link', { name: `查看余额流水 ${txnId}` }),
+    ).toHaveAttribute(
+      'href',
+      `/collection/member-funds?userId=${owner}&txnId=${txnId}`,
     );
     expect(mocks.request).toHaveBeenCalledExactlyOnceWith(
-      `/api/app/order-admin/${orderId}`, { method: 'GET' },
+      `/api/app/order-admin/${orderId}`,
+      { method: 'GET' },
     );
   });
 
@@ -204,16 +225,24 @@ describe('订单操作', () => {
     mocks.search.mockReturnValue(`?orderId=${orderId}`);
     mocks.access.mockReturnValue({ canViewAllOrders: true });
     mocks.request.mockResolvedValue({
-      id: orderId, orderNo: 'ORD-5', orderType: 'Business', subject: '测试订单',
-      status: 'Paid', payChannel: 'AlipayPrecreate', collectionId: paymentId,
+      id: orderId,
+      orderNo: 'ORD-5',
+      orderType: 'Business',
+      subject: '测试订单',
+      status: 'Paid',
+      payChannel: 'AlipayPrecreate',
+      collectionId: paymentId,
     });
     renderPage();
     await screen.findByText('订单详情 · ORD-5');
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText(`渠道收款单 ${paymentId}`)).toBeTruthy();
-    expect(within(dialog).queryByRole('link', { name: /查看渠道收款单/ })).toBeNull();
+    expect(
+      within(dialog).queryByRole('link', { name: /查看渠道收款单/ }),
+    ).toBeNull();
     expect(mocks.request).toHaveBeenCalledExactlyOnceWith(
-      `/api/app/order-admin/${orderId}`, { method: 'GET' },
+      `/api/app/order-admin/${orderId}`,
+      { method: 'GET' },
     );
   });
 
@@ -232,29 +261,42 @@ describe('订单操作', () => {
   it('充值入账关联通过用户与流水 ID 精确筛选，空结果保持该范围', async () => {
     const userId = '74326c91-6b75-4ef0-9429-3f6e8af7c65f';
     const txnId = '50326c91-6b75-4ef0-9429-3f6e8af7c65f';
-    mocks.search.mockReturnValue(`?orderType=TopUp&userId=${userId}&balanceTxnId=${txnId}`);
+    mocks.search.mockReturnValue(
+      `?orderType=TopUp&userId=${userId}&balanceTxnId=${txnId}`,
+    );
     mocks.access.mockReturnValue({ canViewAllOrders: true });
     mocks.request.mockResolvedValue({ items: [], totalCount: 0 });
     await act(async () => renderPage());
     const tableRequest = mocks.tableRequest.mock.lastCall?.[0];
-    expect(await tableRequest({ current: 1, pageSize: 20 })).toMatchObject({
-      data: [], total: 0,
+    expect(await fetchGridBlock(tableRequest)).toEqual({
+      items: [],
+      totalCount: 0,
     });
-    expect(mocks.request).toHaveBeenCalledExactlyOnceWith('/api/app/order-admin', {
-      method: 'GET',
-      params: expect.objectContaining({ OrderType: 'TopUp', UserId: userId, BalanceTxnId: txnId }),
-    });
+    expect(mocks.request).toHaveBeenCalledExactlyOnceWith(
+      `/api/app/order-admin/query?orderType=TopUp&userId=${userId}&balanceTxnId=${txnId}`,
+      expect.objectContaining({
+        method: 'POST',
+        data: expect.objectContaining({ maxResultCount: 20 }),
+      }),
+    );
     expect(screen.getByText(`余额流水 ${txnId} 的充值入账记录`)).toBeTruthy();
   });
 
   it('仅有本人订单权限时，拒绝他人的充值入账筛选', async () => {
     const userId = '74326c91-6b75-4ef0-9429-3f6e8af7c65f';
     const txnId = '50326c91-6b75-4ef0-9429-3f6e8af7c65f';
-    mocks.search.mockReturnValue(`?orderType=TopUp&userId=${userId}&balanceTxnId=${txnId}`);
-    mocks.model.mockReturnValue({ initialState: { currentUser: { userid: txnId } } });
+    mocks.search.mockReturnValue(
+      `?orderType=TopUp&userId=${userId}&balanceTxnId=${txnId}`,
+    );
+    mocks.model.mockReturnValue({
+      initialState: { currentUser: { userid: txnId } },
+    });
     await act(async () => renderPage());
     expect(screen.getByText('充值入账记录链接无效或没有查看权限')).toBeTruthy();
     expect(mocks.tableRequest).not.toHaveBeenCalled();
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/app/order', expect.anything());
+    expect(mocks.request).not.toHaveBeenCalledWith(
+      '/api/app/order',
+      expect.anything(),
+    );
   });
 });

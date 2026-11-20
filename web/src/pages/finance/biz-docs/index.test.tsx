@@ -1,4 +1,4 @@
-import type { ProColumns } from '@ant-design/pro-components';
+import { actionCell, fetchGridBlock } from '@root/tests/gridInteraction';
 import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,9 +20,16 @@ vi.mock('@umijs/max', () => ({
   useAccess: mocks.access,
   useLocation: mocks.location,
 }));
-vi.mock('@/abp/finance', () => ({ getBizDocs: mocks.list, isMock: mocks.mockMode }));
-vi.mock('@/components/AutoHeightProTable', () => ({
-  default: (props: { columns: ProColumns<FinBizDocDto>[] }) => {
+vi.mock('@/abp/finance', () => ({
+  getBizDocs: mocks.list,
+  isMock: mocks.mockMode,
+}));
+vi.mock('@/abp/businessGrid', async (original) => ({
+  ...(await original<typeof import('@/abp/businessGrid')>()),
+  businessGridQueries: { bizDocs: mocks.list },
+}));
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: (props: unknown) => {
     mocks.table(props);
     return null;
   },
@@ -41,13 +48,7 @@ const sourceRow: FinBizDocDto = {
 };
 
 function renderRowActions(row: FinBizDocDto) {
-  const table = mocks.table.mock.lastCall?.[0] as
-    | { columns: ProColumns<FinBizDocDto>[] }
-    | undefined;
-  const operation = table?.columns.find((column) => column.valueType === 'option');
-  if (!operation?.render) throw new Error('缺少操作列');
-  const action = operation.render(null, row, 0, undefined, { type: 'table' });
-  render(action as ReactNode);
+  render(actionCell(mocks.table.mock.lastCall?.[0], row));
 }
 
 describe('凭证来源查询', () => {
@@ -75,20 +76,25 @@ describe('凭证来源查询', () => {
     renderRowActions(sourceRow);
 
     expect(screen.queryByRole('link', { name: '查看会计凭证' })).toBeNull();
-    expect(
-      screen.queryByRole('link', { name: '会计凭证' }),
-    ).toBeNull();
+    expect(screen.queryByRole('link', { name: '会计凭证' })).toBeNull();
   });
 
   it('将凭证详情带来的单号预填到查询，单号和业务类型分别传给服务', async () => {
     mocks.location.mockReturnValue({ search: '?bizRefId=payment%2F1' });
     render(<BizDocsPage />);
 
-    const [{ form, request }] = mocks.table.mock.calls[0];
-    expect(form.initialValues).toEqual({ bizRefId: 'payment/1' });
-    await request({ bizRefId: 'payment/1', bizType: 'payment' });
-    expect(mocks.list).toHaveBeenCalledWith(
-      expect.objectContaining({ filter: 'payment/1', bizType: 'payment' }),
-    );
+    const [props] = mocks.table.mock.calls[0];
+    await fetchGridBlock(props, {
+      filterModel: {
+        bizType: { filterType: 'text', type: 'equals', filter: 'payment' },
+      },
+    });
+    const [input, , scope] = mocks.list.mock.lastCall ?? [];
+    expect(input.filters).toContainEqual({
+      field: 'bizType',
+      join: 'and',
+      conditions: [{ op: 'eq', value: 'payment' }],
+    });
+    expect(scope + JSON.stringify(input)).toMatch(/payment(%2F|\/)1/);
   });
 });

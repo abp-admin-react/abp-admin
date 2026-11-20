@@ -1,3 +1,4 @@
+import { fetchGridBlock } from '@root/tests/gridInteraction';
 import {
   fireEvent,
   render,
@@ -48,8 +49,12 @@ vi.mock('@ant-design/pro-components', () => ({
     </>
   ),
 }));
-vi.mock('@/components/AutoHeightProTable', () => ({
-  default: (props: unknown) => {
+vi.mock('@/abp/businessGrid', async (original) => ({
+  ...(await original<typeof import('@/abp/businessGrid')>()),
+  businessGridQueries: { payments: mocks.getPayments },
+}));
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: (props: unknown) => {
     mocks.table(props);
     return null;
   },
@@ -106,25 +111,29 @@ describe('渠道收款记录', () => {
     });
     render(<PaymentsPage />);
     const props = mocks.table.mock.calls.at(-1)?.[0];
-    await props.request({
-      current: 2,
-      pageSize: 10,
-      channel: 'Other',
-      status: 'Completed',
+    await fetchGridBlock(props, {
+      startRow: 10,
+      endRow: 20,
+      filterModel: { status: { filterType: 'text', type: 'choice:Completed' } },
     });
-    expect(mocks.getPayments).toHaveBeenCalledWith({
-      skipCount: 10,
-      maxResultCount: 10,
-      filter: undefined,
-      status: 'Completed',
-      channel,
-    });
+    expect(mocks.getPayments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipCount: 10,
+        maxResultCount: 10,
+        filters: [
+          {
+            field: 'status',
+            join: 'and',
+            conditions: [{ op: 'eq', value: 'Completed' }],
+          },
+        ],
+      }),
+      expect.any(AbortSignal),
+      `?channel=${channel}`,
+    );
     expect(
-      props.columns.find(
-        (column: { dataIndex: string }) => column.dataIndex === 'channel',
-      ),
-    ).toMatchObject({ search: false });
-    expect(props.params).toEqual({ channel });
+      props.columnDefs.some((c: { field?: string }) => c.field === 'channel'),
+    ).toBe(true);
     expect(screen.getByRole('tab', { name: '第三方收款' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -138,11 +147,12 @@ describe('渠道收款记录', () => {
     });
     render(<PaymentsPage />);
     const props = mocks.table.mock.calls.at(-1)?.[0];
-    await props.request({});
+    await fetchGridBlock(props);
     expect(mocks.getPayments).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: undefined }),
+      expect.objectContaining({ filters: [] }),
+      expect.any(AbortSignal),
+      '',
     );
-    render(props.toolBarRender());
     expect(screen.getByRole('combobox', { name: '渠道' })).toBeTruthy();
     expect(screen.getByText('全部外部渠道')).toBeTruthy();
   });

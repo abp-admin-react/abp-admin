@@ -1,3 +1,4 @@
+import { actionCell } from '@root/tests/gridInteraction';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,8 +22,12 @@ vi.mock('@umijs/max', () => ({
   history: { push: vi.fn(), replace: vi.fn() },
 }));
 vi.mock('@/abp/identity', () => ({ getUser: mocks.getUser }));
-vi.mock('@/components/AutoHeightProTable', () => ({
-  default: (props: unknown) => {
+vi.mock('@/abp/businessGrid', async (original) => ({
+  ...(await original<typeof import('@/abp/businessGrid')>()),
+  businessGridQueries: { balanceAdjustments: mocks.list },
+}));
+vi.mock('ag-grid-react', () => ({
+  AgGridReact: (props: unknown) => {
     mocks.table(props);
     return null;
   },
@@ -54,7 +59,10 @@ describe('用户余额调账', () => {
     });
     mocks.list.mockResolvedValue({ items: [], totalCount: 0 });
     mocks.create.mockResolvedValue({});
-    mocks.location.mockReturnValue({ pathname: '/finance/balance-adjustments', search: '' });
+    mocks.location.mockReturnValue({
+      pathname: '/finance/balance-adjustments',
+      search: '',
+    });
   });
 
   it.each([
@@ -131,31 +139,45 @@ describe('用户余额调账', () => {
       pathname: '/finance/balance-adjustments',
       search: `?createFor=${userId}`,
     });
-    mocks.access.mockReturnValue({ canCreateBalanceAdjustments: true, canManageUsers: true });
-    mocks.getUser.mockResolvedValue({ id: userId, userName: 'target-user', email: 'target@example.test' });
+    mocks.access.mockReturnValue({
+      canCreateBalanceAdjustments: true,
+      canManageUsers: true,
+    });
+    mocks.getUser.mockResolvedValue({
+      id: userId,
+      userName: 'target-user',
+      email: 'target@example.test',
+    });
     render(page());
-    expect(await screen.findByText('调整对象：target-user（target@example.test）')).toBeTruthy();
+    expect(
+      await screen.findByText('调整对象：target-user（target@example.test）'),
+    ).toBeTruthy();
     const userField = screen.getByLabelText('用户 ID');
     expect(userField).toBeDisabled();
     expect(userField).toHaveValue(userId);
-    fireEvent.change(screen.getByLabelText('调整金额'), { target: { value: '0.000000000000000001' } });
+    fireEvent.change(screen.getByLabelText('调整金额'), {
+      target: { value: '0.000000000000000001' },
+    });
     const reason = screen.getByLabelText('调账原因');
     fireEvent.change(reason, { target: { value: '核对后的调整' } });
     const form = reason.closest('form');
     if (form) fireEvent.submit(form);
-    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId, currency: 3, amount: '0.000000000000000001' }),
-    ));
+    await waitFor(() =>
+      expect(mocks.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId,
+          currency: 3,
+          amount: '0.000000000000000001',
+        }),
+      ),
+    );
   });
 
   it('本人申请需要自批权限才显示审批操作', () => {
     render(page());
     const props = mocks.table.mock.calls.at(-1)?.[0];
-    const renderActions = props.columns.find(
-      (column: { valueType: string }) => column.valueType === 'option',
-    ).render;
     const { unmount } = render(
-      renderActions(null, { id: 'id', status: 0, applicantId: 'reviewer' }),
+      actionCell(props, { id: 'id', status: 0, applicantId: 'reviewer' }),
     );
     expect(screen.queryByRole('button', { name: '通过' })).toBeNull();
     expect(screen.queryByRole('button', { name: '拒绝' })).toBeNull();
