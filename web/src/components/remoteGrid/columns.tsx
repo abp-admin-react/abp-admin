@@ -27,6 +27,43 @@ interface ExistingColumn<T> {
   renderText?: (value: unknown, record: T, index: number) => ReactNode;
   render?: (value: unknown, record: T, index: number) => ReactNode;
 }
+/** 保持渲染器类型稳定。工具栏或草稿更新时，同一业务行内的输入和操作按钮可保留焦点。 */
+function ExistingCell<T>(
+  params: ICellRendererParams<T> & {
+    col: ExistingColumn<T>;
+    choices: Record<string, string>;
+    pro?: boolean;
+  },
+) {
+  const { col, choices, pro } = params;
+  if (params.data == null) return null;
+  const index = params.node.rowIndex ?? 0;
+  const raw = params.value;
+  let display: ReactNode = col.renderText
+    ? col.renderText(raw, params.data, index)
+    : (choices[String(raw)] ?? raw ?? '—');
+  if (
+    !col.renderText &&
+    raw &&
+    (col.valueType === 'dateTime' || col.valueType === 'date')
+  ) {
+    const date = new Date(raw);
+    if (Number.isFinite(date.getTime()))
+      display =
+        col.valueType === 'dateTime'
+          ? date.toLocaleString('zh-CN', { hour12: false })
+          : date.toLocaleDateString('zh-CN');
+  }
+  if (col.render) display = col.render(pro ? display : raw, params.data, index);
+  if (Array.isArray(display)) display = <Space>{display}</Space>;
+  return col.copyable && raw != null ? (
+    <Typography.Text copyable={{ text: String(raw) }}>
+      {display}
+    </Typography.Text>
+  ) : (
+    display
+  );
+}
 export function toGridColumns<T>(
   columns: readonly ProColumns<T>[],
   options: ColumnSettings & { pro: true },
@@ -92,40 +129,8 @@ export function toGridColumns<T>(
         col.valueType === 'dateTime' ||
         col.valueType === 'date'
       ) {
-        result.cellRenderer = (params: ICellRendererParams<T>) => {
-          if (params.data == null) return null;
-          const index = params.node.rowIndex ?? 0;
-          const raw = params.value;
-          let display: ReactNode = col.renderText
-            ? col.renderText(raw, params.data, index)
-            : (choices[String(raw)] ?? raw ?? '—');
-          if (
-            !col.renderText &&
-            raw &&
-            (col.valueType === 'dateTime' || col.valueType === 'date')
-          ) {
-            const date = new Date(raw);
-            if (Number.isFinite(date.getTime()))
-              display =
-                col.valueType === 'dateTime'
-                  ? date.toLocaleString('zh-CN', { hour12: false })
-                  : date.toLocaleDateString('zh-CN');
-          }
-          if (col.render)
-            display = col.render(
-              options.pro ? display : raw,
-              params.data,
-              index,
-            );
-          if (Array.isArray(display)) display = <Space>{display}</Space>;
-          return col.copyable && raw != null ? (
-            <Typography.Text copyable={{ text: String(raw) }}>
-              {display}
-            </Typography.Text>
-          ) : (
-            display
-          );
-        };
+        result.cellRenderer = ExistingCell;
+        result.cellRendererParams = { col, choices, pro: options.pro };
       }
       return result;
     });
