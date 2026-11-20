@@ -23,40 +23,38 @@ export function FinancePeriod() {
   }, [load.nonce]);
 
   return (
-    <>
-      <FinanceStateView
-        state={load.state}
-        errorText={load.errorText}
-        onRetry={load.retry}
-      >
-        <Spin spinning={loading}>
-          {!loading && !data ? (
-            <FinanceEmpty text="暂无期间" />
-          ) : (
-            <ProCard title="当前会计期间">
-              <Descriptions column={2} size="small">
-                <Descriptions.Item label="期间">
-                  {data?.label || '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="状态">
-                  {data ? (
-                    <Tag
-                      color={data.status === 'Open' ? 'processing' : 'default'}
-                    >
-                      {data.status === 'Open' ? '开账中' : '已关账'}
-                    </Tag>
-                  ) : (
-                    '-'
-                  )}
-                </Descriptions.Item>
-                <Descriptions.Item label="最近过账失败" span={2}>
-                  {data?.lastPostFailure || '无'}
-                </Descriptions.Item>
-              </Descriptions>
-            </ProCard>
-          )}
-        </Spin>
-      </FinanceStateView>
-    </>
+    <FinanceStateView
+      state={load.state}
+      errorText={load.errorText}
+      onRetry={load.retry}
+    >
+      <Spin spinning={loading}>
+        {!loading && !data ? (
+          <FinanceEmpty text="暂无期间" />
+        ) : (
+          <ProCard title="当前会计期间">
+            <Descriptions column={2} size="small">
+              <Descriptions.Item label="期间">
+                {data?.label || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                {data ? (
+                  <Tag
+                    color={data.status === 'Open' ? 'processing' : 'default'}
+                  >
+                    {data.status === 'Open' ? '开账中' : '已关账'}
+                  </Tag>
+                ) : (
+                  '-'
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="最近过账失败" span={2}>
+                {data?.lastPostFailure || '无'}
+              </Descriptions.Item>
+            </Descriptions>
+          </ProCard>
+        )}
+      </Spin>
+    </FinanceStateView>
   );
 }
