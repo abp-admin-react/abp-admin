@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using AbpAdmin.ClientErrors;
 using AbpAdmin.HttpApi.ClientErrors;
@@ -27,7 +28,9 @@ namespace AbpAdmin.OpenIddict;
 /// 分区，与页面侧同一策略名但分区独立，两道闸各自有界）。
 /// 超限抛 AbpAdminOperationRateLimitingException，此处转成 429 + Retry-After 的
 /// JSON 响应（端点直答，语义与 ABP 对该异常的处理一致；页面侧仍走全局异常处理）。
-/// ReadFormAsync 结果被 ASP.NET Core 缓存，不影响后续 OpenIddict 再读表单。
+/// 合法表单的读取结果由 ASP.NET Core 缓存，OpenIddict 再读同一份。
+/// 无法解析的表单在计入 IP 限流后直接回 400 invalid_request，不调用 next：
+/// 失败的读取同样会被缓存，交给后续管道会变成 500 server_error。
 /// </summary>
 public class TokenEndpointRateLimitingMiddleware
 {
@@ -69,13 +72,24 @@ public class TokenEndpointRateLimitingMiddleware
             IsTokenEndpointPath(context.Request.Path) &&
             context.Request.HasFormContentType)
         {
-            var form = await context.Request.ReadFormAsync();
             var checker = context.RequestServices.GetRequiredService<IOperationRateLimitingChecker>();
 
-            // 全部 grant 类型先过 IP 兜底闸（宽阈值）
+            // IP 闸不依赖表单。空字节等非法表单若先读再抛，喷洒请求会计数失败并变成 500。
             if (await TryRejectRateLimitedAsync(
                     context, checker, OperationRateLimitingPolicyNames.TokenEndpoint, parameter: null))
             {
+                return;
+            }
+
+            IFormCollection form;
+            try
+            {
+                form = await context.Request.ReadFormAsync();
+            }
+            catch (Exception ex) when (ex is BadHttpRequestException or InvalidDataException)
+            {
+                // 不调用 next：失败的表单读取会被 ASP.NET Core 缓存，OpenIddict 再读仍会 500。
+                await WriteInvalidRequestAsync(context);
                 return;
             }
 
@@ -123,5 +137,19 @@ public class TokenEndpointRateLimitingMiddleware
                 retryAfterSeconds: retryAfter);
             return true;
         }
+    }
+
+    /// <summary>
+    /// 表单无法解析时的 OAuth 客户端错误。不走异常管道：那条路把无错误码的异常写成 server_error。
+    /// </summary>
+    private static Task WriteInvalidRequestAsync(HttpContext context)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        context.Response.ContentType = "application/json; charset=utf-8";
+        return context.Response.WriteAsJsonAsync(new
+        {
+            error = "invalid_request",
+            error_description = "The token request could not be read.",
+        });
     }
 }
