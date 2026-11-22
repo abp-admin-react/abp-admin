@@ -129,7 +129,9 @@ services:
       # 后端自身不再对外。与 migrator 的回调地址种入值同源（WEB_PUBLIC_URL）
       AuthServer__Authority: ${WEB_PUBLIC_URL:-http://localhost:8000}
       App__SelfUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
-      # Same source as migrator OIDC RootUrl: change WEB_PUBLIC_URL (+ WEB_HOST_PORT) only.
+      # 创建租户时 Host 也会执行 OIDC 种子，需要沿用迁移器的回调地址。
+      OpenIddict__Applications__AbpAdmin_App__RootUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
+      OpenIddict__Applications__AbpAdmin_Swagger__RootUrl: ${WEB_PUBLIC_URL:-http://localhost:8000}
       App__CorsOrigins: ${WEB_PUBLIC_URL:-http://localhost:8000}
       App__RedirectAllowedUrls: ${WEB_PUBLIC_URL:-http://localhost:8000}
       # IP 归属地库：随 Host 镜像携带（见 Host Dockerfile 的 COPY etc/ip2region），
