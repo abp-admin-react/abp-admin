@@ -2,7 +2,7 @@
  * Umi request 全局错误与鉴权头。
  *
  * ## 与代码/日志对齐的约定
- * - 401 → 静默跳转 /user/login（不弹错）。
+ * - 401 → 静默跳到 /user/login?retry=1，登录页停住等用户点重试，避免立刻再跳授权。
  * - 403 → 只弹一条 message（key=http-403）；有 ABP 文案用文案，否则中文兜底；
  *   绝不透出 axios 英文 "Request failed with status code 403"。
  * - 404 → 全局静默；开发环境 console.warn `[request] 404 silenced...` 便于抓错路径；
@@ -17,10 +17,11 @@ import type { RequestOptions } from '@@/plugin-request/request';
 import type { RequestConfig } from '@umijs/max';
 import { getIntl, getLocale, history } from '@umijs/max';
 import { message, notification } from 'antd';
+import { toAbpCulture } from './abp/culture';
 import { getAccessToken } from './abp/oidc';
 import { getAbpHeaders } from './abp/tenant';
-import { toAbpCulture } from './abp/culture';
 import { formatRetryAfter } from './utils/format';
+import { LOGIN_RETRY_PATH } from './utils/redirect';
 
 type AbpError = {
   error?: {
@@ -88,7 +89,7 @@ export const errorConfig: RequestConfig = {
       // 管理 skip 仍直接抛出 axios/ABP 原错误。客户请求库 skipErrorHandler 只映射 display=none，仍归一化为 CustomerError，两套不要混用。
       if (opts?.skipErrorHandler) throw error;
       if (error.response?.status === 401) {
-        history.replace('/user/login');
+        history.replace(LOGIN_RETRY_PATH);
         return;
       }
       const abpError = error.response?.data?.error as AbpError['error'];
@@ -188,7 +189,9 @@ export const errorConfig: RequestConfig = {
     async (response: any) => {
       const url: string = response?.config?.url || '';
       const contentType: string =
-        response?.headers?.['content-type'] || response?.headers?.get?.('content-type') || '';
+        response?.headers?.['content-type'] ||
+        response?.headers?.get?.('content-type') ||
+        '';
       const status: number = response?.status ?? 0;
       if (
         (url.includes('/api/') || url.includes('/signalr-hubs/')) &&

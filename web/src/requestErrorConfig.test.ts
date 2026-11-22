@@ -95,7 +95,7 @@ describe('requestErrorConfig', () => {
 
       errorHandler(error, {});
 
-      expect(mockHistoryReplace).toHaveBeenCalledWith('/user/login');
+      expect(mockHistoryReplace).toHaveBeenCalledWith('/user/login?retry=1');
       expect(message.error).not.toHaveBeenCalled();
       expect(notification.error).not.toHaveBeenCalled();
     });

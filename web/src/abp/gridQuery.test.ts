@@ -24,7 +24,7 @@ describe('网格请求的登录状态', () => {
         ),
       ).rejects.toBe(error);
       expect(replace).toHaveBeenCalledTimes(aborted ? 0 : 1);
-      if (!aborted) expect(replace).toHaveBeenCalledWith('/user/login');
+      if (!aborted) expect(replace).toHaveBeenCalledWith('/user/login?retry=1');
     },
   );
 });

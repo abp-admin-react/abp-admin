@@ -1,4 +1,5 @@
 import { history, request } from '@umijs/max';
+import { LOGIN_RETRY_PATH } from '@/utils/redirect';
 import type { PagedResult } from './identity';
 
 export type GridFilterOperation =
@@ -46,7 +47,7 @@ export async function postGridQuery<T>(
       (error as { response?: { status?: number } } | null)?.response?.status ===
         401
     ) {
-      history.replace('/user/login');
+      history.replace(LOGIN_RETRY_PATH);
     }
     throw error;
   }

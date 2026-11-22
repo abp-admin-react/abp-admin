@@ -177,6 +177,22 @@ describe('app getInitialState', () => {
     expect(state.currentUser).toBeUndefined();
   });
 
+  it('should require a manual retry when the management API rejects a locally valid session', async () => {
+    const { getInitialState } = await import('./app');
+    mockGetUser.mockResolvedValue({
+      expired: false,
+      access_token: 'valid-local-token',
+    });
+    mockGetApplicationConfiguration.mockRejectedValue(
+      new Error('Management API unavailable'),
+    );
+
+    const state = await getInitialState();
+
+    expect(mockReplace).toHaveBeenCalledExactlyOnceWith('/user/login?retry=1');
+    expect(state.currentUser).toBeUndefined();
+  });
+
   it('should not fetch currentUser on login page', async () => {
     const { getInitialState } = await import('./app');
     mockHistory.location = {

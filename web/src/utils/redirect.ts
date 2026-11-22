@@ -1,4 +1,5 @@
 export const DEFAULT_LANDING_PATH = '/welcome';
+export const LOGIN_RETRY_PATH = '/user/login?retry=1';
 
 /**
  * 服务端下发菜单的路径须为站内相对路径。先解析再比较 origin，覆盖浏览器对反斜杠

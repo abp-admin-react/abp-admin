@@ -1,7 +1,7 @@
 import {
+  type Settings as LayoutSettings,
   type MenuDataItem,
   SettingDrawer,
-  type Settings as LayoutSettings,
 } from '@ant-design/pro-components';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { RequestConfig, RunTimeLayoutConfig } from '@umijs/max';
@@ -14,11 +14,11 @@ import React, { useEffect } from 'react';
 dayjs.extend(relativeTime);
 
 import { getApplicationConfiguration } from '@/abp/config';
-import type { ModuleAvailability } from '@/abp/moduleManagement';
 import { getCurrentAccountStatus } from '@/abp/identity';
 import { getMyAvatarInfo } from '@/abp/imaging';
 import { toMenuIcon } from '@/abp/menuIcons';
 import { getMyMenu, type MyMenuItemDto } from '@/abp/menus';
+import type { ModuleAvailability } from '@/abp/moduleManagement';
 import { getUserManager } from '@/abp/oidc';
 import { syncTenantFromSubdomain } from '@/abp/subdomain';
 import type { AbpCurrentTenant } from '@/abp/types';
@@ -36,17 +36,22 @@ import {
   VersionDropdown,
 } from '@/components';
 import renderPinnedSidebarMenu from '@/components/PinnedSidebarMenu';
-import { queryClient } from '@/queryClient';
 import { ModuleAvailabilityContext } from '@/hooks/useModuleAvailability';
+import { queryClient } from '@/queryClient';
 import { setNotificationInstance } from '@/requestErrorConfig';
-import { isSafeMenuPath } from '@/utils/redirect';
+import { isSafeMenuPath, LOGIN_RETRY_PATH } from '@/utils/redirect';
 import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 
 const loginPath = '/user/login';
 const forceChangePasswordPath = '/account/force-change-password';
 // OpenIddict uses /Error for a failed authorization before a session exists.
-const publicPaths = [loginPath, '/user/callback', '/tenant-not-found', '/Error'];
+const publicPaths = [
+  loginPath,
+  '/user/callback',
+  '/tenant-not-found',
+  '/Error',
+];
 /** 需要登录但不需要检查密码过期的路径 */
 const skipPasswordCheckPaths = [forceChangePasswordPath];
 
@@ -76,12 +81,17 @@ function toMenuData(
       const locale = chainHistory
         ? 'menu.navigation.chain-history'
         : item.isCustomTitle
-        ? false
-        : item.templateKey
-          ? `menu.navigation.${item.templateKey}`
-          : legacyLocaleKey;
+          ? false
+          : item.templateKey
+            ? `menu.navigation.${item.templateKey}`
+            : legacyLocaleKey;
       const children = item.children?.length
-        ? toMenuData(item.children, moduleAvailability, legacyLocaleKey, position)
+        ? toMenuData(
+            item.children,
+            moduleAvailability,
+            legacyLocaleKey,
+            position,
+          )
         : undefined;
       const path = children?.length ? undefined : (item.path ?? undefined);
       const catalogKey = item.path ? encodeURIComponent(item.path) : position;
@@ -128,12 +138,14 @@ export type AppInitialState = {
 };
 
 export async function getInitialState(): Promise<AppInitialState> {
+  let attemptedAuthenticatedBootstrap = false;
   const fetchUserInfo = async () => {
     try {
       const user = await getUserManager().getUser();
       if (!user || user.expired) {
         return undefined;
       }
+      attemptedAuthenticatedBootstrap = !!user.access_token;
       const config = await getApplicationConfiguration();
       if (!config.currentUser?.isAuthenticated) {
         return undefined;
@@ -195,7 +207,9 @@ export async function getInitialState(): Promise<AppInitialState> {
   ).lastConfig;
 
   if (!currentUser) {
-    history.replace(loginPath);
+    history.replace(
+      attemptedAuthenticatedBootstrap ? LOGIN_RETRY_PATH : loginPath,
+    );
   } else if (!skipPasswordCheckPaths.includes(location.pathname)) {
     // 检查是否需要强制改密（密码过期或管理员要求）
     try {
@@ -320,22 +334,29 @@ export const layout: RunTimeLayoutConfig = ({
               const next = configuration.extraProperties?.modules;
               if (
                 !next ||
-                configuration.currentUser?.id !== initialState?.currentUser?.userid ||
+                configuration.currentUser?.id !==
+                  initialState?.currentUser?.userid ||
                 next.version === initialState?.moduleAvailability?.version
-              ) return;
+              )
+                return;
               setInitialState((current) =>
-                current?.currentUser?.userid === configuration.currentUser?.id &&
+                current?.currentUser?.userid ===
+                  configuration.currentUser?.id &&
                 next.version > (current?.moduleAvailability?.version ?? -1)
                   ? { ...current, moduleAvailability: next }
                   : current,
               );
               void queryClient.invalidateQueries({ queryKey: ['workbench'] });
-              void queryClient.invalidateQueries({ queryKey: ['module-management'] });
+              void queryClient.invalidateQueries({
+                queryKey: ['module-management'],
+              });
             }}
           />
           {/* T3.2：登录后建立 SignalR 连接（T3.5 的 ReceiveNotification 等处理器已挂载） */}
           <RealTimeConnection />
-          <ModuleAvailabilityContext.Provider value={initialState?.moduleAvailability}>
+          <ModuleAvailabilityContext.Provider
+            value={initialState?.moduleAvailability}
+          >
             {children}
           </ModuleAvailabilityContext.Provider>
           <SettingDrawer
