@@ -127,7 +127,7 @@
                     }
                 </div>
             </form>
-            <form method="post" asp-page-handler="Passkey" class="d-grid gap-2 mt-2" id="passkey-form">
+            <form method="post" asp-page-handler="Passkey" asp-route-returnUrl="@Model.ReturnUrl" class="d-grid gap-2 mt-2" id="passkey-form">
                 <input type="hidden" asp-for="PasskeyCredentialJson" id="PasskeyCredentialJson" />
                 <input type="hidden" asp-for="ReturnUrl" />
                 <input type="hidden" asp-for="ReturnUrlHash" />

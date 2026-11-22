@@ -74,6 +74,7 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
 
     public override async Task<IActionResult> OnPostAsync(string action)
     {
+        DropEmbeddedReturnAuthority();
         await LoadCaptchaAsync();
         if (action == "Login")
         {
@@ -119,6 +120,15 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
         // 2FA（TwoFactorLoginResultAsync 转跳时摘，完成后原样回跳已是干净 URL）——漏一条，
         // 对应登录方式的用户就在租户上下文复现回环。
         return StripOneTimePromptFromRedirect(await base.OnPostAsync(action));
+    }
+
+    private void DropEmbeddedReturnAuthority()
+    {
+        var url = ReturnUrl;
+        var hash = ReturnUrlHash;
+        ReturnUrlAuthorityGuard.Sanitize(ref url, ref hash);
+        ReturnUrl = url;
+        ReturnUrlHash = hash;
     }
 
     private static IActionResult StripOneTimePromptFromRedirect(IActionResult result)
@@ -203,6 +213,7 @@ public class AbpAdminLoginModel : OpenIddictSupportedLoginModel, IAccountCaptcha
             return Page();
         }
 
+        DropEmbeddedReturnAuthority();
         // Passkey 成功回跳与密码登录同一治理（见 OnPostAsync 处注释）：漏摘则 Passkey 用户
         // 在租户上下文复现 authorize 回环。
         return StripOneTimePromptFromRedirect(await RedirectSafelyAsync(ReturnUrl ?? "~/", ReturnUrlHash));

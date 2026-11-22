@@ -153,6 +153,7 @@ public class TwoFactorVerificationModel : AccountPageModel
         }
 
         await _rateLimitingChecker.ResetAsync(OperationRateLimitingPolicyNames.TwoFactorCodeVerify, user.Id.ToString());
+        DropEmbeddedReturnAuthority();
         return await RedirectSafelyAsync(ReturnUrl ?? "~/", ReturnUrlHash);
     }
 
@@ -187,7 +188,17 @@ public class TwoFactorVerificationModel : AccountPageModel
         }
 
         await _rateLimitingChecker.ResetAsync(OperationRateLimitingPolicyNames.TwoFactorCodeVerify, user.Id.ToString());
+        DropEmbeddedReturnAuthority();
         return await RedirectSafelyAsync(ReturnUrl ?? "~/", ReturnUrlHash);
+    }
+
+    private void DropEmbeddedReturnAuthority()
+    {
+        var url = ReturnUrl;
+        var hash = ReturnUrlHash;
+        ReturnUrlAuthorityGuard.Sanitize(ref url, ref hash);
+        ReturnUrl = url;
+        ReturnUrlHash = hash;
     }
 
     private async Task LoadProvidersAsync(IdentityUser user)
