@@ -1,14 +1,20 @@
 /** OIDC 回调先建立会话，再进入工作台。失败时显示错误和返回登录入口。 */
 import { history } from '@umijs/max';
 import { Result, Spin } from 'antd';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { completeLogin } from '@/abp/oidc';
+import { getStoredTenant } from '@/abp/tenant';
 import { DEFAULT_LANDING_PATH } from '@/utils/redirect';
 
 const Callback: React.FC = () => {
   const [error, setError] = useState<string>();
+  const started = useRef(false);
 
   useEffect(() => {
+    if (started.current) {
+      return;
+    }
+    started.current = true;
     completeLogin()
       .then(() => {
         window.location.replace(DEFAULT_LANDING_PATH);
@@ -27,7 +33,11 @@ const Callback: React.FC = () => {
         extra={
           <a
             onClick={() => {
-              history.replace('/user/login');
+              const tenantName = getStoredTenant()?.name;
+              const search = tenantName
+                ? `?${new URLSearchParams({ tenant: tenantName })}`
+                : '';
+              history.replace(`/user/login${search}`);
             }}
           >
             返回登录

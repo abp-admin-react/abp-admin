@@ -6,14 +6,15 @@
  * - **不包含 client_secret**：SPA 公钥客户端，密钥不进浏览器、不进本仓库。
  * - 令牌存 localStorage（前缀 STORAGE_KEYS.oidcPrefix）；读写一律经本文件，
  *   禁止业务代码手拼 `oidc.user:...` 键。
- * - 登录/换号/注销均携带 `__tenant`（若有），与租户子域名会话对齐。
+ * - 显式 Host 登录带 `hostLogin=1`，不带 `__tenant`。租户登录带 `__tenant` 与 `prompt=login`。
+ *   换号在没有本地租户时同样带 `hostLogin=1`。注销只在已有租户时带 `__tenant`。
  * - 模拟登录与 Magic Link 落地：applyImpersonatedTokens（需已有会话） /
  *   applyTokensForNewSession（无会话亦可）。
  */
 import { User, UserManager, WebStorageStateStore } from 'oidc-client-ts';
 import { abpEnv } from './env';
 import { STORAGE_KEYS } from './storageKeys';
-import { getTenantId } from './tenant';
+import { getTenantId, type StoredTenant, setStoredTenant } from './tenant';
 
 let manager: UserManager | undefined;
 
@@ -80,37 +81,65 @@ export async function getAccessToken(): Promise<string | undefined> {
   return user.access_token;
 }
 
+type StartLoginOptions = {
+  /** null 表示显式登录 Host，undefined 沿用浏览器当前选择。 */
+  tenant?: StoredTenant;
+  replace?: boolean;
+};
+
+type LoginTenantState = { loginTenant: StoredTenant };
+
 /**
- * 发起登录。租户上下文（子域名或切换租户）必须带 prompt=login：防止 IdP 残留会话把
+ * 发起登录。租户登录带 prompt=login：防止 IdP 残留会话把
  * 宿主/其它租户身份静默带进本租户。
  * ⚠ 配对契约：prompt 只生效一次——宿主登录页（AbpAdminLoginModel）认证成功后会把 prompt
  * 从回跳 authorize 的 URL 摘除（否则 OpenIddict 再次强制出登录页，无限回环）。删掉这里的
  * prompt 会重新引入跨租户静默 SSO；删掉宿主摘除则所有租户登录死循环——两端缺一不可。
  */
-export async function startLogin() {
-  const tenantId = getTenantId();
+export async function startLogin({
+  tenant,
+  replace = false,
+}: StartLoginOptions = {}) {
+  const tenantId = tenant === undefined ? getTenantId() : tenant?.id;
+  const extraQueryParams: Record<string, string> = {};
+  if (tenant === null) {
+    extraQueryParams.hostLogin = '1';
+  } else if (tenantId) {
+    extraQueryParams.__tenant = tenantId;
+    extraQueryParams.prompt = 'login';
+  }
   await getUserManager().signinRedirect({
-    extraQueryParams: tenantId ? { __tenant: tenantId, prompt: 'login' } : {},
+    extraQueryParams,
+    ...(tenant !== undefined && {
+      state: { loginTenant: tenant } satisfies LoginTenantState,
+    }),
+    ...(replace && { redirectMethod: 'replace' }),
   });
 }
 
 /**
  * 账号切换：携带 prompt=select_account 重新发起授权。
  * IdP 侧跳到 /Account/SelectAccount，用户可选"继续当前账号"或"换账号"（换账号会登出当前会话落到登录表单）。
- * 与 startLogin 对齐携带 __tenant：租户子域名会话下"换账号"才能落回本租户的登录表单，
- * 否则会按 Host 上下文解析，用户只能登宿主账号。
+ * 与 startLogin 对齐携带 __tenant：租户子域名会话下"换账号"才能落回本租户的登录表单。
+ * 本地没有租户时带 hostLogin=1，避免残留的 __tenant Cookie 把宿主换账号请求解析进别的租户。
  */
 export async function switchAccount() {
   const tenantId = getTenantId();
   await getUserManager().signinRedirect({
     extraQueryParams: tenantId
       ? { __tenant: tenantId, prompt: 'select_account' }
-      : { prompt: 'select_account' },
+      : { prompt: 'select_account', hostLogin: '1' },
   });
 }
 
 export async function completeLogin() {
-  return getUserManager().signinRedirectCallback();
+  const user = await getUserManager().signinRedirectCallback();
+  const state = user.state as LoginTenantState | undefined;
+  if (state?.loginTenant !== undefined) {
+    // 同源标签页可以更新 localStorage，回调时恢复本次授权所用的租户。
+    setStoredTenant(state.loginTenant);
+  }
+  return user;
 }
 
 export async function logout() {

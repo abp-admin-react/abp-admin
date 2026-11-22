@@ -1,17 +1,15 @@
-/** 登录入口负责选择租户、发起 OIDC 登录及处理邮件链接和验证码。 */
+/** 登录入口：裸域名进入 Host；子域名、?tenant= 和邮件链接仍指定租户。 */
 import { Helmet, history } from '@umijs/max';
 import { Alert, App, Button, Card, Input, Space, Spin, Typography } from 'antd';
 import { createStyles } from 'antd-style';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { loginWithMagicLink } from '@/abp/account';
 import { findTenantByName } from '@/abp/config';
 import { applyTokensForNewSession, startLogin } from '@/abp/oidc';
-import { hasRealTimeConnection, restartRealTime } from '@/abp/signalr';
 import { syncTenantFromSubdomain } from '@/abp/subdomain';
 import {
-  getStoredTenant,
-  getTenantNameFromHost,
   isSubdomainTenantMode,
+  type StoredTenant,
   setStoredTenant,
 } from '@/abp/tenant';
 import { DEFAULT_LANDING_PATH } from '@/utils/redirect';
@@ -37,51 +35,105 @@ const useStyles = createStyles(({ token }) => ({
   },
 }));
 
+type LoginMode =
+  | { kind: 'loading' | 'host' | 'host-retry' | 'subdomain' }
+  | { kind: 'tenant'; tenant: NonNullable<StoredTenant> }
+  | { kind: 'tenant-error'; message: string };
+
+function readLoginEntry() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('magicLinkToken');
+  const email = params.get('email');
+  const tenantName = params.get('tenant')?.trim() || undefined;
+  return {
+    tenantName,
+    retry: params.get('retry') === '1',
+    magic: token && email ? { email, token, tenantName } : null,
+  };
+}
+
 const Login: React.FC = () => {
   const { styles } = useStyles();
   const { message } = App.useApp();
   const subdomainMode = isSubdomainTenantMode();
-  const [tenantReady, setTenantReady] = useState(!subdomainMode);
-  const [tenantName, setTenantName] = useState(
-    () => getTenantNameFromHost() || getStoredTenant()?.name || '',
-  );
-  const [currentTenant, setCurrentTenant] = useState(() => getStoredTenant());
+  const [entry] = useState(readLoginEntry);
+  const [mode, setMode] = useState<LoginMode>({ kind: 'loading' });
+  const [currentTenant, setCurrentTenant] =
+    useState<NonNullable<StoredTenant> | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState(false);
+  const autoLoginStartedRef = useRef(false);
 
-  const [magic, setMagic] = useState<{
-    email: string;
-    token: string;
-    tenantName?: string;
-  } | null>(null);
-  const [magicWorking, setMagicWorking] = useState(false);
+  const [magic, setMagic] = useState(entry.magic);
+  const [magicWorking, setMagicWorking] = useState(!!magic);
   const [magicError, setMagicError] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState('');
   // 邮件链接凭据只能消费一次，避免 effect 重跑导致重复提交。
   const magicStartedRef = useRef(false);
 
   useEffect(() => {
-    if (!subdomainMode) {
+    if (magic) {
       return;
     }
-    syncTenantFromSubdomain().then((result) => {
-      if (result.mode === 'missing') {
-        history.replace('/tenant-not-found');
+    let active = true;
+
+    async function resolveLoginMode() {
+      if (subdomainMode) {
+        const result = await syncTenantFromSubdomain();
+        if (!active) {
+          return;
+        }
+        if (result.mode === 'missing') {
+          history.replace('/tenant-not-found');
+          return;
+        }
+        if (result.mode === 'tenant') {
+          setCurrentTenant(result.tenant);
+        }
+        setMode({ kind: 'subdomain' });
         return;
       }
-      if (result.mode === 'tenant') {
-        setCurrentTenant(result.tenant);
-        setTenantName(result.tenant.name);
-      }
-      setTenantReady(true);
-    });
-  }, [subdomainMode]);
 
-  // 切换租户时重连已存在的 SignalR 连接，避免沿用旧租户上下文。
-  const reconnectRealTimeAfterTenantSwitch = () => {
-    if (hasRealTimeConnection()) {
-      void restartRealTime();
+      if (entry.tenantName) {
+        try {
+          const result = await findTenantByName(entry.tenantName);
+          if (!active) {
+            return;
+          }
+          if (!result.success || !result.tenantId || !result.isActive) {
+            setMode({ kind: 'tenant-error', message: '租户不存在或未启用' });
+            return;
+          }
+          setMode({
+            kind: 'tenant',
+            tenant: {
+              id: result.tenantId,
+              name: result.name || entry.tenantName,
+            },
+          });
+        } catch {
+          if (active) {
+            setMode({
+              kind: 'tenant-error',
+              message: '无法验证租户，请刷新后重试',
+            });
+          }
+        }
+        return;
+      }
+
+      // 裸域名不询问租户。先让出一次，被清理的 effect 不能再发起登录。
+      await Promise.resolve();
+      if (active) {
+        setMode({ kind: entry.retry ? 'host-retry' : 'host' });
+      }
     }
-  };
+
+    void resolveLoginMode();
+    return () => {
+      active = false;
+    };
+  }, [entry.retry, entry.tenantName, magic, subdomainMode]);
 
   const establishSession = async (
     result: Awaited<ReturnType<typeof loginWithMagicLink>>,
@@ -89,6 +141,25 @@ const Login: React.FC = () => {
     await applyTokensForNewSession(result);
     message.success('登录成功，正在打开工作台…');
     window.location.replace(DEFAULT_LANDING_PATH);
+  };
+
+  const rememberMagicTenant = async (tenantName?: string) => {
+    if (!tenantName) {
+      // Host 邮件没有租户。留下的旧租户会在换票之后继续附在 __tenant 上。
+      setStoredTenant(null);
+      return true;
+    }
+
+    const result = await findTenantByName(tenantName);
+    if (!result.success || !result.tenantId || !result.isActive) {
+      return false;
+    }
+
+    setStoredTenant({
+      id: result.tenantId,
+      name: result.name || tenantName,
+    });
+    return true;
   };
 
   const consumeMagicLink = async (
@@ -99,17 +170,9 @@ const Login: React.FC = () => {
     setMagicWorking(true);
     setMagicError(null);
     try {
-      if (tenantName) {
-        // 换票请求使用本地租户状态生成 __tenant，先写入邮件指定的租户。
-        const result = await findTenantByName(tenantName);
-        if (!result.success || !result.tenantId || !result.isActive) {
-          setMagicError('链接对应的租户不存在或未启用');
-          return;
-        }
-        setStoredTenant({
-          id: result.tenantId,
-          name: result.name || tenantName,
-        });
+      if (!(await rememberMagicTenant(tenantName))) {
+        setMagicError('链接对应的租户不存在或未启用');
+        return;
       }
       const result = await loginWithMagicLink({
         email,
@@ -132,6 +195,10 @@ const Login: React.FC = () => {
     setMagicWorking(true);
     setMagicError(null);
     try {
+      if (!(await rememberMagicTenant(magic.tenantName))) {
+        setMagicError('链接对应的租户不存在或未启用');
+        return;
+      }
       const result = await loginWithMagicLink({
         email: magic.email,
         code: otpCode.trim(),
@@ -147,58 +214,61 @@ const Login: React.FC = () => {
   };
 
   useEffect(() => {
-    if (magicStartedRef.current) {
-      return;
-    }
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('magicLinkToken');
-    const email = params.get('email');
-    if (!token || !email) {
+    if (!magic || magicStartedRef.current) {
       return;
     }
     magicStartedRef.current = true;
-    const tenantName = params.get('tenant') || undefined;
-    // 从浏览器历史移除一次性凭据，再发起换票。
-    window.history.replaceState(null, '', '/user/login');
-    setMagic({ email, token, tenantName });
-    void consumeMagicLink(email, token, tenantName);
-  }, []);
-
-  const switchTenant = async () => {
-    const name = tenantName.trim();
-    if (!name) {
-      setStoredTenant(null);
-      setCurrentTenant(null);
-      reconnectRealTimeAfterTenantSwitch();
-      message.success('已切换到 Host');
-      return;
+    // 从地址栏去掉一次性凭据。租户留下，刷新后仍进这封邮件的租户，而不是 Host。
+    const next = new URLSearchParams();
+    if (magic.tenantName) {
+      next.set('tenant', magic.tenantName);
     }
-    try {
-      const result = await findTenantByName(name);
-      if (!result.success || !result.tenantId || !result.isActive) {
-        message.error('租户不存在或未启用');
-        return;
-      }
-      const tenant = { id: result.tenantId, name: result.name || name };
-      setStoredTenant(tenant);
-      setCurrentTenant(tenant);
-      reconnectRealTimeAfterTenantSwitch();
-      message.success(`当前租户：${tenant.name}`);
-    } catch {
-      message.error('查找租户失败，请确认后端已启动');
-    }
-  };
+    const search = next.toString();
+    window.history.replaceState(
+      null,
+      '',
+      search ? `/user/login?${search}` : '/user/login',
+    );
+    void consumeMagicLink(magic.email, magic.token, magic.tenantName);
+  }, [magic]);
 
-  const login = async () => {
+  const automaticLogin = mode.kind === 'host' || mode.kind === 'tenant';
+  const directLogin = automaticLogin || mode.kind === 'host-retry';
+
+  const login = useCallback(async () => {
+    setLoginError(false);
     setLoading(true);
     try {
-      await startLogin();
+      if (mode.kind === 'host' || mode.kind === 'host-retry') {
+        setStoredTenant(null);
+        await startLogin({ tenant: null, replace: directLogin });
+      } else if (mode.kind === 'tenant') {
+        setStoredTenant(mode.tenant);
+        await startLogin({ tenant: mode.tenant, replace: true });
+      } else if (currentTenant) {
+        setStoredTenant(currentTenant);
+        await startLogin({ tenant: currentTenant });
+      } else {
+        setStoredTenant(null);
+        await startLogin({ tenant: null });
+      }
     } catch {
       setLoading(false);
       console.warn('[auth] 无法发起 OpenIddict 登录');
-      message.error('无法打开登录页，请稍后重试');
+      if (directLogin) {
+        setLoginError(true);
+      } else {
+        message.error('无法打开登录页，请稍后重试');
+      }
     }
-  };
+  }, [mode, currentTenant, directLogin, message]);
+
+  useEffect(() => {
+    if (automaticLogin && !autoLoginStartedRef.current) {
+      autoLoginStartedRef.current = true;
+      void login();
+    }
+  }, [automaticLogin, login]);
 
   if (magic) {
     return (
@@ -263,6 +333,50 @@ const Login: React.FC = () => {
     );
   }
 
+  if (mode.kind !== 'subdomain') {
+    const tenantError = mode.kind === 'tenant-error' ? mode.message : null;
+    const showRetry = loginError || (mode.kind === 'host-retry' && !loading);
+    return (
+      <div className={styles.container}>
+        <Helmet>
+          <title>登录 - {Settings.title}</title>
+        </Helmet>
+        <div style={{ flex: 1, padding: '64px 16px' }}>
+          <Card style={{ maxWidth: 420, margin: '0 auto' }} title="AbpAdmin">
+            <Space
+              orientation="vertical"
+              size="middle"
+              style={{ width: '100%' }}
+            >
+              {!tenantError && !showRetry && (
+                <Space role="status">
+                  <Spin />
+                  <Typography.Text>正在打开登录页…</Typography.Text>
+                </Space>
+              )}
+              {tenantError && (
+                <>
+                  <Alert type="error" showIcon title={tenantError} />
+                  <Button block href="/user/login">
+                    返回登录
+                  </Button>
+                </>
+              )}
+              {loginError && (
+                <Alert type="error" showIcon title="无法打开登录页" />
+              )}
+              {showRetry && (
+                <Button type="primary" block onClick={login}>
+                  重试登录
+                </Button>
+              )}
+            </Space>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.container}>
       <Helmet>
@@ -279,27 +393,14 @@ const Login: React.FC = () => {
           }
         >
           <Typography.Paragraph type="secondary">
-            使用 ABP OpenIddict 授权码和 PKCE 登录。
-            也可用子域名访问，例如 demo 租户：
+            使用 ABP OpenIddict 授权码和 PKCE 登录。 也可用子域名访问，例如 demo
+            租户：
             {window.location.hostname.startsWith('demo.')
               ? window.location.hostname
               : `demo.${window.location.hostname}`}
             {window.location.port ? `:${window.location.port}` : ''}
           </Typography.Paragraph>
           <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-            {!subdomainMode && (
-              <>
-                <Input
-                  placeholder="租户名称，留空表示 Host"
-                  value={tenantName}
-                  onChange={(e) => setTenantName(e.target.value)}
-                  onPressEnter={switchTenant}
-                />
-                <Button block onClick={switchTenant}>
-                  切换租户
-                </Button>
-              </>
-            )}
             <Typography.Text>
               当前上下文：{currentTenant ? currentTenant.name : 'Host'}
               {subdomainMode ? '（子域名）' : ''}
@@ -308,7 +409,6 @@ const Login: React.FC = () => {
               type="primary"
               block
               loading={loading}
-              disabled={subdomainMode && !tenantReady}
               onClick={login}
               data-testid="abp-login"
             >
