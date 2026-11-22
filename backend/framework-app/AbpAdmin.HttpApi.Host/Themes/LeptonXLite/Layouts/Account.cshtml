@@ -1,0 +1,147 @@
+@using System.Globalization
+@using System.Net
+@using Microsoft.AspNetCore.Html
+@using Microsoft.AspNetCore.Http.Extensions
+@using Microsoft.Extensions.Options
+@using Volo.Abp.AspNetCore.Mvc.UI.Alerts
+@using Volo.Abp.AspNetCore.Mvc.UI.Components.LayoutHook
+@using Volo.Abp.AspNetCore.Mvc.UI.Layout
+@using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite
+@using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite.Bundling
+@using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite.Languages
+@using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite.Themes.LeptonXLite.Components.PageAlerts
+@using Volo.Abp.AspNetCore.Mvc.UI.Theme.Shared.Branding
+@using Volo.Abp.AspNetCore.Mvc.UI.Theming
+@using Volo.Abp.AspNetCore.Mvc.UI.Widgets.Components.WidgetScripts
+@using Volo.Abp.AspNetCore.Mvc.UI.Widgets.Components.WidgetStyles
+@using Volo.Abp.Localization
+@using Volo.Abp.Ui.Branding
+@using Volo.Abp.Ui.LayoutHooks
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@addTagHelper *, Volo.Abp.AspNetCore.Mvc.UI.Bootstrap
+@addTagHelper *, Volo.Abp.AspNetCore.Mvc.UI.Bundling
+@inject IAlertManager AlertManager
+@inject IOptions<AbpThemingOptions> ThemingOptions
+@inject ThemeLanguageInfoProvider ThemeLanguageInfoProvider
+@inject IPageLayout PageLayout
+@inject IBrandingProvider BrandingProvider
+
+@* LeptonXLite 5.7.1 账户布局。租户来自子域名或授权请求，本页不提供切换。 *@
+@{
+    Layout = null;
+    string pageTitle = ViewBag.Title ?? BrandingProvider.AppName;
+    if (PageLayout.Content.Title != null)
+    {
+        pageTitle = string.IsNullOrWhiteSpace(pageTitle)
+            ? PageLayout.Content.Title
+            : $"{PageLayout.Content.Title} | {pageTitle}";
+    }
+
+    var logoUrl = Url.ResolveBrandingCssUrl(BrandingProvider.LogoUrl);
+    var logoIconUrl = Url.ResolveBrandingCssUrl(BrandingProvider.GetLogoIconUrlOrNull());
+    var logoStyles = new HtmlString(
+        (logoUrl == null ? string.Empty : $"--lpx-logo: url('{logoUrl}');") +
+        (logoIconUrl == null ? string.Empty : $"--lpx-logo-icon: url('{logoIconUrl}');"));
+    var languageInfo = await ThemeLanguageInfoProvider.GetLanguageSwitchViewComponentModelAsync();
+    var returnUrl = WebUtility.UrlEncode(Context.Request.GetEncodedPathAndQuery());
+    var rtl = CultureHelper.IsRtl ? "rtl" : string.Empty;
+    var hasLanguageSwitch = languageInfo.Languages.Count > 1;
+    var hasAlerts = AlertManager.Alerts.Any();
+}
+<!DOCTYPE html>
+<html lang="@CultureInfo.CurrentCulture.Name" dir="@rtl">
+<head>
+    @await Component.InvokeLayoutHookAsync(LayoutHooks.Head.First, StandardLayouts.Account)
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    @if (!string.IsNullOrWhiteSpace(ThemingOptions.Value.BaseUrl))
+    {
+        <base href="@ThemingOptions.Value.BaseUrl" />
+    }
+    <title>@pageTitle</title>
+    <link rel="icon" href="~/favicon.svg" type="image/svg+xml">
+    <abp-style-bundle name="@LeptonXLiteThemeBundles.Styles.Global" />
+    @await Component.InvokeAsync(typeof(WidgetStylesViewComponent))
+    @await RenderSectionAsync("styles", required: false)
+    @await Component.InvokeLayoutHookAsync(LayoutHooks.Head.Last, StandardLayouts.Account)
+    @if (logoUrl != null || logoIconUrl != null)
+    {
+        <style>
+            :root .abp-account-layout .lpx-brand-logo {
+                @logoStyles
+            }
+        </style>
+    }
+</head>
+<body class="abp-account-layout @rtl">
+    @await Component.InvokeLayoutHookAsync(LayoutHooks.Body.First, StandardLayouts.Account)
+    <div class="lpx-scroll-container">
+        <div id="lpx-wrapper">
+            <div class="lpx-content-container m-0">
+                <div class="lpx-content">
+                    @await Component.InvokeLayoutHookAsync(LayoutHooks.PageContent.First, StandardLayouts.Account)
+                    <div class="container">
+                        <div class="row">
+                            <div class="col-md-8 col-lg-5 mx-auto">
+                                @if (string.IsNullOrWhiteSpace(BrandingProvider.LogoUrl) || BrandingProvider.ShowsAppNameWithLogo())
+                                {
+                                    <div class="lpx-logo-container lpx-login-brand-text">
+                                        <div class="lpx-brand-logo lpx-login-logo mx-auto" style="@(BrandingProvider.ShowsAppNameWithLogo() ? "background-image: var(--lpx-logo-icon);" : null)"></div>
+                                        <div class="lpx-brand-name lpx-login-name mx-auto">@BrandingProvider.AppName</div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="lpx-brand-logo lpx-login-logo mb-3 mx-auto"></div>
+                                }
+                                @if (hasLanguageSwitch || hasAlerts)
+                                {
+                                    <abp-card>
+                                        <abp-card-body>
+                                            <div class="align-items-start d-flex justify-content-between mb-2">
+                                                <h2 class="lpx-main-title lpx-login-title m-0 me-auto">@PageLayout.Content.Title</h2>
+                                                @if (hasLanguageSwitch)
+                                                {
+                                                    <div class="dropdown btn-group ms-auto">
+                                                        <button id="languageDropdown" class="btn btn-sm btn-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                            <i class="bi bi-translate me-1"></i> @languageInfo.CurrentLanguage.DisplayName
+                                                        </button>
+                                                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="languageDropdown">
+                                                            @{ var seen = new HashSet<string>(); }
+                                                            @foreach (var language in languageInfo.Languages)
+                                                            {
+                                                                var code = (seen.Add(language.TwoLetterISOLanguageName) ? language.TwoLetterISOLanguageName : language.CultureName).ToUpperInvariant();
+                                                                var languageUrl = Url.Content($"~/Abp/Languages/Switch?culture={language.CultureName}&uiCulture={language.UiCultureName}&returnUrl={returnUrl}");
+                                                                <li><a href="@languageUrl" class="dropdown-item" data-lpx-language-option="@code">@language.DisplayName / @code</a></li>
+                                                            }
+                                                        </ul>
+                                                    </div>
+                                                }
+                                            </div>
+                                            <hr />
+                                            @if (hasAlerts)
+                                            {
+                                                @await Component.InvokeAsync(typeof(PageAlertsViewComponent))
+                                            }
+                                        </abp-card-body>
+                                    </abp-card>
+                                }
+                                @RenderBody()
+                                @await Component.InvokeLayoutHookAsync(LayoutHooks.PageContent.Last, StandardLayouts.Account)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <abp-script-bundle name="@LeptonXLiteThemeBundles.Scripts.Global" />
+    <script src="~/Abp/ApplicationLocalizationScript?cultureName=@CultureInfo.CurrentUICulture.Name"></script>
+    <script type="text/javascript" src="~/Abp/ApplicationConfigurationScript"></script>
+    <script type="text/javascript" src="~/Abp/ServiceProxyScript"></script>
+    @await Component.InvokeAsync(typeof(WidgetScriptsViewComponent))
+    @await RenderSectionAsync("scripts", required: false)
+    @await Component.InvokeLayoutHookAsync(LayoutHooks.Body.Last, StandardLayouts.Account)
+</body>
+</html>

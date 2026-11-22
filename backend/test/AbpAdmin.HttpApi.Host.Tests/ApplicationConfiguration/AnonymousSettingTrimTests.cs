@@ -63,6 +63,8 @@ public class AnonymousSettingTrimTests
             "匿名响应必须保留 cookieConsent 扩展段（登录页 Cookie 横幅，CookieConsentApplicationConfigurationContributor 下发）。");
         configuration.ExtraProperties.ShouldContainKey("signalr",
             "匿名响应必须保留 signalr 扩展段（前端据 SignalR:Enabled 决定连接还是降级轮询）。");
+        configuration.ExtraProperties.ContainsKey("showTenantSelection").ShouldBeFalse(
+            "裸域名登录不再询问租户，匿名配置不必下发选择开关。");
     }
 
     [RequiresHostDatabaseFact]

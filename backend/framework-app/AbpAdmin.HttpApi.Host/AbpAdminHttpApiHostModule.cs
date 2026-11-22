@@ -846,6 +846,20 @@ public class AbpAdminHttpApiHostModule : AbpModule
 
         context.Services.PostConfigure<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme, options =>
         {
+            var validatePrincipal = options.Events.OnValidatePrincipal;
+            options.Events.OnValidatePrincipal = async cookieContext =>
+            {
+                if (cookieContext.Principal?.FindFirst(AbpClaimTypes.TenantId) != null
+                    && Tenants.HostLoginTenantResolveContributor.IsHostLogin(cookieContext.Request))
+                {
+                    // 只忽略这一次请求上的租户身份。浏览器里的登录 Cookie 保留到新登录成功。
+                    cookieContext.RejectPrincipal();
+                    return;
+                }
+
+                await validatePrincipal(cookieContext);
+            };
+
             var previous = options.Events.OnRedirectToLogin;
             options.Events.OnRedirectToLogin = async redirectContext =>
             {
@@ -918,6 +932,7 @@ public class AbpAdminHttpApiHostModule : AbpModule
             }
 
             options.AddDomainTenantResolver("{0}.localhost");
+            options.TenantResolvers.Insert(0, new Tenants.HostLoginTenantResolveContributor());
         });
     }
 
