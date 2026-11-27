@@ -4,6 +4,10 @@
 
 ## 模块变更
 
+- **[破坏性]** 角色功能权限改用 `GET/PUT /api/identity/roles/{id}/permissions`。调用方传入打开编辑器时的 `expectedRoleName`，提交增撤差集。旧接口按角色名写入返回 400。
+- 收款与订单核对保留渠道和商户归属，订单作业记录分页位置并独立重扫近七天的充值。资金推送发布时读取已提交授权。升级时轮换所有资金发布与 Hub 节点，使旧会话重新连接。
+- 储备核对保留原始差额，并记录确认区块、核对地址和归集记账时差。既有记录标为“历史记录”。
+
 - 依赖升级：ABP `10.7.0` → `10.7.1`（`Directory.Packages.props` 的 `AbpVersion`），LeptonXLite `5.7.0` → `5.7.1`（主题依赖 `Volo.Abp.* >= 10.7.1`，必须同升）。管理前端 antd lock `6.6.6` → `6.7.0`，`@ant-design/cli` 跟随；`@ant-design/pro-components` 仍钉 `3.1.14-7`。
 
 - `backend/NuGet.Config`:`<packageSources>` 增加 `<clear />`——屏蔽用户级/机器级源,包只允许来自本文件声明源(供应链加固,借鉴 abp-next-admin)。
@@ -61,7 +65,9 @@
 
 | 项目 | 迁移/脚本 | 说明 |
 | --- | --- | --- |
-| (本批无新增;迁移机制重构的迁移条目见该重构自己的说明) | | |
+| AbpAdmin.Collection | `20261127061041_PersistSweepRecovery` | 保存归集恢复和追扫进度。 |
+| AbpAdmin.Collection | `20261127130322_ReconcileVaultAtConfirmedBlock` | 保存确认区块、金库地址和核对结论。 |
+| AbpAdmin.Ordering | `20261127060834_AddCreditRescanBeforeSeq` | 保存订单核对分页和充值重扫位置。 |
 
 ## 配置变更
 
