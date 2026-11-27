@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
 using AbpAdmin.HttpApi.ClientErrors;
 using Microsoft.AspNetCore.Authorization;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp;
+using Volo.Abp.Validation;
 
 namespace AbpAdmin.ClientErrors;
 
@@ -23,6 +25,7 @@ public sealed class ClientErrorFaultController : ControllerBase
     public const string GatewayBoomPath = "/v1/client-error-test/boom";
     public const string StringFailurePath = "/api/client-error-test/string-failure";
     public const string RegisteredPath = "/api/client-error-test/registered";
+    public const string ValidationPath = "/api/client-error-test/validation";
     public const string Marker = "INTERNAL_ONLY_MARKER";
 
     [HttpGet(BoomPath)]
@@ -39,6 +42,12 @@ public sealed class ClientErrorFaultController : ControllerBase
     {
         throw new BusinessException(ClientErrorCodes.NotFound)
             .WithData(Marker, "SELECT * FROM secrets");
+    }
+
+    [HttpGet(ValidationPath)]
+    public IActionResult Validation()
+    {
+        throw new AbpValidationException(Marker, [new ValidationResult(Marker, [Marker])]);
     }
 
     [HttpGet(FailureResultPath)]

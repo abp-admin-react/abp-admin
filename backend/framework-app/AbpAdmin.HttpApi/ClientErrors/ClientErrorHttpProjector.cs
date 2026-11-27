@@ -11,6 +11,7 @@ using Volo.Abp;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.ExceptionHandling;
 using Volo.Abp.Tracing;
+using Volo.Abp.Validation;
 
 namespace AbpAdmin.HttpApi.ClientErrors;
 
@@ -128,6 +129,11 @@ public class ClientErrorHttpProjector : IClientErrorHttpProjector, ITransientDep
             else
             {
                 internalCode ??= (context.Exception as IHasErrorCode)?.Code;
+                // ABP 校验异常无错误码时使用公开的校验分类，异常文本不参与投影。
+                if (string.IsNullOrEmpty(internalCode) && context.Exception is AbpValidationException)
+                {
+                    internalCode = ClientErrorCodes.ValidationFailed;
+                }
             }
         }
 

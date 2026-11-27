@@ -72,6 +72,19 @@ public class ClientErrorPipelineBaselineTests
     }
 
     [Fact]
+    public async Task Uncoded_Abp_Validation_Should_Return_Safe_400()
+    {
+        var (_, client) = await ClientErrorPipelineHost.HostTask;
+        using var response = await client.GetAsync(ClientErrorFaultController.ValidationPath);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        using var envelope = System.Text.Json.JsonDocument.Parse(body);
+        envelope.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe(ClientErrorCodes.ValidationFailed);
+        body.ShouldNotContain(ClientErrorFaultController.Marker);
+    }
+
+    [Fact]
     public async Task Uncaught_Api_Exception_Should_Use_Request_Culture()
     {
         var (_, client) = await ClientErrorPipelineHost.HostTask;
