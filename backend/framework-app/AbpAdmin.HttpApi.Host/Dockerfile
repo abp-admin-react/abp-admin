@@ -33,8 +33,8 @@ COPY framework/ framework/
 COPY framework-app/ framework-app/
 COPY modules/ modules/
 
-# ABP CLI 安装并复制 Razor 登录页所需的静态库到 wwwroot/libs。
-# ABP 10.7 使用 jQuery 4 / Migrate 4，Yarn 会提示旧依赖声明的版本范围不匹配。
+# ABP CLI 将 Razor 登录页的静态库复制到 wwwroot/libs。
+# ABP 10.7 默认加载 jQuery 4 和 Migrate 4，后者兼容旧插件的 API。Yarn 仍会报告旧版依赖范围。
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=node:22-bookworm-slim /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node:22-bookworm-slim /opt/yarn-v1.22.22 /opt/yarn-v1.22.22
@@ -42,7 +42,8 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && ln -s /opt/yarn-v1.22.22/bin/yarn /usr/local/bin/yarn
 ENV PATH="${PATH}:/root/.dotnet/tools"
-RUN dotnet tool install --global Volo.Abp.Studio.Cli
+# CLI 3.1.6 支持 .NET 10，CLI 4 需要 .NET 11。
+RUN dotnet tool install --global Volo.Abp.Studio.Cli --version 3.1.6
 RUN abp install-libs -wd framework-app/AbpAdmin.HttpApi.Host
 
 RUN dotnet publish framework-app/AbpAdmin.HttpApi.Host/AbpAdmin.HttpApi.Host.csproj \
