@@ -1,8 +1,13 @@
 import { message, notification } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getAccessToken } from './abp/oidc';
+import { getAccessToken, getAccessTokenSnapshot } from './abp/oidc';
 import { getAbpHeaders } from './abp/tenant';
-import { errorConfig, isNotFound, setNotificationInstance } from './requestErrorConfig';
+import {
+  errorConfig,
+  isNotFound,
+  RequestSessionContextChangedError,
+  setNotificationInstance,
+} from './requestErrorConfig';
 
 const mockHistoryReplace = vi.hoisted(() => vi.fn());
 
@@ -28,6 +33,7 @@ vi.mock('@umijs/max', () => ({
 
 vi.mock('./abp/oidc', () => ({
   getAccessToken: vi.fn(),
+  getAccessTokenSnapshot: vi.fn(),
 }));
 
 vi.mock('./abp/tenant', () => ({
@@ -81,6 +87,23 @@ describe('requestErrorConfig', () => {
   });
 
   describe('errorHandler', () => {
+    it('返回 HTML 的接口在诊断中只显示路径，忽略查询字符串中的其他路由', async () => {
+      const inspect = errorConfig.responseInterceptors?.[0] as (
+        response: unknown,
+      ) => Promise<unknown>;
+      const html = (url: string) => ({
+        config: { url },
+        headers: { 'content-type': 'text/html' },
+        status: 200,
+      });
+      await expect(
+        inspect(html('/api/download?token=example#fragment')),
+      ).rejects.toThrow(
+        /^接口返回了 HTML 页面，请核对后端路由：\/api\/download$/,
+      );
+      const page = html('/help?next=/api/download');
+      await expect(inspect(page)).resolves.toBe(page);
+    });
     it('should rethrow error when skipErrorHandler is true', () => {
       const error = new Error('Test error');
 
@@ -96,6 +119,31 @@ describe('requestErrorConfig', () => {
       errorHandler(error, {});
 
       expect(mockHistoryReplace).toHaveBeenCalledWith('/user/login?retry=1');
+      expect(message.error).not.toHaveBeenCalled();
+      expect(notification.error).not.toHaveBeenCalled();
+    });
+
+    it('仍为角色权限请求的 401 跳转登录', () => {
+      const error = Object.assign(new Error('Unauthorized'), {
+        response: { status: 401 },
+      });
+
+      errorHandler(error, { expectedUserId: 'initial-account' });
+
+      expect(mockHistoryReplace).toHaveBeenCalledWith('/user/login?retry=1');
+      expect(message.error).not.toHaveBeenCalled();
+      expect(notification.error).not.toHaveBeenCalled();
+    });
+
+    it.each([403, 500])('角色权限请求的 %i 由编辑器展示', (status) => {
+      const error = Object.assign(new Error('Request failed'), {
+        response: { status },
+      });
+
+      expect(() =>
+        errorHandler(error, { expectedUserId: 'initial-account' }),
+      ).toThrow(error);
+      expect(mockHistoryReplace).not.toHaveBeenCalled();
       expect(message.error).not.toHaveBeenCalled();
       expect(notification.error).not.toHaveBeenCalled();
     });
@@ -291,6 +339,8 @@ describe('requestErrorConfig', () => {
       url?: string;
       method?: string;
       headers?: Record<string, string>;
+      expectedTenantId?: string | null;
+      expectedUserId?: string;
     }) => Promise<{ url?: string; headers: Record<string, string> }>;
 
     it('should attach ABP headers and bearer token', async () => {
@@ -307,6 +357,59 @@ describe('requestErrorConfig', () => {
       expect(result.headers['x-tenant']).toBe('tenant-1');
       // SPA 语言单源：每请求经 Accept-Language 传给后端（zh-CN 映射 zh-Hans）
       expect(result.headers['Accept-Language']).toBe('zh-Hans');
+    });
+
+    it('cancels a role update if the tenant header changes before dispatch', async () => {
+      vi.mocked(getAbpHeaders).mockReturnValueOnce({
+        __tenant: 'another-tenant',
+      });
+      await expect(
+        interceptor({ method: 'PUT', expectedTenantId: null }),
+      ).rejects.toMatchObject({
+        name: 'RequestSessionContextChangedError',
+        scope: 'tenant',
+      });
+    });
+
+    it.each(['GET', 'PUT'])(
+      '同租户切换账号后发送前阻止角色权限 %s',
+      async (method) => {
+        vi.mocked(getAbpHeaders).mockReturnValueOnce({ __tenant: 'tenant-1' });
+        vi.mocked(getAccessTokenSnapshot).mockResolvedValueOnce({
+          token: 'replacement-token',
+          userId: 'replacement-account',
+        });
+
+        await expect(
+          interceptor({
+            method,
+            expectedTenantId: 'tenant-1',
+            expectedUserId: 'initial-account',
+          }),
+        ).rejects.toEqual(new RequestSessionContextChangedError('user'));
+        expect(getAccessToken).not.toHaveBeenCalled();
+      },
+    );
+
+    it('角色权限请求仍使用同一账号的新令牌并附加已核对的租户', async () => {
+      vi.mocked(getAbpHeaders).mockReturnValueOnce({ __tenant: 'tenant-1' });
+      vi.mocked(getAccessTokenSnapshot).mockResolvedValueOnce({
+        token: 'refreshed-token',
+        userId: 'initial-account',
+      });
+
+      const result = await interceptor({
+        method: 'PUT',
+        expectedTenantId: 'tenant-1',
+        expectedUserId: 'initial-account',
+      });
+
+      expect(result.headers).toMatchObject({
+        Authorization: 'Bearer refreshed-token',
+        __tenant: 'tenant-1',
+      });
+      expect(getAccessTokenSnapshot).toHaveBeenCalledTimes(1);
+      expect(getAccessToken).not.toHaveBeenCalled();
     });
 
     it('should pass through config without Authorization when no token', async () => {

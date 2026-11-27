@@ -37,6 +37,9 @@ public class AbpAdminHttpApiModule : AbpModule
 
         Configure<Volo.Abp.AspNetCore.ExceptionHandling.AbpExceptionHttpStatusCodeOptions>(options =>
         {
+            options.Map(AbpAdminDomainErrorCodes.Identity.RolePermissionTargetChanged, System.Net.HttpStatusCode.Conflict);
+            options.Map(AbpAdminDomainErrorCodes.Identity.RolePermissionNameAmbiguous, System.Net.HttpStatusCode.Conflict);
+            options.Map(AbpAdminDomainErrorCodes.Identity.RolePermissionIdRequired, System.Net.HttpStatusCode.BadRequest);
             options.Map(Modules.DeploymentModuleErrorCodes.Disabled, System.Net.HttpStatusCode.Conflict);
             options.Map(Modules.DeploymentModuleErrorCodes.VersionConflict, System.Net.HttpStatusCode.Conflict);
             options.Map(Modules.DeploymentModuleErrorCodes.DependencyBlocked, System.Net.HttpStatusCode.Conflict);

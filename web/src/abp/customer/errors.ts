@@ -1,5 +1,5 @@
 /**
- * 客户端错误纯 TS 类型、ABP/OAuth 安全响应校验与归一化（方案 7.1/7.2）。
+ * 客户端错误类型及 ABP、OAuth 响应校验与归一化。
  *
  * 无 React/Umi/Antd/axios 依赖，可在 Node.js 或浏览器使用。
  * 安全错误自身的 message 只来自批准服务端响应或本地安全提示。
@@ -9,7 +9,7 @@
 import catalogJson from './public-error-catalog.json';
 
 /**
- * 客户端错误分类（方案 7.2）。
+ * 客户端错误分类。
  * 前 8 种来自后端 PublicKind；后 4 种由前端本地判定（网络、超时、取消、结果未知）。
  */
 export type CustomerErrorKind =
@@ -27,25 +27,25 @@ export type CustomerErrorKind =
   | 'outcomeUnknown';
 
 /**
- * 客户端错误对象（方案 7.2）。Error 子类型，可直接 throw。
+ * 提供给客户页面的错误对象。
  */
 export type CustomerError = Error & {
-  /** 公开稳定码（可能为 null，前端走 kind 分支） */
+  /** 仅公开稳定码可用时提供；流程分支始终可使用 kind。 */
   code?: string;
   /** 分类（客户端用于流程分支和展示策略） */
   kind: CustomerErrorKind;
-  /** HTTP 状态码（可能为 null，如网络错误） */
+  /** 收到 HTTP 响应时提供。 */
   httpStatus?: number;
-  /** 字段级校验错误（表单接管后不再全局提示） */
+  /** 仅填入公开校验错误的字段消息，供表单展示。 */
   fieldErrors: Record<string, string[]>;
-  /** 关联号（可 null，用于客服查询日志） */
+  /** 有有效关联号时提供，供客服查询日志。 */
   correlationId?: string;
   /** 等待秒数（429/503 时可能提供） */
   retryAfterSeconds?: number;
 };
 
 /**
- * 错误展示责任（方案 7.2）。
+ * 错误展示责任。
  * - global: 全局提示（toast/notification）
  * - page: 页面级提示（如 404 页面）
  * - form: 表单字段提示（fieldErrors 接管后降级）
@@ -54,7 +54,7 @@ export type CustomerError = Error & {
 export type CustomerErrorDisplay = 'global' | 'page' | 'form' | 'none';
 
 /**
- * ABP 标准错误信封（方案 3.1）。
+ * ABP 标准错误信封。
  * 前端归一化器从 HTTP 响应解析此结构。
  */
 export interface AbpRemoteServiceErrorResponse {
@@ -71,7 +71,7 @@ export interface AbpRemoteServiceErrorResponse {
 }
 
 /**
- * OAuth 错误响应（方案 3.2）。
+ * OAuth 错误响应。
  * /connect 端点使用此格式（+ WWW-Authenticate 头）。
  */
 export interface OAuthErrorResponse {
@@ -80,8 +80,7 @@ export interface OAuthErrorResponse {
 }
 
 /**
- * 公开错误快照条目（方案 7.4）。
- * 由后端 P3 快照测试生成，前端加载用于校验响应合法性。
+ * 后端 PublicErrorContractSnapshotTests 生成的公开目录条目，用于校验错误码与 HTTP 状态的组合。
  */
 export interface PublicErrorCatalogEntry {
   /** 公开稳定码 */
@@ -95,7 +94,7 @@ export interface PublicErrorCatalogEntry {
 }
 
 /**
- * 公开错误快照（方案 7.4）。
+ * 公开错误快照。
  */
 export interface PublicErrorCatalogSnapshot {
   /** 契约 schema 版本（前端需识别，不与服务端响应协商） */
@@ -126,7 +125,7 @@ export const CustomerErrorLimits = {
 } as const;
 
 /**
- * 客户端失败结果（方案 3.3 ClientFailureDto）。
+ * 客户端失败结果，对应后端 ClientFailureDto。
  * 用于 HTTP 200 的任务/批量失败结果。
  */
 export interface ClientFailureResult {
@@ -508,7 +507,8 @@ function parseValidationErrors(
 function toFieldErrors(
   validationErrors: Array<{ message?: string; members: string[] }>,
 ): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
+  // 接口字段名可能与对象原型属性同名，表单字段按原名分组。
+  const fieldErrors: Record<string, string[]> = Object.create(null);
   for (const item of validationErrors) {
     if (!item.message || item.members.length === 0) {
       continue;
@@ -910,9 +910,6 @@ export function normalizeCustomerError(
 
   const abp = parseAbpErrorResponse(input.body, input.catalog);
   const oauth = abp ? null : parseOAuthErrorResponse(input.body);
-  const fieldErrors = abp
-    ? toFieldErrors(abp.validationErrors)
-    : fieldErrorsEmpty;
   const status = input.status;
 
   const entry = abp?.code
@@ -923,6 +920,10 @@ export function normalizeCustomerError(
     !!entry &&
     status !== undefined &&
     isAllowedCombination(entry, status);
+  const fieldErrors =
+    catalogMatches && entry.kind === 'validation'
+      ? toFieldErrors(abp.validationErrors)
+      : fieldErrorsEmpty;
 
   let kind: CustomerErrorKind | undefined;
   let code: string | undefined;

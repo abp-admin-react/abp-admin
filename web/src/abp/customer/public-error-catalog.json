@@ -44,6 +44,36 @@
       ]
     },
     {
+      "code": "AbpAdmin:RolePermissionIdRequired",
+      "kind": "validation",
+      "httpStatuses": [
+        400
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "AbpAdmin:RolePermissionNameAmbiguous",
+      "kind": "conflict",
+      "httpStatuses": [
+        409
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
+      "code": "AbpAdmin:RolePermissionTargetChanged",
+      "kind": "conflict",
+      "httpStatuses": [
+        409
+      ],
+      "dataFields": [
+        "correlationId"
+      ]
+    },
+    {
       "code": "BizTemplate:Public:ProjectUnavailable",
       "kind": "business",
       "httpStatuses": [

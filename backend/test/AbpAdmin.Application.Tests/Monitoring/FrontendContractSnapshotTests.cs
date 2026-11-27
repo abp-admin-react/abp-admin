@@ -54,6 +54,7 @@ public class FrontendContractSnapshotTests
         typeof(AbpAdmin.AuditLogs.EntityRestoreResultDto),
         // 用户动态搜索（可用字段元数据 + 结果行；Masked 字段所在 DTO）
         typeof(AbpAdmin.Identity.DynamicSearchFieldDto),
+        typeof(AbpAdmin.Identity.UpdateRolePermissionsDto),
         typeof(AbpAdmin.Identity.IdentityUserSearchItemDto),
         typeof(AbpAdmin.Identity.IdentityUserGridRowDto),
         // 动态菜单管理与套餐共用树形 DTO，parentId/PermissionName 的可空性在此钉住。

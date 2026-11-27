@@ -263,6 +263,25 @@ describe('createCustomerRequest', () => {
     expect(notify.global).not.toHaveBeenCalled();
   });
 
+  it('会话恢复失败时调用方仍收到原请求的认证错误', async () => {
+    const recover = vi.fn().mockRejectedValue(new Error('adapter detail'));
+    const request = createCustomerRequest({
+      transport: async () => ({ status: 401, headers: {} }),
+      auth: {
+        getSnapshot: () => ({ sessionGeneration: 1 }),
+        applyHeaders: () => {},
+        recoverFromUnauthorized: recover,
+      },
+      messages: localMessages,
+      catalog,
+      notify: { global: vi.fn(), form: vi.fn() },
+    });
+    await expect(request('/api/client/protected')).rejects.toMatchObject({
+      kind: 'authentication',
+    });
+    expect(recover).toHaveBeenCalledTimes(1);
+  });
+
   it('有 fieldErrors 时走 form 展示', async () => {
     const notify = { global: vi.fn(), form: vi.fn() };
     const request = createCustomerRequest({

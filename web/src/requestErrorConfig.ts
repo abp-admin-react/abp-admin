@@ -1,7 +1,7 @@
 /**
  * Umi request 全局错误与鉴权头。
  *
- * ## 与代码/日志对齐的约定
+ * 管理端默认错误处理。skipErrorHandler 会直接向调用方抛出原始错误。
  * - 401 → 静默跳到 /user/login?retry=1，登录页停住等用户点重试，避免立刻再跳授权。
  * - 403 → 只弹一条 message（key=http-403）；有 ABP 文案用文案，否则中文兜底；
  *   绝不透出 axios 英文 "Request failed with status code 403"。
@@ -10,7 +10,8 @@
  * - 429 → 限流文案。管理端 Data 键是 PascalCase RetryAfterSeconds，
  *   客户信封是 retryAfterSeconds；两键都读，有秒数才格式化等待时间。
  * - 离线 → message「网络不可用」（i18n）；与 OfflineBanner 一致语义。
- * - 请求头：Bearer（oidc.getAccessToken）+ __tenant（getAbpHeaders）+
+ * - 带账号快照的角色请求同时核对令牌主体和租户。401 仍走登录跳转，其余失败由编辑器显示。
+ * - 请求头：Bearer + __tenant（getAbpHeaders）+
  *   RequestVerificationToken（XSRF-TOKEN cookie）+ Accept-Language（toAbpCulture）。
  */
 import type { RequestOptions } from '@@/plugin-request/request';
@@ -18,7 +19,7 @@ import type { RequestConfig } from '@umijs/max';
 import { getIntl, getLocale, history } from '@umijs/max';
 import { message, notification } from 'antd';
 import { toAbpCulture } from './abp/culture';
-import { getAccessToken } from './abp/oidc';
+import { getAccessToken, getAccessTokenSnapshot } from './abp/oidc';
 import { getAbpHeaders } from './abp/tenant';
 import { formatRetryAfter } from './utils/format';
 import { LOGIN_RETRY_PATH } from './utils/redirect';
@@ -58,6 +59,18 @@ export function isNotFound(error: unknown): boolean {
   );
 }
 
+/** Thrown before dispatch when a request's captured tenant or account changed. */
+export class RequestSessionContextChangedError extends Error {
+  constructor(readonly scope: 'tenant' | 'user') {
+    super(
+      scope === 'tenant'
+        ? '租户已切换，请重新打开角色。'
+        : '登录账号已更换或会话已失效，请重新打开角色。',
+    );
+    this.name = 'RequestSessionContextChangedError';
+  }
+}
+
 function getAntiForgeryHeaders(): Record<string, string> {
   if (typeof document === 'undefined') {
     return {};
@@ -87,11 +100,17 @@ export const errorConfig: RequestConfig = {
     },
     errorHandler: (error: any, opts: any) => {
       // 管理 skip 仍直接抛出 axios/ABP 原错误。客户请求库 skipErrorHandler 只映射 display=none，仍归一化为 CustomerError，两套不要混用。
-      if (opts?.skipErrorHandler) throw error;
+      if (
+        opts?.skipErrorHandler ||
+        error instanceof RequestSessionContextChangedError
+      )
+        throw error;
       if (error.response?.status === 401) {
         history.replace(LOGIN_RETRY_PATH);
         return;
       }
+      // 角色编辑器按服务端回执区分可以重试和需要先核对的状态，错误只在编辑器内展示。
+      if (opts?.expectedUserId !== undefined) throw error;
       const abpError = error.response?.data?.error as AbpError['error'];
       const text =
         abpError?.validationErrors?.map((item) => item.message).join('; ') ||
@@ -111,7 +130,6 @@ export const errorConfig: RequestConfig = {
         message.error({ content: forbiddenText, key: 'http-403' });
         return;
       }
-      // T2.5: 操作限流 429 处理
       if (error.response?.status === 429) {
         const data = (error.response.data?.error?.data ?? {}) as Record<
           string,
@@ -129,13 +147,11 @@ export const errorConfig: RequestConfig = {
       }
       if (error.response) {
         if (error.response?.status === 404) {
-          // 404 是业务语义（数据不存在/端点未覆盖），页面层已 catch 降级——不弹全局错误。
-          // 开发期留一条 console 痕迹：静默是全局面板级策略，端点拼写错/契约漂移时
-          // 没有任何线索会显著拖慢排查（生产不输出）
+          // 资源缺失由调用页解释；开发时保留接口路径，便于检查路由是否匹配。
           if (process.env.NODE_ENV === 'development') {
             console.warn(
               '[request] 404 silenced (page layer should catch):',
-              error.config?.url,
+              error.config?.url?.split(/[?#]/, 1)[0],
             );
           }
           return;
@@ -160,14 +176,31 @@ export const errorConfig: RequestConfig = {
   },
   requestInterceptors: [
     async (config: RequestOptions) => {
-      const token = await getAccessToken();
+      const expectedUserId = config.expectedUserId;
+      const credential =
+        expectedUserId === undefined
+          ? { token: await getAccessToken(), userId: undefined }
+          : await getAccessTokenSnapshot();
+      const tenantHeaders = getAbpHeaders();
+      if (
+        config.expectedTenantId !== undefined &&
+        (tenantHeaders.__tenant ?? null) !== config.expectedTenantId
+      ) {
+        throw new RequestSessionContextChangedError('tenant');
+      }
+      if (
+        expectedUserId !== undefined &&
+        (!credential?.token || credential.userId !== expectedUserId)
+      ) {
+        throw new RequestSessionContextChangedError('user');
+      }
       const headers = {
         ...(config.headers || {}),
-        ...getAbpHeaders(),
+        ...tenantHeaders,
         ...getAntiForgeryHeaders(),
       } as Record<string, string>;
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
+      if (credential?.token) {
+        headers.Authorization = `Bearer ${credential.token}`;
       }
       // ABP Angular 同款做法：SPA 语言即事实源，每请求经 Accept-Language 传给后端，
       // 后端错误消息与前端 UI 同语言（见 abp/culture.ts）。
@@ -181,27 +214,24 @@ export const errorConfig: RequestConfig = {
     },
   ],
   responseInterceptors: [
-    // SPA 兜底契约守卫（E2E 两轮实锤的 bug 类别封口）：/api 请求被 nginx try_files
-    // 兜底成 200 + text/html（路由未命中/URL 形态漂移）时，调用方会拿到字符串/undefined
-    // 后 .items 崩溃或“假成功”。2xx 且 content-type 为 HTML 一律抛契约错误——只拦
-    // HTML（不是“非 JSON 全拦”），204/空体/blob 下载不受影响。
-    // 注：umi 的 response 拦截器是 Axios 形态（headers 为普通对象、url 在 config 上）。
+    // nginx 的 SPA 回退也可能返回 200。API/Hub 收到 HTML 时报告路由错误，空响应和文件下载仍然有效。
     async (response: any) => {
-      const url: string = response?.config?.url || '';
+      const endpoint: string = (response?.config?.url || '').split(
+        /[?#]/,
+        1,
+      )[0];
       const contentType: string =
         response?.headers?.['content-type'] ||
         response?.headers?.get?.('content-type') ||
         '';
       const status: number = response?.status ?? 0;
       if (
-        (url.includes('/api/') || url.includes('/signalr-hubs/')) &&
+        (endpoint.includes('/api/') || endpoint.includes('/signalr-hubs/')) &&
         status >= 200 &&
         status < 300 &&
         contentType.includes('text/html')
       ) {
-        throw new Error(
-          `接口返回了 HTML 而不是 JSON（URL 未命中后端路由或被 SPA 兜底）：${url}`,
-        );
+        throw new Error(`接口返回了 HTML 页面，请核对后端路由：${endpoint}`);
       }
       return response;
     },

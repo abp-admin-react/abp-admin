@@ -14,7 +14,10 @@ const regularRole: IdentityRoleDto = {
   concurrencyStamp: 'stamp',
 };
 
-vi.mock('@umijs/max', () => ({ useAccess: () => access }));
+vi.mock('@umijs/max', () => ({
+  useAccess: () => access,
+  useModel: () => ({ initialState: { currentUser: { userid: 'operator' } } }),
+}));
 vi.mock('@/abp/identity', () => ({
   queryRoles: vi.fn(),
   createRole: vi.fn(),
@@ -25,7 +28,7 @@ vi.mock('@/abp/identity', () => ({
 vi.mock('@/components/IdentityOrgHelp', () => ({
   identityOrgHelpHeader: () => ({}),
 }));
-vi.mock('@/components/PermissionModal', () => ({ default: () => null }));
+vi.mock('./components/RolePermissionEditor', () => ({ default: () => null }));
 vi.mock('@/components/ClaimModal', () => ({ default: () => null }));
 vi.mock('./components/RoleUsersDrawer', () => ({ default: () => null }));
 vi.mock('ag-grid-react', () => ({

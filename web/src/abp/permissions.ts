@@ -1,11 +1,16 @@
 /**
  * 权限授予读写（ABP Permission Management）。
  *
- * - providerName + providerKey：如 R=角色、U=用户；与权限弹窗 PermissionModal 一致。
- * - update 提交的是「变更集」{name,isGranted}[]，不是全量树。
+ * - 角色通过稳定 ID 和打开时的名称读写；服务端在锁定角色后核对名称。
+ * - 用户和客户端通过 ABP 的 providerName + providerKey 读写。
  * - 菜单/按钮是否可见另见 access.ts 的 grantedPolicies，不走本文件。
  */
 import { request } from '@umijs/max';
+import type { IdentityRoleDto } from './identity';
+
+export type PermissionProvider = 'U' | 'C';
+type RoleTarget = Pick<IdentityRoleDto, 'id' | 'name'>;
+type PermissionChange = { name: string; isGranted: boolean };
 
 export type PermissionGrantInfo = {
   name: string;
@@ -26,8 +31,47 @@ export type PermissionListResult = {
   groups: PermissionGroup[];
 };
 
+export type PermissionRequestContext = {
+  tenantId?: string;
+  userId: string;
+};
+
+function roleRequestOptions(context: PermissionRequestContext) {
+  return {
+    expectedTenantId: context.tenantId ?? null,
+    expectedUserId: context.userId,
+  };
+}
+
+function rolePermissionsPath(role: RoleTarget) {
+  return `/api/identity/roles/${encodeURIComponent(role.id)}/permissions`;
+}
+
+export function getRolePermissions(
+  role: RoleTarget,
+  context: PermissionRequestContext,
+) {
+  return request<PermissionListResult>(rolePermissionsPath(role), {
+    method: 'GET',
+    ...roleRequestOptions(context),
+    params: { ExpectedRoleName: role.name },
+  });
+}
+
+export function updateRolePermissions(
+  role: RoleTarget,
+  permissions: PermissionChange[],
+  context: PermissionRequestContext,
+) {
+  return request<void>(rolePermissionsPath(role), {
+    method: 'PUT',
+    ...roleRequestOptions(context),
+    data: { expectedRoleName: role.name, permissions },
+  });
+}
+
 export async function getPermissions(
-  providerName: string,
+  providerName: PermissionProvider,
   providerKey: string,
 ) {
   return request<PermissionListResult>(
@@ -40,9 +84,9 @@ export async function getPermissions(
 }
 
 export async function updatePermissions(
-  providerName: string,
+  providerName: PermissionProvider,
   providerKey: string,
-  permissions: { name: string; isGranted: boolean }[],
+  permissions: PermissionChange[],
 ) {
   return request('/api/permission-management/permissions', {
     method: 'PUT',

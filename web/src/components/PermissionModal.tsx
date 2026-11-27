@@ -6,13 +6,14 @@ import {
   getPermissions,
   type PermissionGrantInfo,
   type PermissionGroup,
+  type PermissionProvider,
   updatePermissions,
 } from '@/abp/permissions';
 
 type PermissionModalProps = {
   open: boolean;
   title: string;
-  providerName: string;
+  providerName: PermissionProvider;
   providerKey?: string;
   onClose: () => void;
 };

@@ -8,7 +8,11 @@ import {
 } from '@testing-library/react';
 import { App as AntdApp } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PermissionGroup, PermissionListResult } from '@/abp/permissions';
+import type {
+  PermissionGroup,
+  PermissionListResult,
+  PermissionProvider,
+} from '@/abp/permissions';
 import PermissionModal from './PermissionModal';
 
 const mocks = vi.hoisted(() => ({
@@ -41,10 +45,10 @@ const groups: PermissionGroup[] = [
 ];
 
 function result(items = groups): PermissionListResult {
-  return { entityDisplayName: '测试角色', groups: items };
+  return { entityDisplayName: '测试用户', groups: items };
 }
 
-function modal(providerName = 'R', providerKey = 'role-1') {
+function modal(providerName: PermissionProvider = 'U', providerKey = 'user-1') {
   return (
     <AntdApp>
       <PermissionModal
@@ -85,7 +89,7 @@ describe('按组管理权限', () => {
     expect(screen.getByText('仅当前组')).toBeTruthy();
     fireEvent.click(saveButton());
     await waitFor(() =>
-      expect(mocks.updatePermissions).toHaveBeenCalledWith('R', 'role-1', [
+      expect(mocks.updatePermissions).toHaveBeenCalledWith('U', 'user-1', [
         { name: 'Orders', isGranted: true },
         { name: 'Orders.Edit', isGranted: true },
         { name: 'Settings', isGranted: false },
@@ -129,7 +133,7 @@ describe('按组管理权限', () => {
     expect(checkbox('锁定已授权')).toBeChecked();
     fireEvent.click(saveButton());
     await waitFor(() =>
-      expect(mocks.updatePermissions).toHaveBeenCalledWith('R', 'role-1', [
+      expect(mocks.updatePermissions).toHaveBeenCalledWith('U', 'user-1', [
         { name: 'Locked.On', isGranted: true },
         { name: 'Locked.Off', isGranted: false },
         { name: 'Editable', isGranted: false },
@@ -147,7 +151,7 @@ describe('按组管理权限', () => {
           finishOldRead = resolve;
         }),
     );
-    view.rerender(modal('R', 'pending-role'));
+    view.rerender(modal('C', 'pending-client'));
     expect(saveButton()).toBeDisabled();
     fireEvent.click(saveButton());
     expect(mocks.updatePermissions).not.toHaveBeenCalled();

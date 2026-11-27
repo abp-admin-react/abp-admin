@@ -174,13 +174,14 @@ export function createCustomerRequest(
     ) {
       return inFlightRecovery.promise;
     }
+    // 同一代会话共用恢复结果；恢复器失败也继续用这次 HTTP 401 生成的 CustomerError 通知调用方。
     const promise = (async () => {
       const latest = options.auth.getSnapshot();
       if (latest.sessionGeneration !== snapshot.sessionGeneration) {
         return false;
       }
       return options.auth.recoverFromUnauthorized(snapshot);
-    })();
+    })().catch(() => false);
     inFlightRecovery = {
       sessionGeneration: snapshot.sessionGeneration,
       promise,

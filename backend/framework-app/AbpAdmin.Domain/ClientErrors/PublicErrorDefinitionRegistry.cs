@@ -245,6 +245,24 @@ public class PublicErrorDefinitionRegistry : IPublicErrorDefinitionProvider, ISi
             MessageKey = "RoleDataScopeEscalation",
             Kind = PublicErrorKind.Forbidden,
         });
+        RegisterRolePermissionError(AbpAdminDomainErrorCodes.Identity.RolePermissionTargetChanged,
+            "RolePermissionTargetChanged", PublicErrorKind.Conflict);
+        RegisterRolePermissionError(AbpAdminDomainErrorCodes.Identity.RolePermissionNameAmbiguous,
+            "RolePermissionNameAmbiguous", PublicErrorKind.Conflict);
+        RegisterRolePermissionError(AbpAdminDomainErrorCodes.Identity.RolePermissionIdRequired,
+            "RolePermissionIdRequired", PublicErrorKind.Validation);
+    }
+
+    private void RegisterRolePermissionError(string code, string messageKey, PublicErrorKind kind)
+    {
+        Register(new PublicErrorDefinition
+        {
+            InternalCode = code,
+            PublicCode = code,
+            ResourceType = typeof(ClientErrorResource),
+            MessageKey = messageKey,
+            Kind = kind,
+        });
     }
 
     IEnumerable<PublicErrorDefinition> IPublicErrorDefinitionProvider.GetDefinitions()

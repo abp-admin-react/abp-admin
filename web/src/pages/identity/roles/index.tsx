@@ -6,7 +6,7 @@ import {
   ProFormText,
   ProFormTextArea,
 } from '@ant-design/pro-components';
-import { useAccess } from '@umijs/max';
+import { useAccess, useModel } from '@umijs/max';
 import { AgGridReact } from 'ag-grid-react';
 import {
   App,
@@ -18,7 +18,7 @@ import {
   Space,
   Tag,
 } from 'antd';
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   createRole,
   deleteRole,
@@ -26,14 +26,15 @@ import {
   queryRoles,
   updateRole,
 } from '@/abp/identity';
+import { refreshRolePermissionSession } from '@/abp/rolePermissionSession';
 import ClaimModal from '@/components/ClaimModal';
 import DataScopeModal from '@/components/DataScopeModal';
 import { identityOrgHelpHeader } from '@/components/IdentityOrgHelp';
-import PermissionModal from '@/components/PermissionModal';
 import {
   toGridColumns,
   useSearchableRemoteGrid,
 } from '@/components/remoteGrid';
+import RolePermissionEditor from './components/RolePermissionEditor';
 import RoleUsersDrawer from './components/RoleUsersDrawer';
 
 const ROLE_REMARK_MAX_LENGTH = 300;
@@ -115,96 +116,128 @@ const RoleForm: React.FC<{
 
 const RolesPage: React.FC = () => {
   const { message, modal } = App.useApp();
-  const [permissionTarget, setPermissionTarget] = useState<IdentityRoleDto>();
+  const { initialState, setInitialState } = useModel('@@initialState');
+  const tenant = initialState?.currentTenant;
+  const userId = initialState?.currentUser?.userid;
+  const sessionKey = JSON.stringify([tenant?.id, userId]);
+  const [permissionTarget, setPermissionTarget] = useState<{
+    role: IdentityRoleDto;
+    sessionKey: string;
+  }>();
   const [claimTarget, setClaimTarget] = useState<IdentityRoleDto>();
   const [usersTarget, setUsersTarget] = useState<IdentityRoleDto>();
   const [dataScopeTarget, setDataScopeTarget] = useState<IdentityRoleDto>();
   const access = useAccess();
 
-  const columns: ProColumns<IdentityRoleDto>[] = [
-    {
-      title: '名称',
-      dataIndex: 'name',
-      width: 240,
-      render: (_, record) => (
-        <Space>
-          <span>{record.name}</span>
-          {record.isStatic && <Tag>系统</Tag>}
-          {record.isDefault && <Tag>默认</Tag>}
-        </Space>
-      ),
-    },
-    {
-      title: '备注',
-      dataIndex: ['extraProperties', 'Remark'],
-      ellipsis: true,
-    },
-    {
-      title: '操作',
-      valueType: 'option',
-      width: 280,
-      render: (_, record) => {
-        const items: MenuProps['items'] = [];
-        if (access.canUpdateRoles && access.canManageClaimTypes) {
-          items.push({
-            key: 'claims',
-            label: '声明（高级）',
-            onClick: () => setClaimTarget(record),
-          });
-        }
-        if (access.canManageRoleDataScopes) {
-          items.push({
-            key: 'data-scope',
-            label: '业务数据范围',
-            onClick: () => setDataScopeTarget(record),
-          });
-        }
-        if (!record.isStatic && access.canDeleteRoles) {
-          items.push({
-            key: 'delete',
-            label: '删除角色',
-            danger: true,
-            onClick: () =>
-              modal.confirm({
-                title: '确认删除该角色？',
-                onOk: async () => {
-                  await deleteRole(record.id);
-                  message.success('已删除');
-                  grid.refresh();
-                },
-              }),
-          });
-        }
-        return [
-          access.canUpdateRoles && (
-            <RoleForm
-              key="edit"
-              record={record}
-              onSuccess={() => grid.refresh()}
-            />
-          ),
-          access.canManageRolePermissions && (
-            <a key="perms" onClick={() => setPermissionTarget(record)}>
-              功能权限
-            </a>
-          ),
-          <a key="users" onClick={() => setUsersTarget(record)}>
-            用户
-          </a>,
-          items.length > 0 && (
-            <Dropdown key="more" menu={{ items }} trigger={['click']}>
-              <a>更多</a>
-            </Dropdown>
-          ),
-        ];
+  useEffect(() => {
+    setPermissionTarget((target) =>
+      target?.sessionKey === sessionKey ? target : undefined,
+    );
+  }, [sessionKey]);
+
+  const columnDefs = useMemo(() => {
+    const columns: ProColumns<IdentityRoleDto>[] = [
+      {
+        title: '名称',
+        dataIndex: 'name',
+        width: 240,
+        render: (_, record) => (
+          <Space>
+            <span>{record.name}</span>
+            {record.isStatic && <Tag>系统</Tag>}
+            {record.isDefault && <Tag>默认</Tag>}
+          </Space>
+        ),
       },
-    },
-  ];
+      {
+        title: '备注',
+        dataIndex: ['extraProperties', 'Remark'],
+        ellipsis: true,
+      },
+      {
+        title: '操作',
+        valueType: 'option',
+        width: 280,
+        render: (_, record) => {
+          const items: MenuProps['items'] = [];
+          if (access.canUpdateRoles && access.canManageClaimTypes) {
+            items.push({
+              key: 'claims',
+              label: '声明（高级）',
+              onClick: () => setClaimTarget(record),
+            });
+          }
+          if (access.canManageRoleDataScopes) {
+            items.push({
+              key: 'data-scope',
+              label: '业务数据范围',
+              onClick: () => setDataScopeTarget(record),
+            });
+          }
+          if (!record.isStatic && access.canDeleteRoles) {
+            items.push({
+              key: 'delete',
+              label: '删除角色',
+              danger: true,
+              onClick: () =>
+                modal.confirm({
+                  title: '确认删除该角色？',
+                  onOk: async () => {
+                    await deleteRole(record.id);
+                    message.success('已删除');
+                    grid.refresh();
+                  },
+                }),
+            });
+          }
+          return [
+            access.canUpdateRoles && (
+              <RoleForm
+                key="edit"
+                record={record}
+                onSuccess={() => grid.refresh()}
+              />
+            ),
+            access.canManageRolePermissions && (
+              <Button
+                key="perms"
+                id={`role-permissions-${record.id}`}
+                size="small"
+                type="link"
+                style={{ paddingInline: 0 }}
+                onClick={() =>
+                  setPermissionTarget({ role: record, sessionKey })
+                }
+              >
+                功能权限
+              </Button>
+            ),
+            <a key="users" onClick={() => setUsersTarget(record)}>
+              用户
+            </a>,
+            items.length > 0 && (
+              <Dropdown key="more" menu={{ items }} trigger={['click']}>
+                <a>更多</a>
+              </Dropdown>
+            ),
+          ];
+        },
+      },
+    ];
+    return toGridColumns<IdentityRoleDto>(columns, { pro: true });
+  }, [
+    sessionKey,
+    modal,
+    message,
+    access.canUpdateRoles,
+    access.canManageClaimTypes,
+    access.canManageRoleDataScopes,
+    access.canDeleteRoles,
+    access.canManageRolePermissions,
+  ]);
 
   const grid = useSearchableRemoteGrid<IdentityRoleDto>({
-    columnDefs: toGridColumns<IdentityRoleDto>(columns, {
-      pro: true,
-    }),
+    columnDefs,
     ariaLabel: '角色',
     getRowId: ({ data }) => String(data.id),
     pageSize: 10,
@@ -226,13 +259,32 @@ const RolesPage: React.FC = () => {
       </GridControls>
       <AgGridReact<IdentityRoleDto> {...grid.gridProps} />
 
-      <PermissionModal
-        open={!!permissionTarget}
-        title={`功能权限 - ${permissionTarget?.name || ''}`}
-        providerName="R"
-        providerKey={permissionTarget?.name}
-        onClose={() => setPermissionTarget(undefined)}
-      />
+      {userId && permissionTarget?.sessionKey === sessionKey && (
+        <RolePermissionEditor
+          key={permissionTarget.role.id}
+          role={permissionTarget.role}
+          userId={userId}
+          tenantId={tenant?.id ?? undefined}
+          tenantName={tenant?.name ?? undefined}
+          onClose={() => {
+            setPermissionTarget(undefined);
+            const triggerId = `role-permissions-${permissionTarget.role.id}`;
+            requestAnimationFrame(() =>
+              document.getElementById(triggerId)?.focus(),
+            );
+          }}
+          onStaleRole={() => grid.refresh()}
+          onSaved={() => {
+            void refreshRolePermissionSession(
+              permissionTarget.role.name,
+              initialState,
+              setInitialState,
+            ).catch(() =>
+              message.warning('当前会话的权限未能刷新，请刷新页面。'),
+            );
+          }}
+        />
+      )}
       {claimTarget && (
         <ClaimModal
           key={claimTarget.id}

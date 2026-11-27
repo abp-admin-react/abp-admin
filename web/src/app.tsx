@@ -125,6 +125,8 @@ export type AppInitialState = {
   currentUser?: AppCurrentUser;
   currentTenant?: AbpCurrentTenant;
   grantedPolicies?: Record<string, boolean>;
+  /** Triggers a runtime menu reload after this account's role grants change. */
+  rolePermissionRevision?: number;
   settingValues?: Record<string, string>;
   tenantMissing?: boolean;
   loading?: boolean;
@@ -252,6 +254,7 @@ export const layout: RunTimeLayoutConfig = ({
         user: initialState?.currentUser?.userid ?? '',
         tenant: initialState?.currentTenant?.id ?? 'host',
         moduleVersion: initialState?.moduleAvailability?.version,
+        rolePermissionRevision: initialState?.rolePermissionRevision ?? 0,
       },
       request: async () => {
         const res = await getMyMenu();

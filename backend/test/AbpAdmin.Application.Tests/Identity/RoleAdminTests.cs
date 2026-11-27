@@ -6,11 +6,13 @@ using AbpAdmin.DataScopes;
 using Microsoft.AspNetCore.Identity;
 using Shouldly;
 using Volo.Abp;
+using Volo.Abp.Caching;
 using Volo.Abp.Data;
 using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 using Volo.Abp.Modularity;
+using Volo.Abp.PermissionManagement;
 using Xunit;
 
 namespace AbpAdmin.Identity;
@@ -193,6 +195,33 @@ public abstract class RoleAdminTests<TStartupModule> : AbpAdminApplicationTestBa
             (await _roleRepository.FindAsync(role.Id)).ShouldBeNull();
             (await _roleDataScopeRepository.FirstOrDefaultAsync(x => x.RoleName == role.Name!)).ShouldBeNull();
         });
+    }
+
+    [Fact]
+    public async Task Rename_Commit_Should_Evict_Old_Grant_Cached_After_Immediate_Invalidation()
+    {
+        var oldName = $"cache-old-{Guid.NewGuid():N}";
+        var newName = $"cache-new-{Guid.NewGuid():N}";
+        var grants = GetRequiredService<IPermissionGrantRepository>();
+        var manager = GetRequiredService<IPermissionManager>();
+        var cache = GetRequiredService<IDistributedCache<PermissionGrantCacheItem>>();
+        var permission = IdentityPermissions.Roles.Default;
+        var key = PermissionGrantCacheItem.CalculateCacheKey(permission, "R", oldName);
+        var grant = new PermissionGrant(Guid.NewGuid(), permission, "R", oldName);
+        await WithUnitOfWorkAsync(() => grants.InsertAsync(grant, autoSave: true));
+        await cache.SetAsync(key, new PermissionGrantCacheItem(true));
+
+        await WithUnitOfWorkAsync(async () =>
+        {
+            // Invoke the same grant-key update as ABP's role rename handler.
+            await manager.UpdateProviderKeyAsync(await grants.GetAsync(grant.Id), newName);
+            (await cache.GetAsync(key, considerUow: false)).ShouldBeNull();
+            // Simulate a concurrent reader caching the old grant before the rename commits.
+            await cache.SetAsync(key, new PermissionGrantCacheItem(true), considerUow: false);
+            (await cache.GetAsync(key, considerUow: false))!.IsGranted.ShouldBeTrue();
+        });
+
+        (await cache.GetAsync(key)).ShouldBeNull();
     }
 
     [Fact]

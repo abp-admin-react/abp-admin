@@ -42,6 +42,9 @@ describe('public-error-catalog', () => {
       'AbpAdmin:Export:SyncThresholdExceeded',
       'AbpAdmin:Files:ContentMismatch',
       'AbpAdmin:IdentityClaimsCannotCarryRole',
+      'AbpAdmin:RolePermissionIdRequired',
+      'AbpAdmin:RolePermissionNameAmbiguous',
+      'AbpAdmin:RolePermissionTargetChanged',
       'BizTemplate:Public:ProjectUnavailable',
       'Client:AuthenticationRequired',
       'Client:Conflict',
@@ -380,6 +383,25 @@ describe('normalizeCustomerError', () => {
     });
     expect(error).not.toHaveProperty('details');
     expect(leakKeys(error)).toEqual([]);
+  });
+
+  it.each([
+    [500, 'Client:ValidationFailed'],
+    [400, 'Unregistered:Error'],
+  ])('未获准的字段消息不进入表单 (%i, %s)', (status, code) => {
+    const error = normalizeCustomerError({
+      status: Number(status),
+      body: {
+        error: {
+          code,
+          validationErrors: [{ members: ['name'], message: 'internal detail' }],
+        },
+      },
+      catalog,
+      localMessages,
+    });
+    expect(error.fieldErrors).toEqual({});
+    expect(error.message).not.toContain('internal detail');
   });
 
   it('写超时为 outcomeUnknown，取消为 cancelled，GET 网络为 network', () => {

@@ -132,6 +132,31 @@ function mockAuthenticatedUser() {
   });
 }
 
+it('refreshes the runtime menu request key after role permissions change', async () => {
+  const { layout } = await import('./app');
+  const state = {
+    currentUser: { userid: '1' },
+    currentTenant: { id: 'tenant-1' },
+  };
+  const model = {
+    initialState: state,
+    loading: false,
+    error: undefined,
+    refresh: async () => {},
+    setInitialState: async () => {},
+  };
+
+  expect(layout(model).menu?.params).toMatchObject({
+    user: '1',
+    tenant: 'tenant-1',
+    rolePermissionRevision: 0,
+  });
+  expect(
+    layout({ ...model, initialState: { ...state, rolePermissionRevision: 1 } })
+      .menu?.params,
+  ).toMatchObject({ user: '1', tenant: 'tenant-1', rolePermissionRevision: 1 });
+});
+
 describe('app getInitialState', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -77,6 +77,11 @@
   部门挂角色与 ABP 保持一致：只有 admin 可授予任意角色，
   其他操作者只能授予自己持有的角色；业务数据范围不再作为角色授予的豁免条件。
   权限弹窗按 ABP 分组展示，全选/清空只作用于当前组，不修改不可编辑的授权。
+  角色功能权限通过 `/api/identity/roles/{id}/permissions` 读写。GET 查询参数和 PUT 请求体均携带打开编辑器时的 `expectedRoleName`，PUT 的 `permissions` 只含实际增撤。
+  服务端在当前租户按角色 ID 锁定记录，核对名称后在同一事务内处理授权。若改名先提交，旧草稿收到 409，客户端应重新选择角色；若授权先提交，授权随原角色迁移到新名称。
+  改名事务提交后还会清理旧角色名的权限缓存，以覆盖并发鉴权在提交前读到旧值并回填缓存的情况。
+  同租户存在历史重名时返回 409（`AbpAdmin:RolePermissionNameAmbiguous`）。旧通用接口的角色（`R`）按名写入返回 400（`AbpAdmin:RolePermissionIdRequired`），调用方须迁到上述 ID 端点。用户（`U`）和客户端（`C`）继续走 ABP 各自的 provider。
+  本机隔离栈可从 `web` 目录运行 `node scripts/e2e-role-permission-concurrency.mjs`，用两个管理员的真实 HTTP 请求验证两种提交顺序、旧名复用和数据库最终授权。
   菜单只按启用/隐藏、结构与绑定的功能权限计算。角色菜单勾选的管理 API 和存储已移除。
   `MenuVisibilityCalculatorTests` 与 `MenuAppServiceTests` 钉住“有功能权限即可见、
   无功能权限不能靠旧菜单勾选获得可见性”。

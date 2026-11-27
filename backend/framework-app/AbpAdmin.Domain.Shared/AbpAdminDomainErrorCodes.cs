@@ -151,6 +151,9 @@ public static class AbpAdminDomainErrorCodes
         /// 用户权限无感丢失；先拒绝并提示改派，删除才是显式决定。
         /// </summary>
         public const string RoleHasUsers = "AbpAdmin:Identity:RoleHasUsers";
+        public const string RolePermissionTargetChanged = "AbpAdmin:RolePermissionTargetChanged";
+        public const string RolePermissionNameAmbiguous = "AbpAdmin:RolePermissionNameAmbiguous";
+        public const string RolePermissionIdRequired = "AbpAdmin:RolePermissionIdRequired";
     }
 
     /// <summary>

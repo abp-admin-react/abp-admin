@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { completeLogin, startLogin } from './oidc';
+import { completeLogin, getAccessTokenSnapshot, startLogin } from './oidc';
 import { getStoredTenant, setStoredTenant } from './tenant';
 
-const { signinRedirect, signinRedirectCallback } = vi.hoisted(() => ({
+const { getUser, signinRedirect, signinRedirectCallback } = vi.hoisted(() => ({
+  getUser: vi.fn(),
   signinRedirect: vi.fn(),
   signinRedirectCallback: vi.fn(),
 }));
@@ -12,6 +13,7 @@ const verified = { id: 'verified', name: 'demo' };
 vi.mock('oidc-client-ts', () => ({
   User: class {},
   UserManager: class {
+    getUser = getUser;
     signinRedirect = signinRedirect;
     signinRedirectCallback = signinRedirectCallback;
   },
@@ -77,5 +79,36 @@ describe('OpenIddict 登录上下文', () => {
     expect(signinRedirect).toHaveBeenLastCalledWith({
       extraQueryParams: { __tenant: 'selected', prompt: 'login' },
     });
+  });
+
+  it('从同一次读取返回访问令牌与账号标识', async () => {
+    getUser
+      .mockResolvedValueOnce({
+        access_token: 'previous-token',
+        profile: { sub: 'previous-account' },
+      })
+      .mockResolvedValueOnce({
+        access_token: 'current-token',
+        profile: { sub: 'current-account' },
+      });
+
+    expect(await getAccessTokenSnapshot()).toEqual({
+      token: 'previous-token',
+      userId: 'previous-account',
+    });
+    expect(getUser).toHaveBeenCalledTimes(1);
+    expect(await getAccessTokenSnapshot()).toEqual({
+      token: 'current-token',
+      userId: 'current-account',
+    });
+  });
+
+  it('过期会话没有可用的请求凭据', async () => {
+    getUser.mockResolvedValueOnce({
+      access_token: 'expired-token',
+      profile: { sub: 'same-account' },
+      expired: true,
+    });
+    expect(await getAccessTokenSnapshot()).toBeUndefined();
   });
 });

@@ -13,6 +13,9 @@
     "FileContentMismatch": "上传被拒绝：文件内容与其扩展名不匹配，或包含不允许的脚本内容。",
     "SyncExportThresholdExceeded": "结果集超过同步导出上限，请使用异步导出。",
     "CannotCarryRole": "不允许写入权威类型（角色）的声明。",
-    "RoleDataScopeEscalation": "该授予会越出你自身的权限范围。"
+    "RoleDataScopeEscalation": "该授予会越出你自身的权限范围。",
+    "RolePermissionTargetChanged": "角色已改名，请重新打开角色权限。",
+    "RolePermissionNameAmbiguous": "当前租户存在同名角色，无法区分权限归属。",
+    "RolePermissionIdRequired": "角色授权需要角色 ID。请使用 /api/identity/roles/{id}/permissions。"
   }
 }

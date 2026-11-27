@@ -17,6 +17,27 @@ import { STORAGE_KEYS } from './storageKeys';
 import { getTenantId, type StoredTenant, setStoredTenant } from './tenant';
 
 let manager: UserManager | undefined;
+const sessionReplaced = new EventTarget();
+
+/** OIDC 登录与退出、本页令牌替换、其他标签页的账号或租户切换都需要重建会话相关的连接。 */
+export function onSessionChanged(listener: () => void) {
+  const events = getUserManager().events;
+  const offLoad = events.addUserLoaded(listener);
+  const offUnload = events.addUserUnloaded(listener);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key.startsWith(STORAGE_KEYS.oidcPrefix) || event.key === STORAGE_KEYS.tenant) {
+      listener();
+    }
+  };
+  window.addEventListener('storage', onStorage);
+  sessionReplaced.addEventListener('change', listener);
+  return () => {
+    offLoad();
+    offUnload();
+    window.removeEventListener('storage', onStorage);
+    sessionReplaced.removeEventListener('change', listener);
+  };
+}
 
 function spaOrigin() {
   return window.location.origin;
@@ -74,11 +95,18 @@ export function getUserManager(): UserManager {
 }
 
 export async function getAccessToken(): Promise<string | undefined> {
+  return (await getAccessTokenSnapshot())?.token;
+}
+
+/** 从同一条 OIDC 记录取令牌和主体，避免分别读取时遇到跨标签页换号。 */
+export async function getAccessTokenSnapshot(): Promise<
+  { token: string; userId?: string } | undefined
+> {
   const user = await getUserManager().getUser();
   if (!user || user.expired) {
     return undefined;
   }
-  return user.access_token;
+  return { token: user.access_token, userId: user.profile?.sub };
 }
 
 type StartLoginOptions = {
@@ -220,6 +248,7 @@ export async function applyImpersonatedTokens(
       : existing.expires_at,
   });
   await manager.storeUser(user);
+  sessionReplaced.dispatchEvent(new Event('change'));
 }
 
 /**
@@ -244,4 +273,5 @@ export async function applyTokensForNewSession(
       : undefined,
   });
   await getUserManager().storeUser(user);
+  sessionReplaced.dispatchEvent(new Event('change'));
 }

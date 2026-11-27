@@ -1601,6 +1601,19 @@
       }
     }
   },
+  "AbpAdmin.Identity.UpdateRolePermissionsDto": {
+    "kind": "dto",
+    "properties": {
+      "ExpectedRoleName": {
+        "type": "string",
+        "nullable": false
+      },
+      "Permissions": {
+        "type": "UpdatePermissionDto[]",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Ledger.Services.Dtos.FinEntryDto": {
     "kind": "dto",
     "properties": {
