@@ -20,9 +20,8 @@ using Xunit;
 namespace AbpAdmin.SignalR;
 
 /// <summary>
-/// Execute the real connection admission and all five real notifier methods against one recorded
-/// SignalR transport. Only ABP grants and the wire are substituted; tests assert recipient payloads,
-/// so a notifier accidentally returning to the old shared group or another group's event is detected.
+/// Exercises hub admission and all five notifier methods with mutable test grants and a recorded transport.
+/// <see cref="ChainPushAudienceTests"/> covers recipient selection against the database.
 /// </summary>
 public class ChainStatusHubPermissionTests
 {
@@ -50,12 +49,6 @@ public class ChainStatusHubPermissionTests
         await transport.PublishAllAsync();
         transport.Deliveries.Select(x => x.Event).ShouldBe(expectedEvents);
         transport.Deliveries.ShouldAllBe(x => x.Connection == "reader" && x.Payload != null);
-        // The outgoing protocol stays compatible; only recipients have changed.
-        transport.Publications.Select(x => x.Group).ShouldBe(new[]
-        {
-            ChainHubGroups.ScanProgress, ChainHubGroups.Operations, ChainHubGroups.Operations,
-            ChainHubGroups.Operations, ChainHubGroups.HotWallet
-        });
     }
 
     [Theory]
@@ -95,6 +88,25 @@ public class ChainStatusHubPermissionTests
     }
 
     [Fact]
+    public async Task A_Connected_Reader_Follows_Current_Grants_Without_Reconnecting()
+    {
+        using var transport = new RecordedTransport();
+        var hub = transport.CreateHub("reader", [CollectionPermissions.Collections.Default, CollectionPermissions.Network.Admin]);
+        await hub.OnConnectedAsync();
+
+        transport.SetGrants("reader", [CollectionPermissions.Collections.Default, CollectionPermissions.Withdraw.Admin]);
+        await transport.PublishAllAsync();
+        transport.Deliveries.Select(x => x.Event).ShouldBe([
+            "ChainDepositChanged", "ChainSweepChanged", "ChainVaultCheck", "ChainHotWalletChanged"]);
+
+        transport.Deliveries.Clear();
+        transport.SetGrants("reader", []);
+        await transport.PublishAllAsync();
+        transport.Deliveries.ShouldBeEmpty();
+        hub.Context.DidNotReceive().Abort();
+    }
+
+    [Fact]
     public void Hub_Still_Requires_Authenticated_Transport()
     {
         typeof(ChainStatusHub).GetCustomAttribute<AuthorizeAttribute>().ShouldNotBeNull();
@@ -106,11 +118,19 @@ public class ChainStatusHubPermissionTests
         private readonly List<ServiceProvider> _providers = new();
         private readonly IGroupManager _groups = Substitute.For<IGroupManager>();
         private readonly IHubContext<ChainStatusHub> _context = Substitute.For<IHubContext<ChainStatusHub>>();
-        public List<(string Group, string Event, object Payload)> Publications { get; } = [];
+        private readonly IChainPushAudience _audience = Substitute.For<IChainPushAudience>();
+        private readonly Dictionary<string, Guid> _users = [];
+        private readonly Dictionary<Guid, string[]> _grants = [];
         public List<(string Connection, string Event, object Payload)> Deliveries { get; } = [];
 
         public RecordedTransport()
         {
+            _audience.GetGroupsAsync(Arg.Any<string[]>()).Returns(call =>
+            {
+                var permissions = call.Arg<string[]>();
+                return Task.FromResult<IReadOnlyList<string>>(_grants.Where(pair => permissions.Intersect(pair.Value).Any())
+                    .Select(pair => ChainHubGroups.ForRecipient(pair.Key, null)).ToArray());
+            });
             _groups.AddToGroupAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(call =>
             {
                 var connection = call.ArgAt<string>(0);
@@ -121,17 +141,17 @@ public class ChainStatusHubPermissionTests
             });
             var clients = Substitute.For<IHubClients>();
             _context.Clients.Returns(clients);
-            clients.Group(Arg.Any<string>()).Returns(call =>
+            clients.Groups(Arg.Any<IReadOnlyList<string>>()).Returns(call =>
             {
-                var group = call.Arg<string>();
+                var groups = call.Arg<IReadOnlyList<string>>();
                 var proxy = Substitute.For<IClientProxy>();
                 proxy.SendCoreAsync(Arg.Any<string>(), Arg.Any<object?[]>(), Arg.Any<CancellationToken>()).Returns(send =>
                 {
                     var eventName = send.ArgAt<string>(0);
                     var payload = send.ArgAt<object?[]>(1).Single()!;
-                    Publications.Add((group, eventName, payload));
-                    if (_members.TryGetValue(group, out var connections))
-                        foreach (var connection in connections) Deliveries.Add((connection, eventName, payload));
+                    foreach (var group in groups)
+                        if (_members.TryGetValue(group, out var connections))
+                            foreach (var connection in connections) Deliveries.Add((connection, eventName, payload));
                     return Task.CompletedTask;
                 });
                 return proxy;
@@ -144,7 +164,8 @@ public class ChainStatusHubPermissionTests
             tenant.Id.Returns(tenantId);
             var user = Substitute.For<ICurrentUser>();
             user.IsAuthenticated.Returns(authenticated);
-            user.Id.Returns(Guid.NewGuid());
+            user.Id.Returns(_users[connectionId] = Guid.NewGuid());
+            SetGrants(connectionId, granted);
             var services = new ServiceCollection().AddSingleton(tenant).AddSingleton(user).BuildServiceProvider();
             _providers.Add(services);
             var checker = Substitute.For<IPermissionChecker>();
@@ -163,9 +184,11 @@ public class ChainStatusHubPermissionTests
             };
         }
 
+        public void SetGrants(string connectionId, string[] grants) => _grants[_users[connectionId]] = grants;
+
         public async Task PublishAllAsync()
         {
-            var notifier = new SignalRChainPushNotifier(_context);
+            var notifier = new SignalRChainPushNotifier(_context, _audience);
             await notifier.PushScanProgressAsync(new ChainScanProgressEto { Symbol = "USDT", LastScannedBlock = 7 });
             await notifier.PushDepositChangedAsync(new ChainDepositChangedEto { UserId = Guid.NewGuid(), Amount = "10" });
             await notifier.PushSweepChangedAsync(new ChainSweepChangedEto { UserId = Guid.NewGuid(), Amount = "9" });

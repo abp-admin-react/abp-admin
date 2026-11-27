@@ -1,50 +1,38 @@
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Permissions;
 using Contracts = AbpAdmin.Collection.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using Volo.Abp.DependencyInjection;
 
 namespace AbpAdmin.SignalR;
 
-/// <summary>
-/// 收付款 SignalR 推送实现（宿主侧）。Collection 模块经 Contracts.IChainPushNotifier 接口调用，
-/// 本类按读取权限把 ETO 转发给 ChainStatusHub 的对应组。事件名与 ChainHubGroups 保持一处定义。
-/// </summary>
-public class SignalRChainPushNotifier : Contracts.IChainPushNotifier, ITransientDependency
+/// <summary>按发送时的有效读取权限，把资金事件转发到已认证用户的连接。</summary>
+public class SignalRChainPushNotifier(IHubContext<ChainStatusHub> hub, IChainPushAudience audience)
+    : Contracts.IChainPushNotifier, ITransientDependency
 {
-    private readonly IHubContext<ChainStatusHub> _hubContext;
+    private static readonly string[] Operations = [CollectionPermissions.Collections.Default, CollectionPermissions.Network.Admin];
+    private static readonly string[] Network = [CollectionPermissions.Network.Admin];
+    private static readonly string[] HotWallet = [CollectionPermissions.Withdraw.Admin];
 
-    public SignalRChainPushNotifier(IHubContext<ChainStatusHub> hubContext)
-    {
-        _hubContext = hubContext;
-    }
+    public Task PushScanProgressAsync(Contracts.ChainScanProgressEto progress) =>
+        PublishAsync(Network, ChainHubGroups.ScanProgressEvent, progress);
 
-    public async Task PushScanProgressAsync(Contracts.ChainScanProgressEto progress)
-    {
-        await _hubContext.Clients.Group(ChainHubGroups.ScanProgress)
-            .SendAsync(ChainHubGroups.ScanProgressEvent, progress);
-    }
+    public Task PushDepositChangedAsync(Contracts.ChainDepositChangedEto deposit) =>
+        PublishAsync(Operations, ChainHubGroups.DepositChangedEvent, deposit);
 
-    public async Task PushDepositChangedAsync(Contracts.ChainDepositChangedEto deposit)
-    {
-        await _hubContext.Clients.Group(ChainHubGroups.Operations)
-            .SendAsync(ChainHubGroups.DepositChangedEvent, deposit);
-    }
+    public Task PushSweepChangedAsync(Contracts.ChainSweepChangedEto sweep) =>
+        PublishAsync(Operations, ChainHubGroups.SweepChangedEvent, sweep);
 
-    public async Task PushSweepChangedAsync(Contracts.ChainSweepChangedEto sweep)
-    {
-        await _hubContext.Clients.Group(ChainHubGroups.Operations)
-            .SendAsync(ChainHubGroups.SweepChangedEvent, sweep);
-    }
+    public Task PushVaultCheckAsync(Contracts.ChainVaultCheckEto check) =>
+        PublishAsync(Operations, ChainHubGroups.VaultCheckEvent, check);
 
-    public async Task PushVaultCheckAsync(Contracts.ChainVaultCheckEto check)
-    {
-        await _hubContext.Clients.Group(ChainHubGroups.Operations)
-            .SendAsync(ChainHubGroups.VaultCheckEvent, check);
-    }
+    public Task PushHotWalletChangedAsync(Contracts.ChainHotWalletChangedEto transaction) =>
+        PublishAsync(HotWallet, ChainHubGroups.HotWalletChangedEvent, transaction);
 
-    public async Task PushHotWalletChangedAsync(Contracts.ChainHotWalletChangedEto txn)
+    private async Task PublishAsync(string[] permissions, string eventName, object payload)
     {
-        await _hubContext.Clients.Group(ChainHubGroups.HotWallet)
-            .SendAsync(ChainHubGroups.HotWalletChangedEvent, txn);
+        var groups = await audience.GetGroupsAsync(permissions);
+        if (groups.Count > 0)
+            await hub.Clients.Groups(groups).SendAsync(eventName, payload);
     }
 }
