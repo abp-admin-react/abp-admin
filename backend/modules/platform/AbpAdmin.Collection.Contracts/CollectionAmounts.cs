@@ -13,6 +13,29 @@ public static class CollectionAmounts
     /// <summary>稳定币金额的最大小数位（numeric(28,18)）。</summary>
     public const int Scale = 18;
 
+    /// <summary>校验写入或核对资金事实的原文。尾零不影响金额，超出币种小数位的非零数字不能舍入。</summary>
+    public static bool TryParsePositiveExact(string? text, CollectionCurrency currency, out decimal value)
+    {
+        value = 0m;
+        var scale = currency switch
+        {
+            CollectionCurrency.Cny or CollectionCurrency.Usd => 2,
+            CollectionCurrency.Usdc or CollectionCurrency.Usdt => Scale,
+            _ => -1,
+        };
+        if (scale < 0 || string.IsNullOrWhiteSpace(text)) return false;
+
+        var input = text.AsSpan().Trim();
+        var separator = input.IndexOf('.');
+        if (separator >= 0 && input[(separator + 1)..].TrimEnd('0').Length > scale) return false;
+        return decimal.TryParse(input, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                   CultureInfo.InvariantCulture, out value) && IsPositiveStorageAmount(value);
+    }
+
+    /// <summary>PostgreSQL numeric(28,18) 的正数范围和精度；先核对再写流水与余额。</summary>
+    public static bool IsPositiveStorageAmount(decimal amount) =>
+        amount > 0m && amount < 10_000_000_000m && decimal.Round(amount, Scale) == amount;
+
     /// <summary>
     /// 解析十进制字符串。不变文化、允许前后空白、不允许千分位分隔符；
     /// 小数位超过 <see cref="Scale"/> 时按银行家舍入到 18 位。
@@ -59,4 +82,7 @@ public static class CollectionAmounts
         var text = value.ToString("0." + new string('#', Scale), CultureInfo.InvariantCulture);
         return text;
     }
+
+    /// <summary>未采样或证据不足的金额在客户端保留空值。</summary>
+    public static string? FormatNullable(decimal? value) => value.HasValue ? Format(value.Value) : null;
 }

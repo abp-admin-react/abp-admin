@@ -94,8 +94,8 @@ public class OrderStatusSyncJobTests : OrderingStubTestBase
     {
         var txnA = Guid.NewGuid();
         var txnB = Guid.NewGuid();
-        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 1, BalanceTxnId = txnA, UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "10.5", CreditedAt = DateTime.Now });
-        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 2, BalanceTxnId = txnB, UserId = UserId, Currency = CollectionCurrency.Usdc, Amount = "3", CreditedAt = DateTime.Now });
+        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 1, BalanceTxnId = txnA, UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "10.5", CreditedAt = GetRequiredService<Volo.Abp.Timing.IClock>().Now });
+        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 2, BalanceTxnId = txnB, UserId = UserId, Currency = CollectionCurrency.Usdc, Amount = "3", CreditedAt = GetRequiredService<Volo.Abp.Timing.IClock>().Now });
 
         await ExecuteJobAsync();
 
@@ -189,15 +189,17 @@ public class OrderStatusSyncJobTests : OrderingStubTestBase
     }
 
 
-    [Fact]
-    public async Task Job_Does_Not_Mark_Paid_When_Debit_Amount_Mismatches()
+    [Theory]
+    [InlineData("9")]
+    [InlineData("12.4200000000000000001")]
+    public async Task Job_Does_Not_Mark_Paid_When_Debit_Amount_Mismatches(string amount)
     {
         var orderId = await CreateOrderAsync();
         await SetPayableAsync(orderId, 12.42m, CollectionCurrency.Usdt);
         Stub.SetDebit(OrderingConsts.OrderBusinessType, orderId, new DebitDto
         {
             BalanceTxnId = Guid.NewGuid(), BusinessType = OrderingConsts.OrderBusinessType, BusinessId = orderId,
-            UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "9", // 错额
+            UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = amount,
         });
 
         await ExecuteJobAsync();
@@ -210,8 +212,8 @@ public class OrderStatusSyncJobTests : OrderingStubTestBase
     [Fact]
     public async Task Job_Backfill_Advances_CreditCursor_And_Rescan_Rerun_Is_Idempotent()
     {
-        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 1, BalanceTxnId = Guid.NewGuid(), UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "1", CreditedAt = DateTime.Now });
-        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 2, BalanceTxnId = Guid.NewGuid(), UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "2", CreditedAt = DateTime.Now });
+        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 1, BalanceTxnId = Guid.NewGuid(), UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "1", CreditedAt = GetRequiredService<Volo.Abp.Timing.IClock>().Now });
+        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 2, BalanceTxnId = Guid.NewGuid(), UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "2", CreditedAt = GetRequiredService<Volo.Abp.Timing.IClock>().Now });
 
         await ExecuteJobAsync();
 
@@ -237,7 +239,7 @@ public class OrderStatusSyncJobTests : OrderingStubTestBase
     {
         // 坏金额行：作业里 Parse 抛 → 单行跳过路径（不需要注入缝，数据本身就是故障源）
         var bad = Guid.NewGuid();
-        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 1, BalanceTxnId = bad, UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "not-a-number", CreditedAt = DateTime.Now });
+        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 1, BalanceTxnId = bad, UserId = UserId, Currency = CollectionCurrency.Usdt, Amount = "not-a-number", CreditedAt = GetRequiredService<Volo.Abp.Timing.IClock>().Now });
 
         // 阈值 2：第一轮计数 1，第二轮达阈值告警并清零重计
         await ExecuteJobAsync(payload: "{\"SkipAlertThreshold\":2}");
@@ -249,6 +251,175 @@ public class OrderStatusSyncJobTests : OrderingStubTestBase
         // 坏金额行不产生充值订单
         (await ReadAsync(async dbContext =>
             await dbContext.Orders.AsNoTracking().CountAsync(o => o.OrderType == OrderType.TopUp && o.BalanceTxnId == bad))).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Job_Resumes_The_Seven_Day_Rescan_Across_Scheduled_Runs()
+    {
+        var now = GetRequiredService<Volo.Abp.Timing.IClock>().Now;
+        var credits = Enumerable.Range(1, 201).Select(seq => new CreditedTxnDto
+        {
+            Seq = seq, BalanceTxnId = Guid.NewGuid(), UserId = UserId,
+            Amount = "1", Currency = CollectionCurrency.Usdt,
+            CreditedAt = seq == 1 ? now.AddDays(-7).AddMinutes(-1) : now.AddMinutes(-6)
+        }).ToList();
+        Stub.CreditedTxns.AddRange(credits);
+        var jobType = AbpAdmin.ScheduledJobs.ScheduledJobConsts.OrderStatusSyncJobType;
+        await RunInUowAsync(async () =>
+        {
+            var db = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+            db.JobStates.Add(new OrdJobState(jobType)
+            {
+                CreditCursor = 201, CreditRescanBeforeSeq = 202, CreditRescanStartedAt = now.AddMinutes(-5), UpdatedAt = now
+            });
+            // The forward pass has handled every recent credit except the oldest one.
+            db.Orders.AddRange(credits.Skip(1).Select(txn => new OrdOrder(Guid.NewGuid())
+            {
+                UserId = UserId, OrderNo = $"TOPUP-{txn.Seq}", OrderType = OrderType.TopUp, Subject = "topup",
+                CreationTime = now, Status = OrderStatus.Paid, BalanceTxnId = txn.BalanceTxnId
+            }));
+        });
+
+        await ExecuteJobAsync();
+        (await ReadAsync(db => db.JobStates.Select(s => s.CreditRescanBeforeSeq).SingleAsync())).ShouldBe(2L);
+        await ExecuteJobAsync();
+
+        (await ReadAsync(db => db.Orders.CountAsync(o => o.BalanceTxnId == credits[0].BalanceTxnId))).ShouldBe(1);
+        var state = await ReadAsync(db => db.JobStates.AsNoTracking().SingleAsync());
+        state.CreditRescanBeforeSeq.ShouldBe(0);
+        state.CreditRescanStartedAt.ShouldBeNull();
+        state.CreditCursor.ShouldBe(201L);
+    }
+
+    [Theory]
+    [InlineData(OrderStatus.PendingPayment)]
+    [InlineData(OrderStatus.Paid)]
+    [InlineData(OrderStatus.Closed)]
+    public async Task Persistent_First_Page_Does_Not_Hide_Later_Orders(OrderStatus status)
+    {
+        var now = GetRequiredService<Volo.Abp.Timing.IClock>().Now;
+        var orders = Enumerable.Range(1, 201).Select(i => new OrdOrder(
+            Guid.Parse($"00000000-0000-0000-0000-{i:D12}"))
+        {
+            UserId = UserId, OrderNo = $"SCAN-{i}", OrderType = OrderType.Business, Subject = "scan",
+            Currency = "USD", PayAmount = 1m, PayCurrency = CollectionCurrency.Usdt, Status = status,
+            CreationTime = now.AddDays(-1).AddSeconds(201 - i), ExpiresAt = now.AddHours(1),
+            CollectionId = status == OrderStatus.Paid ? Guid.NewGuid() : null,
+            PaidAt = status == OrderStatus.Paid ? now : null,
+            CloseReason = status == OrderStatus.Closed ? OrderCloseReason.Expired : null
+        }).ToList();
+        var target = orders[0];
+        if (status == OrderStatus.Paid)
+        {
+            Stub.Track(new CollectionDto
+            {
+                Id = Guid.NewGuid(), UserId = UserId, BusinessType = OrderingConsts.OrderBusinessType,
+                BusinessId = target.Id, Channel = CollectionChannel.WechatNative, Currency = CollectionCurrency.Usdt,
+                Status = CollectionStatus.Completed, Amount = "1"
+            });
+        }
+        else
+        {
+            Stub.SetDebit(OrderingConsts.OrderBusinessType, target.Id, new DebitDto
+            {
+                BalanceTxnId = Guid.NewGuid(), UserId = UserId, BusinessType = OrderingConsts.OrderBusinessType,
+                BusinessId = target.Id, Currency = CollectionCurrency.Usdt, Amount = "1"
+            });
+        }
+        await RunInUowAsync(async () =>
+        {
+            var db = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+            db.Orders.AddRange(orders);
+        });
+
+        // A full order page must leave room for the first credit batch in the same invocation.
+        var credit = Guid.NewGuid();
+        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 1, BalanceTxnId = credit, UserId = UserId,
+            Currency = CollectionCurrency.Usdt, Amount = "1", CreditedAt = now });
+        await ExecuteJobAsync();
+        var before = await ReloadAsync(target.Id);
+        before.Status.ShouldBe(status);
+        before.PaymentAnomaly.ShouldBeFalse();
+        before.BalanceTxnId.ShouldBeNull();
+        (await ReadAsync(db => db.Orders.AnyAsync(o => o.BalanceTxnId == credit))).ShouldBeTrue();
+
+        await ExecuteJobAsync();
+
+        var result = await ReloadAsync(target.Id);
+        result.Status.ShouldBe(OrderStatus.Paid);
+        if (status == OrderStatus.Paid)
+        {
+            result.PaymentAnomaly.ShouldBeTrue();
+        }
+        else
+        {
+            result.BalanceTxnId.ShouldNotBeNull();
+        }
+        (await ReadAsync(db => db.Orders.CountAsync(o => o.OrderType == OrderType.Business && o.Id != target.Id
+            && o.Status == status && !o.PaymentAnomaly))).ShouldBe(200);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Debit_Compensation_Checks_The_Current_Owner_Quote_And_Stablecoin(bool revive)
+    {
+        var id = await CreateOrderAsync();
+        var manager = GetRequiredService<OrderPaymentManager>();
+        var txn = Guid.NewGuid();
+        Task<bool> Apply(Guid owner, decimal amount, CollectionCurrency currency) =>
+            ReadAsync(_ => revive ? manager.ReviveFromDebitAsync(id, owner, amount, currency, txn)
+                : manager.MarkPaidFromDebitAsync(id, owner, amount, currency, txn));
+
+        if (revive)
+        {
+            await ReadAsync(db => db.Orders.Where(o => o.Id == id).ExecuteUpdateAsync(s => s
+                .SetProperty(o => o.Status, OrderStatus.Closed).SetProperty(o => o.CloseReason, OrderCloseReason.Expired)));
+        }
+        await SetPayableAsync(id, 10m, CollectionCurrency.Usdt);
+        (await Apply(Guid.NewGuid(), 10m, CollectionCurrency.Usdt)).ShouldBeFalse();
+        (await Apply(UserId, 11m, CollectionCurrency.Usdt)).ShouldBeFalse();
+        (await Apply(UserId, 10m, CollectionCurrency.Usdc)).ShouldBeFalse();
+        await SetPayableAsync(id, 10m, CollectionCurrency.Cny);
+        (await Apply(UserId, 10m, CollectionCurrency.Cny)).ShouldBeFalse();
+        var untouched = await ReloadAsync(id);
+        untouched.BalanceTxnId.ShouldBeNull();
+        untouched.Status.ShouldBe(revive ? OrderStatus.Closed : OrderStatus.PendingPayment);
+        await SetPayableAsync(id, 10m, CollectionCurrency.Usdc);
+        (await Apply(UserId, 10m, CollectionCurrency.Usdc)).ShouldBeTrue();
+        (await ReloadAsync(id)).PayChannel.ShouldBe(OrderingPayChannel.BalanceUsdc);
+    }
+
+    [Fact]
+    public async Task Invalid_Threshold_And_One_Database_Failure_Do_Not_Block_Healthy_Credits()
+    {
+        var bad = Guid.Parse("00a650b3-b004-4bd4-ad7b-c52da6df67e2");
+        var good = Guid.NewGuid();
+        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 1, BalanceTxnId = bad, UserId = UserId,
+            Currency = CollectionCurrency.Usdt, Amount = "1", CreditedAt = GetRequiredService<Volo.Abp.Timing.IClock>().Now });
+        Stub.CreditedTxns.Add(new CreditedTxnDto { Seq = 2, BalanceTxnId = good, UserId = UserId,
+            Currency = CollectionCurrency.Usdt, Amount = "1", CreditedAt = GetRequiredService<Volo.Abp.Timing.IClock>().Now });
+
+        // Force a real SaveChanges failure even when input validation accepts the event.
+        // The constraint applies only to this fixture's transaction and is removed after the run.
+        await ReadAsync(db => db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE "OrdOrders" ADD CONSTRAINT "test_rejected_credit" CHECK
+                ("BalanceTxnId" <> '00a650b3-b004-4bd4-ad7b-c52da6df67e2'::uuid)
+            """));
+        try
+        {
+            await ExecuteJobAsync(payload: """{"SkipAlertThreshold":"invalid"}""");
+        }
+        finally
+        {
+            await ReadAsync(db => db.Database.ExecuteSqlRawAsync("""
+                ALTER TABLE "OrdOrders" DROP CONSTRAINT "test_rejected_credit"
+                """));
+        }
+
+        (await ReadSkippedJsonAsync())!.ShouldContain($"\"{bad}\":1");
+        var ids = await ReadAsync(db => db.Orders.Select(o => o.BalanceTxnId).ToListAsync());
+        ids.ShouldBe(new Guid?[] { good });
     }
 
     private async Task SetPayableAsync(Guid orderId, decimal amount, CollectionCurrency currency)

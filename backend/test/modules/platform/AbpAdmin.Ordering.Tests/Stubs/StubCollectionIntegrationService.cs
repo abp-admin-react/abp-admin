@@ -148,19 +148,21 @@ public class StubCollectionIntegrationService : ICollectionIntegrationService, I
     public Task<DebitDto?> GetDebitAsync(string businessType, Guid businessId)
         => Task.FromResult(Debits.TryGetValue(Key(businessType, businessId), out var dto) ? dto : null);
 
-    public Task<ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount)
+    public Task<ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount, long rescanBeforeSeq = 0, DateTime? rescanStartedAt = null)
     {
         // 对齐契约（与真实现同一语义）：正向序号段 + 最近 7 天重扫段（游标之前、窗口之内）。
         // 没有重扫腿的话，作业级幂等重跑测试拿不到任何行，断言空转
-        var cutoff = DateTime.Now.AddDays(-7);
+        var through = rescanStartedAt ?? DateTime.Now;
+        var cutoff = through.AddDays(-7);
         var forward = CreditedTxns.Where(t => t.Seq > afterSeq).OrderBy(t => t.Seq).Take(maxCount).ToList();
         var rescan = CreditedTxns
-            .Where(t => t.Seq <= afterSeq && t.CreditedAt >= cutoff)
-            .OrderBy(t => t.Seq).Take(maxCount).ToList();
+            .Where(t => t.Seq <= afterSeq && (rescanBeforeSeq == 0 || t.Seq < rescanBeforeSeq) && t.CreditedAt >= cutoff && t.CreditedAt <= through)
+            .OrderByDescending(t => t.Seq).Take(maxCount).ToList();
         var items = forward.Concat(rescan).DistinctBy(t => t.Seq).OrderBy(t => t.Seq).ToList();
         return Task.FromResult(new ListCreditedTxnsResult
         {
             Items = items,
+            RescanBeforeSeq = rescan.Count > 0 && rescan.Count == maxCount ? rescan[^1].Seq : 0,
             Cursor = items.Count > 0 ? Math.Max(afterSeq, items.Max(t => t.Seq)) : afterSeq,
         });
     }

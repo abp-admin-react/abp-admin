@@ -67,6 +67,17 @@ public class OrderCommerceTests : OrderingTestBase
         await uow.CompleteAsync();
     }
 
+    private Task PayWithBalanceAsync(OrdOrder order, Guid txnId) => UowAsync(async () =>
+    {
+        var db = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+        await db.Orders.Where(o => o.Id == order.Id).ExecuteUpdateAsync(s => s
+            .SetProperty(o => o.PayAmount, order.Amount)
+            .SetProperty(o => o.PayCurrency, CollectionCurrency.Usdt));
+        var marked = await GetRequiredService<OrderPaymentManager>().MarkPaidFromDebitAsync(
+            order.Id, order.UserId, order.Amount!.Value, CollectionCurrency.Usdt, txnId);
+        marked.ShouldBeTrue();
+    });
+
     private async Task<OrdOrder> ReloadAsync(Guid orderId)
     {
         var dbContext = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
@@ -106,8 +117,7 @@ public class OrderCommerceTests : OrderingTestBase
         var order = await CreateOrderAsync(Me);
         var balanceTxnId = Guid.NewGuid();
 
-        await UowAsync(() => GetRequiredService<OrderPaymentManager>()
-            .MarkPaidFromDebitAsync(order.Id, balanceTxnId, CollectionCurrency.Usdt));
+        await PayWithBalanceAsync(order, balanceTxnId);
 
         var after = await UowAsync(() => ReloadAsync(order.Id));
         after.Status.ShouldBe(OrderStatus.Paid);
@@ -119,8 +129,7 @@ public class OrderCommerceTests : OrderingTestBase
     public async Task MarkFulfilled_Writes_FulfilledAt()
     {
         var order = await CreateOrderAsync(Me);
-        await UowAsync(() => GetRequiredService<OrderPaymentManager>()
-            .MarkPaidFromDebitAsync(order.Id, Guid.NewGuid(), CollectionCurrency.Usdt));
+        await PayWithBalanceAsync(order, Guid.NewGuid());
 
         await UowAsync(async () => await GetRequiredService<OrderPaymentManager>()
             .MarkFulfilledAsync(await ReloadAsync(order.Id)));
@@ -271,8 +280,7 @@ public class OrderCommerceTests : OrderingTestBase
     {
         // 渠道模型：Web3/余额类订单写 PayNetwork（当前单链 BSC），法币渠道单为 null
         var order = await CreateOrderAsync(Me);
-        await UowAsync(() => GetRequiredService<OrderPaymentManager>()
-            .MarkPaidFromDebitAsync(order.Id, Guid.NewGuid(), CollectionCurrency.Usdt));
+        await PayWithBalanceAsync(order, Guid.NewGuid());
 
         var after = await UowAsync(() => ReloadAsync(order.Id));
         after.PayChannel.ShouldBe(OrderingPayChannel.BalanceUsdt);

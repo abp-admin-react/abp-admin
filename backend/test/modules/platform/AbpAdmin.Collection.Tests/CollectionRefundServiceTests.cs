@@ -92,6 +92,9 @@ public class CollectionRefundServiceTests : CollectionTestBase
         var wrongAmount = await Should.ThrowAsync<BusinessException>(() =>
             service.ConfirmAsync(evidence with { Amount = "69.99" }));
         wrongAmount.Code.ShouldBe(CollectionRefundErrorCodes.RefundEvidenceMismatch);
+        var excessPrecision = await Should.ThrowAsync<BusinessException>(() =>
+            service.ConfirmAsync(evidence with { Amount = "70.0000000000000000001" }));
+        excessPrecision.Code.ShouldBe(CollectionRefundErrorCodes.RefundEvidenceMismatch);
 
         var results = await Task.WhenAll(
             InScopeAsync(refunds => refunds.ConfirmAsync(evidence)),

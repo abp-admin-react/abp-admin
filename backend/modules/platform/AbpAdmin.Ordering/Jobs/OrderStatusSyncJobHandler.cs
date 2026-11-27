@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Threading;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Ordering.Data;
 using AbpAdmin.Ordering.Entities;
 using AbpAdmin.Ordering.Orders;
@@ -36,6 +38,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
     private readonly IDbContextProvider<OrderingDbContext> _dbContextProvider;
     private readonly AbpAdmin.Collection.Contracts.ICollectionIntegrationService _integrationService;
     private readonly OrderPaymentManager _orderPaymentManager;
+    private readonly IUnitOfWorkManager _units;
     private readonly IClock _clock;
     private readonly ILogger<OrderStatusSyncJobHandler> _logger;
 
@@ -44,12 +47,14 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
         AbpAdmin.Collection.Contracts.ICollectionIntegrationService integrationService,
         OrderPaymentManager orderPaymentManager,
         IClock clock,
+        IUnitOfWorkManager units,
         ILogger<OrderStatusSyncJobHandler> logger)
     {
         _dbContextProvider = dbContextProvider;
         _integrationService = integrationService;
         _orderPaymentManager = orderPaymentManager;
         _clock = clock;
+        _units = units;
         _logger = logger;
     }
 
@@ -57,272 +62,228 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
     public virtual async Task ExecuteAsync(ScheduledJobContext context)
     {
         var now = _clock.Now;
-
-        // ── PendingPayment：到账检查 + 过期关单 ─────────────────────────────────────────
-        var pendingOrders = await QueryOrdersAsync(o =>
-            o.Status == OrderStatus.PendingPayment &&
-            o.OrderType == OrderType.Business);
-
-        foreach (var order in pendingOrders)
+        var db = await _dbContextProvider.GetDbContextAsync();
+        var state = await db.JobStates.FindAsync(ScheduledJobConsts.OrderStatusSyncJobType);
+        if (state == null)
         {
-            try
-            {
-                if (order.ExpiresAt != null && order.ExpiresAt.Value <= now)
-                {
-                    await HandleExpiredAsync(order);
-                    continue;
-                }
-
-                if (order.PayAmount == null)
-                {
-                    continue;
-                }
-
-                var completed = await CompletedCollectionsAsync(order);
-                if (completed.Count == 0)
-                {
-                    continue;
-                }
-
-                await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, FindMatching(completed, order) ?? completed[0]);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "补状态处理订单 {OrderId} 失败，下一轮重试", order.Id);
-            }
+            state = new OrdJobState(ScheduledJobConsts.OrderStatusSyncJobType) { UpdatedAt = now };
+            db.JobStates.Add(state);
         }
 
+        // ── PendingPayment：到账检查 + 过期关单 ─────────────────────────────────────────
+        state.PendingCollectionBeforeId = await ProcessOrdersAsync(state.PendingCollectionBeforeId, o =>
+            o.Status == OrderStatus.PendingPayment, async order =>
+        {
+            if (order.ExpiresAt != null && order.ExpiresAt.Value <= now)
+            {
+                await HandleExpiredAsync(order);
+                return;
+            }
+
+            if (order.PayAmount == null)
+            {
+                return;
+            }
+
+            var completed = await CompletedCollectionsAsync(order);
+            if (completed.Count == 0)
+            {
+                return;
+            }
+
+            await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, FindMatching(completed, order) ?? completed[0]);
+        }, context.CancellationToken);
+
         // ── Paid（7 天内、无异常标志位、已归因 CollectionId）：第二笔到账兜底 ────────────────
-        var paidOrders = await QueryOrdersAsync(o =>
+        state.PaidCollectionBeforeId = await ProcessOrdersAsync(state.PaidCollectionBeforeId, o =>
             o.Status == OrderStatus.Paid &&
             !o.PaymentAnomaly &&
             o.PaidAt != null && o.PaidAt > now - LookBackWindow &&
-            o.CollectionId != null);
-
-        foreach (var order in paidOrders)
+            o.CollectionId != null, async order =>
         {
-            try
+            var completed = await CompletedCollectionsAsync(order);
+            if (completed.Count == 0)
             {
-                var completed = await CompletedCollectionsAsync(order);
-                if (completed.Count == 0)
-                {
-                    continue;
-                }
+                return;
+            }
 
-                // 余额支付已完成时，旧渠道留下的 CollectionId 不能证明这笔渠道收款就是付款来源。
-                var second = completed.FirstOrDefault(c =>
-                    order.BalanceTxnId != null || c.Id != order.CollectionId);
-                if (second != null)
-                {
-                    await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, second);
-                }
-            }
-            catch (Exception ex)
+            // 余额支付已完成时，旧渠道留下的 CollectionId 不能证明这笔渠道收款就是付款来源。
+            var second = completed.FirstOrDefault(c =>
+                order.BalanceTxnId != null || c.Id != order.CollectionId);
+            if (second != null)
             {
-                _logger.LogWarning(ex, "补状态检查已支付订单 {OrderId} 失败，下一轮重试", order.Id);
+                await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, second);
             }
-        }
+        }, context.CancellationToken);
 
         // ── Closed（7 天内、无异常标志位）：匹配到账的复活 / 告警 ──────────────────────────
-        var closedOrders = await QueryOrdersAsync(o =>
+        state.ClosedCollectionBeforeId = await ProcessOrdersAsync(state.ClosedCollectionBeforeId, o =>
             o.Status == OrderStatus.Closed &&
             !o.PaymentAnomaly &&
-            o.ExpiresAt != null && o.ExpiresAt > now - LookBackWindow);
-
-        foreach (var order in closedOrders)
+            o.ExpiresAt != null && o.ExpiresAt > now - LookBackWindow, async order =>
         {
-            try
+            if (order.PayAmount == null)
             {
-                if (order.PayAmount == null)
-                {
-                    continue;
-                }
-
-                var completed = await CompletedCollectionsAsync(order);
-                if (completed.Count == 0)
-                {
-                    continue;
-                }
-
-                await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, FindMatching(completed, order) ?? completed[0]);
+                return;
             }
-            catch (Exception ex)
+
+            var completed = await CompletedCollectionsAsync(order);
+            if (completed.Count == 0)
             {
-                _logger.LogWarning(ex, "补状态检查已关闭订单 {OrderId} 失败，下一轮重试", order.Id);
+                return;
             }
-        }
 
-        await ReconcileUnmarkedDebitsAsync(now);
-        await BackfillCreditedTxnsAsync(context);
+            await _orderPaymentManager.HandleCompletedCollectionAsync(order.Id, FindMatching(completed, order) ?? completed[0]);
+        }, context.CancellationToken);
+
+        await ReconcileUnmarkedDebitsAsync(state, now, context.CancellationToken);
+        await db.SaveChangesAsync(context.CancellationToken);
+        await BackfillCreditedTxnsAsync(context, state);
     }
 
     /// <summary>
-    /// 「已扣未标支付」：扣款和标支付本应同事务原子提交，这一步是为跨模块旁路留下的兜底——
-    /// PendingPayment 且有金额币种一致的未回冲扣款 → 补标 Paid（写 BalanceTxnId、PaidAt）；
-    /// Closed(Expired)、无异常标志位、金额一致 → 标回 Paid 并写归因；
-    /// Closed(UserCancel) 且扣款未回冲 → 回冲扣款并追加异常明细。
+    /// 修复未回冲的余额扣款。待支付或过期关闭订单只在付款人、金额和币种一致且未退款时补标已支付。
+    /// 用户取消的订单走原扣款回冲，遇到退款或缺失凭证时记录异常供人工处理。
     /// </summary>
-    private async Task ReconcileUnmarkedDebitsAsync(DateTime now)
+    private async Task ReconcileUnmarkedDebitsAsync(OrdJobState state, DateTime now, CancellationToken cancellationToken)
     {
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-
-        var pendingOrders = await QueryOrdersAsync(o =>
-            o.Status == OrderStatus.PendingPayment && o.OrderType == OrderType.Business);
-
-        foreach (var order in pendingOrders)
+        state.PendingDebitBeforeId = await ProcessOrdersAsync(state.PendingDebitBeforeId, o =>
+            o.Status == OrderStatus.PendingPayment, async order =>
         {
-            try
+            var debit = await _integrationService.GetDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
+            if (debit == null)
             {
-                var debit = await _integrationService.GetDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
-                if (debit == null)
-                {
-                    continue;
-                }
-
-                // 金额币种与订单应付一致才补支付；对不上只告警（错额扣款留给人工）
-                if (order.PayAmount == null
-                    || order.PayCurrency != debit.Currency
-                    || order.PayAmount.Value != AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(debit.Amount))
-                {
-                    _logger.LogWarning(
-                        "订单 {OrderId} 有未回冲扣款但金额币种与应付不一致（应付 {PayAmount} {PayCurrency}，扣款 {Amount} {Currency}），留给人工处理",
-                        order.Id, order.PayAmount, order.PayCurrency, debit.Amount, debit.Currency);
-                    continue;
-                }
-
-                if (await _integrationService.HasWalletRefundAsync(debit.BalanceTxnId))
-                {
-                    _logger.LogWarning(
-                        "订单 {OrderId} 的扣款 {TxnId} 已有钱包退款或待核实，不补标支付",
-                        order.Id, debit.BalanceTxnId);
-                    continue;
-                }
-
-                // 状态转移统一走状态机（作业只编排扫描，不自己拼 Paid 的列集）
-                if (await _orderPaymentManager.MarkPaidFromDebitAsync(order.Id, debit.BalanceTxnId, debit.Currency))
-                {
-                    _logger.LogWarning("订单 {OrderId} 由补状态作业按未回冲扣款补标 Paid（BalanceTxnId={TxnId}）",
-                        order.Id, debit.BalanceTxnId);
-                }
+                return;
             }
-            catch (Exception ex)
+
+            if (!CollectionAmounts.TryParsePositiveExact(debit.Amount, debit.Currency, out var amount)
+                || order.PayAmount == null
+                || order.UserId != debit.UserId
+                || order.PayCurrency != debit.Currency
+                || order.PayAmount.Value != amount)
             {
-                _logger.LogWarning(ex, "已扣未标支付核对订单 {OrderId} 失败，下一轮重试", order.Id);
+                _logger.LogWarning(
+                    "订单 {OrderId} 的未回冲扣款 {TxnId} 无法匹配付款人、应付金额或币种（应付 {PayAmount} {PayCurrency}，扣款 {Amount} {Currency}），待人工核对",
+                    order.Id, debit.BalanceTxnId, order.PayAmount, order.PayCurrency, debit.Amount, debit.Currency);
+                return;
             }
-        }
 
-        var closedOrders = await QueryOrdersAsync(o =>
+            if (await _integrationService.HasWalletRefundAsync(debit.BalanceTxnId))
+            {
+                _logger.LogWarning(
+                    "订单 {OrderId} 的扣款 {TxnId} 已有钱包退款记录，暂不补标已支付",
+                    order.Id, debit.BalanceTxnId);
+                return;
+            }
+
+            if (await _orderPaymentManager.MarkPaidFromDebitAsync(order.Id, debit.UserId, amount, debit.Currency, debit.BalanceTxnId))
+            {
+                _logger.LogWarning("订单 {OrderId} 由补状态作业按未回冲扣款补标 Paid（BalanceTxnId={TxnId}）",
+                    order.Id, debit.BalanceTxnId);
+            }
+        }, cancellationToken);
+
+        state.ClosedDebitBeforeId = await ProcessOrdersAsync(state.ClosedDebitBeforeId, o =>
             o.Status == OrderStatus.Closed &&
             !o.PaymentAnomaly &&
-            o.OrderType == OrderType.Business &&
-            o.ExpiresAt != null && o.ExpiresAt > now - LookBackWindow);
-
-        foreach (var order in closedOrders)
+            o.ExpiresAt != null && o.ExpiresAt > now - LookBackWindow, async order =>
         {
-            try
+            var debit = await _integrationService.GetDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
+            if (debit == null)
             {
-                var debit = await _integrationService.GetDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
-                if (debit == null)
+                return;
+            }
+
+            var validAmount = CollectionAmounts.TryParsePositiveExact(debit.Amount, debit.Currency, out var amount);
+            if (!validAmount || order.UserId != debit.UserId || debit.Currency is not (CollectionCurrency.Usdt or CollectionCurrency.Usdc))
+            {
+                await _orderPaymentManager.AppendAnomalyAsync(order.Id, validAmount ? amount : null, debit.Currency, null,
+                    debit.BalanceTxnId.ToString(), "Invalid balance debit owner, amount or currency; needs manual resolution.");
+                return;
+            }
+
+            var amountsMatch = order.PayAmount != null
+                && order.PayCurrency == debit.Currency
+                && order.PayAmount.Value == amount;
+
+            if (order.CloseReason == OrderCloseReason.Expired)
+            {
+                if (amountsMatch && await _integrationService.HasWalletRefundAsync(debit.BalanceTxnId))
                 {
-                    continue;
+                    _logger.LogWarning(
+                        "过期关闭的订单 {OrderId} 的扣款 {TxnId} 已有钱包退款记录，暂不恢复为已支付",
+                        order.Id, debit.BalanceTxnId);
+                    return;
                 }
 
-                var amount = AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(debit.Amount);
-                var amountsMatch = order.PayAmount != null
-                    && order.PayCurrency == debit.Currency
-                    && order.PayAmount.Value == amount;
-
-                if (order.CloseReason == OrderCloseReason.Expired)
+                if (amountsMatch)
                 {
-                    if (amountsMatch && await _integrationService.HasWalletRefundAsync(debit.BalanceTxnId))
+                    if (await _orderPaymentManager.ReviveFromDebitAsync(order.Id, debit.UserId, amount, debit.Currency, debit.BalanceTxnId))
                     {
-                        _logger.LogWarning(
-                            "过期关闭的订单 {OrderId} 的扣款 {TxnId} 已有钱包退款或待核实，不复活为已支付",
+                        _logger.LogWarning("过期关闭的订单 {OrderId} 按未回冲扣款复活为 Paid（BalanceTxnId={TxnId}）",
                             order.Id, debit.BalanceTxnId);
-                        continue;
                     }
 
-                    if (amountsMatch)
-                    {
-                        // 过期关闭 + 金额一致 + 无异常明细：标回 Paid 并写归因（余额版复活，状态机统一守卫）
-                        if (await _orderPaymentManager.ReviveFromDebitAsync(order.Id, amount, debit.Currency, debit.BalanceTxnId))
-                        {
-                            _logger.LogWarning("过期关闭的订单 {OrderId} 按未回冲扣款复活为 Paid（BalanceTxnId={TxnId}）",
-                                order.Id, debit.BalanceTxnId);
-                        }
+                    return;
+                }
 
-                        continue;
-                    }
+                // 金额或币种不符时保留异常记录，供订单移出自动核对窗口后继续处理。
+                await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
+                    null, debit.BalanceTxnId.ToString(),
+                    "Expired order has an unreversed debit with mismatched amount or currency; needs manual resolution.");
+                _logger.LogWarning(
+                    "过期关闭的订单 {OrderId} 有未回冲扣款但金额币种不一致（应付 {PayAmount} {PayCurrency}，扣款 {Amount} {Currency}），已进异常队列",
+                    order.Id, order.PayAmount, order.PayCurrency, debit.Amount, debit.Currency);
+                return;
+            }
 
-                    // 金额或币种不符时保留异常记录，供订单移出自动核对窗口后继续处理。
+            if (order.CloseReason == OrderCloseReason.UserCancel)
+            {
+                try
+                {
+                    await _integrationService.ReverseDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
                     await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
                         null, debit.BalanceTxnId.ToString(),
-                        "Expired order has an unreversed debit with mismatched amount or currency; needs manual resolution.");
-                    _logger.LogWarning(
-                        "过期关闭的订单 {OrderId} 有未回冲扣款但金额币种不一致（应付 {PayAmount} {PayCurrency}，扣款 {Amount} {Currency}），已进异常队列",
-                        order.Id, order.PayAmount, order.PayCurrency, debit.Amount, debit.Currency);
-                    continue;
+                        "Order was cancelled by the user, but an unreversed balance debit was found; debit reversed.");
+                    _logger.LogWarning("用户取消的订单 {OrderId} 发现未回冲扣款，已回冲（BalanceTxnId={TxnId}）",
+                        order.Id, debit.BalanceTxnId);
                 }
-
-                if (order.CloseReason == OrderCloseReason.UserCancel)
+                catch (BusinessException ex) when (ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletLedgerPending
+                    || ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletRefundNotAllowed)
                 {
-                    try
-                    {
-                        await _integrationService.ReverseDebitAsync(OrderingConsts.OrderBusinessType, order.Id);
-                        await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
-                            null, debit.BalanceTxnId.ToString(),
-                            "Order was cancelled by the user, but an unreversed balance debit was found; debit reversed.");
-                        _logger.LogWarning("用户取消的订单 {OrderId} 发现未回冲扣款，已回冲（BalanceTxnId={TxnId}）",
-                            order.Id, debit.BalanceTxnId);
-                    }
-                    catch (BusinessException ex) when (ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletLedgerPending
-                        || ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletRefundNotAllowed)
-                    {
-                        var blockedByRefund = ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletRefundNotAllowed;
-                        await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
-                            null, debit.BalanceTxnId.ToString(),
-                            blockedByRefund
-                                ? "Unreversed debit already has a wallet refund. Compensation will not reverse it."
-                                : "Unreversed debit has no finance voucher. Left visible for confirmation; compensation will not invent a reversing entry.");
-                        _logger.LogWarning(
-                            blockedByRefund
-                                ? "订单 {OrderId} 的扣款 {TxnId} 已有钱包退款，已停止自动回冲"
-                                : "订单 {OrderId} 的扣款 {TxnId} 没有财务凭证，已停止自动回冲",
-                            order.Id, debit.BalanceTxnId);
-                    }
+                    var blockedByRefund = ex.Code == AbpAdmin.Collection.Contracts.CollectionErrorCodes.WalletRefundNotAllowed;
+                    await _orderPaymentManager.AppendAnomalyAsync(order.Id, amount, debit.Currency,
+                        null, debit.BalanceTxnId.ToString(),
+                        blockedByRefund
+                            ? "Unreversed debit already has a wallet refund. Compensation will not reverse it."
+                            : "Unreversed debit has no finance voucher. Left visible for confirmation; compensation will not invent a reversing entry.");
+                    _logger.LogWarning(
+                        blockedByRefund
+                            ? "订单 {OrderId} 的扣款 {TxnId} 已有钱包退款，已停止自动回冲"
+                            : "订单 {OrderId} 的扣款 {TxnId} 没有财务凭证，已停止自动回冲",
+                        order.Id, debit.BalanceTxnId);
                 }
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "已扣未标支付核对关闭订单 {OrderId} 失败，下一轮重试", order.Id);
-            }
-        }
+        }, cancellationToken);
     }
 
     /// <summary>
-    /// 充值流水补插：序号游标正向拉一批，没有对应充值订单的按 BalanceTxnId 补插（停在 Paid）。
-    /// 单行失败跳过并告警，游标推进到本批最大序号（含跳过的行，被跳过的行只靠 7 天重扫补）；
-    /// 同一流水达到失败次数阈值时告警并重新计数。
+    /// 正向游标处理新增流水，反向游标分批重扫最近七天。按 BalanceTxnId 补建已支付的充值订单。
+    /// 单笔失败由重扫重试，连续失败达到阈值时告警并重新计数。
     /// </summary>
-    private async Task BackfillCreditedTxnsAsync(ScheduledJobContext context)
+    private async Task BackfillCreditedTxnsAsync(ScheduledJobContext context, OrdJobState state)
     {
         var dbContext = await _dbContextProvider.GetDbContextAsync();
         var now = _clock.Now;
 
-        var state = await dbContext.JobStates.FindAsync(ScheduledJobConsts.OrderStatusSyncJobType);
-        if (state == null)
-        {
-            state = new OrdJobState(ScheduledJobConsts.OrderStatusSyncJobType);
-            await dbContext.JobStates.AddAsync(state);
-        }
-
         var threshold = ParseSkipAlertThreshold(context.Payload);
         var skipped = DeserializeSkipped(state.SkippedTxnsJson);
 
-        var result = await _integrationService.ListCreditedTxnsAsync(state.CreditCursor, BatchSize);
+        var rescanStartedAt = state.CreditRescanStartedAt ?? now;
+        var result = await _integrationService.ListCreditedTxnsAsync(
+            state.CreditCursor, BatchSize, state.CreditRescanBeforeSeq, rescanStartedAt);
 
-        // 批量去重：7 天重扫每轮都会带回已处理行，逐笔 AnyAsync 是每轮 O(批大小) 的点查；
-        // 一次 IN 查出已存在的充值订单，剩下的才走插入
+        // 重扫包含已处理的流水，先批量查出已有的充值订单。
         var candidateIds = result.Items.Select(t => t.BalanceTxnId).ToList();
         var existingIds = candidateIds.Count == 0
             ? new HashSet<Guid>()
@@ -334,6 +295,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
 
         foreach (var txn in result.Items)
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
             if (existingIds.Contains(txn.BalanceTxnId))
             {
                 skipped.Remove(txn.BalanceTxnId);
@@ -342,12 +304,13 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
 
             try
             {
+                using var credit = _units.Begin(requiresNew: true, isTransactional: true);
                 await _orderPaymentManager.HandleBalanceCreditedAsync(
-                    txn.BalanceTxnId, txn.UserId, txn.Currency,
-                    AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(txn.Amount), txn.CreditedAt);
+                    txn.BalanceTxnId, txn.UserId, txn.Currency, txn.Amount, txn.CreditedAt);
+                await credit.CompleteAsync(context.CancellationToken);
                 skipped.Remove(txn.BalanceTxnId);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!context.CancellationToken.IsCancellationRequested)
             {
                 var count = (skipped.TryGetValue(txn.BalanceTxnId, out var c) ? c : 0) + 1;
                 _logger.LogWarning(ex, "充值流水补插失败并跳过（BalanceTxnId={TxnId}，累计未成功 {Count} 次）",
@@ -375,6 +338,8 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
             state.CursorLastAdvancedAt = now; // 告警节流：再等一个窗口
         }
 
+        state.CreditRescanBeforeSeq = result.RescanBeforeSeq;
+        state.CreditRescanStartedAt = result.RescanBeforeSeq == 0 ? null : rescanStartedAt;
         state.SkippedTxnsJson = skipped.Count > 0
             ? System.Text.Json.JsonSerializer.Serialize(skipped)
             : null;
@@ -393,6 +358,7 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
                 // 不在 JsonException 之列，会把整轮补插卡死。先验 ValueKind，坏配置一律退默认值
                 if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
                     && doc.RootElement.TryGetProperty("SkipAlertThreshold", out var v)
+                    && v.ValueKind == System.Text.Json.JsonValueKind.Number
                     && v.TryGetInt32(out var t) && t > 0)
                 {
                     return t;
@@ -473,15 +439,38 @@ public class OrderStatusSyncJobHandler : IScheduledJobHandler, ITransientDepende
             AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(c.Amount) == order.PayAmount!.Value);
     }
 
-    private async Task<List<OrdOrder>> QueryOrdersAsync(Expression<Func<OrdOrder, bool>> predicate)
+    private async Task<Guid?> ProcessOrdersAsync(Guid? before, Expression<Func<OrdOrder, bool>> predicate,
+        Func<OrdOrder, Task> process, CancellationToken cancellationToken)
     {
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        return await dbContext.Orders
-            .AsNoTracking()
-            .Where(o => o.OrderType == OrderType.Business)
-            .Where(predicate)
-            .OrderBy(o => o.CreationTime)
-            .Take(BatchSize)
-            .ToListAsync();
+        var db = await _dbContextProvider.GetDbContextAsync();
+        var candidates = db.Orders.AsNoTracking().Where(o => o.OrderType == OrderType.Business).Where(predicate);
+        if (before.HasValue)
+        {
+            candidates = candidates.Where(o => o.Id < before.Value);
+        }
+
+        var page = await candidates.OrderByDescending(o => o.Id).Take(BatchSize).ToListAsync(cancellationToken);
+        foreach (var order in page)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                // 查单可能访问外部渠道。逐单隔离工作单元，写操作由状态机开启事务。
+                using var item = _units.Begin(requiresNew: true, isTransactional: false);
+                await process(order);
+                await item.CompleteAsync(cancellationToken);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "补状态处理订单 {OrderId} 失败，订单仍满足核对条件时会随下一轮扫描重试", order.Id);
+            }
+        }
+
+        if (page.Count < BatchSize)
+        {
+            return null;
+        }
+        var last = page[^1].Id;
+        return await candidates.AnyAsync(o => o.Id < last, cancellationToken) ? last : null;
     }
 }

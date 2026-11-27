@@ -1,9 +1,13 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Permissions;
+using AbpAdmin.Grids;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -24,18 +28,24 @@ public class CollectionPaymentAdminEndpointTests
         var records = endpoints.Where(endpoint =>
             (endpoint.RoutePattern.RawText?.TrimStart('/') ?? "")
                 .StartsWith(route, StringComparison.Ordinal)).ToList();
-        records.Select(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/'))
-            .OrderBy(template => template)
-            .ShouldBe(new[] { route, route + "/{id}" });
-
-        foreach (var endpoint in records)
+        var expected = new[] { (route, "GET"), (route + "/{id}", "GET"), (route + "/query", "POST") };
+        records.Count.ShouldBe(expected.Length);
+        foreach (var (template, verb) in expected)
         {
-            endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.ShouldBe(new[] { "GET" });
+            var endpoint = records.Single(item => item.RoutePattern.RawText?.TrimStart('/') == template);
+            endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.ShouldBe(new[] { verb });
             endpoint.Metadata.GetMetadata<IAllowAnonymous>().ShouldBeNull();
             endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()
-                .Any(data => data.Policy == CollectionPermissions.Payments.View)
-                .ShouldBeTrue();
+                .Select(data => data.Policy).Where(policy => !string.IsNullOrEmpty(policy)).Distinct()
+                .ShouldBe(new[] { CollectionPermissions.Payments.View });
         }
+
+        var gridQuery = records.Single(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/') == route + "/query");
+        var parameters = gridQuery.Metadata.GetMetadata<ControllerActionDescriptor>()!.Parameters;
+        var grid = parameters.Single(parameter => parameter.ParameterType == typeof(GridQueryInput));
+        var scope = parameters.Single(parameter => parameter.ParameterType == typeof(CollectionPaymentListInput));
+        (grid.BindingInfo?.BindingSource).ShouldBe(BindingSource.Body);
+        (scope.BindingInfo?.BindingSource).ShouldBe(BindingSource.Query);
 
         endpoints.Any(endpoint => (endpoint.RoutePattern.RawText?.TrimStart('/') ?? "")
             .StartsWith("api/payment-service/", StringComparison.Ordinal)).ShouldBeFalse();

@@ -19,7 +19,7 @@ namespace AbpAdmin.Ordering.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasAnnotation("_Abp_DatabaseProvider", EfCoreDatabaseProvider.PostgreSql)
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.15")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -30,11 +30,32 @@ namespace AbpAdmin.Ordering.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<Guid?>("ClosedCollectionBeforeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ClosedDebitBeforeId")
+                        .HasColumnType("uuid");
+
                     b.Property<long>("CreditCursor")
                         .HasColumnType("bigint");
 
+                    b.Property<long>("CreditRescanBeforeSeq")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("CreditRescanStartedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<DateTime?>("CursorLastAdvancedAt")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid?>("PaidCollectionBeforeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PendingCollectionBeforeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PendingDebitBeforeId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("SkippedTxnsJson")
                         .HasColumnType("text");

@@ -9,6 +9,7 @@ using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Volo.Abp;
@@ -27,6 +28,7 @@ public class CollectionRefundService(
     ICurrentTenant currentTenant,
     IEnumerable<ICollectionRefundChannelGateway> gateways,
     IClock clock,
+    IServiceScopeFactory scopeFactory,
     ILogger<CollectionRefundService> logger) : ICollectionRefundService, ITransientDependency
 {
     private static readonly TimeSpan SubmissionLease = TimeSpan.FromMinutes(1);
@@ -38,9 +40,7 @@ public class CollectionRefundService(
         RequestCollectionRefundInput input, CancellationToken cancellationToken = default)
     {
         AssertHost();
-        var amount = CollectionAmounts.Parse(input.Amount);
-        if (amount <= 0 || (input.Currency is CollectionCurrency.Cny or CollectionCurrency.Usd &&
-            decimal.Round(amount, 2) != amount))
+        if (!CollectionAmounts.TryParsePositiveExact(input.Amount, input.Currency, out var amount))
         {
             throw new BusinessException(CollectionErrorCodes.InvalidAmount);
         }
@@ -238,29 +238,32 @@ public class CollectionRefundService(
     public virtual async Task ReconcileAsync(CancellationToken cancellationToken = default)
     {
         AssertHost();
-        var routes = gateways.Select(gateway => (gateway.Channel, gateway.MerchantAccountId)).Distinct().ToArray();
-        if (routes.Length == 0)
-        {
-            return;
-        }
+        using var slots = new SemaphoreSlim(CollectionMerchantRoute.MaxConcurrentMerchants);
+        await Task.WhenAll(Routes(gateways).Select(route => route.RunAsync(
+            CollectionMerchantRoute.RefundTask, scopeFactory, slots, ReconcileRouteAsync, cancellationToken)));
+    }
 
-        var candidates = new List<Guid>();
+    internal static IEnumerable<CollectionMerchantRoute> Routes(IEnumerable<ICollectionRefundChannelGateway> channels) =>
+        channels.Select(gateway => new CollectionMerchantRoute(gateway.Channel, gateway.MerchantAccountId)).Distinct();
+
+    internal static Task ReconcileRouteAsync(IServiceProvider services, CollectionMerchantRoute route, CancellationToken ct) =>
+        services.GetRequiredService<CollectionRefundService>().ReconcileMerchantAsync(route, ct);
+
+    private async Task ReconcileMerchantAsync(CollectionMerchantRoute route, CancellationToken cancellationToken)
+    {
+        AssertHost();
+        Guid[] candidates;
         using (var uow = BeginRead())
         {
             var db = await dbContextProvider.GetDbContextAsync();
             var due = clock.Now.Subtract(ReconcileInterval);
-            foreach (var route in routes)
-            {
-                var rows = await db.Set<ColCollectionRefund>().AsNoTracking()
-                    .Where(row => row.Status == CollectionRefundStatus.Pending && row.LastCheckedAt <= due &&
-                        row.Channel == route.Channel && row.MerchantAccountId == route.MerchantAccountId)
-                    .OrderBy(row => row.LastCheckedAt).ThenBy(row => row.Id)
-                    .Select(row => row.Id)
-                    .Take(ReconcileBatchSize)
-                    .ToListAsync(cancellationToken);
-                candidates.AddRange(rows);
-            }
-
+            candidates = await db.Set<ColCollectionRefund>().AsNoTracking()
+                .Where(row => row.Status == CollectionRefundStatus.Pending && row.LastCheckedAt <= due &&
+                    row.Channel == route.Channel && row.MerchantAccountId == route.MerchantAccountId)
+                .OrderBy(row => row.LastCheckedAt).ThenBy(row => row.Id)
+                .Select(row => row.Id)
+                .Take(ReconcileBatchSize)
+                .ToArrayAsync(cancellationToken);
             await uow.CompleteAsync(cancellationToken);
         }
 
@@ -273,7 +276,8 @@ public class CollectionRefundService(
             }
             catch (BusinessException exception)
             {
-                logger.LogWarning(exception, "Refund {RefundId} requires reconciliation", id);
+                logger.LogWarning(exception, "Refund reconciliation failed for {RefundId} on {Channel}/{MerchantAccountId}",
+                    id, route.Channel, route.MerchantAccountId);
                 await MarkUnknownAsync(id, cancellationToken);
             }
         }
@@ -327,7 +331,7 @@ public class CollectionRefundService(
         catch (BusinessException exception) when (exception.Code is CollectionRefundErrorCodes.RefundEvidenceMismatch
             or CollectionRefundErrorCodes.RefundProviderReferenceConflict)
         {
-            // 渠道已接到请求，证据不一致也保留退款额度，由查单补偿重新核实。
+            // 返回的证据与退款单不符，保留待处理状态和已占额度，供后续查单。
             await MarkUnknownAsync(refund.Id, cancellationToken);
             throw;
         }
@@ -366,7 +370,7 @@ public class CollectionRefundService(
     {
         if (input.Channel != refund.Channel || input.MerchantAccountId != refund.MerchantAccountId ||
             input.MerchantRefundNo != refund.MerchantRefundNo || input.CollectionNo != collection.CollectionNo ||
-            input.Currency != refund.Currency || !CollectionAmounts.TryParse(input.Amount, out var amount) ||
+            input.Currency != refund.Currency || !CollectionAmounts.TryParsePositiveExact(input.Amount, input.Currency, out var amount) ||
             amount != refund.Amount || (input.ChannelRefundNo != null && refund.ChannelRefundNo != null &&
             input.ChannelRefundNo != refund.ChannelRefundNo) ||
             (refund.Status == CollectionRefundStatus.Pending && input.Outcome == CollectionRefundOutcome.Failed &&

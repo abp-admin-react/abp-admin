@@ -157,6 +157,41 @@ describe('渠道收款记录', () => {
     expect(screen.getByText('全部外部渠道')).toBeTruthy();
   });
 
+  it('收款创建时间显示和查询使用同一 UTC 日期', async () => {
+    render(<PaymentsPage />);
+    const props = mocks.table.mock.calls.at(-1)?.[0];
+    const column = props.columnDefs.find(
+      (c: { field?: string }) => c.field === 'creationTime',
+    );
+    expect(column.headerName).toBe('创建时间（UTC）');
+    const value = column.valueGetter({
+      data: { creationTime: '2026-01-01T00:30:00+08:00' },
+    });
+    expect(column.valueFormatter({ value })).toBe('2025-12-31 16:30:00');
+    await fetchGridBlock(props, {
+      filterModel: {
+        creationTime: {
+          filterType: 'date',
+          type: 'equals',
+          dateFrom: '2025-12-31 00:00:00',
+        },
+      },
+    });
+    expect(mocks.getPayments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: [
+          {
+            field: 'creationTime',
+            join: 'and',
+            conditions: [{ op: 'eq', value: '2025-12-31' }],
+          },
+        ],
+      }),
+      expect.any(AbortSignal),
+      '',
+    );
+  });
+
   it('充值记录角色直接打开充值，不请求外部渠道接口', () => {
     mocks.access.mockReturnValue({ canViewDepositRecords: true });
     mocks.useLocation.mockReturnValue({

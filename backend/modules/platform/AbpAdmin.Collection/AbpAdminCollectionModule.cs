@@ -93,6 +93,7 @@ public class AbpAdminCollectionModule : AbpModule
         context.Services.AddTransient<Contracts.ICollectionIntegrationService, CollectionIntegrationService>();
         context.Services.AddTransient<CollectionIntegrationService>();
         context.Services.AddTransient<ICollectionRefundService, Payments.CollectionRefundService>();
+        context.Services.AddTransient<Payments.CollectionRefundService>();
 
         // Auto API（/api/app/collection-admin 一类，随管理端应用服务落地）
         Configure<AbpAspNetCoreMvcOptions>(options =>

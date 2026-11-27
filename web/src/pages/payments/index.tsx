@@ -46,6 +46,7 @@ import {
 import { useModuleEnabled } from '@/hooks/useModuleAvailability';
 import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
 import { isNotFound } from '@/requestErrorConfig';
+import { formatForDisplay } from '@/utils/time';
 import DepositsPage from '../collection/deposits';
 import NetworkConfigPage from '../collection/network';
 import { orderRecordUrl } from '../collection/record-links';
@@ -88,9 +89,7 @@ function formatAmount(payment: CollectionPaymentAdminDto) {
 }
 
 function formatTime(value: string | null) {
-  if (!value) return '—';
-  const time = new Date(value);
-  return Number.isNaN(time.getTime()) ? value : time.toLocaleString();
+  return value ? formatForDisplay(value) : '—';
 }
 
 function PaymentDetails({
@@ -760,8 +759,7 @@ function PaymentRecords({
     {
       title: '创建时间',
       dataIndex: 'creationTime',
-      valueType: 'dateTime',
-      width: 170,
+      width: 180,
     },
     {
       title: '操作',
@@ -786,7 +784,8 @@ function PaymentRecords({
     query: useScopedGridQuery(businessGridQueries.payments, paymentsGridScope),
     columnDefs: toGridColumns<CollectionPaymentAdminDto>(columns, {
       pro: true,
-      kinds: { amount: 'decimal', creationTime: 'date' },
+      utcDateFields: ['creationTime'],
+      kinds: { amount: 'decimal' },
     }),
   });
   actionRef.current = { reload: paymentsGrid.refresh };

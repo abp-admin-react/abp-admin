@@ -128,6 +128,9 @@ public class ListCreditedTxnsResult
 
     /// <summary>本批最大序号（含被跳过的行）；空批时等于调用方传入的游标。</summary>
     public long Cursor { get; set; }
+
+    /// <summary>下一次重扫的独占上界。0 表示本轮回看已结束，下次从最新一页开始。</summary>
+    public long RescanBeforeSeq { get; set; }
 }
 
 /// <summary>返回该用户的 BSC 地址。有副作用（可能派生新地址），不是纯查询。</summary>

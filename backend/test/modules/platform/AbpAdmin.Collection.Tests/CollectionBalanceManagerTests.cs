@@ -33,6 +33,23 @@ public class CollectionBalanceManagerTests : CollectionTestBase
         GetRequiredService<CollectionBalanceManager>();
 
     [Fact]
+    public async Task Credit_Replay_Must_Match_The_Original_Beneficiary_Currency_And_Amount()
+    {
+        var key = $"dep-{Guid.NewGuid()}";
+        var txn = await Manager.CreditAsync(User1, CollectionCurrency.Usdc, 10m, key);
+        (await Manager.CreditAsync(User1, CollectionCurrency.Usdc, 10m, key)).ShouldBe(txn);
+        foreach (var (user, currency, amount) in new[]
+        {
+            (User2, CollectionCurrency.Usdc, 10m), (User1, CollectionCurrency.Usdt, 10m),
+            (User1, CollectionCurrency.Usdc, 9m),
+        })
+            (await Should.ThrowAsync<BusinessException>(() => Manager.CreditAsync(user, currency, amount, key)))
+                .Code.ShouldBe(CollectionErrorCodes.BalanceStateConflict);
+        (await BalanceOfAsync(User1, CollectionCurrency.Usdc)).ShouldBe(10m);
+        (await BalanceOfAsync(User2, CollectionCurrency.Usdc)).ShouldBe(0m);
+    }
+
+    [Fact]
     public async Task Paused_Debit_Allows_Identical_Replay_And_Reversal_Without_A_New_Debit()
     {
         await Manager.CreditAsync(User1, CollectionCurrency.Usdt, 100m, $"dep-{Guid.NewGuid()}");
@@ -206,6 +223,17 @@ public class CollectionBalanceManagerTests : CollectionTestBase
         var rescan = await Manager.ListCreditedAsync(cursor2, 10);
         rescan.Items.Select(i => i.BalanceTxnId).ShouldContain(a);
         rescan.Items.Select(i => i.BalanceTxnId).ShouldContain(b);
+
+        // 即使正向游标在前进，重扫仍沿独立的倒序游标到达上一页，随后重新从最近的流水开始。
+        var latest = await Manager.ListCreditedAsync(cursor2, 1);
+        latest.Items.Single().BalanceTxnId.ShouldBe(b);
+        latest.RescanBeforeSeq.ShouldBe(SeqOf(b));
+        var c = await Manager.CreditAsync(User1, CollectionCurrency.Usdt, 1m, $"dep-{Guid.NewGuid()}");
+        var older = await Manager.ListCreditedAsync(cursor2, 1, latest.RescanBeforeSeq);
+        older.Items.Select(t => t.BalanceTxnId).ShouldBe(new[] { a, c });
+        var end = await Manager.ListCreditedAsync(older.Cursor, 1, older.RescanBeforeSeq);
+        end.RescanBeforeSeq.ShouldBe(0);
+        (await Manager.ListCreditedAsync(end.Cursor, 1, end.RescanBeforeSeq)).Items.Single().BalanceTxnId.ShouldBe(c);
 
         // 扣款流水不出现在充值清单里
         await Manager.DebitAsync("Order", Guid.NewGuid(), User1, CollectionCurrency.Usdt, 0.5m);

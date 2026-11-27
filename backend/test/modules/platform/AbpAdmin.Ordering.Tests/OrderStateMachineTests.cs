@@ -8,6 +8,7 @@ using AbpAdmin.Ordering.Orders;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
+using Volo.Abp;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.Uow;
 using Xunit;
@@ -455,6 +456,35 @@ public class OrderStateMachineTests : OrderingStubTestBase
         topups[0].Status.ShouldBe(OrderStatus.Paid);
         topups[0].PayAmount.ShouldBe(12.5m);
         topups[0].PayCurrency.ShouldBe(CollectionCurrency.Usdt);
+    }
+
+    [Fact]
+    public async Task TopUp_Requires_Valid_Identities_And_Exact_Positive_Stablecoin()
+    {
+        var manager = GetRequiredService<OrderPaymentManager>();
+        var txn = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        foreach (var (reference, owner, amount, currency) in new[]
+        {
+            (Guid.Empty, UserId, 1m, CollectionCurrency.Usdt),
+            (txn, Guid.Empty, 1m, CollectionCurrency.Usdt),
+            (txn, UserId, 1m, CollectionCurrency.Cny),
+            (txn, UserId, 0m, CollectionCurrency.Usdc),
+            (txn, UserId, -1m, CollectionCurrency.Usdc),
+            (txn, UserId, 10_000_000_000m, CollectionCurrency.Usdt),
+            (txn, UserId, 0.0000000000000000001m, CollectionCurrency.Usdt)
+        })
+        {
+            await Should.ThrowAsync<BusinessException>(() => UowAsync(() =>
+                manager.HandleBalanceCreditedAsync(reference, owner, currency, amount, now)));
+        }
+        await Should.ThrowAsync<BusinessException>(() => UowAsync(() =>
+            manager.HandleBalanceCreditedAsync(txn, UserId, CollectionCurrency.Usdt, "1.0000000000000000001", now)));
+        await UowAsync(async () =>
+        {
+            var db = await GetRequiredService<IDbContextProvider<OrderingDbContext>>().GetDbContextAsync();
+            (await db.Orders.CountAsync(o => o.OrderType == OrderType.TopUp)).ShouldBe(0);
+        });
     }
 
     [Fact]

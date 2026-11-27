@@ -405,12 +405,33 @@ public class OrderPaymentManager : DomainService
         }
     }
 
+    /// <summary>保留事件和回填流水的原始金额精度，超出数据库精度的非零小数不能先舍入再入账。</summary>
+    public Task HandleBalanceCreditedAsync(Guid balanceTxnId, Guid userId, CollectionCurrency currency,
+        string amount, DateTime creditedAt)
+    {
+        if (!CollectionAmounts.TryParsePositiveExact(amount, currency, out var value))
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount);
+        }
+
+        return HandleBalanceCreditedAsync(balanceTxnId, userId, currency, value, creditedAt);
+    }
+
     /// <summary>
     /// 充值到账：插入已支付的充值订单（BalanceTxnId 唯一，幂等——已存在即跳过）。
     /// </summary>
     public virtual async Task HandleBalanceCreditedAsync(
         Guid balanceTxnId, Guid userId, AbpAdmin.Collection.Contracts.CollectionCurrency currency, decimal amount, DateTime creditedAt)
     {
+        if (balanceTxnId == Guid.Empty || userId == Guid.Empty)
+        {
+            throw new BusinessException(OrderingErrorCodes.InvalidOrderInput);
+        }
+        if (currency is not (CollectionCurrency.Usdt or CollectionCurrency.Usdc) || !CollectionAmounts.IsPositiveStorageAmount(amount))
+        {
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount);
+        }
+
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
         var exists = await dbContext.Orders.AnyAsync(o =>
@@ -548,6 +569,7 @@ public class OrderPaymentManager : DomainService
         Guid detailId, Guid orderId, decimal? amount, CollectionCurrency? currency,
         Guid? collectionId, string? channelTradeNo, string note, DateTime creationTime, bool markAnomaly)
     {
+        using var uow = BeginPaymentHandling();
         var dbContext = await _dbContextProvider.GetDbContextAsync();
 
         await dbContext.PaymentAnomalyLines.AddAsync(new OrdPaymentAnomalyLine(detailId)
@@ -569,6 +591,7 @@ public class OrderPaymentManager : DomainService
         }
 
         await dbContext.SaveChangesAsync();
+        await uow.CompleteAsync();
     }
 
     private async Task AppendCollectionAnomalyOnceAsync(
@@ -775,52 +798,36 @@ public class OrderPaymentManager : DomainService
         return rows > 0;
     }
 
-    /// <summary>
-    /// 「已扣未标支付」补标（计划第 3.3 节）：金额币种核对由调用方完成，这里只做条件更新
-    /// PendingPayment → Paid 并写余额归因（PayAmount/PayCurrency 已是核对过的应付，不重写）。
-    /// 返回是否真的更新（0 行 = 状态已被并发改变，作业下一轮再看）。
-    /// </summary>
-    public virtual async Task<bool> MarkPaidFromDebitAsync(
-        Guid orderId, Guid balanceTxnId, AbpAdmin.Collection.Contracts.CollectionCurrency currency)
-    {
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var rows = await dbContext.Orders
-            .Where(o => o.Id == orderId && o.Status == OrderStatus.PendingPayment)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(o => o.Status, OrderStatus.Paid)
-                .SetProperty(o => o.PaidAt, _clock.Now)
-                .SetProperty(o => o.PayChannel, currency == AbpAdmin.Collection.Contracts.CollectionCurrency.Usdc
-                    ? OrderingPayChannel.BalanceUsdc
-                    : OrderingPayChannel.BalanceUsdt)
-                .SetProperty(o => o.PayNetwork, (string?)null)
-                .SetProperty(o => o.BalanceTxnId, balanceTxnId));
-        return rows > 0;
-    }
+    public virtual Task<bool> MarkPaidFromDebitAsync(
+        Guid orderId, Guid userId, decimal amount, CollectionCurrency currency, Guid balanceTxnId)
+        => ApplyDebitAsync(orderId, userId, amount, currency, balanceTxnId, reviveExpired: false);
 
-    /// <summary>
-    /// 过期关闭订单的余额版复活（计划第 3.3 节）：与 <see cref="ReviveFromExpiredCloseAsync"/> 同一守卫
-    ///（Closed + Expired + 无异常），写余额归因而不是收款归因。两个复活必须保持同族条件，
-    /// 所以都住在这里——作业不自己拼状态转移（防状态机泄漏）。
-    /// </summary>
-    public virtual async Task<bool> ReviveFromDebitAsync(
-        Guid orderId, decimal amount, AbpAdmin.Collection.Contracts.CollectionCurrency currency, Guid balanceTxnId)
+    public virtual Task<bool> ReviveFromDebitAsync(
+        Guid orderId, Guid userId, decimal amount, CollectionCurrency currency, Guid balanceTxnId)
+        => ApplyDebitAsync(orderId, userId, amount, currency, balanceTxnId, reviveExpired: true);
+
+    private async Task<bool> ApplyDebitAsync(
+        Guid orderId, Guid userId, decimal amount, CollectionCurrency currency, Guid balanceTxnId, bool reviveExpired)
     {
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var rows = await dbContext.Orders
-            .Where(o => o.Id == orderId
-                && o.Status == OrderStatus.Closed
-                && o.CloseReason == OrderCloseReason.Expired
-                && !o.PaymentAnomaly)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(o => o.Status, OrderStatus.Paid)
-                .SetProperty(o => o.PaidAt, _clock.Now)
-                .SetProperty(o => o.PayAmount, amount)
-                .SetProperty(o => o.PayCurrency, currency)
-                .SetProperty(o => o.PayChannel, currency == AbpAdmin.Collection.Contracts.CollectionCurrency.Usdc
-                    ? OrderingPayChannel.BalanceUsdc
-                    : OrderingPayChannel.BalanceUsdt)
-                .SetProperty(o => o.PayNetwork, (string?)null)
-                .SetProperty(o => o.BalanceTxnId, balanceTxnId));
+        if (balanceTxnId == Guid.Empty || userId == Guid.Empty || !CollectionAmounts.IsPositiveStorageAmount(amount)
+            || currency is not (CollectionCurrency.Usdt or CollectionCurrency.Usdc))
+        {
+            return false;
+        }
+
+        var db = await _dbContextProvider.GetDbContextAsync();
+        // Compare the debit against the current quote and owner in the UPDATE itself.
+        var order = db.Orders.Where(o => o.Id == orderId && o.OrderType == OrderType.Business
+            && o.UserId == userId && o.PayAmount == amount && o.PayCurrency == currency);
+        var eligible = reviveExpired
+            ? order.Where(o => o.Status == OrderStatus.Closed && o.CloseReason == OrderCloseReason.Expired && !o.PaymentAnomaly)
+            : order.Where(o => o.Status == OrderStatus.PendingPayment);
+        var channel = currency == CollectionCurrency.Usdc ? OrderingPayChannel.BalanceUsdc : OrderingPayChannel.BalanceUsdt;
+        var rows = await eligible.ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, OrderStatus.Paid)
+            .SetProperty(o => o.PaidAt, _clock.Now)
+            .SetProperty(o => o.PayChannel, channel)
+            .SetProperty(o => o.PayNetwork, (string?)null)
+            .SetProperty(o => o.BalanceTxnId, balanceTxnId));
         return rows > 0;
     }
 

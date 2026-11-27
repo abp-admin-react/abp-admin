@@ -65,8 +65,7 @@ public class BalanceCreditedEventHandler
     public virtual async Task HandleEventAsync(AbpAdmin.Collection.Contracts.BalanceCreditedEto eto)
     {
         await _orderPaymentManager.HandleBalanceCreditedAsync(
-            eto.BalanceTxnId, eto.UserId, eto.Currency,
-            AbpAdmin.Collection.Contracts.CollectionAmounts.Parse(eto.Amount), eto.CompletedAt);
+            eto.BalanceTxnId, eto.UserId, eto.Currency, eto.Amount, eto.CompletedAt);
     }
 }
 

@@ -26,7 +26,7 @@ public class CollectionPaymentOperationsAppService(
     {
         AssertHost();
         await collections.QueryChannelAsync(id, cancellationToken);
-        return await paymentRecords.GetAsync(id);
+        return await paymentRecords.GetAsync(id, cancellationToken);
     }
 
     [HttpGet("api/app/collection-payments/{id}/refunds")]

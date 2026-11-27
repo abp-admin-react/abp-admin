@@ -49,9 +49,9 @@ public interface ICollectionIntegrationService
 
     /// <summary>
     /// 分别读取游标后的新增充值和最近 7 天且序号不超过游标的充值，每段至多 maxCount 条。
-    /// 游标只前进。消费失败的流水由调用方在重扫窗口内重试。
+    /// 正向游标只前进。重扫使用上次返回的 RescanBeforeSeq 和同一轮的 rescanStartedAt，返回 0 后重新定窗。
     /// </summary>
-    Task<ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount);
+    Task<ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount, long rescanBeforeSeq = 0, DateTime? rescanStartedAt = null);
 
     /// <summary>
     /// 返回该用户的 BSC 充值地址。模块暂停受理时不返回充值地址。

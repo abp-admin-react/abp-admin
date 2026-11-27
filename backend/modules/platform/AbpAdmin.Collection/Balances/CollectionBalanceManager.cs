@@ -80,7 +80,7 @@ public class CollectionBalanceManager : DomainService
         string businessType, Guid businessId, Guid userId, CollectionCurrency currency, decimal amount)
     {
         AssertStableCurrency(currency);
-        if (amount <= 0)
+        if (!CollectionAmounts.IsPositiveStorageAmount(amount))
         {
             throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
         }
@@ -273,48 +273,50 @@ public class CollectionBalanceManager : DomainService
     }
 
     /// <summary>
-    /// 新增流水和最近 7 天的旧流水各取至多 maxCount 条，按序号合并。
-    /// 旧流水用于补偿消费失败，返回的游标不回退。
+    /// 正向读取新增充值，按独立的倒序游标重扫固定七日窗口，各取至多 maxCount 条后按序号合并。
     /// </summary>
-    public virtual Task<ListCreditedTxnsResult> ListCreditedAsync(long afterSeq, int maxCount)
+    public virtual Task<ListCreditedTxnsResult> ListCreditedAsync(long afterSeq, int maxCount, long rescanBeforeSeq = 0, DateTime? rescanStartedAt = null)
     {
         return QueryAsync(async () =>
         {
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var cutoff = _clock.Now.AddDays(-7);
+            var dbContext = await _dbContextProvider.GetDbContextAsync();
+            var through = rescanStartedAt ?? _clock.Now;
+            var cutoff = through.AddDays(-7);
 
-        var forward = await dbContext.BalanceTxns.AsNoTracking()
-            .Where(t => t.Action == BalanceActions.DepositCredit && t.Seq > afterSeq)
-            .OrderBy(t => t.Seq)
-            .Take(maxCount)
-            .ToListAsync();
+            var forward = await dbContext.BalanceTxns.AsNoTracking()
+                .Where(t => t.Action == BalanceActions.DepositCredit && t.Seq > afterSeq)
+                .OrderBy(t => t.Seq)
+                .Take(maxCount)
+                .ToListAsync();
 
-        var rescan = await dbContext.BalanceTxns.AsNoTracking()
-            .Where(t => t.Action == BalanceActions.DepositCredit
-                        && t.Seq <= afterSeq
-                        && t.CreationTime >= cutoff)
-            .OrderBy(t => t.Seq)
-            .Take(maxCount)
-            .ToListAsync();
+            var rescan = await dbContext.BalanceTxns.AsNoTracking()
+                .Where(t => t.Action == BalanceActions.DepositCredit
+                            && t.Seq <= afterSeq
+                            && (rescanBeforeSeq == 0 || t.Seq < rescanBeforeSeq)
+                            && t.CreationTime >= cutoff && t.CreationTime <= through)
+                .OrderByDescending(t => t.Seq)
+                .Take(maxCount)
+                .ToListAsync();
 
-        var merged = forward.Concat(rescan)
-            .DistinctBy(t => t.Seq)
-            .OrderBy(t => t.Seq)
-            .ToList();
+            var merged = forward.Concat(rescan)
+                .DistinctBy(t => t.Seq)
+                .OrderBy(t => t.Seq)
+                .ToList();
 
-        return new ListCreditedTxnsResult
-        {
-            Items = merged.Select(t => new CreditedTxnDto
+            return new ListCreditedTxnsResult
             {
-                Seq = t.Seq,
-                BalanceTxnId = t.Id,
-                UserId = t.UserId,
-                Currency = t.Currency,
-                Amount = CollectionAmounts.Format(t.Amount),
-                CreditedAt = t.CreationTime,
-            }).ToList(),
-            Cursor = merged.Count > 0 ? Math.Max(afterSeq, merged.Max(t => t.Seq)) : afterSeq,
-        };
+                Items = merged.Select(t => new CreditedTxnDto
+                {
+                    Seq = t.Seq,
+                    BalanceTxnId = t.Id,
+                    UserId = t.UserId,
+                    Currency = t.Currency,
+                    Amount = CollectionAmounts.Format(t.Amount),
+                    CreditedAt = t.CreationTime,
+                }).ToList(),
+                RescanBeforeSeq = rescan.Count > 0 && rescan.Count == maxCount ? rescan[^1].Seq : 0,
+                Cursor = merged.Count > 0 ? Math.Max(afterSeq, merged.Max(t => t.Seq)) : afterSeq,
+            };
         });
     }
 
@@ -342,7 +344,7 @@ public class CollectionBalanceManager : DomainService
         Guid userId, CollectionCurrency currency, decimal amount, string idempotencyKey)
     {
         AssertStableCurrency(currency);
-        if (amount <= 0)
+        if (!CollectionAmounts.IsPositiveStorageAmount(amount))
         {
             throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", amount);
         }
@@ -360,6 +362,11 @@ public class CollectionBalanceManager : DomainService
         {
             var existing = await dbContext.BalanceTxns.AsNoTracking()
                 .FirstAsync(t => t.IdempotencyKey == idempotencyKey);
+            if (existing.Action != BalanceActions.DepositCredit || existing.UserId != userId
+                || existing.Currency != currency || existing.Amount != amount)
+            {
+                throw new BusinessException(CollectionErrorCodes.BalanceStateConflict);
+            }
             return existing.Id;
         }
 

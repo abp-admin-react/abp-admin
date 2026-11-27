@@ -68,8 +68,7 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
 
     public virtual async Task<CollectionDto> CreateAsync(CreateCollectionInput input, Func<CollectionDto, Task>? onPrepared = null)
     {
-        var amount = CollectionAmounts.Parse(input.Amount);
-        if (amount <= 0)
+        if (!CollectionAmounts.TryParsePositiveExact(input.Amount, input.Currency, out var amount))
         {
             throw new BusinessException(CollectionErrorCodes.InvalidAmount).WithData("Amount", input.Amount);
         }
@@ -310,7 +309,10 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
             case ChannelQueryOutcome.Closed:
                 return await ApplyChannelStateAsync(snapshot, ChannelState.Closed, cancellationToken);
             case ChannelQueryOutcome.Pending:
-                var pending = await ApplyChannelStateAsync(snapshot, ChannelState.Pending, cancellationToken);
+            case ChannelQueryOutcome.OrderNotFound:
+                // 普通查单的「未找到」不能证明不可支付；有取消意图时由关单接口给出终态。
+                var observed = query.Outcome == ChannelQueryOutcome.Pending ? ChannelState.Pending : ChannelState.Unknown;
+                var pending = await ApplyChannelStateAsync(snapshot, observed, cancellationToken);
                 if (retryClose && snapshot.CloseRequested && pending.Status == CollectionStatus.Pending)
                 {
                     var latest = await ReadSnapshotAsync(collection.Id, cancellationToken);
@@ -414,9 +416,11 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
     /// <summary>加入调用方的事务，使扣款和订单支付状态一起提交。</summary>
     public virtual async Task<Contracts.DebitBalanceResult> DebitBalanceAsync(Contracts.DebitBalanceInput input)
     {
+        if (!CollectionAmounts.TryParsePositiveExact(input.Amount, input.Currency, out var amount))
+            throw new BusinessException(CollectionErrorCodes.InvalidAmount);
         var txnId = await _balanceManager.DebitAsync(
             input.BusinessType, input.BusinessId, input.UserId, input.Currency,
-            Contracts.CollectionAmounts.Parse(input.Amount));
+            amount);
         return new Contracts.DebitBalanceResult { BalanceTxnId = txnId };
     }
 
@@ -471,10 +475,10 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         };
     }
 
-    /// <summary>按序号读取新增充值流水并重扫最近 7 天的旧流水，游标只前进。</summary>
-    public virtual Task<Contracts.ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount)
+    /// <summary>正向读取新增充值流水，按独立游标分页重扫同一七日窗口。</summary>
+    public virtual Task<Contracts.ListCreditedTxnsResult> ListCreditedTxnsAsync(long afterSeq, int maxCount, long rescanBeforeSeq = 0, DateTime? rescanStartedAt = null)
     {
-        return _balanceManager.ListCreditedAsync(afterSeq, maxCount);
+        return _balanceManager.ListCreditedAsync(afterSeq, maxCount, rescanBeforeSeq, rescanStartedAt);
     }
 
     /// <summary>
@@ -523,7 +527,8 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         };
         if (key == null)
         {
-            return;
+            throw new BusinessException(CollectionErrorCodes.ChannelNotConfigured)
+                .WithData("Channel", channel).WithData("Currency", currency);
         }
 
         var raw = await _settingProvider.GetOrNullAsync(key);
@@ -606,7 +611,7 @@ public class CollectionIntegrationService : Contracts.ICollectionIntegrationServ
         }
 
         if (state == ChannelState.Closed
-            || (state == ChannelState.OrderNotFound && row.CloseRequested && row.ChannelOrderCreated))
+            || (state == ChannelState.OrderNotFound && row.CloseRequested))
         {
             row.Status = CollectionStatus.Closed;
             row.StatusNote = "Channel confirmed the collection is closed.";

@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using AbpAdmin.Grids;
 using System;
 using System.Linq;
+using System.Linq.Expressions;
+using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
@@ -22,14 +24,15 @@ namespace AbpAdmin.Collection.Services;
 public class CollectionPaymentAdminAppService(
     IDbContextProvider<CollectionDbContext> dbContextProvider) : ApplicationService
 {
-    public virtual Task<PagedResultDto<CollectionPaymentAdminDto>> GetListAsync(CollectionPaymentListInput input) =>
-        ReadListPageAsync(null, input);
+    public virtual Task<PagedResultDto<CollectionPaymentAdminDto>> GetListAsync(CollectionPaymentListInput input, CancellationToken cancellationToken = default) =>
+        ReadListPageAsync(null, input, cancellationToken);
 
     [HttpPost("api/app/collection-payment-admin/query")]
-    public virtual Task<PagedResultDto<CollectionPaymentAdminDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] CollectionPaymentListInput input) =>
-        ReadListPageAsync(grid, input);
+    public virtual Task<PagedResultDto<CollectionPaymentAdminDto>> QueryListAsync([FromBody] GridQueryInput grid, [FromQuery] CollectionPaymentListInput input, CancellationToken cancellationToken = default) =>
+        ReadListPageAsync(grid, input, cancellationToken);
 
-    private async Task<PagedResultDto<CollectionPaymentAdminDto>> ReadListPageAsync(GridQueryInput? grid, CollectionPaymentListInput input)
+    /// <summary>列表与表格共用宿主收款查询。默认按创建时间、ID 倒序，表格可指定排序。</summary>
+    private async Task<PagedResultDto<CollectionPaymentAdminDto>> ReadListPageAsync(GridQueryInput? grid, CollectionPaymentListInput input, CancellationToken cancellationToken)
     {
         AssertHost();
 
@@ -68,26 +71,27 @@ public class CollectionPaymentAdminAppService(
             .SearchableField("channelTradeNo", x => x.ChannelTradeNo)
             .Field("creationTime", x => x.CreationTime);
         if (grid != null) query = definition.Filter(query, grid);
-        var totalCount = await query.LongCountAsync();
-        var items = await (grid == null
-            ? query.OrderByDescending(row => row.CreationTime)
-            .ThenByDescending(row => row.Id)
-            : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
+        var totalCount = await query.LongCountAsync(cancellationToken);
+        var ordered = grid is { Sort.Count: > 0 }
+            ? definition.OrderBy(query, grid, "creationTime", true, x => x.Id)
+            : query.OrderByDescending(row => row.CreationTime).ThenByDescending(row => row.Id);
+        var items = await ordered
             .Skip(grid?.SkipCount ?? input.SkipCount)
             .Take(grid?.MaxResultCount ?? Math.Min(input.MaxResultCount, 200))
-            .ToListAsync();
+            .Select(RecordFields)
+            .ToListAsync(cancellationToken);
 
-        return new PagedResultDto<CollectionPaymentAdminDto>(totalCount, items.Select(Map).ToList());
+        return new PagedResultDto<CollectionPaymentAdminDto>(totalCount, items);
     }
 
-    public virtual async Task<CollectionPaymentAdminDto> GetAsync(Guid id)
+    public virtual async Task<CollectionPaymentAdminDto> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
         AssertHost();
 
         var dbContext = await dbContextProvider.GetDbContextAsync();
-        var row = await dbContext.Collections.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id)
+        return await dbContext.Collections.AsNoTracking().Where(item => item.Id == id).Select(RecordFields)
+            .FirstOrDefaultAsync(cancellationToken)
             ?? throw new EntityNotFoundException(typeof(ColCollection), id);
-        return Map(row);
     }
 
     private void AssertHost()
@@ -98,7 +102,8 @@ public class CollectionPaymentAdminAppService(
         }
     }
 
-    private static CollectionPaymentAdminDto Map(ColCollection row) => new()
+    // 投影在取数时排除渠道凭据；仅把 DTO 需要的金额交给应用层做精确格式化。
+    private static readonly Expression<Func<ColCollection, CollectionPaymentAdminDto>> RecordFields = row => new CollectionPaymentAdminDto
     {
         Id = row.Id,
         CollectionNo = row.CollectionNo,

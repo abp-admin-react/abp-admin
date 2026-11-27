@@ -329,6 +329,32 @@ public class CollectionIntegrationServiceTests : CollectionTestBase
     }
 
     [Fact]
+    public async Task Unknown_Create_Only_Closes_When_The_Close_Endpoint_Confirms_Final_Absence()
+    {
+        Fake.NextCreateResult = new ChannelCreateResult(Succeeded: false, Unknown: true);
+        var input = Input("72.45");
+        var created = await Service.CreateAsync(input);
+        Fake.CloseResults[created.CollectionNo] = new ChannelCloseResult(ChannelCloseOutcome.Unknown);
+        (await Service.CancelAsync(created.Id)).Collection.Status.ShouldBe(CollectionStatus.Pending);
+        Fake.QueryResults[created.CollectionNo] = new ChannelQueryResult(ChannelQueryOutcome.OrderNotFound);
+        (await Service.QueryChannelAsync(created.Id)).Status.ShouldBe(CollectionStatus.Pending);
+        Fake.CloseResults[created.CollectionNo] = new ChannelCloseResult(ChannelCloseOutcome.OrderNotFound);
+        (await Service.QueryChannelAsync(created.Id)).Status.ShouldBe(CollectionStatus.Closed);
+        (await Service.CreateAsync(input)).Id.ShouldNotBe(created.Id);
+    }
+
+    [Theory]
+    [InlineData("10.00000000000000000001", CollectionCurrency.Cny)]
+    [InlineData("10.10", CollectionCurrency.Usd)]
+    public async Task Invalid_Channel_Terms_Do_Not_Open_A_Payable_Order(string amount, CollectionCurrency currency)
+    {
+        var input = Input(amount);
+        input.Currency = currency;
+        await Should.ThrowAsync<BusinessException>(() => Service.CreateAsync(input));
+        Fake.CreateCallCount.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Concurrent_Create_And_Close_Cannot_Expose_A_New_Payment_Payload()
     {
         var input = Input("72.45");

@@ -5,6 +5,7 @@ using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Services;
+using AbpAdmin.Grids;
 using Shouldly;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
@@ -38,6 +39,15 @@ public class CollectionPaymentAdminAppServiceTests : CollectionTestBase
         page.TotalCount.ShouldBe(2);
         page.Items.Single().Id.ShouldBe(older.Id);
 
+        var gridPage = await service.QueryListAsync(new GridQueryInput
+        {
+            Filters = [new() { Field = "status", Conditions = [new() { Op = "eq", Value = nameof(CollectionStatus.Completed) }] }],
+            Sort = [new() { Field = "collectionNo", Direction = "asc" }],
+            MaxResultCount = 1,
+        }, new CollectionPaymentListInput { Channel = CollectionChannel.WechatNative });
+        gridPage.TotalCount.ShouldBe(2);
+        gridPage.Items.Single().Id.ShouldBe(older.Id);
+
         var matchingOrder = await service.GetListAsync(new CollectionPaymentListInput
         {
             Filter = pending.BusinessId.ToString(),
@@ -49,6 +59,31 @@ public class CollectionPaymentAdminAppServiceTests : CollectionTestBase
             Filter = "trade-col-004",
         });
         matchingChannelTrade.Items.Single().Id.ShouldBe(alipay.Id);
+    }
+
+    [Fact]
+    public async Task Get_And_Grid_Page_By_Newest_Creation_Then_Descending_Id()
+    {
+        var now = DateTime.UtcNow;
+        var rows = Enumerable.Range(1, 4)
+            .Select(i => Create($"COL-TIE-{i}", CollectionChannel.WechatNative, CollectionStatus.Completed, now))
+            .OrderBy(row => row.Id).ToArray();
+        rows[3].CreationTime = now.AddDays(-1);
+        await InsertAsync(rows);
+
+        var service = GetRequiredService<CollectionPaymentAdminAppService>();
+        var expected = new[] { rows[2].Id, rows[1].Id, rows[0].Id, rows[3].Id };
+        for (var skip = 0; skip < expected.Length; skip += 2)
+        {
+            var get = await service.GetListAsync(new CollectionPaymentListInput { SkipCount = skip, MaxResultCount = 2 });
+            var post = await service.QueryListAsync(new GridQueryInput { SkipCount = skip, MaxResultCount = 2 },
+                new CollectionPaymentListInput());
+            var page = expected.Skip(skip).Take(2).ToArray();
+            get.TotalCount.ShouldBe(4);
+            post.TotalCount.ShouldBe(4);
+            get.Items.Select(row => row.Id).ShouldBe(page);
+            post.Items.Select(row => row.Id).ShouldBe(page);
+        }
     }
 
     [Fact]
@@ -84,6 +119,9 @@ public class CollectionPaymentAdminAppServiceTests : CollectionTestBase
         var listError = await Should.ThrowAsync<BusinessException>(() =>
             service.GetListAsync(new CollectionPaymentListInput()));
         listError.Code.ShouldBe(CollectionErrorCodes.HostOnly);
+        var gridError = await Should.ThrowAsync<BusinessException>(() =>
+            service.QueryListAsync(new GridQueryInput(), new CollectionPaymentListInput()));
+        gridError.Code.ShouldBe(CollectionErrorCodes.HostOnly);
         var detailError = await Should.ThrowAsync<BusinessException>(() => service.GetAsync(Guid.NewGuid()));
         detailError.Code.ShouldBe(CollectionErrorCodes.HostOnly);
     }
