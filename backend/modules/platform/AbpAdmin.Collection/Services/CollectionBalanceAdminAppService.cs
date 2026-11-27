@@ -256,20 +256,24 @@ public class CollectionBalanceAdminAppService : ApplicationService
         }).ToList();
 
         // 金库最新留痕按币取最近一条（DB 侧组内取最新，不整表物化——留痕表只增不减）
-        var vaultChecks = await dbContext.VaultChecks.AsNoTracking()
+        var latestChecks = await dbContext.VaultChecks.AsNoTracking()
             .GroupBy(v => v.Symbol)
-            .Select(g => new VaultCheckLatestDto
-            {
-                Symbol = g.Key,
-                VaultBalance = CollectionAmounts.Format(
-                    g.OrderByDescending(x => x.CheckedAt).First().VaultBalance),
-                UserTotal = CollectionAmounts.Format(
-                    g.OrderByDescending(x => x.CheckedAt).First().UserTotal),
-                Difference = CollectionAmounts.Format(
-                    g.OrderByDescending(x => x.CheckedAt).First().Difference),
-                CheckedAt = g.OrderByDescending(x => x.CheckedAt).First().CheckedAt,
-            })
+            .Select(g => g.OrderByDescending(x => x.CheckedAt).ThenBy(x => x.Id).First())
             .ToListAsync();
+        var vaultChecks = latestChecks.Select(v => new VaultCheckLatestDto
+        {
+            Symbol = v.Symbol,
+            VaultBalance = CollectionAmounts.Format(v.VaultBalance),
+            UserTotal = CollectionAmounts.Format(v.UserTotal),
+            Difference = CollectionAmounts.Format(v.Difference),
+            ReconciliationStatus = v.ReconciliationStatus.ToString(),
+            ReferenceBlock = v.ReferenceBlock,
+            ReferenceVaultAddress = v.ReferenceVaultAddress,
+            PendingCredit = CollectionAmounts.FormatNullable(v.PendingCredit),
+            PostedAfterBlock = CollectionAmounts.FormatNullable(v.PostedAfterBlock),
+            ReconciledDifference = CollectionAmounts.FormatNullable(v.ReconciledDifference),
+            CheckedAt = v.CheckedAt,
+        }).ToList();
 
         var held = await dbContext.DepositOrders.AsNoTracking()
             .Where(o => o.Status == DepositOrderStatus.Confirmed && o.SweepTaskId == null && !o.ManuallyReleased)
@@ -435,7 +439,13 @@ public class VaultCheckLatestDto
     public string VaultBalance { get; set; } = default!;
     public string UserTotal { get; set; } = default!;
 
-    /// <summary>VaultBalance - UserTotal；负 = 金库 &lt; 用户余额（缺口）。</summary>
+    /// <summary>金库与当前负债的原始观测差额，最终缺口看 ReconciliationStatus。</summary>
     public string Difference { get; set; } = default!;
+    public string ReconciliationStatus { get; set; } = "Legacy";
+    public long? ReferenceBlock { get; set; }
+    public string? ReferenceVaultAddress { get; set; }
+    public string? PendingCredit { get; set; }
+    public string? PostedAfterBlock { get; set; }
+    public string? ReconciledDifference { get; set; }
     public DateTime CheckedAt { get; set; }
 }

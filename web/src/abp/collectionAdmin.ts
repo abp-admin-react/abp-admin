@@ -220,12 +220,27 @@ export interface UserBalanceBucketDto {
   frozen: string;
 }
 
+export type VaultReconciliationStatus =
+  | 'Legacy'
+  | 'Balanced'
+  | 'Surplus'
+  | 'TimingDifference'
+  | 'Shortfall'
+  | 'Inconclusive';
+
 export interface VaultCheckLatestDto {
   symbol: string;
   vaultBalance: string;
   userTotal: string;
-  /** VaultBalance - UserTotal；负 = 金库 < 用户余额（缺口） */
+  /** 同次核对的原始观测差，核对结论由服务端给出。 */
   difference: string;
+  reconciliationStatus: VaultReconciliationStatus;
+  referenceBlock: number | null;
+  referenceVaultAddress: string | null;
+  pendingCredit: string | null;
+  postedAfterBlock: string | null;
+  /** 参考区块口径的核对结果。历史记录或证据不足时为 null，界面需与零差额区分。 */
+  reconciledDifference: string | null;
   checkedAt: string;
 }
 

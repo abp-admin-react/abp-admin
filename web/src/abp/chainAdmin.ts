@@ -1,4 +1,5 @@
 import { request } from '@umijs/max';
+import type { VaultCheckLatestDto } from './collectionAdmin';
 
 /**
  * 链网管理 API 镜像（对应 CollectionNetworkAdminAppService）。
@@ -91,13 +92,8 @@ export interface SweepTaskListDto {
   creationTime: string;
 }
 
-export interface VaultCheckListDto {
+export interface VaultCheckListDto extends VaultCheckLatestDto {
   id: string;
-  symbol: string;
-  vaultBalance: string;
-  userTotal: string;
-  difference: string;
-  checkedAt: string;
 }
 
 export interface ChainApiKeyDto {
@@ -235,8 +231,12 @@ export interface TransactionRpcDto {
   rpcUrlMasked: string | null;
 }
 
-export function getTransactionRpc(networkId: string): Promise<TransactionRpcDto> {
-  return request(`${BASE}/transaction-rpc`, { params: { NetworkId: networkId } });
+export function getTransactionRpc(
+  networkId: string,
+): Promise<TransactionRpcDto> {
+  return request(`${BASE}/transaction-rpc`, {
+    params: { NetworkId: networkId },
+  });
 }
 
 export function configureTransactionRpc(input: {

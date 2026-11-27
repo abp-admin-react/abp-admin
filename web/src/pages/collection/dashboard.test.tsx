@@ -95,4 +95,43 @@ describe('Web3 运营的 Ankr 账户余额', () => {
     expect(mocks.getDashboardAnkrBalance).not.toHaveBeenCalled();
     expect(screen.queryByText('Ankr 账户余额')).not.toBeInTheDocument();
   });
+
+  it('储备卡展示核对结论并保留原始金额与核对后金额的精度', async () => {
+    const empty = await mocks.getTreasuryDashboard();
+    mocks.getTreasuryDashboard.mockResolvedValue({
+      ...empty,
+      userBalances: [
+        { currency: 'Usdt', balance: '100.000000000000000001', frozen: '12' },
+      ],
+      vaultChecks: [
+        {
+          symbol: 'USDT',
+          vaultBalance: '100',
+          userTotal: '112',
+          difference: '-12',
+          reconciliationStatus: 'Shortfall',
+          reconciledDifference: '-0.000000000000000001',
+          checkedAt: '2026-11-26T04:00:00Z',
+          referenceBlock: 100,
+          referenceVaultAddress: '0x1111111111111111111111111111111111111111',
+        },
+      ],
+    });
+    mocks.getDashboardAnkrBalance.mockResolvedValue({
+      status: 'notConfigured',
+    });
+    render(<CollectionDashboardPage embedded />);
+    expect(await screen.findByText('USDT 核对后差额')).toBeVisible();
+    expect(screen.getByText('-0.000000000000000001')).toBeVisible();
+    expect(screen.getByText('原始差额 -12')).toBeVisible();
+    expect(screen.getByText('缺口')).toBeVisible();
+    expect(screen.getByText(/最近核对 .*UTC/)).toBeVisible();
+    expect(screen.getByText('参考区块 100')).toBeVisible();
+    expect(
+      screen.getByText('核对金库 0x1111111111111111111111111111111111111111'),
+    ).toBeVisible();
+    expect(screen.getByText('用户 Usdt 可用余额')).toBeVisible();
+    expect(screen.getByText('100.000000000000000001')).toBeVisible();
+    expect(screen.getByText('冻结 12')).toBeVisible();
+  });
 });

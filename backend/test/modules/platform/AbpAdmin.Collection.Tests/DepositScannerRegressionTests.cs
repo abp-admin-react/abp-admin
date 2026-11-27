@@ -62,6 +62,31 @@ public class DepositScannerRegressionTests : CollectionTestBase
         second.Cursor.ShouldBe(101L);
         second.Orders.Single().Id.ShouldBe(first.Orders.Single().Id);
         alerts.Titles.Count(title => title == "精度放不下的转入").ShouldBe(1);
+        var notification = Fakes.FakeChainPushNotifier.Instance.Deposits.ShouldHaveSingleItem();
+        notification.DepositOrderId.ShouldBe(first.Orders.Single().Id);
+        notification.Status.ShouldBe(nameof(DepositOrderStatus.PrecisionOverflow));
+    }
+
+    [Fact]
+    public async Task Confirmed_Deposit_And_New_Queue_Notify_Once_Even_When_The_Deposit_Push_Fails()
+    {
+        var (network, token) = await SeedAsync(autoCreditMax: 100);
+        var log = new TokenTransferLog("0xabc", 1, FromAddress, WatchAddress, "20000000000000000000", 101);
+        var gateway = NewGateway(token, [log], true);
+        var notifier = Fakes.FakeChainPushNotifier.Instance;
+        notifier.RejectDepositPush = true;
+        var scanner = NewScanner(new RecordingAlerts(GetRequiredService<IDistributedEventBus>()));
+        await ScanAsync(scanner, network, token, gateway);
+        await ScanAsync(scanner, network, token, gateway);
+        var snapshot = await ReadAsync(token.Id);
+        snapshot.Cursor.ShouldBe(101);
+        var order = snapshot.Orders.ShouldHaveSingleItem();
+        var deposit = notifier.Deposits.ShouldHaveSingleItem();
+        deposit.DepositOrderId.ShouldBe(order.Id);
+        deposit.Status.ShouldBe(nameof(DepositOrderStatus.Confirmed));
+        var sweep = notifier.Sweeps.ShouldHaveSingleItem();
+        sweep.SweepTaskId.ShouldBe(order.SweepTaskId!.Value);
+        sweep.Status.ShouldBe(nameof(SweepTaskStatus.Queued));
     }
 
     [Fact]
@@ -143,6 +168,102 @@ public class DepositScannerRegressionTests : CollectionTestBase
         recovered.Failure.ShouldBeNull();
         (await ReadAsync(token.Id)).Orders.Select(order => order.TxHash).Order()
             .ShouldBe(new[] { seen.TxHash, missed.TxHash, current.TxHash });
+    }
+
+    [Fact]
+    public async Task Invalid_Raw_Amount_Does_Not_Claim_An_Identity_Or_Advance_The_Cursor()
+    {
+        var (network, token) = await SeedAsync();
+        var log = new TokenTransferLog("0xaba", 0, FromAddress, WatchAddress, "-1", 101);
+        var source = new RecordingDepositSource(false) { ReadHead = () => 113, ReadLogs = (_, _) => [log] };
+        var scanner = NewScanner(new RecordingAlerts(GetRequiredService<IDistributedEventBus>()));
+        await ScanAsync(scanner, network, token, [new(Guid.NewGuid(), "RPC", source, new DepositScanProviderHealth())]);
+        (await ReadAsync(token.Id)).Orders.ShouldBeEmpty();
+        var state = await ReadProviderStateAsync(token.Id);
+        state.Cursor.ShouldBe(100);
+        state.Failure.ShouldBe(DepositScanFailure.EvidenceInvalid);
+
+        log = log with { RawAmount = "1" };
+        await ScanAsync(scanner, network, token, [new(Guid.NewGuid(), "RPC", source, new DepositScanProviderHealth())]);
+        var recovered = await ReadAsync(token.Id);
+        recovered.Cursor.ShouldBe(101);
+        recovered.Orders.Single().RawAmount.ShouldBe("1");
+    }
+
+    [Fact]
+    public async Task Contradictory_Receipt_On_Replay_Stops_Confirmation_And_Retains_Chain_Evidence()
+    {
+        var (network, token) = await SeedAsync();
+        var indexedLog = new TokenTransferLog("0xeff", 2, FromAddress, WatchAddress, "11000000000000000000", 101);
+        var rpcLog = indexedLog with { RawAmount = "12000000000000000000" };
+        var indexed = new RecordingDepositSource(true) { ReadHead = () => 113, ReadLogs = (_, _) => [indexedLog] };
+        var rpc = new RecordingDepositSource(false) { ReadHead = () => 113, ReadLogs = (_, _) => [rpcLog] };
+        var health = new DepositScanProviderHealth();
+        DepositScanProvider[] providers = [new(Guid.NewGuid(), "Etherscan", indexed, health), new(Guid.NewGuid(), "RPC", rpc, health)];
+        var scanner = NewScanner(new RecordingAlerts(GetRequiredService<IDistributedEventBus>()));
+
+        var error = await Should.ThrowAsync<InvalidOperationException>(() => ScanAsync(scanner, network, token, providers));
+        error.Message.ShouldContain("0xeff#2");
+        var disputed = await ReadAsync(token.Id);
+        disputed.Cursor.ShouldBe(100);
+        var order = disputed.Orders.Single();
+        order.RawAmount.ShouldBe(indexedLog.RawAmount);
+        order.Status.ShouldBe(DepositOrderStatus.PendingConfirm);
+        order.SweepTaskId.ShouldBeNull();
+
+        rpcLog = indexedLog with { RawAmount = "0" + indexedLog.RawAmount, From = FromAddress.ToUpperInvariant() };
+        await ScanAsync(scanner, network, token, providers);
+        var recovered = await ReadAsync(token.Id);
+        recovered.Cursor.ShouldBe(101);
+        recovered.Orders.Single().Id.ShouldBe(order.Id);
+        recovered.Orders.Single().Status.ShouldBe(DepositOrderStatus.Confirmed);
+    }
+
+    [Fact]
+    public async Task Reincluded_Transfer_Keeps_The_Later_Height_Until_Settled_And_Preserves_The_Credited_Record()
+    {
+        var (network, token) = await SeedAsync();
+        var log = new TokenTransferLog("0xace", 3, FromAddress, WatchAddress, "11000000000000000000", 101);
+        var head = 113L;
+        var rpc = new RecordingDepositSource(false) { ReadHead = () => head, ReadLogs = (_, _) => [log] };
+        DepositScanProvider[] providers = [new(Guid.NewGuid(), "RPC", rpc, new DepositScanProviderHealth())];
+        var scanner = NewScanner(new RecordingAlerts(GetRequiredService<IDistributedEventBus>()));
+        await ScanAsync(scanner, network, token, providers);
+        var id = (await ReadAsync(token.Id)).Orders.Single().Id;
+
+        head = 114;
+        log = log with { BlockNumber = 102 };
+        await ScanAsync(scanner, network, token, providers);
+        var moved = (await ReadAsync(token.Id)).Orders.Single();
+        moved.Id.ShouldBe(id);
+        moved.BlockNumber.ShouldBe(102);
+
+        // A replay may then observe the original height. The later, more conservative height wins.
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true))
+        {
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await db.Tokens.Where(t => t.Id == token.Id).ExecuteUpdateAsync(s => s.SetProperty(t => t.LastScannedBlock, 100L));
+            await uow.CompleteAsync();
+        }
+        log = log with { BlockNumber = 101 };
+        await ScanAsync(scanner, network, token, providers);
+        (await ReadAsync(token.Id)).Orders.Single().BlockNumber.ShouldBe(102);
+
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true))
+        {
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await db.DepositOrders.Where(o => o.Id == id).ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, DepositOrderStatus.Swept));
+            await uow.CompleteAsync();
+        }
+        head = 115;
+        log = log with { BlockNumber = 103 };
+        await ScanAsync(scanner, network, token, providers);
+        var settled = await ReadAsync(token.Id);
+        settled.Cursor.ShouldBe(103);
+        var stored = settled.Orders.Single();
+        stored.Id.ShouldBe(id);
+        stored.BlockNumber.ShouldBe(102);
+        stored.Status.ShouldBe(DepositOrderStatus.Swept);
     }
 
     [Fact]
@@ -313,7 +434,7 @@ public class DepositScannerRegressionTests : CollectionTestBase
 
     private DepositScanManager NewScanner(ChainAlertService alerts) => new(
         GetRequiredService<IDbContextProvider<CollectionDbContext>>(), alerts, GetRequiredService<IClock>(),
-        GetRequiredService<IUnitOfWorkManager>(), GetRequiredService<IGuidGenerator>())
+        GetRequiredService<IUnitOfWorkManager>(), GetRequiredService<IGuidGenerator>(), ServiceProvider)
     {
         LazyServiceProvider = GetRequiredService<IAbpLazyServiceProvider>(),
     };
@@ -324,7 +445,7 @@ public class DepositScannerRegressionTests : CollectionTestBase
     private static Task ScanAsync(DepositScanManager scanner, ColNetwork network, ColToken token, IReadOnlyList<DepositScanProvider> providers) =>
         scanner.RunTokenRoundAsync(network, token, providers, 12, 50, 2000, TimeSpan.FromMinutes(10), 0, CancellationToken.None);
 
-    private async Task<(ColNetwork Network, ColToken Token)> SeedAsync()
+    private async Task<(ColNetwork Network, ColToken Token)> SeedAsync(decimal autoCreditMax = 0)
     {
         using var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
         var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
@@ -333,6 +454,7 @@ public class DepositScannerRegressionTests : CollectionTestBase
         {
             Name = "SCANNER-" + Guid.NewGuid().ToString("N")[..8],
             ChainId = 97,
+            AutoCreditMaxAmount = autoCreditMax,
             CreationTime = now,
         };
         var token = new ColToken(Guid.NewGuid())

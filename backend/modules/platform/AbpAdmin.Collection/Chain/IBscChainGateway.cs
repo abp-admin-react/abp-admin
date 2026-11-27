@@ -31,9 +31,7 @@ public record AddressTransferPage(
     bool HasUnresolvedLogs = false);
 
 /// <summary>
-/// BSC 链网关（计划第 5.6 节）：只读操作（getLogs/回执/余额/nonce）与签名广播（EIP-155）。
-/// 实现一：AnkrBscChainGateway（JSON-RPC over HttpClient）；按地址兜底走 Etherscan V2。
-/// 测试用假实现驱动扫链/归集状态机——链上全链路手工验证不进 CI（计划第 8 节）。
+/// BSC 链上查询、签名和广播。按地址补查 Transfer 日志时可使用 Etherscan V2。
 /// </summary>
 public interface IBscChainGateway
 {
@@ -54,10 +52,17 @@ public interface IBscChainGateway
     /// <summary>balanceOf，返回原始整数十进制字符串。</summary>
     Task<string> GetTokenBalanceRawAsync(string contractAddress, string address, CancellationToken ct = default);
 
+    /// <summary>读取指定区块的 ERC20 balanceOf。金库核对不能回退到 latest。</summary>
+    Task<string> GetTokenBalanceRawAtBlockAsync(string contractAddress, string address, long block, CancellationToken ct = default);
+
     /// <summary>BNB 余额（ether 十进制）。</summary>
     Task<decimal> GetBnbBalanceAsync(string address, CancellationToken ct = default);
 
     Task<long> GetTransactionCountAsync(string address, CancellationToken ct = default);
+
+    /// <summary>读取账户在指定块的交易数，供打油恢复与共址提现核对已消耗的 nonce。</summary>
+    Task<long?> GetTransactionCountAtBlockAsync(string address, long block, CancellationToken ct = default)
+        => Task.FromResult<long?>(null);
 
     /// <summary>回执；无回执返回 BlockNumber/Status 为 null 的记录。</summary>
     Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default);

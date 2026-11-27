@@ -204,6 +204,9 @@ public class BscDepositProviderClientTests
         return services.BuildServiceProvider();
     }
 
+    internal static ServiceProvider FakeTransport(Func<HttpRequestMessage, HttpResponseMessage> respond) =>
+        CreateServices(new Handler(respond));
+
     private sealed class CapturingLogger : ILoggerProvider, ILogger
     {
         internal List<string> Messages { get; } = [];

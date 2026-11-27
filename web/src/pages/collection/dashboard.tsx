@@ -5,7 +5,7 @@ import {
 } from '@ant-design/pro-components';
 import { Link, useAccess } from '@umijs/max';
 import { AgGridReact } from 'ag-grid-react';
-import { Alert, Card, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Card, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import {
   getTreasuryDashboard,
@@ -13,18 +13,14 @@ import {
   type TreasuryDashboardDto,
 } from '@/abp/collectionAdmin';
 import { toGridColumns, useSearchableLocalGrid } from '@/components/remoteGrid';
+import { formatForDisplay } from '@/utils/time';
 import AnkrBalanceCard from './AnkrBalanceCard';
+import VaultReconciliationTag from './VaultReconciliationTag';
 
 const { Text } = Typography;
 
-function fmtTime(value?: string | null) {
-  if (!value) return '-';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-}
-
 /**
- * 链上监控总览（/collection/dashboard）：汇总充提、手续费、用户负债和储备余额。
+ * 资金看板按币种展示可用余额和冻结金额；金库一栏显示最近一次服务端核对的原始观测和结论。
  * 「今日」按 UTC 计算，与当日笔数限额口径一致。
  */
 export default function CollectionDashboardPage({
@@ -201,9 +197,9 @@ export default function CollectionDashboardPage({
               <ProCard key={b.currency} colSpan={{ xs: 24, md: 6 }}>
                 <StatisticCard
                   statistic={{
-                    title: `用户 ${b.currency} 合计（平台负债）`,
+                    title: `用户 ${b.currency} 可用余额`,
                     value: b.balance,
-                    precision: 2,
+                    formatter: () => b.balance,
                     description: `冻结 ${b.frozen}`,
                   }}
                 />
@@ -216,20 +212,32 @@ export default function CollectionDashboardPage({
               <Text type="secondary">暂无每日核对记录</Text>
             ) : (
               data.vaultChecks.map((v) => {
-                const negative = v.difference.startsWith('-');
                 return (
                   <ProCard key={v.symbol} colSpan={{ xs: 24, md: 8 }}>
                     <StatisticCard
                       statistic={{
-                        title: `${v.symbol} 差额（储备 − 用户余额）`,
-                        value: v.difference,
-                        precision: 2,
+                        title: `${v.symbol} 核对后差额`,
+                        value: v.reconciledDifference ?? '—',
+                        formatter: () => v.reconciledDifference ?? '—',
                         description: (
-                          <Space size={8}>
+                          <Space size={8} wrap>
                             <span>储备 {v.vaultBalance}</span>
                             <span>用户余额 {v.userTotal}</span>
-                            {negative && <Tag color="error">缺口</Tag>}
-                            <span>{fmtTime(v.checkedAt)}</span>
+                            <span>原始差额 {v.difference}</span>
+                            <VaultReconciliationTag
+                              status={v.reconciliationStatus}
+                            />
+                            {v.referenceBlock != null && (
+                              <span>参考区块 {v.referenceBlock}</span>
+                            )}
+                            {v.referenceVaultAddress && (
+                              <span style={{ overflowWrap: 'anywhere' }}>
+                                核对金库 {v.referenceVaultAddress}
+                              </span>
+                            )}
+                            <span>
+                              最近核对 {formatForDisplay(v.checkedAt)}
+                            </span>
                           </Space>
                         ),
                       }}
@@ -260,7 +268,7 @@ export default function CollectionDashboardPage({
           </ProCard>
 
           <Text type="secondary">
-            生成于 {fmtTime(data.generatedAt)}（数据为 DB 聚合快照）
+            生成于 {formatForDisplay(data.generatedAt)}（数据为 DB 聚合快照）
           </Text>
         </>
       )}

@@ -32,7 +32,6 @@ import {
   type ChainConnState,
   onChainConnState,
   onChainDepositChanged,
-  startChainSignalR,
 } from '@/abp/chainSignalR';
 import {
   toGridColumns,
@@ -73,7 +72,7 @@ export default function DepositsPage({
   const access = useAccess();
   const { initialState } = useModel('@@initialState');
   const currentUserId = initialState?.currentUser?.userid;
-  const refreshGrid = useGridRef<() => void>(undefined);
+  const refreshGrid = useGridRef<(preserveRows?: boolean) => void>(undefined);
   const [data, setData] = useState<DepositOrderListDto[]>([]);
   const focused = depositId !== undefined;
   const invalidId = focused && !isValidRecordId(depositId);
@@ -88,7 +87,7 @@ export default function DepositsPage({
 
   const reload = useCallback(
     async (background = false) => {
-      refreshGrid.current?.();
+      refreshGrid.current?.(background);
       if (!focused || invalidId || invalidSweepId) return;
       const request = ++latestRequest.current;
       if (!background) setLoading(true);
@@ -122,25 +121,9 @@ export default function DepositsPage({
   useEffect(() => {
     if (focused) void reload();
   }, [focused, reload]);
-  useChainRecordRefresh(reload);
+  useChainRecordRefresh(reload, onChainDepositChanged);
+  useEffect(() => onChainConnState(setConnState), []);
 
-  useEffect(() => {
-    const offConn = onChainConnState(setConnState);
-    const offDeposit = onChainDepositChanged(() => {
-      // 收到推送：重新拉当前页（轻量，全量刷新保序）
-      void reload(true);
-    });
-    startChainSignalR();
-    return () => {
-      offConn();
-      offDeposit();
-    };
-  }, [reload]);
-
-  const fmtTime = (v: string) => {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
-  };
   const connView =
     connState === 'connected'
       ? { color: 'success' as const, text: '实时推送：已连接' }
@@ -261,10 +244,9 @@ export default function DepositsPage({
       ),
     },
     {
-      title: '时间',
+      title: '创建时间',
       dataIndex: 'creationTime',
-      width: 150,
-      render: (v: string) => fmtTime(v),
+      width: 180,
     },
     ...(access.canAdminNetwork
       ? [
@@ -314,13 +296,13 @@ export default function DepositsPage({
     symbol: focused ? undefined : symbolFilter,
   });
   const recordColumns = toGridColumns<DepositOrderListDto>(columns, {
+    utcDateFields: ['creationTime'],
     kinds: {
       amount: 'decimal',
       fee: 'decimal',
       actualAmount: 'decimal',
       blockNumber: 'number',
       logIndex: 'number',
-      creationTime: 'date',
     },
   });
   const depositsGrid = useSearchableRemoteGrid<DepositOrderListDto>({
@@ -338,7 +320,7 @@ export default function DepositsPage({
     keywordFields: ['txHash', 'toAddress', 'userId', 'symbol'],
   });
   const visibleGrid = focused ? focusedGrid : depositsGrid;
-  refreshGrid.current = depositsGrid.refresh;
+  refreshGrid.current = (background) => background ? depositsGrid.refreshCachedRows() : depositsGrid.refresh();
   const content = (
     <Card
       extra={

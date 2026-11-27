@@ -24,6 +24,30 @@ namespace AbpAdmin.Collection.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("AbpAdmin.Collection.Data.AccountDirectoryEntry", b =>
+                {
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.ToTable((string)null);
+
+                    b.ToView("AbpUsers", (string)null);
+                });
+
             modelBuilder.Entity("AbpAdmin.Collection.Entities.ColBalance", b =>
                 {
                     b.Property<Guid>("Id")
@@ -872,6 +896,9 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<long?>("GasNonceUsed")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("GasSignedTransaction")
+                        .HasColumnType("text");
+
                     b.Property<string>("GasTxHash")
                         .HasMaxLength(66)
                         .HasColumnType("character varying(66)");
@@ -887,6 +914,9 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.PrimitiveCollection<string[]>("PreviousTxHashes")
                         .HasColumnType("text[]");
+
+                    b.Property<int>("ReceiptCursor")
+                        .HasColumnType("integer");
 
                     b.Property<bool>("Retryable")
                         .HasColumnType("boolean");
@@ -1012,10 +1042,32 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<Guid>("NetworkId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("PendingCredit")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<decimal?>("PostedAfterBlock")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
                     b.Property<string>("RawVaultAmount")
                         .IsRequired()
                         .HasMaxLength(96)
                         .HasColumnType("character varying(96)");
+
+                    b.Property<decimal?>("ReconciledDifference")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<int>("ReconciliationStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("ReferenceBlock")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ReferenceVaultAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("Symbol")
                         .IsRequired()

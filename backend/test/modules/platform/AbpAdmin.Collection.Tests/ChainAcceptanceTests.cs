@@ -212,9 +212,9 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var (network, usdt, _) = await SeedChainAsync(scanRan: true);
         var manager = NewSweepManager();
 
-        // 确认达标 → Queued 任务；但金库未配置 → 归集轮空转：不加余额、不广播
+        // 金库未配置时，新进款即使达到确认数也不会广播或入账。
         usdt.VaultAddress = null;
-        var orderId = await SeedOrderAsync(network.Id, usdt, watched, 20m);
+        var orderId = await SeedOrderAsync(network.Id, usdt, watched, 20m, userId: unUser);
 
         await NewScanManager().RunTokenRoundAsync(
             network, usdt, new FakeChainGateway(head: 500), 12, 50, 2000,
@@ -480,40 +480,265 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         (await ReadOrdersAsync(usdt.Id)).Count.ShouldBe(0);
     }
 
-    [Fact]
-    public async Task Vault_Audit_Writes_Row_On_Shortfall()
+    [Theory]
+    [InlineData(CollectionCurrency.Usdt)]
+    [InlineData(CollectionCurrency.Usdc)]
+    public async Task Vault_Audit_Writes_Row_On_Shortfall(CollectionCurrency currency)
     {
-        var (network, usdt, _) = await SeedChainAsync(scanRan: true);
-        usdt.VaultAddress = "0x" + new string('a', 40);
+        var (network, usdt, usdc) = await SeedChainAsync(scanRan: true);
+        var token = currency == CollectionCurrency.Usdt ? usdt : usdc;
+        token.Symbol = token.Symbol.ToLowerInvariant();
+        token.VaultAddress = "0x" + new string('a', 40);
         var gateway = new FakeChainGateway(head: 500); // balanceOf 固定 0：用户有余额 → 缺口留痕
-        var watched = "0x" + Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N")[..8];
-        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
-        await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId, status: DepositOrderStatus.Swept);
-
-        // 用户侧余额 20（缺口核对的对账基数）：直接造行，绕过入账路径
         using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
         {
             var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
             await dbContext.Balances.AddAsync(new ColBalance(Guid.NewGuid())
             {
-                UserId = User2, Currency = CollectionCurrency.Usdt,
-                Balance = 20m,
+                UserId = User2, Currency = currency, Balance = 16m, Frozen = 4m,
             });
             await dbContext.SaveChangesAsync();
             await uow.CompleteAsync();
         }
 
         var manager = GetRequiredService<VaultAuditManager>();
-        await manager.RunAsync(network, usdt, gateway, CancellationToken.None);
+        await manager.RunAsync(network, token, gateway, CancellationToken.None);
 
         using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
         {
             var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
-            var row = await dbContext.VaultChecks.AsNoTracking().SingleAsync(v => v.TokenId == usdt.Id);
+            var row = await dbContext.VaultChecks.AsNoTracking().SingleAsync(v => v.TokenId == token.Id);
             row.VaultBalance.ShouldBe(0m);
-            row.Difference.ShouldBeNegative(); // vault < users（缺口方向正确） // 负差额 = 缺口
+            row.UserTotal.ShouldBe(20m);
+            row.Difference.ShouldBe(-20m);
+            row.ReconciliationStatus.ShouldBe(VaultReconciliationStatus.Shortfall);
+            row.ReconciledDifference.ShouldBe(-20m);
+            var pushed = Fakes.FakeChainPushNotifier.Instance.VaultChecks.Single();
+            pushed.CheckId.ShouldBe(row.Id);
+            pushed.Symbol.ShouldBe(row.Symbol);
+            pushed.VaultBalance.ShouldBe("0");
+            pushed.UserTotal.ShouldBe("20");
+            pushed.Difference.ShouldBe("-20");
+            pushed.ReconciliationStatus.ShouldBe("Shortfall");
+            pushed.ReconciledDifference.ShouldBe("-20");
             await uow.CompleteAsync();
         }
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, 5)]
+    [InlineData(true, 0)]
+    [InlineData(true, 5)]
+    public async Task Vault_Audit_Reconciles_Confirmed_Deposit_And_Posting_On_Either_Side_Of_Reference_Block(
+        bool settleAfterBalanceRead, int unrelatedLiability)
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = WatchAddress;
+        var sender = WatchAddress;
+        var orderId = await SeedOrderAsync(network.Id, token, sender, 20m);
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var db = await DbAsync();
+            await db.DepositOrders.Where(d => d.Id == orderId).ExecuteUpdateAsync(s =>
+                s.SetProperty(d => d.Fee, 2m).SetProperty(d => d.ActualAmount, 18m));
+            if (unrelatedLiability > 0)
+                db.Balances.Add(new ColBalance(TestGuid.Next())
+                    { UserId = NewUser(), Currency = CollectionCurrency.Usdt, Frozen = unrelatedLiability });
+            await db.SaveChangesAsync();
+        });
+        var gateway = new FakeChainGateway(500) { SimulatedSweepSender = sender };
+        await ActivateAsync(network, token, gateway, orderId);
+        gateway.HasReceipt = true;
+        gateway.ReceiptConfirmationsMet = true; // 链上归集在区块 400，毛额 20。
+        gateway.Head = settleAfterBalanceRead ? 400 : 500;
+        var reference = gateway.Head - ChainDefaults.Confirmations;
+        Task SettleAsync() => NewSweepManager().RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        gateway.ReadVaultAtBlock = async block =>
+        {
+            block.ShouldBe(reference);
+            if (!settleAfterBalanceRead) return "20000000000000000000";
+            gateway.Head = 500;
+            await SettleAsync();
+            return "0";
+        };
+        var audit = GetRequiredService<VaultAuditManager>();
+        await audit.RunAsync(network, token, gateway, CancellationToken.None);
+        var row = await (await DbAsync()).VaultChecks.AsNoTracking().SingleAsync(v => v.TokenId == token.Id);
+        row.ReferenceBlock.ShouldBe(reference);
+        row.ReferenceVaultAddress.ShouldBe(token.VaultAddress);
+        row.UserTotal.ShouldBe((settleAfterBalanceRead ? 18 : 0) + unrelatedLiability);
+        row.Difference.ShouldBe((settleAfterBalanceRead ? -18 : 20) - unrelatedLiability);
+        row.PendingCredit.ShouldBe(settleAfterBalanceRead ? 0m : 18m);
+        row.PostedAfterBlock.ShouldBe(settleAfterBalanceRead ? 18m : 0m);
+        row.ReconciledDifference.ShouldBe((settleAfterBalanceRead ? 0m : 2m) - unrelatedLiability);
+        row.ReconciliationStatus.ShouldBe(unrelatedLiability > 0
+            ? VaultReconciliationStatus.Shortfall : VaultReconciliationStatus.TimingDifference);
+
+        if (!settleAfterBalanceRead) await SettleAsync();
+        (await ReadOrderAsync(orderId)).Status.ShouldBe(DepositOrderStatus.Swept);
+        gateway.ReadVaultAtBlock = _ => Task.FromResult("20000000000000000000");
+        await audit.RunAsync(network, token, gateway, CancellationToken.None);
+        var next = await (await DbAsync()).VaultChecks.AsNoTracking().SingleAsync(v => v.TokenId == token.Id && v.Id != row.Id);
+        next.PendingCredit.ShouldBe(0m);
+        next.PostedAfterBlock.ShouldBe(0m);
+        next.ReconciledDifference.ShouldBe(2m - unrelatedLiability);
+        next.ReconciliationStatus.ShouldBe(unrelatedLiability > 0
+            ? VaultReconciliationStatus.Shortfall : VaultReconciliationStatus.Surplus);
+    }
+
+    [Fact]
+    public async Task Vault_Audit_Requires_Receipt_Transfer_Proof_And_Never_Treats_A_Broadcast_As_Money()
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = WatchAddress;
+        var sender = WatchAddress;
+        var gateway = new FakeChainGateway(500) { SimulatedSweepSender = sender };
+        await ActivateAsync(network, token, gateway, await SeedOrderAsync(network.Id, token, sender, 20m));
+        var audit = GetRequiredService<VaultAuditManager>();
+        await audit.RunAsync(network, token, gateway, CancellationToken.None);
+        var db = await DbAsync();
+        var initial = await db.VaultChecks.AsNoTracking().SingleAsync(v => v.TokenId == token.Id);
+        initial.ReconciliationStatus.ShouldBe(VaultReconciliationStatus.Balanced);
+        initial.PendingCredit.ShouldBe(0m);
+
+        gateway.HasReceipt = gateway.ReceiptConfirmationsMet = true;
+        gateway.IncompleteReceiptLogHashes.Add((await ReadOrderTaskAsync(token.Id)).TxHash!);
+        gateway.ReadVaultAtBlock = _ => Task.FromResult("20000000000000000000");
+        await audit.RunAsync(network, token, gateway, CancellationToken.None);
+        var uncertain = await db.VaultChecks.AsNoTracking().SingleAsync(v => v.TokenId == token.Id && v.Id != initial.Id);
+        uncertain.Difference.ShouldBe(20m);
+        uncertain.ReconciliationStatus.ShouldBe(VaultReconciliationStatus.Inconclusive);
+        uncertain.ReconciledDifference.ShouldBeNull();
+        uncertain.PendingCredit.ShouldBeNull();
+        uncertain.PostedAfterBlock.ShouldBeNull();
+
+        gateway.ReadVaultAtBlock = _ => throw new ChainRpcException("balanceOf 不可用");
+        await Should.ThrowAsync<ChainRpcException>(() => audit.RunAsync(network, token, gateway, CancellationToken.None));
+        (await db.VaultChecks.CountAsync(v => v.TokenId == token.Id)).ShouldBe(2);
+        Fakes.FakeChainPushNotifier.Instance.VaultChecks.Count.ShouldBe(2);
+    }
+
+    [Theory]
+    [InlineData(405)]
+    [InlineData(380)]
+    public async Task Vault_Audit_Requires_Final_Depth_And_Matching_Vault_To_Offset_A_Shortfall(int finalHead)
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        var oldVault = token.VaultAddress = WatchAddress;
+        var sender = WatchAddress;
+        var gateway = new FakeChainGateway(500) { SimulatedSweepSender = sender };
+        var task = await ActivateAsync(network, token, gateway, await SeedOrderAsync(network.Id, token, sender, 20m));
+        gateway.HasReceipt = gateway.ReceiptConfirmationsMet = true;
+        await NewSweepManager().RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        (await ReadOrderTaskAsync(token.Id)).Status.ShouldBe(SweepTaskStatus.Swept);
+
+        // 本地已提交区块 400 的入账，但核对节点只能证明块深 5 或已回退到 380。
+        gateway.Head = 399;
+        gateway.ReadVaultAtBlock = _ => { gateway.Head = finalHead; return Task.FromResult("0"); };
+        var audit = GetRequiredService<VaultAuditManager>();
+        await audit.RunAsync(network, token, gateway, CancellationToken.None);
+        var db = await DbAsync();
+        var uncertain = await db.VaultChecks.AsNoTracking().SingleAsync(v => v.TokenId == token.Id);
+        uncertain.ReconciliationStatus.ShouldBe(VaultReconciliationStatus.Inconclusive);
+        uncertain.Difference.ShouldBe(-20m);
+        uncertain.ReconciledDifference.ShouldBeNull();
+
+        // 现在核对新地址，旧金库的到账即使凭证齐全也不能冲销新地址的缺口。
+        token.VaultAddress = WatchAddress;
+        gateway.ReadVaultAtBlock = _ => { gateway.Head = 500; return Task.FromResult("0"); };
+        gateway.Head = 399;
+        await audit.RunAsync(network, token, gateway, CancellationToken.None);
+        var rotated = await db.VaultChecks.AsNoTracking().SingleAsync(v => v.ReferenceVaultAddress == token.VaultAddress);
+        rotated.ReferenceVaultAddress.ShouldNotBe(oldVault);
+        rotated.PostedAfterBlock.ShouldBe(0m);
+        rotated.ReconciledDifference.ShouldBe(-20m);
+        rotated.ReconciliationStatus.ShouldBe(VaultReconciliationStatus.Shortfall);
+        Fakes.FakeChainPushNotifier.Instance.VaultChecks.Last().ReferenceVaultAddress.ShouldBe(token.VaultAddress);
+
+        // 旧批次缺少块高时可凭真实回执重建；连哈希也丢失时保留原始差额待核实。
+        token.VaultAddress = oldVault;
+        gateway.Head = 399;
+        await db.SweepTasks.Where(t => t.Id == task).ExecuteUpdateAsync(s => s.SetProperty(t => t.TxBlockNumber, (long?)null));
+        await audit.RunAsync(network, token, gateway, CancellationToken.None);
+        Fakes.FakeChainPushNotifier.Instance.VaultChecks.Last().ReconciliationStatus.ShouldBe("TimingDifference");
+        await db.SweepTasks.Where(t => t.Id == task).ExecuteUpdateAsync(s => s.SetProperty(t => t.TxHash, (string?)null));
+        gateway.Head = 399;
+        await audit.RunAsync(network, token, gateway, CancellationToken.None);
+        Fakes.FakeChainPushNotifier.Instance.VaultChecks.Last().ReconciliationStatus.ShouldBe("Inconclusive");
+    }
+
+    [Fact]
+    public async Task Vault_Audit_Rejects_Unknown_Token_Without_A_Check_Or_Notification()
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.Symbol = "OTHER";
+        token.VaultAddress = WatchAddress;
+        var manager = GetRequiredService<VaultAuditManager>();
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            manager.RunAsync(network, token, new FakeChainGateway(500), CancellationToken.None));
+        (await (await DbAsync()).VaultChecks.AnyAsync(row => row.TokenId == token.Id)).ShouldBeFalse();
+        Fakes.FakeChainPushNotifier.Instance.VaultChecks.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData(WithdrawStatus.Processing, true, null, 8, true)]
+    [InlineData(WithdrawStatus.Broadcasting, false, true, 8, true)]
+    [InlineData(WithdrawStatus.Completed, false, true, 7, true)]
+    [InlineData(WithdrawStatus.Completed, false, true, 8, false)]
+    [InlineData(WithdrawStatus.Broadcasting, true, false, 7, false)]
+    public async Task Vault_Audit_Checks_Withdrawals_By_Actual_Sender_And_Nonce_At_Reference_Block(
+        WithdrawStatus status, bool walletIsVault, bool? senderWasVault, long confirmedNonce, bool needsReview)
+    {
+        var (network, token, _) = await SeedChainAsync();
+        token.VaultAddress = WatchAddress;
+        var separate = WatchAddress;
+        await WithUnitOfWorkAsync(async () =>
+        {
+            var db = await DbAsync();
+            await db.Networks.Where(n => n.Id == network.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(n => n.WithdrawVaultAddress, walletIsVault ? token.VaultAddress : separate));
+            db.WithdrawOrders.Add(new ColWithdrawOrder(TestGuid.Next())
+            {
+                Currency = CollectionCurrency.Usdt, NetworkName = network.Name, ToAddress = WatchAddress, Amount = 10m,
+                ActualAmount = 10m, UserId = NewUser(), Status = status, StatusChangedAt = TestClock.Now, CreationTime = TestClock.Now,
+                BroadcastSenderAddress = senderWasVault.HasValue ? (senderWasVault.Value ? token.VaultAddress : separate) : null,
+                NonceUsed = senderWasVault.HasValue ? 7 : null, TxHash = senderWasVault.HasValue ? "0xwithdraw" : null,
+            });
+            await db.SaveChangesAsync();
+        });
+        var gateway = new FakeChainGateway(500) { ConfirmedTxCount = confirmedNonce };
+        await GetRequiredService<VaultAuditManager>().RunAsync(network, token, gateway, CancellationToken.None);
+        var check = await (await DbAsync()).VaultChecks.AsNoTracking().SingleAsync(x => x.TokenId == token.Id);
+        check.ReconciliationStatus.ShouldBe(needsReview ? VaultReconciliationStatus.Inconclusive : VaultReconciliationStatus.Balanced);
+        check.Difference.ShouldBe(0m);
+        check.ReconciledDifference.ShouldBe(needsReview ? null : 0m);
+    }
+
+    [Fact]
+    public async Task Vault_Audit_Does_Not_Record_A_Truncated_Liability_Total()
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = WatchAddress;
+        const decimal max = 9_999_999_999.999999999999999999m;
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true))
+        {
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            for (var i = 0; i < 5; i++)
+            {
+                db.Balances.Add(new ColBalance(Guid.NewGuid())
+                {
+                    UserId = Guid.NewGuid(), Currency = CollectionCurrency.Usdt, Balance = max, Frozen = max,
+                });
+            }
+            await uow.CompleteAsync();
+        }
+
+        await GetRequiredService<VaultAuditManager>().RunAsync(network, token, new FakeChainGateway(500), CancellationToken.None);
+        (await (await DbAsync()).VaultChecks.AnyAsync(row => row.TokenId == token.Id)).ShouldBeFalse();
+        Fakes.FakeChainPushNotifier.Instance.VaultChecks.ShouldBeEmpty();
     }
 
     [Fact]
@@ -530,7 +755,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         };
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
-        var orderId = await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId);
+        var orderId = await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId, userId: rvUser);
         await ActivateAsync(network, usdt, gateway, orderId);
 
         var manager = NewSweepManager();
@@ -593,6 +818,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
     [InlineData(ReplacementReceipt.Malformed)]
     [InlineData(ReplacementReceipt.TimedOut)]
     [InlineData(ReplacementReceipt.IncompleteTransferProof)]
+    [InlineData(ReplacementReceipt.InterruptedWithVaultCleared)]
     public async Task Original_Hash_Can_Win_After_A_Replacement_And_Vault_Change(ReplacementReceipt replacementReceipt)
     {
         var user = NewUser();
@@ -619,9 +845,10 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
 
         token.VaultAddress = "0x" + new string('b', 40);
         var manager = NewSweepManager();
-        async Task RoundAsync()
+        async Task RoundAsync(CancellationToken stopping = default)
         {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(stopping);
+            deadline.CancelAfter(TimeSpan.FromSeconds(15));
             await manager.RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
                 TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, deadline.Token);
         }
@@ -647,12 +874,18 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         gateway.ReceiptConfirmationsMet = true;
         var receiptReads = new List<string>();
         var candidateCanceled = false;
+        using var interrupted = new CancellationTokenSource();
         gateway.BeforeCancellableReceiptRead = async (hash, ct) =>
         {
             receiptReads.Add(hash);
             if (hash != replacement.TxHash)
             {
                 return;
+            }
+            if (replacementReceipt == ReplacementReceipt.InterruptedWithVaultCleared)
+            {
+                interrupted.Cancel();
+                ct.ThrowIfCancellationRequested();
             }
             if (replacementReceipt == ReplacementReceipt.Malformed)
             {
@@ -670,6 +903,11 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
                 }
             }
         };
+        if (replacementReceipt == ReplacementReceipt.InterruptedWithVaultCleared)
+        {
+            token.VaultAddress = null;
+            await Should.ThrowAsync<OperationCanceledException>(() => RoundAsync(interrupted.Token));
+        }
         await RoundAsync();
         await RoundAsync();
         candidateCanceled.ShouldBe(replacementReceipt == ReplacementReceipt.TimedOut);
@@ -693,6 +931,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         Malformed,
         TimedOut,
         IncompleteTransferProof,
+        InterruptedWithVaultCleared,
     }
 
     [Theory]
@@ -849,13 +1088,71 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         gateway.BnbBalances[watched] = 0m;
         gateway.AfterBroadcast = (_, _, _) => throw new ChainRpcException("gas response lost");
         await ActivateAsync(network, token, gateway, orderId);
-        (await ReadOrderTaskAsync(token.Id)).GasNonceUsed.ShouldBe(61);
+        var attempt = await ReadOrderTaskAsync(token.Id);
+        attempt.GasNonceUsed.ShouldBe(61);
+        attempt.GasTxHash.ShouldBe(gateway.Broadcasts.Single().Hash);
         gateway.AfterBroadcast = null;
         gateway.TxCountSeed = 90;
         await NewSweepManager().RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
             TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
         gateway.Broadcasts.Select(call => call.Nonce).ShouldBe(new long[] { 61, 61 });
-        (await ReadOrderTaskAsync(token.Id)).GasTxHash.ShouldNotBeNull();
+        gateway.Broadcasts.Select(call => call.Hash).Distinct().Single().ShouldBe(attempt.GasTxHash);
+        (await ReadOrderTaskAsync(token.Id)).GasTxHash.ShouldBe(attempt.GasTxHash);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task Funding_Recovery_Uses_Address_Balance_And_Confirmed_Nonce(bool legacyNonceOnly, bool independentlyFunded)
+    {
+        var (network, token, _) = await SeedChainAsync(scanRan: true);
+        token.VaultAddress = "0x" + new string('a', 40);
+        var watched = WatchAddress;
+        var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
+        var orderId = await SeedOrderAsync(network.Id, token, watched, 20m, addressId);
+        var gateway = new FakeChainGateway(head: 500) { TxCountSeed = 61 };
+        gateway.BnbBalances[watched] = 0m;
+        gateway.AfterBroadcast = (_, _, _) => throw new ChainRpcException("unknown funding result");
+        await ActivateAsync(network, token, gateway, orderId);
+        var attempt = await ReadOrderTaskAsync(token.Id);
+        attempt.GasNonceUsed.ShouldBe(61);
+        if (legacyNonceOnly)
+        {
+            using var edit = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true);
+            var db = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
+            await db.SweepTasks.Where(row => row.Id == attempt.Id).ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.GasTxHash, (string?)null)
+                .SetProperty(row => row.GasSignedTransaction, (string?)null));
+            await edit.CompleteAsync();
+        }
+
+        gateway.AfterBroadcast = null;
+        gateway.TxCountSeed = 62;
+        gateway.BnbBalances[watched] = independentlyFunded ? 0.001m : 0m;
+        gateway.ConfirmedTxCount = 61;
+        if (!independentlyFunded)
+        {
+            await NewSweepManager().RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+                TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+            (await ReadOrderTaskAsync(token.Id)).Status.ShouldBe(SweepTaskStatus.Fueling);
+            gateway.ConfirmedTxCount = 62;
+        }
+        await NewSweepManager().RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
+            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(120), 0.02m, CancellationToken.None);
+        var resumed = await ReadOrderTaskAsync(token.Id);
+        if (independentlyFunded)
+        {
+            resumed.Status.ShouldBe(SweepTaskStatus.Sweeping);
+            resumed.TxHash.ShouldNotBeNull();
+        }
+        else
+        {
+            resumed.Status.ShouldBe(SweepTaskStatus.Failed);
+            resumed.Retryable.ShouldBeFalse();
+            resumed.TxHash.ShouldBeNull();
+        }
+        gateway.Broadcasts.Count(call => call.DataHex.Length == 0).ShouldBe(1);
     }
 
     [Fact]
@@ -1763,11 +2060,21 @@ public class FakeChainGateway : IBscChainGateway
     public Task<string> GetTokenBalanceRawAsync(string contractAddress, string address, CancellationToken ct = default)
         => Task.FromResult(TokenBalances.TryGetValue(contractAddress + ":" + address, out var raw) ? raw : "0");
 
+    public Func<long, Task<string>>? ReadVaultAtBlock { get; set; }
+
+    public Task<string> GetTokenBalanceRawAtBlockAsync(string contractAddress, string address, long block, CancellationToken ct = default)
+        => ReadVaultAtBlock?.Invoke(block) ?? GetTokenBalanceRawAsync(contractAddress, address, ct);
+
     public Task<decimal> GetBnbBalanceAsync(string address, CancellationToken ct = default)
         => Task.FromResult(BnbBalances.TryGetValue(address, out var b) ? b : 1m);
 
     /// <summary>可扰动计数：同 nonce 重签的回归测试靠它区分「复用存储 nonce」与「重查链上计数」。</summary>
     public long TxCountSeed { get; set; }
+
+    public long? ConfirmedTxCount { get; set; }
+
+    public Task<long?> GetTransactionCountAtBlockAsync(string address, long block, CancellationToken ct = default)
+        => Task.FromResult(ConfirmedTxCount);
 
     public Task<long> GetTransactionCountAsync(string address, CancellationToken ct = default)
         => Task.FromResult(TxCountSeed);

@@ -38,6 +38,7 @@ public class SweepManager : DomainService
     private readonly IStringEncryptionService _encryptor;
     private readonly IClock _clock;
     private readonly IUnitOfWorkManager _unitOfWorkManager;
+    private readonly IChainPushNotifier? _pushNotifier;
 
     public SweepManager(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
@@ -46,7 +47,7 @@ public class SweepManager : DomainService
         ChainAlertService alerts,
         IStringEncryptionService encryptor,
         IClock clock,
-        IUnitOfWorkManager unitOfWorkManager)
+        IUnitOfWorkManager unitOfWorkManager, IChainPushNotifier? pushNotifier = null)
     {
         _dbContextProvider = dbContextProvider;
         _balanceManager = balanceManager;
@@ -55,6 +56,7 @@ public class SweepManager : DomainService
         _encryptor = encryptor;
         _clock = clock;
         _unitOfWorkManager = unitOfWorkManager;
+        _pushNotifier = pushNotifier;
     }
 
     private string? MasterKey => _masterKey;
@@ -76,14 +78,9 @@ public class SweepManager : DomainService
         CancellationToken ct,
         int batchSize = ChainDefaults.SweepTaskBatchSize)
     {
-        if (string.IsNullOrEmpty(token.VaultAddress))
-        {
-            Logger.LogWarning("代币 {Symbol} 未配置金库地址，归集轮空转（Confirmed 单保持待归集）", token.Symbol);
-            return;
-        }
-
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
+        await using var changes = new ChainRecordChanges(dbContext, token.Symbol, _pushNotifier, Logger);
         var now = _clock.Now;
 
         // 调用方传入的网络来自另一个工作单元，重读后才能保存心跳和告警时间。
@@ -98,28 +95,44 @@ public class SweepManager : DomainService
 
         var sweeping = tasks.Where(t => t.Status == SweepTaskStatus.Sweeping);
         Task DriveSweepAsync(ColSweepTask task, CancellationToken taskCt) =>
-            DriveSweepingAsync(network, token, gateway, dbContext, task, GetHeadAsync, confirmations, rebroadcastGrace, taskCt);
+            DriveSweepingAsync(network, token, gateway, dbContext, task, GetHeadAsync, confirmations, rebroadcastGrace, changes, taskCt);
 
-        await RunStageAsync(dbContext, sweeping.Where(t => t.TxHash != null), batchSize, "回执", DriveSweepAsync, ct);
+        if (string.IsNullOrEmpty(token.VaultAddress))
+        {
+            // 停止签署新转账后仍核对已签名时保存的金库地址，以便已到账的资金完成结算。
+            await RunStageAsync(dbContext, sweeping.Where(t => t.TxHash != null && t.BroadcastVaultAddress != null),
+                batchSize, "已广播回执", DriveSweepAsync, changes, ct);
+            await dbContext.SaveChangesAsync(ct);
+            await uow.CompleteAsync(ct);
+            return;
+        }
 
-        var retryIds = tasks.Where(t => t.Status == SweepTaskStatus.Failed && t.Retryable
+        await RunStageAsync(dbContext, sweeping.Where(t => t.TxHash != null), batchSize, "回执", DriveSweepAsync, changes, ct);
+
+        var retryTasks = await tasks.Where(t => t.Status == SweepTaskStatus.Failed && t.Retryable
                 && t.StatusChangedAt <= now - retryCooldown)
-            .OrderBy(t => t.StatusChangedAt).ThenBy(t => t.Id).Take(batchSize).Select(t => t.Id);
-        await dbContext.SweepTasks.Where(t => retryIds.Contains(t.Id) && t.Status == SweepTaskStatus.Failed && t.Retryable)
-            .ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, SweepTaskStatus.Queued)
-                .SetProperty(t => t.Retryable, false)
-                .SetProperty(t => t.FailReason, (string?)null)
-                .SetProperty(t => t.StatusChangedAt, now), ct);
+            .OrderBy(t => t.StatusChangedAt).ThenBy(t => t.Id).Take(batchSize).ToListAsync(ct);
+        var retryIds = retryTasks.Select(t => t.Id).ToArray();
+        foreach (var task in retryTasks) changes.ObserveSweep(task);
+        if (retryIds.Length > 0)
+        {
+            await dbContext.SweepTasks.Where(t => retryIds.Contains(t.Id) && t.Status == SweepTaskStatus.Failed && t.Retryable
+                    && t.StatusChangedAt <= now - retryCooldown)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, SweepTaskStatus.Queued)
+                    .SetProperty(t => t.Retryable, false)
+                    .SetProperty(t => t.FailReason, (string?)null)
+                    .SetProperty(t => t.StatusChangedAt, now), ct);
+        }
 
         var queued = tasks.Where(t => t.Status == SweepTaskStatus.Queued && !dbContext.SweepTasks.Any(active =>
             active.AddressId == t.AddressId && (active.Status == SweepTaskStatus.Fueling || active.Status == SweepTaskStatus.Sweeping)));
-        await RunStageAsync(dbContext, queued, batchSize, "排队", (task, taskCt) => TryActivateAsync(task, sweepRoundLimit, taskCt), ct);
+        await RunStageAsync(dbContext, queued, batchSize, "排队", (task, taskCt) => TryActivateAsync(task, sweepRoundLimit, changes, taskCt), changes, ct);
         var resumedSweeps = new List<Guid>();
         await RunStageAsync(dbContext, tasks.Where(t => t.Status == SweepTaskStatus.Fueling), batchSize, "打油",
             (task, taskCt) => DriveFuelingAsync(network, gateway, dbContext, task, GetHeadAsync, confirmations,
-                fuelBnbLimit, gasBnbAlertThreshold, resumedSweeps, taskCt), ct);
+                fuelBnbLimit, gasBnbAlertThreshold, resumedSweeps, taskCt), changes, ct);
         await RunStageAsync(dbContext, sweeping.Where(t => t.TxHash == null || resumedSweeps.Contains(t.Id)),
-            batchSize, "待广播", DriveSweepAsync, ct);
+            batchSize, "待广播", DriveSweepAsync, changes, ct);
 
         if (ChainAlertService.ShouldAlert(network.SweepStuckAlertedAt, TimeSpan.FromMinutes(60), now))
         {
@@ -139,7 +152,7 @@ public class SweepManager : DomainService
 
     /// <summary>先记录本次处理时间再处理。失败或耗时的任务轮到队尾，其余阶段保留自己的时间预算。</summary>
     private async Task RunStageAsync(CollectionDbContext db, IQueryable<ColSweepTask> query, int batchSize,
-        string stage, Func<ColSweepTask, CancellationToken, Task> processAsync, CancellationToken ct)
+        string stage, Func<ColSweepTask, CancellationToken, Task> processAsync, ChainRecordChanges changes, CancellationToken ct)
     {
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(StageBudget);
@@ -155,6 +168,7 @@ public class SweepManager : DomainService
                         && t.LastProcessedAt == task.LastProcessedAt)
                     .ExecuteUpdateAsync(s => s.SetProperty(t => t.LastProcessedAt, processedAt), stageCt);
                 if (rows == 0) continue;
+                changes.ObserveSweep(task);
                 try
                 {
                     await processAsync(task, stageCt);
@@ -172,7 +186,7 @@ public class SweepManager : DomainService
     }
 
     /// <summary>确定归集批次并转入 Fueling。已有同地址在途任务时等待下轮。</summary>
-    private async Task TryActivateAsync(ColSweepTask candidate, decimal? roundLimit, CancellationToken ct)
+    private async Task TryActivateAsync(ColSweepTask candidate, decimal? roundLimit, ChainRecordChanges changes, CancellationToken ct)
     {
         using var activateUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
         var txDb = await _dbContextProvider.GetDbContextAsync();
@@ -196,9 +210,11 @@ public class SweepManager : DomainService
         var linked = await txDb.DepositOrders.AsNoTracking()
             .Where(o => o.SweepTaskId == task.Id
                         && (o.Status == DepositOrderStatus.Sweeping
-                            || (!hasBroadcast && o.Status == DepositOrderStatus.Confirmed)))
+                            || o.Status == DepositOrderStatus.Confirmed))
             .OrderBy(o => o.CreationTime).ThenBy(o => o.Id)
             .ToListAsync(ct);
+        var confirmedIds = linked.Where(o => o.Status == DepositOrderStatus.Confirmed).Select(o => o.Id).ToList();
+        if (hasBroadcast) linked.RemoveAll(o => o.Status == DepositOrderStatus.Confirmed);
         if (linked.Count == 0)
         {
             await FailAsync(txDb, task.Id, SweepTaskStatus.Queued, retryable: false,
@@ -279,9 +295,10 @@ public class SweepManager : DomainService
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.SweepTaskId, (Guid?)null), ct);
 
         await activateUow.CompleteAsync(ct);
+        foreach (var id in confirmedIds) changes.DepositChanged(id);
     }
 
-    /// <summary>跟踪打油回执，发送前保存 nonce，使同一任务的重发只能替换原交易。</summary>
+    /// <summary>广播前保存打油交易的签名、哈希和 nonce，节点未收到时重播原签名。</summary>
     private async Task DriveFuelingAsync(
         ColNetwork network, IBscChainGateway gateway, CollectionDbContext dbContext,
         ColSweepTask task, Func<CancellationToken, Task<long>> getHeadAsync, int confirmations,
@@ -289,16 +306,13 @@ public class SweepManager : DomainService
     {
         var now = _clock.Now;
 
-        // 已有打油在途：等回执，不重复广播（否则每轮 60s 连环打油烧 BNB）
+        // 节点可能还没有回执，但地址已从其他来源获得 BNB。先看账户能否归集，再决定是否重播。
         var gasNonce = task.GasNonceUsed;
+        long? minedGasBlock = null;
         if (task.GasTxHash != null)
         {
             var gasReceipt = await gateway.GetTransactionReceiptAsync(task.GasTxHash, ct);
-            if (gasReceipt.Status == null)
-            {
-                return; // 在途未确认：下一轮再看
-            }
-
+            if (!string.Equals(gasReceipt.TxHash, task.GasTxHash, StringComparison.OrdinalIgnoreCase)) return;
             if (gasReceipt.Status == 0)
             {
                 if (gasReceipt.BlockNumber is long block
@@ -307,9 +321,15 @@ public class SweepManager : DomainService
                     await dbContext.SweepTasks.Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling
                             && t.GasTxHash == task.GasTxHash && t.GasNonceUsed == gasNonce)
                         .ExecuteUpdateAsync(s => s.SetProperty(t => t.GasTxHash, (string?)null)
+                            .SetProperty(t => t.GasSignedTransaction, (string?)null)
                             .SetProperty(t => t.GasNonceUsed, (long?)null), ct);
                 }
                 return;
+            }
+            if (gasReceipt.Status != null)
+            {
+                if (gasReceipt.Status != 1 || gasReceipt.BlockNumber is not (>= 0 and var mined)) return;
+                minedGasBlock = mined;
             }
         }
 
@@ -320,6 +340,7 @@ public class SweepManager : DomainService
         {
             var rows = await dbContext.SweepTasks.Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling)
                 .ExecuteUpdateAsync(s => s.SetProperty(t => t.Status, SweepTaskStatus.Sweeping)
+                    .SetProperty(t => t.GasSignedTransaction, minedGasBlock.HasValue ? null : task.GasSignedTransaction)
                     .SetProperty(t => t.StatusChangedAt, now), ct);
             if (rows > 0 && task.TxHash != null)
             {
@@ -328,7 +349,21 @@ public class SweepManager : DomainService
             return;
         }
 
-        // 需要打油：金额 = gas 成本 ×2（余量），超上限仅人工
+        if (minedGasBlock is long gasBlock)
+        {
+            // 已成功打油后仍不足以归集，等待最终确认再转人工，避免自动重复给同一地址转 BNB。
+            if (await getHeadAsync(ct) - gasBlock >= confirmations)
+                await FailAsync(dbContext, task.Id, SweepTaskStatus.Fueling, retryable: false,
+                    reason: "打油交易已确认，但地址余额仍不足以支付归集费用，请核对", now);
+            return;
+        }
+        if (task.GasTxHash != null)
+        {
+            if (task.GasSignedTransaction != null && await gateway.GetTransactionNonceAsync(task.GasTxHash, ct) == null)
+                await gateway.BroadcastTransactionAsync(new(task.GasTxHash, task.GasSignedTransaction), ct);
+            return;
+        }
+
         var fuelAmount = Math.Max(sweepGasCostBnb * 2m, 0.0005m);
         if (fuelAmount > fuelBnbLimit)
         {
@@ -337,22 +372,31 @@ public class SweepManager : DomainService
             return;
         }
 
-        // Gas 地址 BNB 余额检查（index 1）+ 过低告警（固定前缀 + 冷却）
         if (MasterKey == null)
         {
             await _alerts.RaiseAsync(null, "归集不可用",
-                "Collection:MasterKey 未配置，无法解密助记词；归集轮空转。");
+                $"归集任务 {task.Id} 缺少 Collection:MasterKey，无法为充值地址签署打油交易。");
             return;
         }
 
         using var mnemonic = HdKeyService.Unprotect(network.MnemonicCipher!, MasterKey, _encryptor);
         var gasAddress = HdKeyService.DeriveAddress(mnemonic.Words, HdKeyService.GasAddressIndex);
+        var nextNonce = await gateway.GetTransactionCountAsync(gasAddress, ct);
+        if (gasNonce.HasValue && nextNonce > gasNonce.Value)
+        {
+            // pending 只表示可能在途。只有足够深的区块也已消耗该 nonce，才结束无哈希旧任务的自动重试。
+            var confirmedBlock = Math.Max(0, await getHeadAsync(ct) - confirmations);
+            if (await gateway.GetTransactionCountAtBlockAsync(gasAddress, confirmedBlock, ct) > gasNonce.Value)
+                await FailAsync(dbContext, task.Id, SweepTaskStatus.Fueling, retryable: false,
+                    reason: "历史打油交易缺少哈希，原 nonce 已确认使用且地址余额不足，请人工核对", now);
+            return;
+        }
         var gasBalance = await gateway.GetBnbBalanceAsync(gasAddress, ct);
         if (gasBalance < gasBnbAlertThreshold
             && ChainAlertService.ShouldAlert(network.GasLowAlertedAt, TimeSpan.FromMinutes(60), now))
         {
             await _alerts.RaiseAsync(CollectionConsts.AlertPrefixGasLow, "Gas 地址 BNB 过低",
-                $"Gas 地址 {gasAddress} 余额 {gasBalance:0.000000} BNB 低于阈值 {gasBnbAlertThreshold}，归集打油将失败，请补充。");
+                $"Gas 地址 {gasAddress} 余额 {gasBalance:0.000000} BNB，已低于预警阈值 {gasBnbAlertThreshold} BNB，请补充。");
             network.GasLowAlertedAt = now;
         }
 
@@ -366,28 +410,36 @@ public class SweepManager : DomainService
 
         var gasKey = HdKeyService.DerivePrivateKey(mnemonic.Words, HdKeyService.GasAddressIndex);
         var valueWei = "0x" + ToRawHex(fuelAmount, 18);
-        if (task.GasTxHash != null)
+        var nonce = gasNonce ?? nextNonce;
+        // 另一任务已占用该 nonce 时重播原签名，避免将同一笔 BNB 改付给其他地址。
+        var reserved = await dbContext.SweepTasks.AsNoTracking().Where(t => t.NetworkId == task.NetworkId
+                && t.Id != task.Id && t.GasNonceUsed == nonce && t.GasSignedTransaction != null && t.GasTxHash != null)
+            .Select(t => new SignedChainTransaction(t.GasTxHash!, t.GasSignedTransaction!)).FirstOrDefaultAsync(ct);
+        if (reserved != null)
         {
+            await gateway.BroadcastTransactionAsync(reserved, ct);
             return;
         }
-
-        if (gasNonce == null)
+        var signed = await gateway.PrepareTransactionAsync(gasKey, task.Address, "", valueWei, network.ChainId, nonce, ct);
+        using (var gasUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
         {
-            // 同一个网络的打油账户由所有代币共用。存在未知发送结果时，先核对那一笔。
-            var unresolved = await dbContext.SweepTasks.AnyAsync(t => t.NetworkId == task.NetworkId
-                && t.Id != task.Id && t.Status == SweepTaskStatus.Fueling
-                && t.GasNonceUsed != null && t.GasTxHash == null, ct);
+            var gasDb = await _dbContextProvider.GetDbContextAsync();
+            // 同一网络所有代币共享打油地址。先提交交易身份，其他任务不能认领尚未被节点看到的 nonce。
+            await gasDb.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtext('Collection:GasNonce'), hashtext({task.NetworkId.ToString()}))", ct);
+            var unresolved = await gasDb.SweepTasks.AnyAsync(t => t.NetworkId == task.NetworkId
+                && t.Id != task.Id && t.GasNonceUsed == nonce
+                && (t.Status == SweepTaskStatus.Fueling || t.GasTxHash == null || t.GasSignedTransaction != null), ct);
             if (unresolved)
             {
                 return;
             }
 
-            gasNonce = await gateway.GetTransactionCountAsync(gasAddress, ct);
-            using var gasUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
-            var gasDb = await _dbContextProvider.GetDbContextAsync();
             var claimed = await gasDb.SweepTasks.Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling
-                    && t.GasTxHash == null && t.GasNonceUsed == null)
-                .ExecuteUpdateAsync(s => s.SetProperty(t => t.GasNonceUsed, gasNonce), ct);
+                    && t.GasTxHash == null && t.GasNonceUsed == gasNonce)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.GasNonceUsed, nonce)
+                    .SetProperty(t => t.GasTxHash, signed.Hash)
+                    .SetProperty(t => t.GasSignedTransaction, signed.RawHex), ct);
             await gasUow.CompleteAsync(ct);
             if (claimed == 0)
             {
@@ -395,27 +447,23 @@ public class SweepManager : DomainService
             }
         }
 
-        var gasTx = await gateway.SendTransactionAsync(
-            gasKey, task.Address, dataHex: "", valueWei, network.ChainId, nonce: gasNonce.Value, ct);
-        await dbContext.SweepTasks
-            .Where(t => t.Id == task.Id && t.Status == SweepTaskStatus.Fueling
-                && t.GasNonceUsed == gasNonce && t.GasTxHash == null)
-            .ExecuteUpdateAsync(s => s.SetProperty(t => t.GasTxHash, gasTx), ct);
-        Logger.LogInformation("归集任务 {TaskId} 已提交 {Fuel} BNB 打油交易 {Hash}，等待回执", task.Id, fuelAmount, gasTx);
+        await gateway.BroadcastTransactionAsync(signed, ct);
+        Logger.LogInformation("归集任务 {TaskId} 已提交 {Fuel} BNB 打油交易 {Hash}，等待回执", task.Id, fuelAmount, signed.Hash);
     }
 
     /// <summary>未知候选仅阻止重签。任一通过确认与转账核对的候选可完成原任务。</summary>
     private async Task DriveSweepingAsync(
         ColNetwork network, ColToken token, IBscChainGateway gateway, CollectionDbContext dbContext,
         ColSweepTask task, Func<CancellationToken, Task<long>> getHeadAsync, int confirmations,
-        TimeSpan rebroadcastGrace, CancellationToken ct)
+        TimeSpan rebroadcastGrace, ChainRecordChanges changes, CancellationToken ct)
     {
         var now = _clock.Now;
         var head = task.TxHash == null ? 0 : await getHeadAsync(ct);
         var (receipt, uncertain, transferMismatch) = await FindSweepReceiptAsync(
-            gateway, task, token, head, confirmations, ct);
+            dbContext, gateway, task, token, head, confirmations, ct);
         if (receipt == null)
         {
+            if (string.IsNullOrEmpty(token.VaultAddress)) return;
             if (transferMismatch && !uncertain)
             {
                 await FailSweepAttemptAsync(dbContext, task, "归集回执未包含与本单匹配的代币转账，拒绝入账", now, ct);
@@ -452,10 +500,13 @@ public class SweepManager : DomainService
 
                 if (promotable.Count > 0)
                 {
-                    await dbContext.DepositOrders
-                        .Where(o => promotable.Contains(o.Id) && o.Status == DepositOrderStatus.Confirmed)
-                        .ExecuteUpdateAsync(s => s
-                            .SetProperty(o => o.Status, DepositOrderStatus.Sweeping), ct);
+                    var promoted = await dbContext.Database.SqlQuery<Guid>($"""
+                        WITH updated AS (UPDATE "ColDepositOrders" SET "Status" = {(int)DepositOrderStatus.Sweeping}
+                            WHERE "SweepTaskId" = {task.Id} AND "Status" = {(int)DepositOrderStatus.Confirmed}
+                              AND "Id" = ANY({promotable.ToArray()}) RETURNING "Id")
+                        SELECT "Id" AS "Value" FROM updated
+                        """).ToListAsync(ct);
+                    foreach (var id in promoted) changes.DepositChanged(id);
                 }
             }
 
@@ -600,7 +651,7 @@ public class SweepManager : DomainService
                 var gross = order.Amount ?? 0m;
                 var credit = CollectionLedgerPoster.ResolveCreditAmount(
                     order.Amount, order.ActualAmount, order.Fee);
-                var currency = MapCurrency(token.Symbol);
+                var currency = token.GetBalanceCurrency();
                 await _balanceManager.CreditAsync(
                     order.UserId, currency, credit,
                     idempotencyKey: BalanceIdempotencyKeys.ForDepositOrder(order.Id));
@@ -610,11 +661,15 @@ public class SweepManager : DomainService
             }
 
             // 解绑旧批次里残留的 Confirmed 单据，供下轮重新挂队。
-            await creditDbContext.DepositOrders
-                .Where(o => o.SweepTaskId == task.Id && o.Status == DepositOrderStatus.Confirmed)
-                .ExecuteUpdateAsync(s => s.SetProperty(o => o.SweepTaskId, (Guid?)null), ct);
+            var detached = await creditDbContext.Database.SqlQuery<Guid>($"""
+                WITH updated AS (UPDATE "ColDepositOrders" SET "SweepTaskId" = NULL
+                    WHERE "SweepTaskId" = {task.Id} AND "Status" = {(int)DepositOrderStatus.Confirmed} RETURNING "Id")
+                SELECT "Id" AS "Value" FROM updated
+                """).ToListAsync(ct);
 
             await creditUow.CompleteAsync();
+            foreach (var order in linked) changes.DepositChanged(order.Id);
+            foreach (var id in detached) changes.DepositChanged(id);
             Logger.LogInformation("归集任务 {TaskId} 确认毛额 {GrossAmount} {Symbol}，已结算 {Count} 笔进款",
                 task.Id, task.Amount, token.Symbol, linked.Count);
         }
@@ -622,13 +677,19 @@ public class SweepManager : DomainService
 
     /// <summary>坏回执只影响对应哈希，旧候选继续核对。缺少可靠查单结果时保持原 nonce 和候选。</summary>
     private async Task<(TransactionReceipt? Receipt, bool Uncertain, bool TransferMismatch)> FindSweepReceiptAsync(
-        IBscChainGateway gateway, ColSweepTask task, ColToken token, long head, int confirmations, CancellationToken ct)
+        CollectionDbContext db, IBscChainGateway gateway, ColSweepTask task, ColToken token, long head, int confirmations, CancellationToken ct)
     {
         TransactionReceipt? unconfirmed = null;
         var uncertain = false;
         var transferMismatch = false;
-        foreach (var hash in SweepHashes(task))
+        var candidates = SweepHashes(task).ToArray();
+        for (var offset = 0; offset < candidates.Length; offset++)
         {
+            var index = (int)(((long)task.ReceiptCursor + offset) % candidates.Length);
+            var hash = candidates[index];
+            if (candidates.Length > 1)
+                await MatchSweepAttempt(db, task).ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.ReceiptCursor, (index + 1) % candidates.Length), ct);
             using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
             budget.CancelAfter(ReceiptQueryBudget);
             try
@@ -746,11 +807,4 @@ public class SweepManager : DomainService
         return r;
     }
 
-    private static CollectionCurrency MapCurrency(string symbol)
-    {
-        // fail-closed：未知符号直接抛，绝不当成 USDT 入账（未来代币可配置时的护栏）
-        if (symbol.Equals("USDC", StringComparison.OrdinalIgnoreCase)) return CollectionCurrency.Usdc;
-        if (symbol.Equals("USDT", StringComparison.OrdinalIgnoreCase)) return CollectionCurrency.Usdt;
-        throw new InvalidOperationException("未知稳定币符号，拒绝入账：" + symbol);
-    }
 }

@@ -28,6 +28,7 @@ public class SweepSettlementRollbackTests : AbpAdminTestBase<SweepSettlementRoll
     public async Task Interrupted_After_First_Flushed_Voucher_Rolls_Back_And_Replays_Confirmed_Sweep_Once()
     {
         var (network, token, task, deposit) = await SeedBroadcastAsync();
+        var pushes = GetRequiredService<Fakes.FakeChainPushNotifier>();
         var bus = GetRequiredService<IDistributedEventBus>();
         var observed = new List<BalanceCreditedEto>();
         using var subscription = bus.Subscribe<BalanceCreditedEto>(eventData =>
@@ -63,6 +64,8 @@ public class SweepSettlementRollbackTests : AbpAdminTestBase<SweepSettlementRoll
 
         await AssertSettlementAsync(committed: false);
         observed.ShouldBeEmpty();
+        pushes.Deposits.ShouldNotContain(e => e.DepositOrderId == deposit.Id);
+        pushes.Sweeps.ShouldNotContain(e => e.SweepTaskId == task.Id);
         gateway.Broadcasts.ShouldBeEmpty();
 
         using (var restarted = ServiceProvider.CreateScope())
@@ -72,6 +75,8 @@ public class SweepSettlementRollbackTests : AbpAdminTestBase<SweepSettlementRoll
         }
 
         var credit = await AssertSettlementAsync(committed: true);
+        pushes.Deposits.Single(e => e.DepositOrderId == deposit.Id).Status.ShouldBe(nameof(DepositOrderStatus.Swept));
+        pushes.Sweeps.Single(e => e.SweepTaskId == task.Id).Status.ShouldBe(nameof(SweepTaskStatus.Swept));
         var published = observed.Single();
         credit.ShouldBe(published.BalanceTxnId);
         published.UserId.ShouldBe(deposit.UserId);

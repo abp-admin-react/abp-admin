@@ -1,6 +1,7 @@
 using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
@@ -34,6 +35,7 @@ using Volo.Abp.Security.Encryption;
 using Volo.Abp.Settings;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.Uow;
+using Volo.Abp.Validation;
 
 namespace AbpAdmin.Collection.Services;
 
@@ -255,14 +257,9 @@ public class SweepTaskListDto
 }
 
 /// <summary>金库核对留痕行。</summary>
-public class VaultCheckListDto
+public class VaultCheckListDto : VaultCheckLatestDto
 {
     public Guid Id { get; set; }
-    public string Symbol { get; set; } = default!;
-    public string VaultBalance { get; set; } = default!;
-    public string UserTotal { get; set; } = default!;
-    public string Difference { get; set; } = default!;
-    public DateTime CheckedAt { get; set; }
 }
 
 /// <summary>扫链 API KEY 行（只回掩码：**** + 尾 4 位）。</summary>
@@ -619,23 +616,31 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
 
     public virtual Task<PagedResultDto<DepositOrderListDto>> GetDepositOrdersAsync(
         int skipCount, int maxResultCount, string? status = null, string? symbol = null,
-        Guid? depositId = null, Guid? sweepTaskId = null) =>
-        ReadDepositOrdersPageAsync(null, skipCount, maxResultCount, status, symbol, depositId, sweepTaskId);
+        Guid? depositId = null, Guid? sweepTaskId = null, CancellationToken cancellationToken = default) =>
+        ReadDepositOrdersPageAsync(null, skipCount, maxResultCount, status, symbol, depositId, sweepTaskId, cancellationToken);
 
     [HttpPost("api/app/collection-network-admin/deposit-orders/query")]
-    public virtual Task<PagedResultDto<DepositOrderListDto>> QueryDepositOrdersAsync([FromBody] GridQueryInput grid, string? status = null, string? symbol = null, Guid? depositId = null, Guid? sweepTaskId = null) =>
-        ReadDepositOrdersPageAsync(grid, grid.SkipCount, grid.MaxResultCount, status, symbol, depositId, sweepTaskId);
+    public virtual Task<PagedResultDto<DepositOrderListDto>> QueryDepositOrdersAsync(
+        [FromBody] GridQueryInput grid, [FromQuery] string? status = null, [FromQuery] string? symbol = null,
+        [FromQuery] Guid? depositId = null, [FromQuery] Guid? sweepTaskId = null, CancellationToken cancellationToken = default) =>
+        ReadDepositOrdersPageAsync(grid, grid.SkipCount, grid.MaxResultCount, status, symbol, depositId, sweepTaskId, cancellationToken);
 
+    /// <summary>先限定宿主运营可见记录，再分页并为当页充值匹配同一账户的入账流水。</summary>
+    /// <returns>总数和当前页。缺少历史代币或网络配置时仍保留充值记录。</returns>
+    /// <exception cref="AbpValidationException">传入未知状态或无效表格条件。</exception>
     private async Task<PagedResultDto<DepositOrderListDto>> ReadDepositOrdersPageAsync(GridQueryInput? grid,
-        int skipCount, int maxResultCount, string? status = null, string? symbol = null,
-        Guid? depositId = null, Guid? sweepTaskId = null)
+        int skipCount, int maxResultCount, string? status, string? symbol,
+        Guid? depositId, Guid? sweepTaskId, CancellationToken cancellationToken)
     {
         await CheckOperationsReadAccessAsync();
         if (maxResultCount <= 0 || maxResultCount > 200) maxResultCount = 20;
-        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
+        // 入金状态和关联的余额流水必须取自同一已提交快照，否则并发结算会让同一行自相矛盾。
+        using var uow = UnitOfWorkManager.Begin(new AbpUnitOfWorkOptions
+        {
+            IsTransactional = true,
+            IsolationLevel = System.Data.IsolationLevel.RepeatableRead,
+        }, requiresNew: true);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var symbols = await dbContext.Tokens.ToDictionaryAsync(t => t.Id, t => t.Symbol);
-        var networkNames = await dbContext.Networks.ToDictionaryAsync(n => n.Id, n => n.Name);
         var query = dbContext.DepositOrders.AsNoTracking();
 
         if (depositId is { } id)
@@ -647,15 +652,14 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
             query = query.Where(o => o.SweepTaskId == sweepId);
         }
 
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<DepositOrderStatus>(status, true, out var st))
+        if (ParseStatus<DepositOrderStatus>(status) is { } depositStatus)
         {
-            query = query.Where(o => o.Status == st);
+            query = query.Where(o => o.Status == depositStatus);
         }
         if (!string.IsNullOrEmpty(symbol))
         {
-            var tokenIds = symbols.Where(kv => kv.Value.Equals(symbol, StringComparison.OrdinalIgnoreCase))
-                .Select(kv => kv.Key).ToList();
-            query = query.Where(o => tokenIds.Contains(o.TokenId));
+            var tokenSymbol = symbol.ToUpperInvariant();
+            query = query.Where(o => dbContext.Tokens.Any(t => t.Id == o.TokenId && t.Symbol.ToUpper() == tokenSymbol));
         }
 
         var definition = new GridQueryDefinition<ColDepositOrder>()
@@ -663,8 +667,8 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
             .SearchableField("txHash", x => x.TxHash)
             .Field("logIndex", x => x.LogIndex)
             .SearchableField("userId", x => x.UserId.ToString())
-            .SearchableField("symbol", x => dbContext.Tokens.Where(t => t.Id == x.TokenId).Select(t => t.Symbol).FirstOrDefault())
-            .SearchableField("networkName", x => dbContext.Networks.Where(n => n.Id == x.NetworkId).Select(n => n.Name).FirstOrDefault())
+            .SearchableField("symbol", x => dbContext.Tokens.Where(t => t.Id == x.TokenId).Select(t => t.Symbol).FirstOrDefault() ?? "?")
+            .SearchableField("networkName", x => dbContext.Networks.Where(n => n.Id == x.NetworkId).Select(n => n.Name).FirstOrDefault() ?? "?")
             .Field("amount", x => x.Amount)
             .Field("fee", x => x.Fee)
             .Field("actualAmount", x => x.ActualAmount ?? x.Amount)
@@ -674,79 +678,89 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
             .SearchableField("fromAddress", x => x.FromAddress)
             .Field("creationTime", x => x.CreationTime);
         if (grid != null) query = definition.Filter(query, grid);
-        var total = await query.CountAsync();
+        var total = await query.LongCountAsync(cancellationToken);
         var items = await (grid == null
-            ? query.OrderByDescending(o => o.CreationTime)
+            ? query.OrderByDescending(o => o.CreationTime).ThenBy(o => o.Id)
             : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
-            .ToListAsync();
+            .Select(o => new DepositOrderListDto
+            {
+                Id = o.Id,
+                TxHash = o.TxHash,
+                LogIndex = o.LogIndex,
+                UserId = o.UserId,
+                ToAddress = o.ToAddress,
+                FromAddress = o.FromAddress,
+                Amount = o.Amount == null ? null : CollectionAmounts.Format(o.Amount.Value),
+                Fee = o.Fee == null ? null : CollectionAmounts.Format(o.Fee.Value),
+                ActualAmount = o.ActualAmount == null ? null : CollectionAmounts.Format(o.ActualAmount.Value),
+                RawAmount = o.RawAmount,
+                Symbol = dbContext.Tokens.Where(t => t.Id == o.TokenId).Select(t => t.Symbol).FirstOrDefault() ?? "?",
+                NetworkName = dbContext.Networks.Where(n => n.Id == o.NetworkId).Select(n => n.Name).FirstOrDefault() ?? "?",
+                BlockNumber = o.BlockNumber,
+                Status = o.Status.ToString(),
+                SweepTaskId = o.SweepTaskId,
+                ManuallyReleased = o.ManuallyReleased,
+                CreationTime = o.CreationTime,
+            }).ToListAsync(cancellationToken);
 
-        // The unique ledger idempotency key is the stored deposit ID, never a transaction-hash guess.
-        // Keep the owner check even for host operators so malformed legacy rows cannot create a false link.
-        var creditKeys = items.Select(o => BalanceIdempotencyKeys.ForDepositOrder(o.Id)).ToList();
-        var credits = await dbContext.BalanceTxns.AsNoTracking()
-            .Where(t => t.Action == BalanceActions.DepositCredit && creditKeys.Contains(t.IdempotencyKey))
-            .Select(t => new { t.Id, t.UserId, t.IdempotencyKey })
-            .ToDictionaryAsync(t => t.IdempotencyKey);
-        await uow.CompleteAsync();
-
-        return new PagedResultDto<DepositOrderListDto>(total, items.Select(o => new DepositOrderListDto
+        // 只按当页充值 ID 查询流水。同一幂等键还须属于同一账户，避免关联错误历史数据。
+        if (items.Count > 0)
         {
-            Id = o.Id,
-            TxHash = o.TxHash,
-            LogIndex = o.LogIndex,
-            UserId = o.UserId,
-            ToAddress = o.ToAddress,
-            FromAddress = o.FromAddress,
-            Amount = o.Amount == null ? null : CollectionAmounts.Format(o.Amount.Value),
-            Fee = o.Fee == null ? null : CollectionAmounts.Format(o.Fee.Value),
-            ActualAmount = o.ActualAmount == null ? null : CollectionAmounts.Format(o.ActualAmount.Value),
-            RawAmount = o.RawAmount,
-            Symbol = symbols.TryGetValue(o.TokenId, out var s) ? s : "?",
-            NetworkName = networkNames.TryGetValue(o.NetworkId, out var n) ? n : "?",
-            BlockNumber = o.BlockNumber,
-            Status = o.Status.ToString(),
-            SweepTaskId = o.SweepTaskId,
-            BalanceTxnId = credits.TryGetValue(BalanceIdempotencyKeys.ForDepositOrder(o.Id), out var credit)
-                           && credit.UserId == o.UserId ? credit.Id : null,
-            ManuallyReleased = o.ManuallyReleased,
-            CreationTime = o.CreationTime,
-        }).ToList());
+            var creditKeys = items.Select(o => BalanceIdempotencyKeys.ForDepositOrder(o.Id)).ToList();
+            var credits = await dbContext.BalanceTxns.AsNoTracking()
+                .Where(t => t.Action == BalanceActions.DepositCredit && creditKeys.Contains(t.IdempotencyKey))
+                .Select(t => new { t.Id, t.UserId, t.IdempotencyKey })
+                .ToDictionaryAsync(t => t.IdempotencyKey, cancellationToken);
+            foreach (var item in items)
+            {
+                if (credits.TryGetValue(BalanceIdempotencyKeys.ForDepositOrder(item.Id), out var credit) && credit.UserId == item.UserId)
+                {
+                    item.BalanceTxnId = credit.Id;
+                }
+            }
+        }
+        await uow.CompleteAsync(cancellationToken);
+        return new PagedResultDto<DepositOrderListDto>(total, items);
     }
 
     /// <summary>归集任务分页。</summary>
     public virtual Task<PagedResultDto<SweepTaskListDto>> GetSweepTasksAsync(
-        int skipCount, int maxResultCount, string? status = null, Guid? sweepTaskId = null) =>
-        ReadSweepTasksPageAsync(null, skipCount, maxResultCount, status, sweepTaskId);
+        int skipCount, int maxResultCount, string? status = null, Guid? sweepTaskId = null, CancellationToken cancellationToken = default) =>
+        ReadSweepTasksPageAsync(null, skipCount, maxResultCount, status, sweepTaskId, cancellationToken);
 
     [HttpPost("api/app/collection-network-admin/sweep-tasks/query")]
-    public virtual Task<PagedResultDto<SweepTaskListDto>> QuerySweepTasksAsync([FromBody] GridQueryInput grid, string? status = null, Guid? sweepTaskId = null) =>
-        ReadSweepTasksPageAsync(grid, grid.SkipCount, grid.MaxResultCount, status, sweepTaskId);
+    public virtual Task<PagedResultDto<SweepTaskListDto>> QuerySweepTasksAsync(
+        [FromBody] GridQueryInput grid, [FromQuery] string? status = null, [FromQuery] Guid? sweepTaskId = null,
+        CancellationToken cancellationToken = default) =>
+        ReadSweepTasksPageAsync(grid, grid.SkipCount, grid.MaxResultCount, status, sweepTaskId, cancellationToken);
 
+    /// <summary>两个运营入口共用状态限制和稳定排序，从当前页投影代币名称。</summary>
+    /// <returns>匹配的归集任务总数和当前页。</returns>
+    /// <exception cref="AbpValidationException">传入未知状态或无效表格条件。</exception>
     private async Task<PagedResultDto<SweepTaskListDto>> ReadSweepTasksPageAsync(GridQueryInput? grid,
-        int skipCount, int maxResultCount, string? status = null, Guid? sweepTaskId = null)
+        int skipCount, int maxResultCount, string? status, Guid? sweepTaskId, CancellationToken cancellationToken)
     {
         await CheckOperationsReadAccessAsync();
         if (maxResultCount <= 0 || maxResultCount > 200) maxResultCount = 20;
         using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var symbols = await dbContext.Tokens.ToDictionaryAsync(t => t.Id, t => t.Symbol);
         var query = dbContext.SweepTasks.AsNoTracking();
         if (sweepTaskId is { } id)
         {
             query = query.Where(t => t.Id == id);
         }
 
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<SweepTaskStatus>(status, true, out var st))
+        if (ParseStatus<SweepTaskStatus>(status) is { } sweepStatus)
         {
-            query = query.Where(t => t.Status == st);
+            query = query.Where(t => t.Status == sweepStatus);
         }
 
         var definition = new GridQueryDefinition<ColSweepTask>()
             .SearchableField("id", x => x.Id.ToString())
             .SearchableField("userId", x => x.UserId.ToString())
-            .SearchableField("symbol", x => dbContext.Tokens.Where(t => t.Id == x.TokenId).Select(t => t.Symbol).FirstOrDefault())
+            .SearchableField("symbol", x => dbContext.Tokens.Where(t => t.Id == x.TokenId).Select(t => t.Symbol).FirstOrDefault() ?? "?")
             .Field("amount", x => x.Amount)
             .SearchableEnumField("status", x => x.Status)
             .SearchableField("address", x => x.Address)
@@ -758,45 +772,46 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
             .Field("statusChangedAt", x => x.StatusChangedAt)
             .Field("creationTime", x => x.CreationTime);
         if (grid != null) query = definition.Filter(query, grid);
-        var total = await query.CountAsync();
+        var total = await query.LongCountAsync(cancellationToken);
         var items = await (grid == null
-            ? query.OrderByDescending(t => t.CreationTime)
+            ? query.OrderByDescending(t => t.CreationTime).ThenBy(t => t.Id)
             : definition.OrderBy(query, grid, "creationTime", true, x => x.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
-            .ToListAsync();
-        await uow.CompleteAsync();
-
-        return new PagedResultDto<SweepTaskListDto>(total, items.Select(t => new SweepTaskListDto
-        {
-            Id = t.Id,
-            Symbol = symbols.TryGetValue(t.TokenId, out var s) ? s : "?",
-            UserId = t.UserId,
-            Address = t.Address,
-            AddressIndex = t.AddressIndex,
-            Amount = CollectionAmounts.Format(t.Amount),
-            Status = t.Status.ToString(),
-            Retryable = t.Retryable,
-            FailReason = t.FailReason,
-            TxHash = t.TxHash,
-            NonceUsed = t.NonceUsed,
-            GasTxHash = t.GasTxHash,
-            StatusChangedAt = t.StatusChangedAt,
-            CreationTime = t.CreationTime,
-        }).ToList());
+            .Select(t => new SweepTaskListDto
+            {
+                Id = t.Id,
+                Symbol = dbContext.Tokens.Where(token => token.Id == t.TokenId).Select(token => token.Symbol).FirstOrDefault() ?? "?",
+                UserId = t.UserId,
+                Address = t.Address,
+                AddressIndex = t.AddressIndex,
+                Amount = CollectionAmounts.Format(t.Amount),
+                Status = t.Status.ToString(),
+                Retryable = t.Retryable,
+                FailReason = t.FailReason,
+                TxHash = t.TxHash,
+                NonceUsed = t.NonceUsed,
+                GasTxHash = t.GasTxHash,
+                StatusChangedAt = t.StatusChangedAt,
+                CreationTime = t.CreationTime,
+            }).ToListAsync(cancellationToken);
+        await uow.CompleteAsync(cancellationToken);
+        return new PagedResultDto<SweepTaskListDto>(total, items);
     }
 
     /// <summary>金库核对留痕分页。</summary>
     public virtual Task<PagedResultDto<VaultCheckListDto>> GetVaultChecksAsync(
-        int skipCount, int maxResultCount) =>
-        ReadVaultChecksPageAsync(null, skipCount, maxResultCount);
+        int skipCount, int maxResultCount, CancellationToken cancellationToken = default) =>
+        ReadVaultChecksPageAsync(null, skipCount, maxResultCount, cancellationToken);
 
     [HttpPost("api/app/collection-network-admin/vault-checks/query")]
-    public virtual Task<PagedResultDto<VaultCheckListDto>> QueryVaultChecksAsync([FromBody] GridQueryInput grid) =>
-        ReadVaultChecksPageAsync(grid, grid.SkipCount, grid.MaxResultCount);
+    public virtual Task<PagedResultDto<VaultCheckListDto>> QueryVaultChecksAsync([FromBody] GridQueryInput grid, CancellationToken cancellationToken = default) =>
+        ReadVaultChecksPageAsync(grid, grid.SkipCount, grid.MaxResultCount, cancellationToken);
 
+    /// <summary>按核对时间与唯一 ID 稳定分页，同批生成的多币种记录可跨页核对。</summary>
+    /// <returns>核对记录总数和当前页。</returns>
     private async Task<PagedResultDto<VaultCheckListDto>> ReadVaultChecksPageAsync(GridQueryInput? grid,
-        int skipCount, int maxResultCount)
+        int skipCount, int maxResultCount, CancellationToken cancellationToken)
     {
         await CheckOperationsReadAccessAsync();
         if (maxResultCount <= 0 || maxResultCount > 200) maxResultCount = 20;
@@ -806,30 +821,45 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
 
         var definition = new GridQueryDefinition<ColVaultCheck>()
             .SearchableField("symbol", x => x.Symbol)
-            .SearchableField("status", x => x.Difference < 0 ? "缺口" : "正常")
+            .SearchableField("status", x => x.ReconciliationStatus == VaultReconciliationStatus.Balanced ? "平衡"
+                : x.ReconciliationStatus == VaultReconciliationStatus.Surplus ? "盈余"
+                : x.ReconciliationStatus == VaultReconciliationStatus.TimingDifference ? "记账时差"
+                : x.ReconciliationStatus == VaultReconciliationStatus.Shortfall ? "缺口"
+                : x.ReconciliationStatus == VaultReconciliationStatus.Inconclusive ? "待核实" : "历史记录")
+            .SearchableEnumField("reconciliationStatus", x => x.ReconciliationStatus)
             .Field("vaultBalance", x => x.VaultBalance)
             .Field("userTotal", x => x.UserTotal)
             .Field("difference", x => x.Difference)
+            .Field("referenceBlock", x => x.ReferenceBlock)
+            .SearchableField("referenceVaultAddress", x => x.ReferenceVaultAddress ?? "")
+            .Field("pendingCredit", x => x.PendingCredit)
+            .Field("postedAfterBlock", x => x.PostedAfterBlock)
+            .Field("reconciledDifference", x => x.ReconciledDifference)
             .Field("checkedAt", x => x.CheckedAt);
         if (grid != null) query = definition.Filter(query, grid);
-        var total = await query.CountAsync();
+        var total = await query.LongCountAsync(cancellationToken);
         var items = await (grid == null
-            ? query.OrderByDescending(v => v.CheckedAt)
+            ? query.OrderByDescending(v => v.CheckedAt).ThenBy(v => v.Id)
             : definition.OrderBy(query, grid, "checkedAt", true, x => x.Id))
             .Skip(Math.Max(0, skipCount))
             .Take(maxResultCount)
-            .ToListAsync();
-        await uow.CompleteAsync();
-
-        return new PagedResultDto<VaultCheckListDto>(total, items.Select(v => new VaultCheckListDto
-        {
-            Id = v.Id,
-            Symbol = v.Symbol,
-            VaultBalance = CollectionAmounts.Format(v.VaultBalance),
-            UserTotal = CollectionAmounts.Format(v.UserTotal),
-            Difference = CollectionAmounts.Format(v.Difference),
-            CheckedAt = v.CheckedAt,
-        }).ToList());
+            .Select(v => new VaultCheckListDto
+            {
+                Id = v.Id,
+                Symbol = v.Symbol,
+                VaultBalance = CollectionAmounts.Format(v.VaultBalance),
+                UserTotal = CollectionAmounts.Format(v.UserTotal),
+                Difference = CollectionAmounts.Format(v.Difference),
+                ReconciliationStatus = v.ReconciliationStatus.ToString(),
+                ReferenceBlock = v.ReferenceBlock,
+                ReferenceVaultAddress = v.ReferenceVaultAddress,
+                PendingCredit = CollectionAmounts.FormatNullable(v.PendingCredit),
+                PostedAfterBlock = CollectionAmounts.FormatNullable(v.PostedAfterBlock),
+                ReconciledDifference = CollectionAmounts.FormatNullable(v.ReconciledDifference),
+                CheckedAt = v.CheckedAt,
+            }).ToListAsync(cancellationToken);
+        await uow.CompleteAsync(cancellationToken);
+        return new PagedResultDto<VaultCheckListDto>(total, items);
     }
 
     // ── 写入 ─────────────────────────────────────────────────────────────────────────────
@@ -1370,7 +1400,20 @@ public partial class CollectionNetworkAdminAppService : ApplicationService
 
     // ── 内部 ─────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>链网运维仅 Host。</summary>
+    /// <summary>空值省略状态筛选；其余输入须为单个已定义的枚举名称或数值。</summary>
+    private static TStatus? ParseStatus<TStatus>(string? status) where TStatus : struct, Enum
+    {
+        if (string.IsNullOrEmpty(status)) return null;
+        if (!status.Contains(',') && Enum.TryParse<TStatus>(status, true, out var parsed) && Enum.IsDefined(parsed))
+        {
+            return parsed;
+        }
+
+        const string message = "请选择有效的业务状态。";
+        throw new AbpValidationException(message, [new ValidationResult(message, ["status"])]);
+    }
+
+    /// <summary>宿主的收款运营读权限和网络管理权限均可查看运营记录。</summary>
     private async Task CheckOperationsReadAccessAsync()
     {
         AssertHost();

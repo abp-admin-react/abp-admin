@@ -56,7 +56,6 @@ vi.mock('@/abp/chainSignalR', () => ({
   onChainDepositChanged: () => () => {},
   onChainSweepChanged: () => () => {},
   onChainVaultCheck: () => () => {},
-  startChainSignalR: () => {},
 }));
 vi.mock('@/abp/finance', () => ({
   financeErrorText: (error: Error) => error.message,
@@ -155,6 +154,17 @@ describe('Web3 运营明细定位', () => {
       canViewWeb3Operations: true,
       canAdminNetwork: true,
     });
+    mocks.getVaultChecks.mockResolvedValue({
+      items: [
+        {
+          id: 'vault-1',
+          symbol: 'USDT',
+          difference: '-8',
+          checkedAt: '2026-03-31T23:59:59-04:00',
+        },
+      ],
+      totalCount: 1,
+    });
     show('?view=vault');
     expect(screen.getByRole('tab', { name: '储备核对' })).toHaveAttribute(
       'aria-selected',
@@ -168,8 +178,39 @@ describe('Web3 运营明细定位', () => {
     );
     expect(mocks.getDepositOrders).not.toHaveBeenCalled();
     expect(
+      screen.getByRole('columnheader', { name: '核对时间（UTC）' }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText('2026-04-01 03:59:59')).toBeInTheDocument();
+    expect(screen.getByText('历史记录')).toBeVisible();
+    expect(screen.queryByText('缺口')).toBeNull();
+    expect(
       screen.queryByRole('tab', { name: '资金概览' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('同一原始缺口按核对依据分别显示时差、缺口和待核实', async () => {
+    const statuses = ['TimingDifference', 'Shortfall', 'Inconclusive'];
+    mocks.getVaultChecks.mockResolvedValue({
+      items: statuses.map((reconciliationStatus, i) => ({
+        id: `vault-${i}`,
+        symbol: `T${i}`,
+        reconciliationStatus,
+        difference: '-12',
+        reconciledDifference: ['0', '-0.000000000000000001', null][i],
+        postedAfterBlock: ['12', '11.999999999999999999', null][i],
+        referenceBlock: 100,
+        referenceVaultAddress: address,
+      })),
+      totalCount: 3,
+    });
+    show('?view=vault');
+    const timing = await screen.findByRole('row', { name: /记账时差/ });
+    expect(within(timing).getByText('-12')).toBeVisible();
+    expect(within(timing).getByText('0')).toBeVisible();
+    expect(within(timing).getByText(address)).toBeVisible();
+    const shortfall = screen.getByRole('row', { name: /缺口/ });
+    expect(within(shortfall).getByText('-0.000000000000000001')).toBeVisible();
+    expect(screen.getByRole('row', { name: /待核实/ })).toHaveTextContent('—');
   });
 
   it('链网管理员可以定位充值，已经人工放行的尾单继续显示待归集', async () => {
@@ -190,12 +231,16 @@ describe('Web3 运营明细定位', () => {
 
   it('精确定位充值，摘要可读且保留原操作；切换栏目时清除定位', async () => {
     mocks.getDepositOrders.mockResolvedValue({
-      items: [deposit],
+      items: [{ ...deposit, creationTime: '2026-11-13T00:09:00+08:00' }],
       totalCount: 1,
     });
     show(`?view=deposits&depositId=${depositId}`, '/operations/payments');
     const focus = within(await screen.findByRole('alert'));
     expect(await focus.findByText('已定位充值单')).toBeTruthy();
+    expect(
+      screen.getByRole('columnheader', { name: '创建时间（UTC）' }),
+    ).toBeTruthy();
+    expect(screen.getByText('2026-11-12 16:09:00')).toBeInTheDocument();
     expect(focus.getByText('12.01 USDT')).toBeTruthy();
     expect(focus.getByText('大额待放行')).toBeTruthy();
     expect(focus.getByText(`充值单号 ${depositId}`)).toBeTruthy();
@@ -394,12 +439,20 @@ describe('Web3 运营明细定位', () => {
           amount: '12.01',
           address,
           status: 'Completed',
+          statusChangedAt: '2026-11-13T00:01:00',
         },
       ],
       totalCount: 1,
     });
     show(`?view=sweeps&depositId=${depositId}`);
     expect(await screen.findByText('已定位归集任务')).toBeInTheDocument();
+    expect(
+      screen.getByRole('columnheader', { name: '状态变更（UTC）' }),
+    ).toBeTruthy();
+    expect(screen.getByText('2026-11-13 00:01:00')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: '归集任务状态' }),
+    ).not.toBeInTheDocument();
     expect(mocks.getSweepTasks).toHaveBeenCalledWith(
       expect.objectContaining({ sweepTaskId, maxResultCount: 1 }),
     );

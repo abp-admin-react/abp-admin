@@ -1,10 +1,8 @@
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Settings;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -59,8 +57,7 @@ public class HotWalletWatchWorker : CollectionChainWorkerBase
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await dbContextProvider.GetDbContextAsync();
-        var network = await dbContext.Networks.AsNoTracking()
-            .OrderBy(n => n.CreationTime).FirstOrDefaultAsync(ct);
+        var network = await dbContext.FindBscMainnetAsync(ct);
         if (network == null)
         {
             return;

@@ -38,6 +38,23 @@ public class ChainApiKeyRotationTests : IDisposable
 
     public void Dispose() => _http.Dispose();
 
+    [Fact]
+    public async Task Vault_Audit_BalanceOf_Pins_Block_And_Rejects_Malformed_Abi_Words()
+    {
+        var gateway = NewGateway(["test"], []);
+        var word = "0x" + new string('0', 62) + "2a";
+        _handler.Responder = _ => Json(HttpStatusCode.OK, JsonSerializer.Serialize(new { result = word }));
+        (await gateway.GetTokenBalanceRawAtBlockAsync("0xtoken", "0x0001", 400)).ShouldBe("42");
+        using var request = JsonDocument.Parse(_handler.Bodies.Single());
+        request.RootElement.GetProperty("method").GetString().ShouldBe("eth_call");
+        request.RootElement.GetProperty("params")[1].GetString().ShouldBe("0x190");
+        foreach (var malformed in new[] { "0x", "0x0", word + "0", word[..^1] + "z", word[2..] })
+        {
+            _handler.Responder = _ => Json(HttpStatusCode.OK, JsonSerializer.Serialize(new { result = malformed }));
+            await Should.ThrowAsync<ChainRpcException>(() => gateway.GetTokenBalanceRawAtBlockAsync("0xtoken", "0x0001", 400));
+        }
+    }
+
     private static string UrlWithKey(string key) => AnkrBscChainGateway.AnkrBscRpcUrlBase + key;
 
     private AnkrBscChainGateway NewGateway(string[] rpcKeys, string[] etherscanKeys, int rpcOffset = 0)

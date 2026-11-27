@@ -1,5 +1,7 @@
 using AbpAdmin.Collection.Entities;
 using AbpAdmin.Collection.Payments;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp.Data;
 using Volo.Abp.EntityFrameworkCore;
@@ -18,6 +20,9 @@ namespace AbpAdmin.Collection.Data;
 [ConnectionStringName(CollectionConsts.ConnectionStringName)]
 public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 {
+    internal Task<ColNetwork?> FindBscMainnetAsync(CancellationToken ct = default) =>
+        Networks.FirstOrDefaultAsync(n => n.Name == CollectionConsts.BscNetworkName && n.ChainId == CollectionConsts.BscMainnetChainId, ct);
+
     public DbSet<ColCollection> Collections { get; set; } = default!;
 
     public DbSet<ColBalance> Balances { get; set; } = default!;
@@ -263,6 +268,10 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.Property(x => x.VaultBalance).HasPrecision(28, 18);
             b.Property(x => x.UserTotal).HasPrecision(28, 18);
             b.Property(x => x.Difference).HasPrecision(28, 18);
+            b.Property(x => x.ReferenceVaultAddress).HasMaxLength(64);
+            b.Property(x => x.PendingCredit).HasPrecision(28, 18);
+            b.Property(x => x.PostedAfterBlock).HasPrecision(28, 18);
+            b.Property(x => x.ReconciledDifference).HasPrecision(28, 18);
 
             b.HasIndex(x => new { x.TokenId, x.CheckedAt });
         });

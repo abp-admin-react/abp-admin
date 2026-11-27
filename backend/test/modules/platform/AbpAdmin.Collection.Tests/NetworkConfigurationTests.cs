@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -9,16 +10,21 @@ using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
+using AbpAdmin.Collection.Jobs;
 using AbpAdmin.Collection.Services;
 using AbpAdmin.Collection.Settings;
 using AbpAdmin.Modules;
+using AbpAdmin.ScheduledJobs;
+using HttpAgent;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Volo.Abp;
 using Volo.Abp.Caching;
+using Volo.Abp.DistributedLocking;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.MultiTenancy;
 using Volo.Abp.Uow;
@@ -31,6 +37,120 @@ namespace AbpAdmin.Collection;
 
 public class NetworkConfigurationTests : CollectionTestBase
 {
+    [Fact]
+    public async Task Scan_Worker_Pushes_The_Committed_Cursor_And_Chain_Head_Including_Disabled_Tokens()
+    {
+        var provider = GetRequiredService<IDbContextProvider<CollectionDbContext>>();
+        var encryptor = GetRequiredService<IStringEncryptionService>();
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true))
+        {
+            var db = await provider.GetDbContextAsync();
+            var bsc = (await db.FindBscMainnetAsync())!;
+            bsc.LegacyDepositRpcCipher = HdKeyService.Protect("https://rpc.ankr.com/bsc/test", "test-master-key", encryptor);
+            bsc.NodeLogResultCap = 100;
+            bsc.LatestChainHead = 99;
+            await db.Tokens.Where(t => t.NetworkId == bsc.Id).ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.IsEnabled, t => t.Symbol == "USDT").SetProperty(t => t.LastScannedBlock, 100L));
+            await uow.CompleteAsync();
+        }
+        await GetRequiredService<ISettingManager>().SetGlobalAsync(CollectionSettings.Chain.Confirmations, "15");
+        await using var http = BscDepositProviderClientTests.FakeTransport(request =>
+        {
+            using var call = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            object result = call.RootElement.GetProperty("method").GetString() switch
+            {
+                "eth_chainId" => "0x38", "eth_blockNumber" => "0x74", "eth_getLogs" => Array.Empty<object>(),
+                var method => throw new InvalidOperationException(method)
+            };
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { result })) };
+        });
+        var factory = new BscDepositScanProviderFactory(new BscDepositProviderClient(http.GetRequiredService<IHttpRemoteService>()),
+            GetRequiredService<ChainKeyProvider>(), encryptor, new DepositScanProviderHealth());
+        var services = Substitute.For<IServiceProvider>();
+        services.GetService(Arg.Any<Type>()).Returns(call => call.Arg<Type>() == typeof(BscDepositScanProviderFactory)
+            ? factory : ServiceProvider.GetService(call.Arg<Type>()));
+        await new TestScanWorker(services).RunOnceAsync();
+        var progress = Fakes.FakeChainPushNotifier.Instance.ScanProgress;
+        var enabled = progress.Single(p => p.Symbol == "USDT");
+        enabled.LastScannedBlock.ShouldBe(101);
+        enabled.LatestChainHead.ShouldBe(116);
+        enabled.BlocksBehind.ShouldBe(15);
+        enabled.LastScanAt.ShouldNotBeNull();
+        var disabled = progress.Single(p => p.Symbol == "USDC");
+        disabled.IsEnabled.ShouldBeFalse();
+        disabled.LastScannedBlock.ShouldBe(100);
+        disabled.LatestChainHead.ShouldBe(116);
+    }
+
+    private sealed class TestScanWorker(IServiceProvider services) : DepositScanWorker(
+        services.GetRequiredService<IAbpDistributedLock>(), services.GetRequiredService<IServiceScopeFactory>(),
+        services.GetRequiredService<IConfiguration>(), new CollectionChainWorkerOptions(), NullLogger<DepositScanWorker>.Instance)
+    {
+        public Task RunOnceAsync() => RunRoundAsync(services, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Sweep_Hot_Wallet_And_Vault_Audit_Select_The_Bsc_Mainnet_Even_If_Another_Network_Is_Older()
+    {
+        Guid bscId;
+        var provider = GetRequiredService<IDbContextProvider<CollectionDbContext>>();
+        using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin(requiresNew: true))
+        {
+            var db = await provider.GetDbContextAsync();
+            var bsc = await db.Networks.SingleAsync(n => n.Name == CollectionConsts.BscNetworkName);
+            bscId = bsc.Id;
+            bsc.RpcCipher = "configured";
+            db.Networks.Add(new ColNetwork(Guid.NewGuid())
+            {
+                Name = "OLDER", ChainId = bsc.ChainId, RpcCipher = "configured", CreationTime = bsc.CreationTime.AddDays(-1)
+            });
+            await db.Tokens.ExecuteUpdateAsync(s => s.SetProperty(t => t.IsEnabled, false));
+            await uow.CompleteAsync();
+        }
+
+        using var http = new HttpClient();
+        var factory = Substitute.For<ChainGatewayFactory>(http, GetRequiredService<IStringEncryptionService>(),
+            string.Empty, NullLoggerFactory.Instance, null);
+        var seen = new List<Guid>();
+        factory.CreateAsync(Arg.Any<CollectionDbContext>(), Arg.Any<ColNetwork>(), Arg.Any<int>()).Returns(call =>
+        {
+            seen.Add(call.Arg<ColNetwork>().Id);
+            return Substitute.For<IBscChainGateway>();
+        });
+        var services = Substitute.For<IServiceProvider>();
+        services.GetService(Arg.Any<Type>()).Returns(call => call.Arg<Type>() == typeof(ChainGatewayFactory)
+            ? factory : ServiceProvider.GetService(call.Arg<Type>()));
+        var sweep = new TestSweepWorker(services);
+        var hotWallet = new TestHotWalletWorker(services);
+        var audit = new VaultAuditJobHandler(provider, GetRequiredService<VaultAuditManager>(), factory,
+            GetRequiredService<IUnitOfWorkManager>(), NullLogger<VaultAuditJobHandler>.Instance);
+        await sweep.RunOnceAsync();
+        await hotWallet.RunOnceAsync();
+        await audit.ExecuteAsync(new ScheduledJobContext());
+        seen.ShouldBe(new[] { bscId, bscId, bscId });
+
+        await WithUnitOfWorkAsync(async () => await (await provider.GetDbContextAsync()).Networks
+            .Where(n => n.Id == bscId).ExecuteUpdateAsync(s => s.SetProperty(n => n.ChainId, 97L)));
+        await sweep.RunOnceAsync();
+        await hotWallet.RunOnceAsync();
+        await audit.ExecuteAsync(new ScheduledJobContext());
+        seen.ShouldBe(new[] { bscId, bscId, bscId });
+    }
+
+    private sealed class TestSweepWorker(IServiceProvider services) : SweepWorker(
+        services.GetRequiredService<IAbpDistributedLock>(), services.GetRequiredService<IServiceScopeFactory>(),
+        services.GetRequiredService<IConfiguration>(), new CollectionChainWorkerOptions(), NullLogger<SweepWorker>.Instance)
+    {
+        public Task RunOnceAsync() => RunRoundAsync(services, CancellationToken.None);
+    }
+
+    private sealed class TestHotWalletWorker(IServiceProvider services) : HotWalletWatchWorker(
+        services.GetRequiredService<IAbpDistributedLock>(), services.GetRequiredService<IServiceScopeFactory>(),
+        services.GetRequiredService<IConfiguration>(), new CollectionChainWorkerOptions(), NullLogger<HotWalletWatchWorker>.Instance)
+    {
+        public Task RunOnceAsync() => RunRoundAsync(services, CancellationToken.None);
+    }
+
     [Fact]
     public async Task Estimated_Arrival_Uses_Bsc_Default_And_Preserves_Existing_Deposit_Eligibility()
     {

@@ -64,6 +64,12 @@ public class ColSweepTask : BasicAggregateRoot<Guid>
     /// <summary>打油的 BNB 交易哈希（排障用）。</summary>
     public string? GasTxHash { get; set; }
 
+    /// <summary>已签名的 BNB 转账，在确认前可原样重播，不包含签名私钥。</summary>
+    public string? GasSignedTransaction { get; set; }
+
+    /// <summary>上次已尝试的归集回执之后的位置。慢节点不能让旧替换哈希永久排在时间预算之外。</summary>
+    public int ReceiptCursor { get; set; }
+
     /// <summary>在发送打油交易前保存 nonce，响应丢失时使用原 nonce。</summary>
     public long? GasNonceUsed { get; set; }
 

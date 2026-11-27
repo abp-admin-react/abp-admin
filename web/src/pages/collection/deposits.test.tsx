@@ -27,7 +27,6 @@ vi.mock('@/abp/chainAdmin', async (original) => ({
 vi.mock('@/abp/chainSignalR', () => ({
   onChainConnState: () => () => {},
   onChainDepositChanged: () => () => {},
-  startChainSignalR: () => {},
 }));
 
 const depositId = 'c6d8f751-c115-4fff-aee2-6964056bcfad';

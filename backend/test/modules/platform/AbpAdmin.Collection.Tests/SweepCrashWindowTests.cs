@@ -17,11 +17,7 @@ using Xunit;
 namespace AbpAdmin.Collection;
 
 /// <summary>
-/// 回归锁（sweep 激活崩溃窗）：激活的 claim/翻状态/解链若为三条独立自动提交，
-/// 中断窗口留下「任务 Amount 已按选中子集聚合、尾巴单仍链接+Confirmed」的毒态；自愈无条件
-/// 升级 + 确认逐笔入账 ⇒ 把没上链的钱记给用户（金库缺口）。修复三道：激活内层事务原子化
-/// （新毒态不可达）、自愈升级按 task.Amount 截额（存量毒态不再扩大）、确认入账前毛额对账门
-/// （漂移即拒绝入账转人工）。本文件针对存量毒态验证第二、三道的 fail-closed 行为。
+/// 旧归集任务中断后可能仍关联超出广播金额的进款单。验证恢复时的选单上限和入账前的毛额核对。
 /// </summary>
 public class SweepCrashWindowTests : CollectionTestBase
 {
@@ -69,7 +65,7 @@ public class SweepCrashWindowTests : CollectionTestBase
         return (network, token, addressId, watched);
     }
 
-    /// <summary>种毒态：任务 + 两笔链接 Confirmed 单（A 广播子集内、B 尾巴），Amount 只含 A。</summary>
+    /// <summary>关联两笔 Confirmed 进款，任务金额只包含第一笔。</summary>
     private async Task<Guid> SeedPoisonedTaskAsync(
         CollectionDbContext dbContext, ColNetwork network, ColToken token, Guid addressId, string watched,
         SweepTaskStatus status, string? txHash)
@@ -114,8 +110,7 @@ public class SweepCrashWindowTests : CollectionTestBase
     [Fact]
     public async Task Legacy_Partial_Activation_SelfHeal_Does_Not_Promote_Over_Broadcast_Amount()
     {
-        // 第二道：自愈升级按 task.Amount 截额。毒态（A=10 Confirmed 链接、B=5 尾巴 Confirmed
-        // 链接、Amount=10）下自愈只升 A；B 留在 Confirmed，不会被并入链上只转 10 的归集。
+        // 任务金额 10 只覆盖第一笔，金额 5 的第二笔应保持 Confirmed。
         var (network, token, addressId, watched) = await SeedAsync();
         var gateway = new FakeChainGateway(head: 500) { HasReceipt = true, ReceiptConfirmationsMet = true };
 
@@ -138,15 +133,16 @@ public class SweepCrashWindowTests : CollectionTestBase
                 .ToDictionaryAsync(o => o.Amount ?? 0m, o => o.Status);
             orders[10m].ShouldBe(DepositOrderStatus.Sweeping, "A（广播子集内）自愈升级");
             orders[5m].ShouldBe(DepositOrderStatus.Confirmed, "B（尾巴）不得越过广播金额被升级");
+            var pushed = Fakes.FakeChainPushNotifier.Instance.Deposits.ShouldHaveSingleItem();
+            pushed.Amount.ShouldBe("10");
+            pushed.Status.ShouldBe(nameof(DepositOrderStatus.Sweeping));
         }
     }
 
     [Fact]
     public async Task Credit_Time_Amount_Mismatch_Refuses_Credit_And_Fails_Task_For_Manual()
     {
-        // 第三道（资金时刻对账门）：历史毒态里 B 已被（修复前的）自愈升级成 Sweeping——
-        // 链上只转 10、链接单毛额合计 15。修复前：逐笔入账 15 = 金库缺口 5。
-        // 修复后：拒绝入账、任务置失败仅人工、单保持 Sweeping。
+        // 链上只转了 10，待结算的进款却合计 15；两笔都应留待人工核对。
         var (network, token, addressId, watched) = await SeedAsync();
         var gateway = new FakeChainGateway(head: 500) { HasReceipt = true, ReceiptConfirmationsMet = true };
         gateway.Logs[token.ContractAddress] = new()
@@ -159,7 +155,7 @@ public class SweepCrashWindowTests : CollectionTestBase
             var dbContext = await GetRequiredService<IDbContextProvider<CollectionDbContext>>().GetDbContextAsync();
             var taskId = await SeedPoisonedTaskAsync(dbContext, network, token, addressId, watched,
                 SweepTaskStatus.Sweeping, txHash: null);
-            // 模拟修复前自愈留下的毒态：A、B 都已是 Sweeping，链上"已广播"（TxHash 占位）
+            // 模拟旧任务已关联两笔 Sweeping 单并持有广播哈希。
             await dbContext.DepositOrders
                 .Where(o => o.SweepTaskId == taskId)
                 .ExecuteUpdateAsync(s => s.SetProperty(o => o.Status, DepositOrderStatus.Sweeping));

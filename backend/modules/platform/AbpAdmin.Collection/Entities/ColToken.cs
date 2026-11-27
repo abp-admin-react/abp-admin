@@ -1,4 +1,5 @@
 using System;
+using AbpAdmin.Collection.Contracts;
 using Volo.Abp.Domain.Entities;
 
 namespace AbpAdmin.Collection.Entities;
@@ -24,6 +25,13 @@ public class ColToken : BasicAggregateRoot<Guid>
 
     /// <summary>USDT / USDC（与 CollectionCurrency 枚举名一致，便于映射余额币种）。</summary>
     public string Symbol { get; set; } = default!;
+
+    internal CollectionCurrency GetBalanceCurrency()
+    {
+        if (string.Equals(Symbol, "USDC", StringComparison.OrdinalIgnoreCase)) return CollectionCurrency.Usdc;
+        if (string.Equals(Symbol, "USDT", StringComparison.OrdinalIgnoreCase)) return CollectionCurrency.Usdt;
+        throw new InvalidOperationException("未知稳定币符号：" + Symbol);
+    }
 
     /// <summary>ERC20 合约地址（白名单；非白名单合约不建进款单）。</summary>
     public string ContractAddress { get; set; } = default!;

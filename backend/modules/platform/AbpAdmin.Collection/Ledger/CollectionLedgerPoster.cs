@@ -40,7 +40,13 @@ public class CollectionLedgerPoster : DomainService
     /// </summary>
     public static string CurrencyCode(Contracts.CollectionCurrency currency)
     {
-        return currency == Contracts.CollectionCurrency.Usdc ? "USDC" : "USDT";
+        return currency switch
+        {
+            Contracts.CollectionCurrency.Usdt => "USDT",
+            Contracts.CollectionCurrency.Usdc => "USDC",
+            _ => throw new Volo.Abp.BusinessException(Contracts.CollectionErrorCodes.InvalidAmount)
+                .WithData("Currency", currency),
+        };
     }
 
     /// <summary>

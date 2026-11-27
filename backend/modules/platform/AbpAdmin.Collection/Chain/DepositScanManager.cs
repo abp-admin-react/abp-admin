@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
@@ -80,6 +82,11 @@ public class DepositScanManager : DomainService
         // 在当前工作单元重读网络和代币，确保游标和心跳可以保存。
         network = await dbContext.Networks.SingleAsync(n => n.Id == network.Id, ct);
         token = await dbContext.Tokens.SingleAsync(t => t.Id == token.Id, ct);
+        await using var changes = new ChainRecordChanges(dbContext, token.Symbol, _pushNotifier, Logger);
+        if (token.Decimals is < 0 or > byte.MaxValue)
+        {
+            throw new InvalidOperationException($"代币 {token.Symbol} 的小数位无效：{token.Decimals}");
+        }
 
         if (network.LegacyAddressIndexHighWaterMark.HasValue && !token.LastScannedBlock.HasValue)
         {
@@ -104,7 +111,7 @@ public class DepositScanManager : DomainService
             var target = Math.Min(head - confirmations, cursor + blockRange);
             if (target > cursor)
             {
-                await ScanRangeAsync(network, token, legacyGateway, dbContext, byAddress, cursor + 1, target, ct);
+                await ScanRangeAsync(network, token, legacyGateway, dbContext, byAddress, cursor + 1, target, changes, ct);
             }
             else if (token.LastScannedBlock == null)
             {
@@ -115,7 +122,7 @@ public class DepositScanManager : DomainService
         else
         {
             var result = await ScanWithProvidersAsync(network, token, providers!, dbContext, byAddress, confirmations,
-                blockRange, ct);
+                blockRange, changes, ct);
             if (!result.HasValue)
             {
                 await dbContext.SaveChangesAsync(ct);
@@ -127,7 +134,7 @@ public class DepositScanManager : DomainService
         network.LatestChainHead = head;
 
         // 确认推进：块龄够的 PendingConfirm → Confirmed → 并入（或新建）Queued 归集任务
-        await ConfirmPendingAsync(network, token, dbContext, head, confirmations, ct);
+        await ConfirmPendingAsync(network, token, dbContext, head, confirmations, changes, ct);
 
         // 游标前进判据在 ScanRangeAsync 内已把完整读到的末端写回 token.LastScannedBlock；
         // 这里只做心跳、落后告警与跳过比例
@@ -152,7 +159,7 @@ public class DepositScanManager : DomainService
     private async Task<long?> ScanWithProvidersAsync(ColNetwork network, ColToken token,
         IReadOnlyList<DepositScanProvider> providers, CollectionDbContext dbContext,
         Dictionary<string, (Guid Id, Guid UserId, int AddressIndex)> byAddress, int confirmations, int blockRange,
-        CancellationToken ct)
+        ChainRecordChanges changes, CancellationToken ct)
     {
         var watched = byAddress.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         string? failure = null;
@@ -218,7 +225,7 @@ public class DepositScanManager : DomainService
                 continue;
             }
 
-            await RecordProviderDepositsAsync(network, token, dbContext, byAddress, logs, ct);
+            await RecordProviderDepositsAsync(network, token, dbContext, byAddress, logs, changes, ct);
 
             // Keep the legacy RPC available across failed saves, probes and scans until a managed log read succeeds.
             if (replacingLegacy && readLogs)
@@ -251,7 +258,7 @@ public class DepositScanManager : DomainService
                 if (replaySource != null)
                 {
                     await ReplayProviderWindowAsync(replaySource, network, token, dbContext, byAddress, watched, replayFrom,
-                        replayTo, blockRange, source.RequiresReconciliation ? confirmations : null, ct);
+                        replayTo, blockRange, source.RequiresReconciliation ? confirmations : null, changes, ct);
                 }
             }
             return head;
@@ -275,7 +282,7 @@ public class DepositScanManager : DomainService
     /// <summary>Commits replay progress only after a trusted RPC returns a complete confirmed block range.</summary>
     private async Task ReplayProviderWindowAsync(IBscDepositScanSource source, ColNetwork network, ColToken token,
         CollectionDbContext dbContext, Dictionary<string, (Guid Id, Guid UserId, int AddressIndex)> byAddress,
-        IReadOnlySet<string> watched, long from, long to, int blockRange, int? verifyConfirmations, CancellationToken ct)
+        IReadOnlySet<string> watched, long from, long to, int blockRange, int? verifyConfirmations, ChainRecordChanges changes, CancellationToken ct)
     {
         using var replayBudget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         replayBudget.CancelAfter(TimeSpan.FromSeconds(8));
@@ -306,20 +313,20 @@ public class DepositScanManager : DomainService
             return;
         }
 
-        await RecordProviderDepositsAsync(network, token, dbContext, byAddress, logs, ct);
+        await RecordProviderDepositsAsync(network, token, dbContext, byAddress, logs, changes, ct);
         token.ScanReplayFromBlock = end < to ? end + 1 : null;
         if (token.ScanReplayFromBlock == null) token.ScanReplayToBlock = null;
     }
 
     private async Task RecordProviderDepositsAsync(ColNetwork network, ColToken token, CollectionDbContext dbContext,
         Dictionary<string, (Guid Id, Guid UserId, int AddressIndex)> byAddress, IReadOnlyList<TokenTransferLog> logs,
-        CancellationToken ct)
+        ChainRecordChanges changes, CancellationToken ct)
     {
         foreach (var log in logs)
         {
             if (byAddress.TryGetValue(log.To, out var address))
             {
-                await UpsertDepositOrderAsync(dbContext, network, token, address.Id, address.UserId, log, ct);
+                await UpsertDepositOrderAsync(dbContext, network, token, address.Id, address.UserId, log, changes, ct);
             }
         }
     }
@@ -333,7 +340,7 @@ public class DepositScanManager : DomainService
             try
             {
                 var logs = await source.ReadLogsAsync(contract, from, end, watched, ct);
-                if (logs.Any(log => !IsInRange(log, from, end)))
+                if (logs.Any(log => !IsValidTransfer(log, from, end)))
                 {
                     throw new DepositScanReadException(DepositScanFailure.EvidenceInvalid);
                 }
@@ -352,7 +359,7 @@ public class DepositScanManager : DomainService
     private async Task ScanRangeAsync(
         ColNetwork network, ColToken token, IBscChainGateway gateway, CollectionDbContext dbContext,
         Dictionary<string, (Guid Id, Guid UserId, int AddressIndex)> byAddress,
-        long from, long to, CancellationToken ct)
+        long from, long to, ChainRecordChanges changes, CancellationToken ct)
     {
         var range = to - from + 1;
         IReadOnlyList<TokenTransferLog> logs;
@@ -363,7 +370,7 @@ public class DepositScanManager : DomainService
         {
             end = from + range - 1;
             (logs, complete) = await gateway.GetTransferLogsAsync(token.ContractAddress, from, end, ct);
-            if (complete && logs.All(log => IsInRange(log, from, end)))
+            if (complete && logs.All(log => IsValidTransfer(log, from, end)))
             {
                 break;
             }
@@ -388,13 +395,13 @@ public class DepositScanManager : DomainService
             break;
         }
 
-        // 匹配看管中的地址并建进款单（ON CONFLICT DO NOTHING：重启不重复建单）
+        // 同一哈希和日志索引只建一单；重扫时仍须核对已有凭证和块高。
         var matched = 0;
         foreach (var log in logs)
         {
             if (byAddress.TryGetValue(log.To.ToLowerInvariant(), out var address))
             {
-                await UpsertDepositOrderAsync(dbContext, network, token, address.Id, address.UserId, log, ct);
+                await UpsertDepositOrderAsync(dbContext, network, token, address.Id, address.UserId, log, changes, ct);
                 matched++;
             }
         }
@@ -430,7 +437,7 @@ public class DepositScanManager : DomainService
                 complete &= !result.HasUnresolvedLogs;
                 foreach (var log in result.Logs)
                 {
-                    if (!IsInRange(log, from, to))
+                    if (!IsValidTransfer(log, from, to))
                     {
                         complete = false;
                         continue;
@@ -459,17 +466,17 @@ public class DepositScanManager : DomainService
         return (merged.Values.ToList(), complete);
     }
 
-    private static bool IsInRange(TokenTransferLog log, long from, long to) =>
-        log.BlockNumber >= from && log.BlockNumber <= to;
+    private static bool IsValidTransfer(TokenTransferLog log, long from, long to) =>
+        log.BlockNumber >= from && log.BlockNumber <= to && IsRawTokenAmount(log.RawAmount);
 
     private async Task UpsertDepositOrderAsync(
         CollectionDbContext dbContext, Entities.ColNetwork network, ColToken token,
-        Guid addressId, Guid userId, TokenTransferLog log, CancellationToken ct)
+        Guid addressId, Guid userId, TokenTransferLog log, ChainRecordChanges changes, CancellationToken ct)
     {
         var now = _clock.Now;
         var amount = TryScaleRaw(log.RawAmount, token.Decimals, out var overflow);
 
-        // 手续费/净额快照（对齐线上 SnapshotFee：费率取网络行、向零 8 位；费率 0 = 不收费）
+        // 建单时固定费率和净额，供归集确认时入账。
         var (feeRate, fee, actual) = Ledger.CollectionLedgerPoster.SnapshotDepositFee(network.DepositFeeRate, amount);
 
         DepositOrderStatus status;
@@ -489,7 +496,7 @@ public class DepositScanManager : DomainService
         }
         else if (actual <= 0)
         {
-            // 手续费吃光毛额：终态不归集不加余额（快照留痕，等价线上 actual<=0 拒绝）
+            // 净额为零的进款保留手续费快照并跳过归集。
             status = DepositOrderStatus.SkippedBelowMinDeposit;
             finalAmount = amount;
             finalFee = fee;
@@ -506,13 +513,38 @@ public class DepositScanManager : DomainService
         }
 
         var txHash = log.TxHash.ToLowerInvariant();
-        var inserted = await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO "ColDepositOrders" ("Id", "NetworkId", "TokenId", "UserId", "AddressId", "ToAddress", "FromAddress", "TxHash", "LogIndex", "RawAmount", "Amount", "Fee", "ActualAmount", "FeeRateSnapshot", "BlockNumber", "BlockTime", "Status", "SweepTaskId", "CreationTime")
-            VALUES ({_guidGenerator.Create()}, {network.Id}, {token.Id}, {userId}, {addressId}, {log.To}, {log.From}, {txHash}, {log.LogIndex}, {log.RawAmount}, {finalAmount}, {finalFee}, {finalActual}, {finalFeeRate}, {log.BlockNumber}, {now}, {(int)status}, NULL, {now})
-            ON CONFLICT ("TxHash", "LogIndex") DO NOTHING
-            """, ct);
+        var id = _guidGenerator.Create();
+        var write = dbContext.Database.SqlQuery<DepositWrite>($"""
+            WITH prior AS MATERIALIZED (
+                SELECT "Id", ("NetworkId" = {network.Id} AND "TokenId" = {token.Id}
+                    AND lower("FromAddress") = lower({log.From}) AND lower("ToAddress") = lower({log.To})
+                    AND ltrim("RawAmount", '0') = ltrim({log.RawAmount}, '0')) AS matches
+                FROM "ColDepositOrders" WHERE "TxHash" = {txHash} AND "LogIndex" = {log.LogIndex}
+            ), added AS (
+                INSERT INTO "ColDepositOrders" ("Id", "NetworkId", "TokenId", "UserId", "AddressId", "ToAddress", "FromAddress", "TxHash", "LogIndex", "RawAmount", "Amount", "Fee", "ActualAmount", "FeeRateSnapshot", "BlockNumber", "BlockTime", "Status", "SweepTaskId", "CreationTime")
+                SELECT {id}, {network.Id}, {token.Id}, {userId}, {addressId}, {log.To}, {log.From}, {txHash}, {log.LogIndex}, {log.RawAmount}, {finalAmount}, {finalFee}, {finalActual}, {finalFeeRate}, {log.BlockNumber}, {now}, {(int)status}, NULL, {now}
+                WHERE NOT EXISTS (SELECT FROM prior)
+                ON CONFLICT ("TxHash", "LogIndex") DO NOTHING RETURNING "Id"
+            ), moved AS (
+                UPDATE "ColDepositOrders" AS orders SET "BlockNumber" = {log.BlockNumber}
+                FROM prior WHERE orders."Id" = prior."Id" AND prior.matches
+                    AND orders."BlockNumber" < {log.BlockNumber} AND orders."Status" <> {(int)DepositOrderStatus.Swept}
+                RETURNING orders."Id"
+            )
+            SELECT "Id", TRUE AS "Matches", TRUE AS "Changed" FROM added
+            UNION ALL SELECT "Id", TRUE, TRUE FROM moved
+            UNION ALL SELECT "Id", matches, FALSE FROM prior WHERE NOT EXISTS (SELECT FROM moved)
+            """);
+        var result = (await write.ToListAsync(ct)).SingleOrDefault();
+        // A concurrent insert can win ON CONFLICT after the statement snapshot. Re-read its committed evidence.
+        result ??= (await write.ToListAsync(ct)).Single();
+        if (!result.Matches)
+        {
+            throw new InvalidOperationException($"充值日志 {txHash}#{log.LogIndex} 与已记录的链上凭证不一致，停止本轮确认，请人工核对。");
+        }
 
-        if (inserted > 0 && status == DepositOrderStatus.PrecisionOverflow)
+        if (result.Changed) changes.DepositChanged(result.Id);
+        if (result.Id == id && status == DepositOrderStatus.PrecisionOverflow)
         {
             // 超精度进款要告警（告警清单；冷却靠「同哈希只建一次单」天然节流）
             await _alerts.RaiseAsync(null, "精度放不下的转入",
@@ -520,10 +552,17 @@ public class DepositScanManager : DomainService
         }
     }
 
+    private sealed class DepositWrite
+    {
+        public Guid Id { get; set; }
+        public bool Matches { get; set; }
+        public bool Changed { get; set; }
+    }
+
     /// <summary>确认成熟进款，并在地址锁内挂队。批次截尾后的人工放行单保留入队资格。</summary>
     private async Task ConfirmPendingAsync(
         ColNetwork network, ColToken token, CollectionDbContext dbContext,
-        long head, int confirmations, CancellationToken ct)
+        long head, int confirmations, ChainRecordChanges changes, CancellationToken ct)
     {
         var safeHead = head - confirmations;
         var observedMax = Math.Max(0m, network.AutoCreditMaxAmount);
@@ -546,14 +585,17 @@ public class DepositScanManager : DomainService
 
             var autoMax = Math.Max(0m, await queueDb.Networks.AsNoTracking()
                 .Where(n => n.Id == network.Id).Select(n => n.AutoCreditMaxAmount).SingleAsync(ct));
+            var newlyConfirmed = orders.Where(o => o.Status != DepositOrderStatus.Confirmed).Select(o => o.Id).ToList();
             foreach (var order in orders)
             {
                 order.Status = DepositOrderStatus.Confirmed;
             }
 
             var automatic = orders.Where(o => o.ManuallyReleased || o.Amount <= autoMax).ToList();
-            await DepositSweepQueue.EnqueueAsync(queueDb, automatic, () => _guidGenerator.Create(), _clock.Now, ct);
+            var newSweep = await DepositSweepQueue.EnqueueAsync(queueDb, automatic, () => _guidGenerator.Create(), _clock.Now, ct);
             await queueUow.CompleteAsync(ct);
+            foreach (var id in newlyConfirmed.Concat(automatic.Select(o => o.Id))) changes.DepositChanged(id);
+            if (newSweep is Guid sweepId) changes.SweepCreated(sweepId);
             if (automatic.Count > 0)
             {
                 Logger.LogInformation("代币 {Symbol} 确认进款 {Count} 笔（待归集）", token.Symbol, automatic.Count);
@@ -597,37 +639,40 @@ public class DepositScanManager : DomainService
                 SkipRatioAlertedAt.TryGetValue(token.Id, out var last) ? last : null,
                 TimeSpan.FromMinutes(30), now))
         {
-            await _alerts.RaiseAsync(null, "低于最低额跳过比例异常",
-                $"代币 {token.Symbol} 最近 {window.TotalMinutes:0} 分钟进款 {total} 笔中跳过 {skipped} 笔（{ratio:p0} > 阈值 {threshold:p0}）。");
-            // 进程内冷却（多实例各有一份，重复告警有限）：窗口 24h，条件常真时每 30 分钟提醒一次
+            await _alerts.RaiseAsync(null, "充值跳过比例超过阈值",
+                $"代币 {token.Symbol} 最近 {window.TotalMinutes:0} 分钟共 {total} 笔进款，其中 {skipped} 笔因低于最低额、净额为零或超出精度被跳过（{ratio:p0} > {threshold:p0}）。");
             SkipRatioAlertedAt[token.Id] = now;
         }
     }
 
-    /// <summary>原始整数（token 单位）→ decimal；超出 numeric(28,18)（整数部分 > 10 位）判溢出。</summary>
-    internal static decimal? TryScaleRaw(string raw, int decimals, out bool overflow)
+    // ERC-20 transfer values are unsigned 256-bit integers. The original text is retained in varchar(96).
+    private static bool IsRawTokenAmount(string? raw) =>
+        !string.IsNullOrEmpty(raw) && raw.Length <= 96 && !raw.AsSpan().ContainsAnyExceptInRange('0', '9')
+        && (raw.Length < 78 || BigInteger.Parse(raw, NumberStyles.None, CultureInfo.InvariantCulture).GetBitLength() <= 256);
+
+    /// <summary>换算为可在 numeric(28,18) 原样存储的金额；非法输入或需要舍入时返回 null。</summary>
+    internal static decimal? TryScaleRaw(string? raw, int decimals, out bool overflow)
     {
-        overflow = false;
-        var digits = raw.TrimStart('0');
+        overflow = true;
+        if (!IsRawTokenAmount(raw) || decimals is < 0 or > byte.MaxValue) return null;
+        var digits = raw.AsSpan().TrimStart('0');
         if (digits.Length == 0)
         {
+            overflow = false;
             return 0m;
         }
 
-        // numeric(28,18)：小数 18 位 + 整数至多 10 位 → 原始整数至多 28 位
-        if (raw.TrimStart('0').Length > 28)
+        // A token may have more than 18 decimal places if the excess raw digits are all zero.
+        while (decimals > CollectionAmounts.Scale && digits[^1] == '0')
         {
-            overflow = true;
-            return null;
+            digits = digits[..^1];
+            decimals--;
         }
+        if (decimals > CollectionAmounts.Scale || digits.Length > 10 + decimals) return null;
 
-        if (decimals == 0)
-        {
-            return decimal.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
-        }
-
-        var padded = digits.PadLeft(decimals + 1, '0');
-        var text = padded[..^decimals] + "." + padded[^decimals..];
-        return decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+        overflow = false;
+        var units = decimal.Parse(digits, NumberStyles.None, CultureInfo.InvariantCulture);
+        for (var i = 0; i < decimals; i++) units /= 10m;
+        return units;
     }
 }

@@ -46,6 +46,12 @@ public class ChainSweepChangedEto
 [Serializable]
 public class ChainVaultCheckEto
 {
+    public string ReconciliationStatus { get; set; } = "Legacy";
+    public long? ReferenceBlock { get; set; }
+    public string? ReferenceVaultAddress { get; set; }
+    public string? PendingCredit { get; set; }
+    public string? PostedAfterBlock { get; set; }
+    public string? ReconciledDifference { get; set; }
     public Guid CheckId { get; set; }
     public string Symbol { get; set; } = default!;
     public string VaultBalance { get; set; } = default!;

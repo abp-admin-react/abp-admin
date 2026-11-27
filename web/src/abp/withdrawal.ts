@@ -157,18 +157,18 @@ export async function getWithdrawals(params: {
 }
 
 /** 提现配置快照 */
-export async function getWithdrawStatus(): Promise<WithdrawStatusDto> {
-  return request(`${BASE}/status`);
+export async function getWithdrawStatus(signal?: AbortSignal): Promise<WithdrawStatusDto> {
+  return request(`${BASE}/status`, { signal });
 }
 
 /** 热钱包状态卡 */
-export async function getHotWallet(): Promise<WithdrawHotWalletStatusDto> {
-  return request(`${BASE}/hot-wallet`);
+export async function getHotWallet(signal?: AbortSignal): Promise<WithdrawHotWalletStatusDto> {
+  return request(`${BASE}/hot-wallet`, { signal });
 }
 
 /** 热钱包监控状态卡（各币游标/最近扫描/未处置异常计数） */
-export async function getHotWalletWatchStatus(): Promise<HotWalletWatchStatusDto> {
-  return request(`${BASE}/hot-wallet-watch-status`);
+export async function getHotWalletWatchStatus(signal?: AbortSignal): Promise<HotWalletWatchStatusDto> {
+  return request(`${BASE}/hot-wallet-watch-status`, { signal });
 }
 
 /** 热钱包监控流水分页（可按状态/方向筛选，最新在前） */

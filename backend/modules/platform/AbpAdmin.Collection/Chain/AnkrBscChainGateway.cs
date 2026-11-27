@@ -341,12 +341,21 @@ public class AnkrBscChainGateway : IBscChainGateway
             : int.TryParse(text, System.Globalization.NumberStyles.None, null, out index);
     }
 
-    public async Task<string> GetTokenBalanceRawAsync(string contractAddress, string address, CancellationToken ct = default)
+    public Task<string> GetTokenBalanceRawAsync(string contractAddress, string address, CancellationToken ct = default)
+        => ReadTokenBalanceAsync(contractAddress, address, "latest", ct);
+
+    public Task<string> GetTokenBalanceRawAtBlockAsync(string contractAddress, string address, long block, CancellationToken ct = default)
+        => ReadTokenBalanceAsync(contractAddress, address, $"0x{block:x}", ct);
+
+    private async Task<string> ReadTokenBalanceAsync(string contractAddress, string address, string blockTag, CancellationToken ct)
     {
         // balanceOf(address) 选择子 0x70a08231 + pad32(address)
         var data = "0x70a08231" + address.ToLowerInvariant().TrimStart('0', 'x').PadLeft(64, '0');
-        var result = await RpcAsync("eth_call", new object[] { new Dictionary<string, string> { ["to"] = contractAddress, ["data"] = data }, "latest" }, ct);
-        return HexToDecimalString(result!.Value.GetString()!);
+        var result = await RpcAsync("eth_call", new object[] { new Dictionary<string, string> { ["to"] = contractAddress, ["data"] = data }, blockTag }, ct);
+        if (result is not { ValueKind: JsonValueKind.String } value || value.GetString() is not { Length: 66 } word
+            || !word.StartsWith("0x", StringComparison.Ordinal) || word.AsSpan(2).ContainsAnyExcept("0123456789abcdefABCDEF"))
+            throw new ChainRpcException("balanceOf 未返回完整的 uint256 ABI 字。");
+        return HexToDecimalString(word);
     }
 
     public async Task<decimal> GetBnbBalanceAsync(string address, CancellationToken ct = default)
@@ -359,6 +368,13 @@ public class AnkrBscChainGateway : IBscChainGateway
     {
         var result = await RpcAsync("eth_getTransactionCount", new object[] { address, "pending" }, ct);
         return Convert.ToInt64(result!.Value.GetString()!, 16);
+    }
+
+    public async Task<long?> GetTransactionCountAtBlockAsync(string address, long block, CancellationToken ct = default)
+    {
+        var result = await RpcAsync("eth_getTransactionCount", new object[] { address, $"0x{block:x}" }, ct);
+        var quantity = result?.GetString();
+        return string.IsNullOrWhiteSpace(quantity) ? null : Convert.ToInt64(quantity, 16);
     }
 
     public async Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default)

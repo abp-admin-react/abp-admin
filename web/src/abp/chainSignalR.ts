@@ -1,5 +1,6 @@
 import * as SignalR from '@microsoft/signalr';
-import { getAccessToken } from './oidc';
+import type { VaultCheckLatestDto } from './collectionAdmin';
+import { getAccessToken, onSessionChanged } from './oidc';
 
 /**
  * 收付款模块 SignalR 客户端（管理页面共用）。
@@ -11,8 +12,8 @@ import { getAccessToken } from './oidc';
  * - ChainVaultCheck    金库核对留痕
  * - ChainHotWalletChanged 热钱包监控流水新增/异常
  *
- * 可靠性：与 exchange 项目同款双轨重连（SignalR 自动 5s×12 + 指数退避 1s→10s 无限），
- * 连接状态暴露给页面状态条。
+ * 各页面共用当前会话的连接。首个订阅启动，最后一个退订停连并清空进度。
+ * 有订阅时，启动失败或自动重连耗尽会继续退避重试；换账号或租户后重新取令牌建连。
  */
 
 export interface ChainScanProgressPayload {
@@ -44,13 +45,8 @@ export interface ChainSweepChangedPayload {
   statusChangedAt: string;
 }
 
-export interface ChainVaultCheckPayload {
+export interface ChainVaultCheckPayload extends VaultCheckLatestDto {
   checkId: string;
-  symbol: string;
-  vaultBalance: string;
-  userTotal: string;
-  difference: string;
-  checkedAt: string;
 }
 
 export interface ChainHotWalletChangedPayload {
@@ -84,8 +80,10 @@ const connListeners = new Set<ConnListener>();
 let connState: ChainConnState = 'disconnected';
 let startRetry = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let subscriptions = 0;
+let offSession: (() => void) | undefined;
 
-/** 最近一轮进度快照（晚订阅页面回放） */
+/** 当前会话中每个代币最近一次进度，可供后打开的页面回放。 */
 const lastProgress = new Map<string, ChainScanProgressPayload>();
 
 const setConn = (s: ChainConnState) => {
@@ -97,7 +95,7 @@ const setConn = (s: ChainConnState) => {
 };
 
 const scheduleRetry = () => {
-  if (retryTimer != null) return;
+  if (retryTimer != null || !subscriptions) return;
   const delay = Math.min(1000 * 2 ** startRetry, 10_000);
   startRetry += 1;
   retryTimer = setTimeout(() => {
@@ -113,57 +111,67 @@ const getToken = async (): Promise<string> => (await getAccessToken()) ?? '';
 const ensureConn = () => {
   if (connection) return connection;
 
-  connection = new SignalR.HubConnectionBuilder()
+  const conn = new SignalR.HubConnectionBuilder()
     .configureLogging(SignalR.LogLevel.Warning)
     .withUrl('/signalr-hubs/chain-status', {
       accessTokenFactory: getToken,
     })
     .withAutomaticReconnect({
-      nextRetryDelayInMilliseconds: (ctx) => (ctx.previousRetryCount < 12 ? 5000 : null),
+      nextRetryDelayInMilliseconds: (ctx) =>
+        ctx.previousRetryCount < 12 ? 5000 : null,
     })
     .build();
 
+  connection = conn;
   connection.keepAliveIntervalInMilliseconds = 15_000;
   connection.serverTimeoutInMilliseconds = 30_000;
 
   connection.onclose(() => {
+    if (connection !== conn) return;
     setConn('disconnected');
     scheduleRetry();
   });
-  connection.onreconnecting(() => setConn('connecting'));
-  connection.onreconnected(() => setConn('connected'));
+  connection.onreconnecting(() => {
+    if (connection === conn) setConn('connecting');
+  });
+  connection.onreconnected(() => {
+    if (connection === conn) setConn('connected');
+  });
 
   connection.on('ChainScanProgress', (item: ChainScanProgressPayload) => {
-    if (!item?.symbol) return;
+    if (connection !== conn || !item?.symbol) return;
     lastProgress.set(item.symbol, item);
     progressListeners.forEach((fn) => {
       fn(item);
     });
   });
   connection.on('ChainDepositChanged', (item: ChainDepositChangedPayload) => {
-    if (!item) return;
+    if (connection !== conn || !item) return;
     depositListeners.forEach((fn) => {
       fn(item);
     });
   });
   connection.on('ChainSweepChanged', (item: ChainSweepChangedPayload) => {
-    if (!item) return;
+    if (connection !== conn || !item) return;
     sweepListeners.forEach((fn) => {
       fn(item);
     });
   });
   connection.on('ChainVaultCheck', (item: ChainVaultCheckPayload) => {
-    if (!item) return;
+    if (connection !== conn || !item) return;
     vaultListeners.forEach((fn) => {
       fn(item);
     });
   });
-  connection.on('ChainHotWalletChanged', (item: ChainHotWalletChangedPayload) => {
-    if (!item) return;
-    hotWalletListeners.forEach((fn) => {
-      fn(item);
-    });
-  });
+  connection.on(
+    'ChainHotWalletChanged',
+    (item: ChainHotWalletChangedPayload) => {
+      if (connection !== conn || !item) return;
+      hotWalletListeners.forEach((fn) => {
+        fn(item);
+      });
+    },
+  );
 
   return connection;
 };
@@ -172,51 +180,73 @@ const startConn = () => {
   const conn = ensureConn();
   if (conn.state === SignalR.HubConnectionState.Disconnected) {
     setConn('connecting');
-    conn.start().then(() => {
-      startRetry = 0;
-      setConn('connected');
-    }).catch(() => {
-      setConn('disconnected');
-      scheduleRetry();
-    });
+    conn
+      .start()
+      .then(() => {
+        if (connection !== conn) return;
+        startRetry = 0;
+        setConn('connected');
+      })
+      .catch(() => {
+        if (connection !== conn) return;
+        setConn('disconnected');
+        scheduleRetry();
+      });
   } else if (conn.state === SignalR.HubConnectionState.Connected) {
     setConn('connected');
   }
   return conn;
 };
 
-export const startChainSignalR = () => startConn();
+const resetConnection = () => {
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  retryTimer = null;
+  startRetry = 0;
+  const old = connection;
+  // 先摘掉旧连接，让异步 stop 触发的断线回调和迟到事件无法重试或覆盖新会话。
+  connection = null;
+  lastProgress.clear();
+  setConn('disconnected');
+  void old?.stop().catch(() => {});
+};
 
-export const getChainProgressReplay = (): ChainScanProgressPayload[] =>
-  [...lastProgress.values()];
+function subscribe<T>(
+  listeners: Set<(value: T) => void>,
+  fn: (value: T) => void,
+) {
+  const listener = (value: T) => fn(value);
+  listeners.add(listener);
+  if (++subscriptions === 1) {
+    offSession = onSessionChanged(() => {
+      resetConnection();
+      if (subscriptions) startConn();
+    });
+    startConn();
+  }
+  return () => {
+    if (!listeners.delete(listener) || --subscriptions > 0) return;
+    offSession?.();
+    offSession = undefined;
+    resetConnection();
+  };
+}
+
+export const getChainProgressReplay = (): ChainScanProgressPayload[] => [
+  ...lastProgress.values(),
+];
 
 export const onChainConnState = (fn: ConnListener) => {
-  connListeners.add(fn);
   fn(connState);
-  return () => connListeners.delete(fn);
+  return subscribe(connListeners, fn);
 };
 
-export const onChainScanProgress = (fn: ProgressListener) => {
-  progressListeners.add(fn);
-  return () => progressListeners.delete(fn);
-};
-
-export const onChainDepositChanged = (fn: DepositListener) => {
-  depositListeners.add(fn);
-  return () => depositListeners.delete(fn);
-};
-
-export const onChainSweepChanged = (fn: SweepListener) => {
-  sweepListeners.add(fn);
-  return () => sweepListeners.delete(fn);
-};
-
-export const onChainVaultCheck = (fn: VaultListener) => {
-  vaultListeners.add(fn);
-  return () => vaultListeners.delete(fn);
-};
-
-export const onChainHotWalletChanged = (fn: HotWalletListener) => {
-  hotWalletListeners.add(fn);
-  return () => hotWalletListeners.delete(fn);
-};
+export const onChainScanProgress = (fn: ProgressListener) =>
+  subscribe(progressListeners, fn);
+export const onChainDepositChanged = (fn: DepositListener) =>
+  subscribe(depositListeners, fn);
+export const onChainSweepChanged = (fn: SweepListener) =>
+  subscribe(sweepListeners, fn);
+export const onChainVaultCheck = (fn: VaultListener) =>
+  subscribe(vaultListeners, fn);
+export const onChainHotWalletChanged = (fn: HotWalletListener) =>
+  subscribe(hotWalletListeners, fn);

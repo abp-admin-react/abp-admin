@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Permissions;
 using AbpAdmin.Collection.Services;
+using AbpAdmin.Grids;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -65,12 +67,16 @@ public class CollectionOperationsEndpointTests
     public async Task Only_Operations_Reads_Relax_The_Network_Admin_Policy()
     {
         var app = await HostTestBed.HostTask;
-        var readActions = new[]
+        const string route = "api/app/collection-network-admin/";
+        var expectedReads = new Dictionary<string, (string Verb, string Path)>
         {
-            nameof(CollectionNetworkAdminAppService.GetDepositOrdersAsync),
-            nameof(CollectionNetworkAdminAppService.GetSweepTasksAsync),
-            nameof(CollectionNetworkAdminAppService.GetVaultChecksAsync),
-            nameof(CollectionNetworkAdminAppService.GetAnkrBalanceAsync)
+            [nameof(CollectionNetworkAdminAppService.GetDepositOrdersAsync)] = ("GET", "deposit-orders"),
+            [nameof(CollectionNetworkAdminAppService.QueryDepositOrdersAsync)] = ("POST", "deposit-orders/query"),
+            [nameof(CollectionNetworkAdminAppService.GetSweepTasksAsync)] = ("GET", "sweep-tasks"),
+            [nameof(CollectionNetworkAdminAppService.QuerySweepTasksAsync)] = ("POST", "sweep-tasks/query"),
+            [nameof(CollectionNetworkAdminAppService.GetVaultChecksAsync)] = ("GET", "vault-checks"),
+            [nameof(CollectionNetworkAdminAppService.QueryVaultChecksAsync)] = ("POST", "vault-checks/query"),
+            [nameof(CollectionNetworkAdminAppService.GetAnkrBalanceAsync)] = ("GET", "ankr-balance")
         };
         var actions = app.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
@@ -81,20 +87,39 @@ public class CollectionOperationsEndpointTests
         actions.ShouldNotBeEmpty();
         foreach (var endpoint in actions)
         {
-            var method = endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()!.MethodInfo.Name;
+            var action = endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()!;
+            var method = action.MethodInfo.Name;
             var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
             endpoint.Metadata.GetMetadata<IAllowAnonymous>().ShouldBeNull();
             policies.ShouldNotBeEmpty();
-            policies.Any(item => item.Policy == CollectionPermissions.Network.Admin)
-                .ShouldBe(!readActions.Contains(method), method);
-            if (readActions.Contains(method))
+            var requiresNetworkAdmin = policies.Any(item => item.Policy == CollectionPermissions.Network.Admin);
+            if (!expectedReads.Remove(method, out var read))
             {
-                endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.ShouldBe(new[] { "GET" });
+                requiresNetworkAdmin.ShouldBeTrue(method);
+                continue;
+            }
+
+            requiresNetworkAdmin.ShouldBeFalse(method);
+            (endpoint.RoutePattern.RawText?.TrimStart('/')).ShouldBe(route + read.Path);
+            endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.ShouldBe(new[] { read.Verb });
+            if (read.Verb == "POST")
+            {
+                var body = action.Parameters.Single(parameter => parameter.BindingInfo?.BindingSource == BindingSource.Body);
+                body.ParameterType.ShouldBe(typeof(GridQueryInput));
+                // The browser sends scope in the URL alongside the JSON grid body.
+                var scope = action.Parameters.Where(parameter => parameter.BindingInfo?.BindingSource == BindingSource.Query)
+                    .Select(parameter => parameter.Name).OrderBy(name => name).ToArray();
+                string[] expectedScope = method switch
+                {
+                    nameof(CollectionNetworkAdminAppService.QueryDepositOrdersAsync) => ["depositId", "status", "sweepTaskId", "symbol"],
+                    nameof(CollectionNetworkAdminAppService.QuerySweepTasksAsync) => ["status", "sweepTaskId"],
+                    _ => []
+                };
+                scope.ShouldBe(expectedScope, method);
             }
         }
 
-        actions.Select(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()!.MethodInfo.Name)
-            .Where(readActions.Contains).Distinct().Count().ShouldBe(readActions.Length);
+        expectedReads.Keys.ShouldBeEmpty();
     }
 
     [RequiresHostDatabaseFact]
@@ -144,20 +169,24 @@ public class CollectionOperationsEndpointTests
             new Claim(AbpClaimTypes.UserId, id.ToString()),
         }, "Testing"));
 
-        async Task ReadOperationsAsync()
-        {
-            (await service.GetDepositOrdersAsync(0, 10)).ShouldNotBeNull();
-            (await service.GetSweepTasksAsync(0, 10)).ShouldNotBeNull();
-            (await service.GetVaultChecksAsync(0, 10)).ShouldNotBeNull();
-            (await service.GetAnkrBalanceAsync()).ShouldNotBeNull();
-        }
+        var grid = new GridQueryInput { MaxResultCount = 10 };
+        Func<Task<object>>[] reads =
+        [
+            async () => await service.GetDepositOrdersAsync(0, 10),
+            async () => await service.QueryDepositOrdersAsync(grid),
+            async () => await service.GetSweepTasksAsync(0, 10),
+            async () => await service.QuerySweepTasksAsync(grid),
+            async () => await service.GetVaultChecksAsync(0, 10),
+            async () => await service.QueryVaultChecksAsync(grid),
+            async () => await service.GetAnkrBalanceAsync()
+        ];
 
         using (accessor.Change(CreatePrincipal(Guid.NewGuid())))
         {
-            await Should.ThrowAsync<AbpAuthorizationException>(() => service.GetDepositOrdersAsync(0, 10));
-            await Should.ThrowAsync<AbpAuthorizationException>(() => service.GetSweepTasksAsync(0, 10));
-            await Should.ThrowAsync<AbpAuthorizationException>(() => service.GetVaultChecksAsync(0, 10));
-            await Should.ThrowAsync<AbpAuthorizationException>(() => service.GetAnkrBalanceAsync());
+            foreach (var read in reads)
+            {
+                await Should.ThrowAsync<AbpAuthorizationException>(read);
+            }
         }
 
         var observer = Guid.NewGuid();
@@ -165,7 +194,10 @@ public class CollectionOperationsEndpointTests
             new[] { CollectionPermissions.Collections.Default });
         using (accessor.Change(CreatePrincipal(observer)))
         {
-            await ReadOperationsAsync();
+            foreach (var read in reads)
+            {
+                (await read()).ShouldNotBeNull();
+            }
             await Should.ThrowAsync<AbpAuthorizationException>(() => service.GetStatusAsync());
             await Should.ThrowAsync<AbpAuthorizationException>(() => service.GetApiKeysAsync());
             await Should.ThrowAsync<AbpAuthorizationException>(() => service.SetChainSwitchesAsync());
@@ -176,7 +208,10 @@ public class CollectionOperationsEndpointTests
             new[] { CollectionPermissions.Network.Admin });
         using (accessor.Change(CreatePrincipal(networkAdmin)))
         {
-            await ReadOperationsAsync();
+            foreach (var read in reads)
+            {
+                (await read()).ShouldNotBeNull();
+            }
             (await service.GetNetworksAsync()).ShouldNotBeNull();
             await service.SetChainSwitchesAsync(); // 不传开关值，不写设置。
         }
@@ -184,10 +219,11 @@ public class CollectionOperationsEndpointTests
         using (services.GetRequiredService<ICurrentTenant>().Change(Guid.NewGuid()))
         using (accessor.Change(CreatePrincipal(observer)))
         {
-            var denied = await Should.ThrowAsync<BusinessException>(() => service.GetDepositOrdersAsync(0, 10));
-            denied.Code.ShouldBe(CollectionErrorCodes.HostOnly);
-            var balanceDenied = await Should.ThrowAsync<BusinessException>(() => service.GetAnkrBalanceAsync());
-            balanceDenied.Code.ShouldBe(CollectionErrorCodes.HostOnly);
+            foreach (var read in reads)
+            {
+                var denied = await Should.ThrowAsync<BusinessException>(read);
+                denied.Code.ShouldBe(CollectionErrorCodes.HostOnly);
+            }
         }
     }
 }

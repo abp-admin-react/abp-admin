@@ -1,23 +1,21 @@
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Contracts;
 using AbpAdmin.Collection.Data;
 using AbpAdmin.Collection.Entities;
-using Microsoft.EntityFrameworkCore;
+using AbpAdmin.Collection.Settings;
 using Microsoft.Extensions.Logging;
 using Volo.Abp.Domain.Services;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.Settings;
 using Volo.Abp.Timing;
 using Volo.Abp.Uow;
 
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 金库核对（计划第 5.6 节）：每日按币 balanceOf(金库) vs 用户余额合计，追加 ColVaultChecks；
-/// 金库 &lt; 用户余额则告警。未入账的在途（Confirmed 未 Swept）不加入右边——归集完成前加入会误报。
-/// 正差额不告警（多出来的粉尘/礼品属金库盈余）。
+/// 按币留存金库确认块、余额快照和已核实的归集记账时差。缺口与证据不足分别告警。
 /// </summary>
 public class VaultAuditManager : DomainService
 {
@@ -27,6 +25,7 @@ public class VaultAuditManager : DomainService
     private readonly IUnitOfWorkManager _unitOfWorkManager;
     private readonly Volo.Abp.Guids.IGuidGenerator _guidGenerator;
     private readonly Contracts.IChainPushNotifier? _pushNotifier;
+    private readonly ISettingProvider _settings;
 
     public VaultAuditManager(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
@@ -34,6 +33,7 @@ public class VaultAuditManager : DomainService
         IClock clock,
         IUnitOfWorkManager unitOfWorkManager,
         Volo.Abp.Guids.IGuidGenerator guidGenerator,
+        ISettingProvider settings,
         System.IServiceProvider? serviceProvider = null)
     {
         _dbContextProvider = dbContextProvider;
@@ -41,6 +41,7 @@ public class VaultAuditManager : DomainService
         _clock = clock;
         _unitOfWorkManager = unitOfWorkManager;
         _guidGenerator = guidGenerator;
+        _settings = settings;
         _pushNotifier = serviceProvider?.GetService(typeof(Contracts.IChainPushNotifier)) as Contracts.IChainPushNotifier;
     }
 
@@ -52,50 +53,92 @@ public class VaultAuditManager : DomainService
             return;
         }
 
-        // 链上读先行（外部 I/O 不开事务）；事务只包 SUM 读 + 留痕写
-        var rawVault = await gateway.GetTokenBalanceRawAsync(token.ContractAddress, token.VaultAddress!, ct);
-
-        using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var now = _clock.Now;
+        var currency = token.GetBalanceCurrency();
+        var confirmations = await _settings.GetIntAsync(CollectionSettings.Chain.Confirmations, ChainDefaults.Confirmations);
+        long referenceBlock;
+        string rawVault;
+        try
+        {
+            var head = await gateway.GetLatestBlockNumberAsync(ct);
+            if (confirmations < 0 || head < confirmations)
+                throw new ChainRpcException("未取得达到确认深度的区块。");
+            referenceBlock = head - confirmations;
+            rawVault = await gateway.GetTokenBalanceRawAtBlockAsync(token.ContractAddress, token.VaultAddress, referenceBlock, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            Logger.LogWarning(ex, "无法取得代币 {Symbol} 的确认块金库余额", token.Symbol);
+            await _alerts.RaiseAsync(null, "金库核对未取得链上余额",
+                $"代币 {token.Symbol} 本次无法读取确认块或金库余额，最近一次核对记录仍为历史结果。");
+            throw;
+        }
 
         var vaultBalance = DepositScanManager.TryScaleRaw(rawVault, token.Decimals, out var overflow);
         if (overflow)
         {
-            // 金库余额放不进 decimal 列本身就是重大异常：告警并以原始值留痕不了账
             await _alerts.RaiseAsync(null, "金库余额超出精度",
-                $"代币 {token.Symbol} 金库 balanceOf={rawVault} 放不进 numeric(28,18)，请人工核对。");
-            await uow.CompleteAsync();
+                $"代币 {token.Symbol} 在确认块 {referenceBlock} 的金库余额原值 {rawVault} 无法精确存入 numeric(28,18)，本次未生成核对记录。");
             return;
         }
 
-        var currency = MapCurrency(token.Symbol);
-        // 用户侧口径 = 可用 + 冻结（提现 M1 两桶后，冻结中的钱仍属用户、仍在金库里）
-        var userTotal = await dbContext.Balances
-            .Where(b => b.Currency == currency)
-            .SumAsync(b => b.Balance + b.Frozen, ct);
+        VaultAuditEvidence evidence;
+        using (var snapshot = _unitOfWorkManager.Begin(new AbpUnitOfWorkOptions
+        {
+            IsTransactional = true, IsolationLevel = System.Data.IsolationLevel.RepeatableRead,
+        }, requiresNew: true))
+        {
+            evidence = await VaultAuditEvidence.ReadAsync(await _dbContextProvider.GetDbContextAsync(),
+                network, token, currency, referenceBlock, ct);
+            await snapshot.CompleteAsync(ct);
+        }
+        if (evidence.UserTotal == VaultAuditEvidence.StorageLimit)
+        {
+            await _alerts.RaiseAsync(null, "金库核对用户余额合计超出精度",
+                $"代币 {token.Symbol} 可用与冻结余额合计无法写入 numeric(28,18)，请人工核对。");
+            return;
+        }
 
-        dbContext.VaultChecks.Add(new ColVaultCheck(_guidGenerator.Create())
+        var (pending, after) = await evidence.CompareAsync(gateway, token, referenceBlock, confirmations, Logger, ct);
+        var difference = vaultBalance!.Value - evidence.UserTotal;
+        var reconciled = difference + after - pending;
+        if (reconciled is <= -VaultAuditEvidence.StorageLimit or >= VaultAuditEvidence.StorageLimit) reconciled = null;
+        var status = reconciled switch
+        {
+            null => VaultReconciliationStatus.Inconclusive,
+            < 0 => VaultReconciliationStatus.Shortfall,
+            _ when pending > 0 || after > 0 => VaultReconciliationStatus.TimingDifference,
+            > 0 => VaultReconciliationStatus.Surplus,
+            _ => VaultReconciliationStatus.Balanced,
+        };
+        var check = new ColVaultCheck(_guidGenerator.Create())
         {
             NetworkId = network.Id,
             TokenId = token.Id,
             Symbol = token.Symbol,
             RawVaultAmount = rawVault,
-            VaultBalance = vaultBalance!.Value,
-            UserTotal = userTotal,
-            Difference = vaultBalance.Value - userTotal,
-            CheckedAt = now,
-        });
-
-        if (vaultBalance < userTotal)
+            VaultBalance = vaultBalance.Value,
+            UserTotal = evidence.UserTotal,
+            Difference = difference,
+            ReferenceBlock = referenceBlock,
+            ReferenceVaultAddress = token.VaultAddress,
+            PendingCredit = pending,
+            PostedAfterBlock = after,
+            ReconciledDifference = reconciled,
+            ReconciliationStatus = status,
+            CheckedAt = _clock.Now,
+        };
+        using (var write = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
         {
-            await _alerts.RaiseAsync(null, "金库余额小于用户余额合计",
-                $"代币 {token.Symbol} 金库 {vaultBalance:0.######} < 用户余额合计 {userTotal:0.######}，缺口 {userTotal - vaultBalance:0.######}。未入账在途不计入右侧（计划口径）。");
+            (await _dbContextProvider.GetDbContextAsync()).VaultChecks.Add(check);
+            await write.CompleteAsync(ct);
         }
-
-        await dbContext.SaveChangesAsync(ct);
-        await uow.CompleteAsync();
-        Logger.LogInformation("金库核对 {Symbol}：vault={Vault} users={Users}", token.Symbol, vaultBalance, userTotal);
+        if (status == VaultReconciliationStatus.Shortfall)
+            await _alerts.RaiseAsync(null, "金库核对确认缺口",
+                $"代币 {token.Symbol} 在确认块 {referenceBlock} 核对记账时差后仍有缺口 {CollectionAmounts.Format(-reconciled!.Value)}。核对记录 {check.Id}。");
+        else if (status == VaultReconciliationStatus.Inconclusive)
+            await _alerts.RaiseAsync(null, "金库核对证据不足",
+                $"代币 {token.Symbol} 在确认块 {referenceBlock} 的原始差额为 {CollectionAmounts.Format(difference)}，归集、同地址提现或金额尚待核实，请核查记录 {check.Id}。");
+        Logger.LogInformation("金库核对 {CheckId} {Symbol}：block={Block} status={Status}", check.Id, token.Symbol, referenceBlock, status);
 
         if (_pushNotifier != null)
         {
@@ -103,24 +146,23 @@ public class VaultAuditManager : DomainService
             {
                 await _pushNotifier.PushVaultCheckAsync(new Contracts.ChainVaultCheckEto
                 {
-                    CheckId = Guid.NewGuid(), Symbol = token.Symbol,
-                    VaultBalance = Contracts.CollectionAmounts.Format(vaultBalance.Value),
-                    UserTotal = Contracts.CollectionAmounts.Format(userTotal),
-                    Difference = Contracts.CollectionAmounts.Format(vaultBalance.Value - userTotal),
-                    CheckedAt = now,
+                    CheckId = check.Id, Symbol = check.Symbol,
+                    VaultBalance = CollectionAmounts.Format(check.VaultBalance),
+                    UserTotal = CollectionAmounts.Format(check.UserTotal),
+                    Difference = CollectionAmounts.Format(check.Difference),
+                    ReconciliationStatus = status.ToString(),
+                    ReferenceBlock = referenceBlock,
+                    ReferenceVaultAddress = check.ReferenceVaultAddress,
+                    PendingCredit = CollectionAmounts.FormatNullable(pending),
+                    PostedAfterBlock = CollectionAmounts.FormatNullable(after),
+                    ReconciledDifference = CollectionAmounts.FormatNullable(reconciled),
+                    CheckedAt = check.CheckedAt,
                 });
             }
-            catch
+            catch (Exception exception)
             {
-                // 推送失败不影响核对
+                Logger.LogWarning(exception, "金库核对 {CheckId} 已保存，实时通知发送失败", check.Id);
             }
         }
-    }
-
-    private static CollectionCurrency MapCurrency(string symbol)
-    {
-        return symbol.Equals("USDC", StringComparison.OrdinalIgnoreCase)
-            ? CollectionCurrency.Usdc
-            : CollectionCurrency.Usdt;
     }
 }

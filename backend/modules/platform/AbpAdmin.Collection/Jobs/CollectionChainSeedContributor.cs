@@ -17,10 +17,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Jobs;
 
 /// <summary>
-/// 链网种子（计划第 5.6 节表清单）：BSC 网络行 + USDT/USDC 代币行（合约为主网公认地址，
-/// MinDeposit 按运行说明上调，先给保守值）+ 金库核对作业（Host 专用、默认停用，同两模块种子纪律）。
-/// 密文（RPC/助记词）不进种子——由运维经管理接口写入。NodeLogResultCap 留空 = 扫链不可开（无缺省）。
-/// 另含开关的一次性部署引导（Collection:Bootstrap:* → 设置库；见 SeedBootstrapSwitchesAsync）。
+/// 初始化宿主的 BSC 网络、USDT/USDC 和默认停用的金库核对作业。按部署配置补齐尚未保存的全局开关。
 /// </summary>
 public class CollectionChainSeedContributor : IDataSeedContributor, ITransientDependency
 {
@@ -109,7 +106,7 @@ public class CollectionChainSeedContributor : IDataSeedContributor, ITransientDe
                 ScheduledJobConsts.VaultAuditJobType,
                 jobType: ScheduledJobConsts.VaultAuditJobType,
                 cronExpression: "0 40 4 * * ?",
-                description: "金库核对：按币 balanceOf(金库) vs 用户余额合计，追加 ColVaultChecks，负差额告警（每日）",
+                description: "金库核对：按币对齐确认块余额和归集净额，记录记账时差，对剩余缺口或证据不足告警（每日）",
                 isEnabled: false));
         }
     }

@@ -17,6 +17,7 @@ public class FakeChainPushNotifier : IChainPushNotifier
     public List<ChainScanProgressEto> ScanProgress { get; } = new();
 
     public List<ChainDepositChangedEto> Deposits { get; } = new();
+    public bool RejectDepositPush { get; set; }
 
     public List<ChainSweepChangedEto> Sweeps { get; } = new();
 
@@ -30,6 +31,7 @@ public class FakeChainPushNotifier : IChainPushNotifier
     {
         ScanProgress.Clear();
         Deposits.Clear();
+        RejectDepositPush = false;
         Sweeps.Clear();
         VaultChecks.Clear();
         HotWallet.Clear();
@@ -44,6 +46,7 @@ public class FakeChainPushNotifier : IChainPushNotifier
     public Task PushDepositChangedAsync(ChainDepositChangedEto deposit)
     {
         Deposits.Add(deposit);
+        if (RejectDepositPush) throw new System.InvalidOperationException("Simulated disconnected notifier");
         return Task.CompletedTask;
     }
 

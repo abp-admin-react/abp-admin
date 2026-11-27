@@ -31,7 +31,6 @@ import {
   type ChainConnState,
   onChainConnState,
   onChainSweepChanged,
-  startChainSignalR,
 } from '@/abp/chainSignalR';
 import {
   toGridColumns,
@@ -59,7 +58,7 @@ export default function SweepsPage({
 } = {}) {
   const { message } = App.useApp();
   const access = useAccess();
-  const refreshGrid = useGridRef<() => void>(undefined);
+  const refreshGrid = useGridRef<(preserveRows?: boolean) => void>(undefined);
   const [data, setData] = useState<SweepTaskListDto[]>([]);
   const focusId = sweepTaskId ?? depositId;
   const invalidId = !!focusId && !isValidRecordId(focusId);
@@ -76,7 +75,7 @@ export default function SweepsPage({
 
   const reload = useCallback(
     async (background = false) => {
-      refreshGrid.current?.();
+      refreshGrid.current?.(background);
       if (invalidId || !focusId) return;
       const request = ++latestRequest.current;
       if (!background) {
@@ -127,17 +126,8 @@ export default function SweepsPage({
   useEffect(() => {
     if (focusId) void reload();
   }, [focusId, reload]);
-  useChainRecordRefresh(reload);
-
-  useEffect(() => {
-    const offConn = onChainConnState(setConnState);
-    const offSweep = onChainSweepChanged(() => void reload(true));
-    startChainSignalR();
-    return () => {
-      offConn();
-      offSweep();
-    };
-  }, [reload]);
+  useChainRecordRefresh(reload, onChainSweepChanged);
+  useEffect(() => onChainConnState(setConnState), []);
 
   const doRetry = async (row: SweepTaskListDto) => {
     setRetryingId(row.id);
@@ -152,10 +142,6 @@ export default function SweepsPage({
     }
   };
 
-  const fmtTime = (v: string) => {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
-  };
   const connView =
     connState === 'connected'
       ? { color: 'success' as const, text: '实时推送：已连接' }
@@ -236,8 +222,7 @@ export default function SweepsPage({
     {
       title: '状态变更',
       dataIndex: 'statusChangedAt',
-      width: 150,
-      render: (v: string) => fmtTime(v),
+      width: 180,
     },
     ...(access.canAdminNetwork || access.canViewDepositRecords
       ? [
@@ -277,12 +262,12 @@ export default function SweepsPage({
     status: focusId ? undefined : statusFilter,
   });
   const recordColumns = toGridColumns<SweepTaskListDto>(columns, {
+    utcDateFields: ['statusChangedAt'],
     kinds: {
       amount: 'decimal',
       addressIndex: 'number',
       nonceUsed: 'number',
       retryable: 'boolean',
-      statusChangedAt: 'date',
     },
   });
   const sweepsGrid = useSearchableRemoteGrid<SweepTaskListDto>({
@@ -300,25 +285,28 @@ export default function SweepsPage({
     keywordFields: ['address', 'symbol', 'txHash'],
   });
   const visibleGrid = focusId ? focusedGrid : sweepsGrid;
-  refreshGrid.current = sweepsGrid.refresh;
+  refreshGrid.current = (background) => background ? sweepsGrid.refreshCachedRows() : sweepsGrid.refresh();
   const content = (
     <Card
       title="归集任务"
       extra={
         <Space>
           <Tag color={connView.color}>{connView.text}</Tag>
-          <Select
-            placeholder="状态"
-            allowClear
-            style={{ width: 120 }}
-            value={statusFilter}
-            onChange={(v) => {
-              setStatusFilter(v);
-            }}
-            options={Object.entries(SWEEP_STATUS_LABELS).map(
-              ([value, cfg]) => ({ value, label: cfg.text }),
-            )}
-          />
+          {!focusId && (
+            <Select
+              aria-label="归集任务状态"
+              placeholder="状态"
+              allowClear
+              style={{ width: 120 }}
+              value={statusFilter}
+              onChange={(v) => {
+                setStatusFilter(v);
+              }}
+              options={Object.entries(SWEEP_STATUS_LABELS).map(
+                ([value, cfg]) => ({ value, label: cfg.text }),
+              )}
+            />
+          )}
         </Space>
       }
     >

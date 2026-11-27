@@ -55,18 +55,16 @@ public class DepositScanWorker : CollectionChainWorkerBase
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var db = await dbContext.GetDbContextAsync();
-        var network = await db.Networks.FirstOrDefaultAsync(n => n.Name == CollectionConsts.BscNetworkName
-            && n.ChainId == CollectionConsts.BscMainnetChainId, ct);
+        var network = await db.FindBscMainnetAsync(ct);
         if (network == null) return;
 
         var providers = await factory.CreateAsync(db, network, ct);
 
-        var tokens = await db.Tokens
-            .Where(t => t.NetworkId == network.Id)
-            .ToListAsync(ct); // 含禁用的（进度推送需要全量）
+        var enabledTokens = await db.Tokens
+            .Where(t => t.NetworkId == network.Id && t.IsEnabled)
+            .ToListAsync(ct);
         await uow.CompleteAsync();
 
-        var enabledTokens = tokens.Where(t => t.IsEnabled).ToList();
         var confirmations = await settings.GetIntAsync(
             CollectionSettings.Chain.Confirmations, ChainDefaults.Confirmations);
         var blockRange = await settings.GetIntAsync(
@@ -95,23 +93,27 @@ public class DepositScanWorker : CollectionChainWorkerBase
             }
         }
 
-        // 推送轮初的游标快照，包含禁用代币。轮内更新在各代币的独立工作单元中提交。
+        // 从数据库一次读取全部代币的已提交进度，包含禁用代币和本轮失败的代币。
         if (pusher != null)
         {
             try
             {
-                var head = network.LatestChainHead ?? 0;
-                foreach (var t in tokens)
-                {
-                    await pusher.PushScanProgressAsync(new Contracts.ChainScanProgressEto
+                using var read = uowManager.Begin(requiresNew: true, isTransactional: false);
+                var committed = await dbContext.GetDbContextAsync();
+                var progress = await (from token in committed.Tokens
+                    join chain in committed.Networks on token.NetworkId equals chain.Id
+                    where chain.Id == network.Id
+                    select new Contracts.ChainScanProgressEto
                     {
-                        Symbol = t.Symbol,
-                        LastScannedBlock = t.LastScannedBlock,
-                        LatestChainHead = network.LatestChainHead,
-                        BlocksBehind = t.LastScannedBlock.HasValue && head > 0 ? head - t.LastScannedBlock.Value : null,
-                        LastScanAt = t.LastScanAt,
-                        IsEnabled = t.IsEnabled,
-                    });
+                        Symbol = token.Symbol, LastScannedBlock = token.LastScannedBlock,
+                        LatestChainHead = chain.LatestChainHead,
+                        BlocksBehind = chain.LatestChainHead > 0 ? chain.LatestChainHead - token.LastScannedBlock : null,
+                        LastScanAt = token.LastScanAt, IsEnabled = token.IsEnabled
+                    }).ToListAsync(ct);
+                await read.CompleteAsync(ct);
+                foreach (var item in progress)
+                {
+                    await pusher.PushScanProgressAsync(item);
                 }
             }
             catch (Exception ex)
@@ -123,7 +125,7 @@ public class DepositScanWorker : CollectionChainWorkerBase
 }
 
 /// <summary>
-/// 按代币执行归集轮次，并在轮末推送活跃任务快照。每轮读取当前归集设置。
+/// 按代币执行归集轮次。归集管理器按已提交的变化通知运营端。
 /// </summary>
 public class SweepWorker : CollectionChainWorkerBase
 {
@@ -156,13 +158,12 @@ public class SweepWorker : CollectionChainWorkerBase
         var dbContext = scopedServices.GetRequiredService<IDbContextProvider<CollectionDbContext>>();
         var factory = scopedServices.GetRequiredService<ChainGatewayFactory>();
         var sweepManager = scopedServices.GetRequiredService<SweepManager>().WithMasterKey(await factory.GetMasterKeyAsync());
-        var pusher = scopedServices.GetService<Contracts.IChainPushNotifier>();
         var uowManager = scopedServices.GetRequiredService<Volo.Abp.Uow.IUnitOfWorkManager>();
         var settings = scopedServices.GetRequiredService<ISettingProvider>();
 
         using var uow = uowManager.Begin(requiresNew: true, isTransactional: false);
         var db = await dbContext.GetDbContextAsync();
-        var network = await db.Networks.OrderBy(n => n.CreationTime).ThenBy(n => n.Id).FirstOrDefaultAsync(ct);
+        var network = await db.FindBscMainnetAsync(ct);
         if (network == null) return;
 
         var tokens = await db.Tokens
@@ -209,38 +210,5 @@ public class SweepWorker : CollectionChainWorkerBase
             }
         }
 
-        // 轮末推 SignalR 任务状态（活跃任务的最新快照）
-        if (pusher != null)
-        {
-            try
-            {
-                using var pushUow = uowManager.Begin(requiresNew: true, isTransactional: false);
-                var pushDb = await dbContext.GetDbContextAsync();
-                var symbols = await pushDb.Tokens.ToDictionaryAsync(t => t.Id, t => t.Symbol, ct);
-                var activeTasks = await pushDb.SweepTasks.AsNoTracking()
-                    .Where(t => t.Status != Entities.SweepTaskStatus.Swept)
-                    .OrderByDescending(t => t.StatusChangedAt)
-                    .Take(20)
-                    .ToListAsync(ct);
-                await pushUow.CompleteAsync();
-
-                foreach (var task in activeTasks)
-                {
-                    await pusher.PushSweepChangedAsync(new Contracts.ChainSweepChangedEto
-                    {
-                        SweepTaskId = task.Id,
-                        Symbol = symbols.TryGetValue(task.TokenId, out var s) ? s : "?",
-                        UserId = task.UserId,
-                        Status = task.Status.ToString(),
-                        Amount = Contracts.CollectionAmounts.Format(task.Amount),
-                        StatusChangedAt = task.StatusChangedAt,
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "SignalR 任务推送失败（不影响归集）");
-            }
-        }
     }
 }

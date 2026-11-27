@@ -149,6 +149,59 @@
       }
     }
   },
+  "AbpAdmin.Collection.Contracts.ChainVaultCheckEto": {
+    "kind": "dto",
+    "properties": {
+      "CheckedAt": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "CheckId": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "Difference": {
+        "type": "string",
+        "nullable": false
+      },
+      "PendingCredit": {
+        "type": "string",
+        "nullable": true
+      },
+      "PostedAfterBlock": {
+        "type": "string",
+        "nullable": true
+      },
+      "ReconciledDifference": {
+        "type": "string",
+        "nullable": true
+      },
+      "ReconciliationStatus": {
+        "type": "string",
+        "nullable": false
+      },
+      "ReferenceBlock": {
+        "type": "long?",
+        "nullable": true
+      },
+      "ReferenceVaultAddress": {
+        "type": "string",
+        "nullable": true
+      },
+      "Symbol": {
+        "type": "string",
+        "nullable": false
+      },
+      "UserTotal": {
+        "type": "string",
+        "nullable": false
+      },
+      "VaultBalance": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
   "AbpAdmin.Collection.Contracts.CollectionBalanceAdjustmentDto": {
     "kind": "dto",
     "properties": {
@@ -1387,6 +1440,108 @@
       "RpcUrlMasked": {
         "type": "string",
         "nullable": true
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.VaultCheckLatestDto": {
+    "kind": "dto",
+    "properties": {
+      "CheckedAt": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Difference": {
+        "type": "string",
+        "nullable": false
+      },
+      "PendingCredit": {
+        "type": "string",
+        "nullable": true
+      },
+      "PostedAfterBlock": {
+        "type": "string",
+        "nullable": true
+      },
+      "ReconciledDifference": {
+        "type": "string",
+        "nullable": true
+      },
+      "ReconciliationStatus": {
+        "type": "string",
+        "nullable": false
+      },
+      "ReferenceBlock": {
+        "type": "long?",
+        "nullable": true
+      },
+      "ReferenceVaultAddress": {
+        "type": "string",
+        "nullable": true
+      },
+      "Symbol": {
+        "type": "string",
+        "nullable": false
+      },
+      "UserTotal": {
+        "type": "string",
+        "nullable": false
+      },
+      "VaultBalance": {
+        "type": "string",
+        "nullable": false
+      }
+    }
+  },
+  "AbpAdmin.Collection.Services.VaultCheckListDto": {
+    "kind": "dto",
+    "properties": {
+      "CheckedAt": {
+        "type": "DateTime",
+        "nullable": false
+      },
+      "Difference": {
+        "type": "string",
+        "nullable": false
+      },
+      "Id": {
+        "type": "Guid",
+        "nullable": false
+      },
+      "PendingCredit": {
+        "type": "string",
+        "nullable": true
+      },
+      "PostedAfterBlock": {
+        "type": "string",
+        "nullable": true
+      },
+      "ReconciledDifference": {
+        "type": "string",
+        "nullable": true
+      },
+      "ReconciliationStatus": {
+        "type": "string",
+        "nullable": false
+      },
+      "ReferenceBlock": {
+        "type": "long?",
+        "nullable": true
+      },
+      "ReferenceVaultAddress": {
+        "type": "string",
+        "nullable": true
+      },
+      "Symbol": {
+        "type": "string",
+        "nullable": false
+      },
+      "UserTotal": {
+        "type": "string",
+        "nullable": false
+      },
+      "VaultBalance": {
+        "type": "string",
+        "nullable": false
       }
     }
   },

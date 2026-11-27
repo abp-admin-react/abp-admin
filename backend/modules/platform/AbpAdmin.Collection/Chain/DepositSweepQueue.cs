@@ -24,13 +24,13 @@ internal static class DepositSweepQueue
     }
 
     /// <summary>调用者持有该地址锁，将新任务和同地址同币种的进款关联一起提交。</summary>
-    internal static async Task EnqueueAsync(
+    internal static async Task<Guid?> EnqueueAsync(
         CollectionDbContext db, IReadOnlyList<ColDepositOrder> orders, Func<Guid> newId,
         DateTime now, CancellationToken ct = default)
     {
         if (orders.Count == 0)
         {
-            return;
+            return null;
         }
 
         var first = orders[0];
@@ -42,6 +42,7 @@ internal static class DepositSweepQueue
             .OrderBy(t => t.CreationTime).ThenBy(t => t.Id)
             .FirstOrDefaultAsync(ct);
 
+        Guid? createdId = null;
         if (task == null)
         {
             var address = await db.DepositAddresses.AsNoTracking().SingleAsync(a => a.Id == first.AddressId, ct);
@@ -58,11 +59,13 @@ internal static class DepositSweepQueue
                 CreationTime = now,
             };
             db.SweepTasks.Add(task);
+            createdId = task.Id;
         }
 
         foreach (var order in orders)
         {
             order.SweepTaskId = task.Id;
         }
+        return createdId;
     }
 }

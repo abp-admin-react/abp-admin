@@ -15,8 +15,7 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Jobs;
 
 /// <summary>
-/// 金库核对定时作业（计划第 57、291 节）：每日按币 balanceOf(金库) vs 用户余额合计，
-/// 追加 ColVaultChecks；负差额告警（固定前缀之外的普通告警）。Host 专用、种子默认停用。
+/// 核对 BSC 主网启用代币的金库余额。单个代币读取失败时继续处理其他代币。
 /// </summary>
 [ExposeServices(typeof(IScheduledJobHandler))]
 public class VaultAuditJobHandler : IScheduledJobHandler, ITransientDependency
@@ -50,7 +49,7 @@ public class VaultAuditJobHandler : IScheduledJobHandler, ITransientDependency
     {
         using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
         var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var network = await dbContext.Networks.OrderBy(n => n.CreationTime).FirstOrDefaultAsync();
+        var network = await dbContext.FindBscMainnetAsync();
         if (network == null || (string.IsNullOrEmpty(network.RpcCipher)
             && !await dbContext.ChainApiKeys.AnyAsync(k => k.NetworkId == network.Id
                 && k.Provider == ChainApiKeyProvider.RpcBsc && k.IsEnabled)))

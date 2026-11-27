@@ -9,13 +9,13 @@ import {
   type ChainConnState,
   onChainConnState,
   onChainVaultCheck,
-  startChainSignalR,
 } from '@/abp/chainSignalR';
 import {
   toGridColumns,
   useSearchableRemoteGrid,
 } from '@/components/remoteGrid';
 import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
+import VaultReconciliationTag from './VaultReconciliationTag';
 
 const { Text } = Typography;
 
@@ -36,18 +36,12 @@ export default function VaultPage({
   useEffect(() => {
     const offConn = onChainConnState(setConnState);
     const offVault = onChainVaultCheck(() => reload());
-    startChainSignalR();
     return () => {
       offConn();
       offVault();
     };
   }, [reload]);
 
-  const fmtTime = (v: string) => {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
-  };
-  const parseNum = (s: string) => parseFloat(s) || 0;
   const connView =
     connState === 'connected'
       ? { color: 'success' as const, text: '实时推送：已连接' }
@@ -57,6 +51,27 @@ export default function VaultPage({
 
   const columns = [
     { title: '代币', dataIndex: 'symbol', width: 80 },
+    {
+      title: '核对结论',
+      dataIndex: 'status',
+      width: 112,
+      render: (_: unknown, row: VaultCheckListDto) => (
+        <VaultReconciliationTag status={row.reconciliationStatus} />
+      ),
+    },
+    {
+      title: '核对后差额',
+      dataIndex: 'reconciledDifference',
+      width: 160,
+      align: 'right' as const,
+      render: (v: string | null, row: VaultCheckListDto) => (
+        <Text
+          type={row.reconciliationStatus === 'Shortfall' ? 'danger' : undefined}
+        >
+          {v ?? '—'}
+        </Text>
+      ),
+    },
     {
       title: '储备钱包余额',
       dataIndex: 'vaultBalance',
@@ -76,39 +91,40 @@ export default function VaultPage({
       ),
     },
     {
-      title: '差额',
+      title: '原始差额',
       dataIndex: 'difference',
       width: 160,
       align: 'right' as const,
-      render: (v: string) => {
-        const n = parseNum(v);
-        if (n < 0)
-          return (
-            <Text strong style={{ color: '#cf1322', fontFamily: 'monospace' }}>
-              {v}
-            </Text>
-          );
-        return (
-          <Text style={{ fontFamily: 'monospace', color: '#389e0d' }}>{v}</Text>
-        );
-      },
+      render: (v: string) => <Text>{v}</Text>,
     },
     {
-      title: '状态',
-      dataIndex: 'status',
-      width: 80,
-      render: (_: unknown, row: VaultCheckListDto) =>
-        parseNum(row.difference) < 0 ? (
-          <Tag color="error">缺口</Tag>
-        ) : (
-          <Tag color="success">正常</Tag>
-        ),
+      title: '已到账待记账',
+      dataIndex: 'pendingCredit',
+      width: 160,
+      render: (v: string | null) => v ?? '—',
+    },
+    {
+      title: '参考区块后记账',
+      dataIndex: 'postedAfterBlock',
+      width: 170,
+      render: (v: string | null) => v ?? '—',
+    },
+    {
+      title: '参考区块',
+      dataIndex: 'referenceBlock',
+      width: 135,
+      render: (v: number | null) => v ?? '—',
+    },
+    {
+      title: '核对金库地址',
+      dataIndex: 'referenceVaultAddress',
+      width: 380,
+      render: (v: string | null) => (v ? <Text copyable>{v}</Text> : '—'),
     },
     {
       title: '核对时间',
       dataIndex: 'checkedAt',
       width: 180,
-      render: (v: string) => fmtTime(v),
     },
   ];
 
@@ -117,11 +133,15 @@ export default function VaultPage({
     getRowId: ({ data }) => String(data.id),
     query: useScopedGridQuery(businessGridQueries.vault, ''),
     columnDefs: toGridColumns<VaultCheckListDto>(columns, {
+      utcDateFields: ['checkedAt'],
       kinds: {
         vaultBalance: 'decimal',
         userTotal: 'decimal',
         difference: 'decimal',
-        checkedAt: 'date',
+        reconciledDifference: 'decimal',
+        pendingCredit: 'decimal',
+        postedAfterBlock: 'decimal',
+        referenceBlock: 'number',
       },
     }),
   });

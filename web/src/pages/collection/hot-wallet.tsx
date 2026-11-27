@@ -22,7 +22,6 @@ import {
   type ChainConnState,
   onChainConnState,
   onChainHotWalletChanged,
-  startChainSignalR,
 } from '@/abp/chainSignalR';
 import { financeErrorText } from '@/abp/finance';
 import {
@@ -42,6 +41,7 @@ import {
   useSearchableRemoteGrid,
 } from '@/components/remoteGrid';
 import { useScopedGridQuery } from '@/hooks/useScopedGridQuery';
+import { trailingRefresh } from './use-chain-record-refresh';
 
 const { Text } = Typography;
 
@@ -58,11 +58,12 @@ export default function HotWalletWatchPage({
   const access = useAccess();
   const { message } = App.useApp();
   const refreshGrid = useGridRef<() => void>(undefined);
+  const cardRefresh = useGridRef<ReturnType<typeof trailingRefresh> | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [directionFilter, setDirectionFilter] = useState<string | undefined>();
-  const [watch, setWatch] = useState<HotWalletWatchStatusDto>();
-  const [hotWallet, setHotWallet] = useState<WithdrawHotWalletStatusDto>();
-  const [status, setStatus] = useState<WithdrawStatusDto>();
+  const [watch, setWatch] = useState<HotWalletWatchStatusDto | null>();
+  const [hotWallet, setHotWallet] = useState<WithdrawHotWalletStatusDto | null>();
+  const [status, setStatus] = useState<WithdrawStatusDto | null>();
   const [ackTarget, setAckTarget] = useState<HotWalletTxnDto>();
   const [ackNote, setAckNote] = useState('');
   const [acting, setActing] = useState(false);
@@ -70,27 +71,30 @@ export default function HotWalletWatchPage({
 
   const reload = useCallback(() => refreshGrid.current?.(), []);
 
-  const reloadCards = useCallback(async () => {
-    try {
-      setWatch(await getHotWalletWatchStatus());
-    } catch {
-      /* interceptor */
-    }
-    try {
-      setHotWallet(await getHotWallet());
-    } catch {
-      setHotWallet(undefined);
-    }
-    try {
-      setStatus(await getWithdrawStatus());
-    } catch {
-      /* interceptor */
-    }
-  }, []);
+  const reloadCards = useCallback(() => cardRefresh.current?.run(), []);
 
   useEffect(() => {
-    reloadCards();
-  }, [reloadCards]);
+    const controller = new AbortController();
+    const { signal } = controller;
+    async function read<T>(request: Promise<T>, update: (value: T | null) => void) {
+      const result = await request.catch(() => null);
+      if (!signal.aborted) update(result);
+    }
+    const refresh = trailingRefresh(async () => {
+      await Promise.all([
+        read(getHotWalletWatchStatus(signal), setWatch),
+        read(getHotWallet(signal), setHotWallet),
+        read(getWithdrawStatus(signal), setStatus),
+      ]);
+    });
+    cardRefresh.current = refresh;
+    void refresh.run();
+    return () => {
+      refresh.stop();
+      controller.abort();
+      cardRefresh.current = undefined;
+    };
+  }, []);
 
   useEffect(() => {
     const offConn = onChainConnState(setConnState);
@@ -106,7 +110,6 @@ export default function HotWalletWatchPage({
         reloadCards();
       }, 3000);
     });
-    startChainSignalR();
     return () => {
       if (timer != null) {
         clearTimeout(timer);
@@ -322,6 +325,8 @@ export default function HotWalletWatchPage({
                 </Text>
               ))}
             </Space>
+          ) : watch === null ? (
+            <Text type="danger">监控状态读取失败</Text>
           ) : (
             <Spin size="small" />
           )}
@@ -348,12 +353,17 @@ export default function HotWalletWatchPage({
                 ) : (
                   <Tag color="success">偿付正常</Tag>
                 )}
+                {status === null && <Text type="danger">提现状态读取失败</Text>}
                 {status && (
                   <Text>
                     待审 {status.pendingCount} · 待广播 {status.processingCount}
                   </Text>
                 )}
               </Space>
+            ) : hotWallet === undefined ? (
+              <Spin size="small" />
+            ) : hotWallet === null ? (
+              <Text type="danger">提现钱包状态读取失败</Text>
             ) : (
               <Tag color="warning">提现钱包未配置</Tag>
             )}

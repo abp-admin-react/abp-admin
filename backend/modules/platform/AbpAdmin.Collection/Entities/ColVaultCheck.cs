@@ -3,9 +3,18 @@ using Volo.Abp.Domain.Entities;
 
 namespace AbpAdmin.Collection.Entities;
 
+public enum VaultReconciliationStatus
+{
+    Legacy = 0,
+    Balanced,
+    Surplus,
+    TimingDifference,
+    Shortfall,
+    Inconclusive,
+}
+
 /// <summary>
-/// 金库核对留痕（计划第 5.6 节）：每日按币追加一行 balanceOf(金库) vs 用户余额合计。
-/// 未入账的在途不加入右边（否则归集完成前会误报）；正差额不告警（负差额 = 金库 < 用户余额，告警）。
+/// 按币保存一次金库核对。历史记录保留原始差额，新记录同时保留地址、确认块和校准差额。
 /// </summary>
 public class ColVaultCheck : BasicAggregateRoot<Guid>
 {
@@ -26,17 +35,27 @@ public class ColVaultCheck : BasicAggregateRoot<Guid>
 
     public string Symbol { get; set; } = default!;
 
-    /// <summary>balanceOf(金库) 原始整数十进制字符串（18 位小数单位）。</summary>
+    /// <summary>balanceOf 的原始整数，以代币最小单位计。</summary>
     public string RawVaultAmount { get; set; } = default!;
 
     /// <summary>换算后的金库余额。</summary>
     public decimal VaultBalance { get; set; }
 
-    /// <summary>该币用户余额合计（ColBalances）。</summary>
+    /// <summary>本地快照中该币所有用户的可用余额与冻结余额之和。</summary>
     public decimal UserTotal { get; set; }
 
-    /// <summary>VaultBalance - UserTotal；正差额不告警。</summary>
+    /// <summary>金库减当前负债的原始观测值，保留历史口径。</summary>
     public decimal Difference { get; set; }
+
+    public VaultReconciliationStatus ReconciliationStatus { get; set; }
+    public long? ReferenceBlock { get; set; }
+    public string? ReferenceVaultAddress { get; set; }
+    /// <summary>参考块内已到账、在本地快照尚未入账的用户净额。</summary>
+    public decimal? PendingCredit { get; set; }
+    /// <summary>本地已入账、实际归集在参考块之后的用户净额。</summary>
+    public decimal? PostedAfterBlock { get; set; }
+    /// <summary>Difference - PendingCredit + PostedAfterBlock。证据不完整及历史数据保留 null。</summary>
+    public decimal? ReconciledDifference { get; set; }
 
     public DateTime CheckedAt { get; set; }
 }
