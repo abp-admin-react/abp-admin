@@ -459,6 +459,10 @@ export function useSearchableRemoteGrid<T>({
       if (!state.api.current?.isDestroyed())
         state.api.current?.purgeInfiniteCache();
     },
+    refreshCachedRows() {
+      if (!state.api.current?.isDestroyed())
+        state.api.current?.refreshInfiniteCache();
+    },
     getQuery() {
       const api = state.api.current;
       return api && !api.isDestroyed()

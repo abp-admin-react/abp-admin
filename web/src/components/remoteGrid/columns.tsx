@@ -2,11 +2,14 @@ import type { ProColumns } from '@ant-design/pro-components';
 import type { ColDef, ICellRendererParams } from 'ag-grid-community';
 import { Space, type TableColumnsType, Typography } from 'antd';
 import type { ReactNode } from 'react';
+import { parseApiDate } from '@/utils/time';
 import type { RemoteColumn } from './index';
 import type { ColumnKind } from './validation';
 
-interface ColumnSettings {
+interface ColumnSettings<T> {
   kinds?: Readonly<Record<string, ColumnKind>>;
+  /** API timestamps displayed and filtered by UTC calendar day. */
+  utcDateFields?: ReadonlyArray<Extract<keyof T, string>>;
   pro?: boolean;
 }
 
@@ -66,15 +69,15 @@ function ExistingCell<T>(
 }
 export function toGridColumns<T>(
   columns: readonly ProColumns<T>[],
-  options: ColumnSettings & { pro: true },
+  options: ColumnSettings<T> & { pro: true },
 ): RemoteColumn<T>[];
 export function toGridColumns<T>(
   columns: Readonly<TableColumnsType<T>>,
-  options?: ColumnSettings,
+  options?: ColumnSettings<T>,
 ): RemoteColumn<T>[];
 export function toGridColumns<T>(
   columns: readonly unknown[],
-  options: ColumnSettings = {},
+  options: ColumnSettings<T> = {},
 ): RemoteColumn<T>[] {
   return (columns as ExistingColumn<T>[])
     .filter((col) => !col.hideInTable && !col.hidden)
@@ -121,6 +124,21 @@ export function toGridColumns<T>(
           : { minWidth: 140, flex: 1 }),
         ...(mapping.length ? { choices } : {}),
       };
+      const utcField = options.utcDateFields?.find((field) => field === path);
+      if (utcField) {
+        result.kind = 'date';
+        result.headerName = `${header}（UTC）`;
+        result.valueGetter = ({ data }) => {
+          const value = data?.[utcField];
+          return typeof value === 'string'
+            ? (parseApiDate(value)?.toISOString() ?? null)
+            : null;
+        };
+        // The local grid also filters and sorts on this normalized ISO instant.
+        result.valueFormatter = ({ value }) =>
+          value ? value.slice(0, 19).replace('T', ' ') : '—';
+        return result;
+      }
       if (
         col.render ||
         col.renderText ||

@@ -3,6 +3,8 @@ import type {
   GridApi,
   ICellRendererParams,
   IGetRowsParams,
+  ValueFormatterParams,
+  ValueGetterParams,
 } from 'ag-grid-community';
 import type { AgGridReactProps } from 'ag-grid-react';
 import {
@@ -113,7 +115,18 @@ export function AgGridReact<T extends Record<string, unknown>>(
             }
           >
             {columns.map((c) => {
-              const value = data[String(c.field)];
+              const value =
+                typeof c.valueGetter === 'function'
+                  ? c.valueGetter({ data, colDef: c } as ValueGetterParams<T>)
+                  : data[String(c.field)];
+              const display =
+                typeof c.valueFormatter === 'function'
+                  ? c.valueFormatter({
+                      value,
+                      data,
+                      colDef: c,
+                    } as ValueFormatterParams<T>)
+                  : String(value ?? '');
               const Cell = c.cellRenderer as
                 | ComponentType<ICellRendererParams<T>>
                 | undefined;
@@ -124,13 +137,14 @@ export function AgGridReact<T extends Record<string, unknown>>(
                       {...({
                         ...c.cellRendererParams,
                         value,
+                        valueFormatted: display,
                         data,
                         node: { rowIndex: index },
                         api,
                       } as ICellRendererParams<T>)}
                     />
                   ) : (
-                    String(value ?? '')
+                    display
                   )}
                 </td>
               );
