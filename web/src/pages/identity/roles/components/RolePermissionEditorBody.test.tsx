@@ -98,6 +98,27 @@ function renderBody(
 }
 
 describe('角色功能权限编辑区', () => {
+  it('权限列表在独立滚动区内，勾选不改列表容器角色', () => {
+    renderBody();
+    expect(screen.getByRole('region', { name: '功能权限' })).toBeVisible();
+    fireEvent.click(checkbox('查看订单'));
+    expect(screen.getByRole('region', { name: '功能权限' })).toBeVisible();
+  });
+
+  it('列表只显示中文名称，权限代码仅用于搜索', () => {
+    const { onChange } = renderBody();
+    expect(checkbox('编辑订单')).toBeInTheDocument();
+    expect(screen.queryByText('Orders.Edit')).toBeNull();
+    expect(screen.queryByText('Orders.Details')).toBeNull();
+
+    fireEvent.change(screen.getByRole('searchbox'), {
+      target: { value: 'Orders.Edit' },
+    });
+    expect(checkbox('编辑订单')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '查看订单' })).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('提交搜索只保留当前筛选和草稿', () => {
     const { onChange } = renderBody();
     const search = screen.getByRole('form', { name: '功能权限筛选' });
@@ -150,7 +171,7 @@ describe('角色功能权限编辑区', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('已授权筛选采用保存状态，保留待撤销及锁定项', () => {
+  it('已授权筛选采用保存状态，保留将取消及锁定项', () => {
     renderBody(
       orderGroups,
       new Map([
@@ -162,7 +183,7 @@ describe('角色功能权限编辑区', () => {
     fireEvent.click(screen.getByRole('radio', { name: '已授权' }));
     expect(screen.queryByRole('checkbox', { name: '查看订单' })).toBeNull();
     expect(checkbox('查看订单明细')).not.toBeChecked();
-    expect(screen.getByText('待撤销')).toBeVisible();
+    expect(screen.getByText('将取消')).toBeVisible();
     expect(checkbox('导出订单')).toBeDisabled();
   });
 
@@ -174,7 +195,8 @@ describe('角色功能权限编辑区', () => {
       { name: 'Finance.Voucher.Reverse', isGranted: true },
     ]);
     setChanges(new Map([['Finance.Voucher.Reverse', true]]));
-    expect(screen.getByRole('alert')).toHaveTextContent('Finance.Voucher.View');
+    expect(screen.getByRole('alert')).toHaveTextContent('查看凭证');
+    expect(screen.queryByText('Finance.Voucher.View')).toBeNull();
     expect(checkbox('查看凭证')).not.toBeChecked();
 
     fireEvent.click(button('同时授予查看凭证'));
@@ -207,7 +229,8 @@ describe('角色功能权限编辑区', () => {
     if (pendingView) changes.set('Finance.Voucher.View', true);
     const { onChange } = renderBody(finance(granted, editable), changes);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Finance.Voucher.View');
+    expect(screen.getByRole('alert')).toHaveTextContent('查看凭证');
+    expect(screen.queryByText('Finance.Voucher.View')).toBeNull();
     expect(
       screen.queryByRole('button', { name: '同时授予查看凭证' }),
     ).toBeNull();

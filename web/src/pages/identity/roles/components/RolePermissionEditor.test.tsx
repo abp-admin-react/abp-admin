@@ -154,7 +154,7 @@ describe('角色功能权限编辑', () => {
     fireEvent.click(settings);
     expect(settings).not.toBeChecked();
     expect(
-      screen.getByText('待保存 2 项，新增 1 项，撤销 1 项'),
+      screen.getByText('2 项改动尚未保存，保存后才会生效'),
     ).toBeInTheDocument();
 
     fireEvent.click(saveButton());
@@ -276,7 +276,7 @@ describe('角色功能权限编辑', () => {
     fireEvent.click(saveButton());
     expect(await screen.findByText(/核对发现 1 项未生效/)).toBeInTheDocument();
     expect(
-      screen.getByText('待保存 1 项，新增 0 项，撤销 1 项'),
+      screen.getByText('1 项改动尚未保存，保存后才会生效'),
     ).toBeInTheDocument();
     expect(permission('查看设置')).not.toBeChecked();
     expect(saveButton()).toBeEnabled();

@@ -29,12 +29,13 @@ type PermissionRow = {
   children: PermissionRow[];
 };
 
+// pending = 尚未 PUT 的草稿；界面文案为「本次改动」。
 type Filter = 'all' | 'granted' | 'pending';
 
 const filterOptions: { value: Filter; label: string }[] = [
   { value: 'all', label: '全部' },
   { value: 'granted', label: '已授权' },
-  { value: 'pending', label: '待保存' },
+  { value: 'pending', label: '本次改动' },
 ];
 
 const voucherReverse = 'Finance.Voucher.Reverse';
@@ -43,20 +44,30 @@ const voucherView = 'Finance.Voucher.View';
 const useStyles = createStyles(({ css, token }) => ({
   editor: css`
     container: role-permissions / inline-size;
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 12px;
     min-inline-size: 0;
+    min-block-size: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    block-size: 100%;
   `,
   filters: css`
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
+    flex: none;
   `,
   columns: css`
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    align-items: start;
+    align-items: stretch;
     gap: 16px;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow: hidden;
 
     @container role-permissions (min-width: 38rem) {
       grid-template-columns: minmax(9rem, 27%) minmax(0, 1fr);
@@ -65,10 +76,11 @@ const useStyles = createStyles(({ css, token }) => ({
   groupNavigation: css`
     display: none;
     min-inline-size: 0;
-    position: sticky;
-    inset-block-start: 0;
-    max-block-size: 54dvh;
+    min-block-size: 0;
     overflow-y: auto;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
+    align-content: start;
 
     @container role-permissions (min-width: 38rem) {
       display: grid;
@@ -118,6 +130,7 @@ const useStyles = createStyles(({ css, token }) => ({
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+    flex: none;
 
     @media (pointer: coarse) {
       & button { min-block-size: 3rem; }
@@ -139,9 +152,7 @@ const useStyles = createStyles(({ css, token }) => ({
     align-items: center;
     justify-content: space-between;
     gap: 4px 12px;
-    position: sticky;
-    inset-block-end: 0;
-    z-index: 1;
+    flex: none;
     padding-block: 6px;
     border-block-start: 1px solid ${token.colorBorderSecondary};
     background: ${token.colorBgElevated};
@@ -149,16 +160,28 @@ const useStyles = createStyles(({ css, token }) => ({
     &:empty { display: none; }
   `,
   workspace: css`
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 12px;
     min-inline-size: 0;
+    min-block-size: 0;
+    overflow: hidden;
+  `,
+  // 右侧独立滚动；stable gutter 避免滚动条出现时把「将授予」挤换行。
+  permissionPane: css`
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
+    border: 1px solid ${token.colorBorderSecondary};
+    border-radius: ${token.borderRadius}px;
   `,
   permissionList: css`
     list-style: none;
     margin: 0;
     padding: 0;
-    border: 1px solid ${token.colorBorderSecondary};
-    border-radius: ${token.borderRadius}px;
   `,
   permissionChildren: css`
     list-style: none;
@@ -166,14 +189,24 @@ const useStyles = createStyles(({ css, token }) => ({
     padding: 0;
   `,
   permissionRow: css`
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 6px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 12px;
     min-inline-size: 0;
     padding: 8px 12px;
     border-block-end: 1px solid ${token.colorBorderSecondary};
+  `,
+  permissionActions: css`
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    justify-self: end;
+
+    @media (pointer: coarse) {
+      & button { min-block-size: 3rem; }
+    }
   `,
   permissionLabel: css`
     display: flex;
@@ -191,7 +224,6 @@ const useStyles = createStyles(({ css, token }) => ({
   `,
   permissionMain: css`
     display: grid;
-    flex: 1 1 16rem;
     gap: 3px;
     min-inline-size: 0;
     overflow-wrap: anywhere;
@@ -234,6 +266,7 @@ function indexPermissions(group: PermissionGroup) {
     const row: PermissionRow = {
       permission,
       path,
+      // 权限键（如 BizTemplate.Projects.Delete）只进搜索，列表不渲染。
       searchText: [path, group.name, permission.displayName, permission.name]
         .join(' ')
         .toLowerCase(),
@@ -296,6 +329,7 @@ export default function RolePermissionEditorBody({
     groupRows[0];
   const searchTerms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const isGlobal = searchTerms.length > 0 || filter === 'pending';
+  // 树形浏览用缩进表达层级，不再重复展示分组路径。
   const browsingTree = !isGlobal && filter === 'all';
   const visibleRows = (isGlobal ? allRows : (selectedGroup?.rows ?? [])).filter(
     ({ permission, searchText }) => {
@@ -316,7 +350,6 @@ export default function RolePermissionEditorBody({
     plannedValue(permission),
   );
   const hasPending = changes.size > 0;
-  const addedCount = Array.from(changes.values()).filter(Boolean).length;
   const reversePermission = allRows.find(
     ({ permission }) => permission.name === voucherReverse,
   )?.permission;
@@ -344,6 +377,7 @@ export default function RolePermissionEditorBody({
   }
 
   function showPending() {
+    // 跨组核对草稿时清掉搜索，避免只看到当前关键词命中的改动。
     setFilter('pending');
     setQuery('');
   }
@@ -366,6 +400,9 @@ export default function RolePermissionEditorBody({
     const change = changes.get(name);
     const expandable = browsingTree && children.length > 0;
     const expanded = expandable && !collapsed.has(name);
+    const showPath = !browsingTree && Boolean(path);
+    const showVoucherHint = name === voucherReverse;
+    const showDetails = showPath || showVoucherHint;
 
     return (
       <li key={name}>
@@ -391,7 +428,7 @@ export default function RolePermissionEditorBody({
               )}
               <Checkbox
                 className={styles.checkbox}
-                aria-describedby={detailsId}
+                aria-describedby={showDetails ? detailsId : undefined}
                 name={name}
                 checked={plannedValue(permission)}
                 disabled={disabled || isEditable === false}
@@ -402,19 +439,20 @@ export default function RolePermissionEditorBody({
                 {label}
               </Checkbox>
             </div>
-            <div className={styles.permissionDetails} id={detailsId}>
-              <span>{path}</span>
-              <code>{name}</code>
-              {name === voucherReverse && <span>执行红冲还需查看凭证权限</span>}
-            </div>
+            {showDetails && (
+              <div className={styles.permissionDetails} id={detailsId}>
+                {showPath && <span>{path}</span>}
+                {showVoucherHint && <span>执行红冲还需查看凭证权限</span>}
+              </div>
+            )}
           </div>
           {(change !== undefined || isEditable === false) && (
-            <div className={styles.toolbar}>
+            <div className={styles.permissionActions}>
               {isEditable === false && <Tag>不可修改</Tag>}
               {change !== undefined && (
                 <>
                   <Tag color={change ? 'success' : 'error'}>
-                    {change ? '待新增' : '待撤销'}
+                    {change ? '将授予' : '将取消'}
                   </Tag>
                   <Button
                     type="link"
@@ -468,7 +506,7 @@ export default function RolePermissionEditorBody({
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="名称、权限代码或分组路径"
+            placeholder="权限名称"
             prefix={<SearchOutlined aria-hidden />}
             allowClear
             autoCapitalize="none"
@@ -511,7 +549,7 @@ export default function RolePermissionEditorBody({
           }
           description={
             <div>
-              执行红冲并生成红字凭证还需「查看凭证」（Finance.Voucher.View）。
+              执行红冲并生成红字凭证还需「查看凭证」。
               {missingVoucherView && (
                 <div>
                   当前角色的草稿缺少此权限。用户也可以通过其他角色获得查看凭证权限。
@@ -578,30 +616,32 @@ export default function RolePermissionEditorBody({
               </Button>
             </div>
           )}
-          {visibleRows.length ? (
-            <ul className={styles.permissionList} aria-label="功能权限">
-              {(browsingTree ? (selectedGroup?.roots ?? []) : visibleRows).map(
-                (row) => renderPermission(row),
-              )}
-            </ul>
-          ) : (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={
-                filter === 'pending' && !hasPending
-                  ? '没有待保存的变更'
-                  : '没有符合条件的权限'
-              }
-            />
-          )}
+          <section className={styles.permissionPane} aria-label="功能权限">
+            {visibleRows.length ? (
+              <ul className={styles.permissionList}>
+                {(browsingTree
+                  ? (selectedGroup?.roots ?? [])
+                  : visibleRows
+                ).map((row) => renderPermission(row))}
+              </ul>
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  filter === 'pending' && !hasPending
+                    ? '还没有改动'
+                    : '没有符合条件的权限'
+                }
+              />
+            )}
+          </section>
         </div>
       </div>
       <div className={styles.review}>
         {hasPending && (
           <>
             <span className={styles.summary} role="status">
-              待保存 {changes.size} 项，新增 {addedCount} 项，撤销{' '}
-              {changes.size - addedCount} 项
+              {changes.size} 项改动尚未保存，保存后才会生效
             </span>
             <Button
               type="link"
@@ -610,7 +650,7 @@ export default function RolePermissionEditorBody({
                 filtersRef.current?.scrollIntoView?.({ block: 'start' });
               }}
             >
-              查看全部待保存
+              只看这些改动
             </Button>
           </>
         )}

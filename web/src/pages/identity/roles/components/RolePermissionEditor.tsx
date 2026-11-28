@@ -1,5 +1,6 @@
 import { history } from '@umijs/max';
 import { Alert, App, Button, Empty, Modal, Space, Spin, Tag } from 'antd';
+import { createStyles } from 'antd-style';
 import React, {
   useEffect,
   useLayoutEffect,
@@ -40,6 +41,33 @@ type Phase =
   | 'unknown'
   | 'stale';
 type GrantChange = { name: string; isGranted: boolean };
+
+// 弹层固定 85dvh：勾选、展开、换组只在内部滚动。antd 6 语义槽是 container，不是 content。
+const useStyles = createStyles(({ css }) => ({
+  container: css`
+    display: flex;
+    flex-direction: column;
+    block-size: 85dvh;
+    max-block-size: 85dvh;
+    overflow: hidden;
+  `,
+  body: css`
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-block-size: 0;
+    overflow: hidden;
+  `,
+  shell: css`
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    gap: 12px;
+    min-block-size: 0;
+    overflow: hidden;
+    block-size: 100%;
+  `,
+}));
 
 function indexPermissions(groups: PermissionGroup[]) {
   return new Map(
@@ -88,6 +116,7 @@ const RolePermissionEditor: React.FC<Props> = ({
   onSaved,
   onStaleRole,
 }) => {
+  const { styles } = useStyles();
   const { modal, message } = App.useApp();
   const [groups, setGroups] = useState<PermissionGroup[]>([]);
   const [changes, setChanges] = useState(new Map<string, boolean>());
@@ -335,7 +364,7 @@ const RolePermissionEditor: React.FC<Props> = ({
       centered
       width="min(1120px, 100vw)"
       style={{ maxWidth: '100vw', marginInline: 'auto' }}
-      styles={{ body: { maxHeight: '72dvh', overflowY: 'auto' } }}
+      classNames={{ container: styles.container, body: styles.body }}
       title={
         <Space wrap>
           <span>功能权限 · {role.name}</span>
@@ -372,39 +401,34 @@ const RolePermissionEditor: React.FC<Props> = ({
         </Space>
       }
     >
-      {notice && (
-        <Alert
-          type="warning"
-          showIcon
-          title={notice}
-          style={{ marginBottom: 12 }}
-        />
-      )}
-      {phase === 'loading' ? (
-        <Spin description="加载角色权限">
-          <div style={{ minHeight: 200 }} />
-        </Spin>
-      ) : phase === 'loadFailed' ? (
-        <Alert
-          type="error"
-          title="加载角色权限失败"
-          showIcon
-          action={
-            <Button onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
-              重新加载
-            </Button>
-          }
-        />
-      ) : groups.length ? (
-        <RolePermissionEditorBody
-          groups={groups}
-          changes={changes}
-          disabled={phase !== 'ready'}
-          onChange={edit}
-        />
-      ) : (
-        phase !== 'stale' && <Empty description="没有可配置的权限" />
-      )}
+      <div className={styles.shell}>
+        {notice && <Alert type="warning" showIcon title={notice} />}
+        {phase === 'loading' ? (
+          <Spin description="加载角色权限">
+            <div style={{ minBlockSize: 200 }} />
+          </Spin>
+        ) : phase === 'loadFailed' ? (
+          <Alert
+            type="error"
+            title="加载角色权限失败"
+            showIcon
+            action={
+              <Button onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+                重新加载
+              </Button>
+            }
+          />
+        ) : groups.length ? (
+          <RolePermissionEditorBody
+            groups={groups}
+            changes={changes}
+            disabled={phase !== 'ready'}
+            onChange={edit}
+          />
+        ) : (
+          phase !== 'stale' && <Empty description="没有可配置的权限" />
+        )}
+      </div>
     </Modal>
   );
 };
