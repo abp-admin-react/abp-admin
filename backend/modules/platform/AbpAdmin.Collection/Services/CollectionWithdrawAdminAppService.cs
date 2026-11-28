@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Mvc;
 using AbpAdmin.Grids;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Numerics;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Chain;
 using AbpAdmin.Collection.Contracts;
@@ -20,6 +22,7 @@ using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.DistributedLocking;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.Security.Encryption;
 using Volo.Abp.Settings;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.Uow;
@@ -41,7 +44,65 @@ public class SetWithdrawVaultInput
     public Guid? NetworkId { get; set; }
     public string Address { get; set; } = default!;
 
+    /// <summary>可选二次确认地址；传入时必须与 Address 严格一致。</summary>
+    public string? ConfirmAddress { get; set; }
+
     public string PrivateKey { get; set; } = default!;
+}
+
+public class PurgeStuckNonceInput
+{
+    /// <summary>GasSponsor 或 WithdrawHotWallet。</summary>
+    public string Target { get; set; } = default!;
+
+    public long Nonce { get; set; }
+
+    public decimal? MinGasPriceGwei { get; set; }
+
+    public string Reason { get; set; } = default!;
+
+    public string? NetworkName { get; set; }
+
+    /// <summary>强制覆盖当前仍处于 Fueling/Broadcasting 的活单占位（WithdrawHotWallet 还要求先拉响 Halt）。</summary>
+    public bool ForceOverrideActiveOwner { get; set; }
+}
+
+public class PurgeStuckNonceResultDto
+{
+    public string Target { get; set; } = default!;
+    public string SenderAddress { get; set; } = default!;
+    public long Nonce { get; set; }
+    public string GasPriceWei { get; set; } = default!;
+    public string TxHash { get; set; } = default!;
+}
+
+public class WalletNonceInfoDto
+{
+    public bool Configured { get; set; }
+    public string? Address { get; set; }
+    public long LatestNonce { get; set; }
+    public long PendingNonce { get; set; }
+    public bool HasPendingGap { get; set; }
+    public bool IsDelegated { get; set; }
+    public List<ChainTxAttemptSummaryDto> RecentAttempts { get; set; } = new();
+}
+
+public class ChainTxAttemptSummaryDto
+{
+    public string Purpose { get; set; } = default!;
+    public Guid? RefId { get; set; }
+    public long Nonce { get; set; }
+    public int AttemptNo { get; set; }
+    public string TxHash { get; set; } = default!;
+    public string GasPriceWei { get; set; } = default!;
+    public string Status { get; set; } = default!;
+    public DateTime BroadcastAt { get; set; }
+}
+
+public class WalletNonceStatusDto
+{
+    public WalletNonceInfoDto GasSponsor { get; set; } = new();
+    public WalletNonceInfoDto WithdrawHotWallet { get; set; } = new();
 }
 
 /// <summary>热钱包监控流水行（金额超精度时 Amount 为 null，展示回退 RawAmount）。</summary>
@@ -54,7 +115,7 @@ public class HotWalletTxnDto
     public string From { get; set; } = default!;
     public string To { get; set; } = default!;
 
-    /// <summary>Out / In。</summary>
+    /// <summary>Out / In / Self。</summary>
     public string Direction { get; set; } = default!;
 
     /// <summary>缩放后金额（十进制字符串）；null = 超精度。</summary>
@@ -99,7 +160,7 @@ public class HotWalletWatchTokenDto
 }
 
 /// <summary>
-/// 提现管理端（审核/拒绝/列表/状态）。广播重试、人工完结、热钱包状态在 M3 扩展。
+/// 提现管理端（审核/拒绝/退款/重试/人工完结、热钱包配置与监控、卡死 Nonce 诊断与清理）。
 /// Host 专用权限（WithdrawAdmin）+ AssertHost 双保险（同 Network.Admin 纪律）。
 /// </summary>
 [Authorize(CollectionPermissions.Withdraw.Admin)]
@@ -114,6 +175,9 @@ public class CollectionWithdrawAdminAppService : ApplicationService
     private readonly ISettingProvider _settings;
     private readonly IAbpDistributedLock _distributedLock;
     private readonly Volo.Abp.SettingManagement.ISettingManager _settingManager;
+    private readonly ChainKeyProvider? _chainKeyProvider;
+    private readonly IStringEncryptionService? _encryptor;
+    private readonly ChainAlertService? _alerts;
 
     public CollectionWithdrawAdminAppService(
         WithdrawManager withdraws,
@@ -124,7 +188,10 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         IDbContextProvider<CollectionDbContext> dbContextProvider,
         ISettingProvider settings,
         Volo.Abp.SettingManagement.ISettingManager settingManager,
-        IAbpDistributedLock distributedLock)
+        IAbpDistributedLock distributedLock,
+        ChainKeyProvider? chainKeyProvider = null,
+        IStringEncryptionService? encryptor = null,
+        ChainAlertService? alerts = null)
     {
         _withdraws = withdraws;
         _ledger = ledger;
@@ -135,6 +202,9 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         _settings = settings;
         _settingManager = settingManager;
         _distributedLock = distributedLock;
+        _chainKeyProvider = chainKeyProvider;
+        _encryptor = encryptor;
+        _alerts = alerts;
     }
 
     /// <summary>提现单列表（可按订单、状态、用户过滤，倒序分页）。</summary>
@@ -338,6 +408,13 @@ public class CollectionWithdrawAdminAppService : ApplicationService
             throw new BusinessException(CollectionErrorCodes.WithdrawInvalidAddress).WithData("ToAddress", address);
         }
 
+        if (!string.IsNullOrWhiteSpace(input.ConfirmAddress)
+            && !string.Equals(input.ConfirmAddress.Trim(), address, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidAddress)
+                .WithData("Reason", "confirm address does not match address");
+        }
+
         var privateKey = (input.PrivateKey ?? string.Empty).Trim();
         string derived;
         try
@@ -364,18 +441,73 @@ public class CollectionWithdrawAdminAppService : ApplicationService
             throw new BusinessException(CollectionErrorCodes.TryAgain);
         }
 
-        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
-        var network = await WithdrawGuard.NetworkQuery(dbContext).FirstOrDefaultAsync()
-                      ?? throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
-        if (input.NetworkId.HasValue && input.NetworkId != network.Id)
+        string? previousAddress;
+        string networkName;
+        using (var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
         {
-            throw new BusinessException(CollectionErrorCodes.WithdrawNetworkUnsupported);
+            var dbContext = await _dbContextProvider.GetDbContextAsync();
+            var network = await WithdrawGuard.NetworkQuery(dbContext).FirstOrDefaultAsync()
+                          ?? throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
+            if (input.NetworkId.HasValue && input.NetworkId != network.Id)
+            {
+                throw new BusinessException(CollectionErrorCodes.WithdrawNetworkUnsupported);
+            }
+
+            var normalizedNew = address.ToLowerInvariant();
+            var isDepositAddress = await dbContext.DepositAddresses.AsNoTracking()
+                .AnyAsync(a => a.NetworkId == network.Id && !a.IsRetired && a.Address.ToLower() == normalizedNew);
+            if (isDepositAddress)
+            {
+                throw new BusinessException(CollectionErrorCodes.WithdrawInvalidAddress)
+                    .WithData("Reason", "cannot configure a user deposit address as hot wallet");
+            }
+
+            if (!string.IsNullOrEmpty(network.WithdrawVaultAddress)
+                && !string.Equals(network.WithdrawVaultAddress, normalizedNew, StringComparison.OrdinalIgnoreCase))
+            {
+                var hasBroadcasting = await dbContext.WithdrawOrders.AsNoTracking()
+                    .AnyAsync(o => o.NetworkName == network.Name && o.Status == WithdrawStatus.Broadcasting);
+                if (hasBroadcasting)
+                {
+                    throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
+                        .WithData("Reason", "存在在途广播提现单（Broadcasting），禁止轮换热钱包");
+                }
+            }
+
+            // 尽力检查目标地址是否存在合约代码/EIP-7702 委托；无 RPC 配置时不阻断首次冷启动初始化
+            try
+            {
+                var gateway = await _gatewayFactory.CreateAsync(dbContext, network, network.NodeLogResultCap ?? 10000);
+                var code = await gateway.GetCodeAsync(normalizedNew);
+                if (BscGasPricePolicy.HasDeployedCode(code))
+                {
+                    throw new BusinessException(CollectionErrorCodes.WithdrawInvalidAddress)
+                        .WithData("Reason", "target address has deployed bytecode (EIP-7702/contract not allowed)");
+                }
+            }
+            catch (BusinessException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "轮换热钱包前 eth_getCode 预检跳过（网关不可用）: Address={Address}", normalizedNew);
+            }
+
+            previousAddress = network.WithdrawVaultAddress;
+            networkName = network.Name;
+            network.WithdrawVaultAddress = normalizedNew;
+            network.WithdrawVaultKeyCipher = await _guard.ProtectKeyAsync(privateKey);
+            await dbContext.SaveChangesAsync();
+            await uow.CompleteAsync();
         }
-        network.WithdrawVaultAddress = address.ToLowerInvariant();
-        network.WithdrawVaultKeyCipher = await _guard.ProtectKeyAsync(privateKey);
-        await dbContext.SaveChangesAsync();
-        await uow.CompleteAsync();
+
+        if (_alerts != null)
+        {
+            await _alerts.RaiseAsync(CollectionConsts.AlertPrefixWithdrawHotWallet,
+                "提现热钱包配置变更",
+                $"操作人 {CurrentUser.UserName ?? "system"} 更新了网络 {networkName} 热钱包：{previousAddress ?? "(未配置)"} → {address.ToLowerInvariant()}。");
+        }
     }
 
     /// <summary>
@@ -573,7 +705,290 @@ public class CollectionWithdrawAdminAppService : ApplicationService
         await uow.CompleteAsync();
     }
 
-    /// <summary>重试广播失败单（有哈希先验回执；无哈希过近期同地址付款双花门）。</summary>
+    /// <summary>热钱包异常自动拉响停机总闸开关（WithdrawAdmin 专用）。</summary>
+    public virtual async Task SetWithdrawAutoHaltOnAnomalyAsync(bool enabled)
+    {
+        AssertHost();
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        await _settingManager.SetGlobalAsync(
+            CollectionSettings.Withdraw.AutoHaltOnAnomaly, enabled ? "true" : "false");
+        await uow.CompleteAsync();
+    }
+
+    /// <summary>查询 Gas Sponsor 与提现热钱包的 latest/pending nonce、EIP-7702 字节码与最近尝试记录。</summary>
+    public virtual async Task<WalletNonceStatusDto> GetWalletNonceStatusAsync(string? networkName = null)
+    {
+        AssertHost();
+        var (network, gateway) = await CreateWithdrawGatewayAsync(networkName);
+        var masterKey = _chainKeyProvider != null ? await _chainKeyProvider.GetAsync() : null;
+
+        string? gasAddress = null;
+        if (!string.IsNullOrEmpty(network.MnemonicCipher) && masterKey != null && _encryptor != null)
+        {
+            using var mnemonic = HdKeyService.Unprotect(network.MnemonicCipher, masterKey, _encryptor);
+            gasAddress = HdKeyService.DeriveAddress(mnemonic.Words, HdKeyService.GasAddressIndex).ToLowerInvariant();
+        }
+
+        var hotAddress = string.IsNullOrEmpty(network.WithdrawVaultAddress)
+            ? null
+            : network.WithdrawVaultAddress.ToLowerInvariant();
+
+        using var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: false);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+
+        var dto = new WalletNonceStatusDto
+        {
+            GasSponsor = await BuildNonceInfoAsync(dbContext, network.Id, gateway, gasAddress),
+            WithdrawHotWallet = await BuildNonceInfoAsync(dbContext, network.Id, gateway, hotAddress),
+        };
+        await uow.CompleteAsync();
+        return dto;
+    }
+
+    /// <summary>
+    /// 管理员卡死 nonce 自转清理逃生舱：按目标取分布式锁（SweepLockKey / WithdrawBroadcastLockKey）并叠加 AccountSlot 锁，
+    /// 经 VerifyDeployedCodeAsync 复核未遭 EIP-7702 委托，且仅允许针对 pending &gt; latest 且 Nonce == latest 的卡池队头发送高 gas 0-BNB 自转；
+    /// 若该 nonce 正被活跃 Fueling/Broadcasting 单持有，默认拒绝（需 ForceOverrideActiveOwner，WithdrawHotWallet 还须先拉响 Withdraw.Halt）。
+    /// </summary>
+    public virtual async Task<PurgeStuckNonceResultDto> PurgeStuckNonceAsync(PurgeStuckNonceInput input)
+    {
+        AssertHost();
+        if (string.IsNullOrWhiteSpace(input.Reason) || input.Reason.Trim().Length > 256)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawRemarkRequired)
+                .WithData("Reason", "清理卡死 nonce 必须填写原因（≤256 字符）");
+        }
+
+        if (input.Target is not ("GasSponsor" or "WithdrawHotWallet"))
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidAddress)
+                .WithData("Target", input.Target);
+        }
+
+        var lockKey = input.Target == "GasSponsor"
+            ? CollectionConsts.SweepLockKey
+            : CollectionConsts.WithdrawBroadcastLockKey;
+        await using var targetLock = await _distributedLock.TryAcquireAsync(
+            lockKey, timeout: TimeSpan.FromSeconds(5));
+        if (targetLock == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.TryAgain);
+        }
+
+        var (network, gateway) = await CreateWithdrawGatewayAsync(input.NetworkName);
+        var masterKey = (_chainKeyProvider != null ? await _chainKeyProvider.GetAsync() : null)
+                        ?? throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
+        if (_encryptor == null)
+        {
+            throw new BusinessException(CollectionErrorCodes.MasterKeyMissing);
+        }
+
+        string sender;
+        string privateKey;
+        if (input.Target == "GasSponsor")
+        {
+            if (string.IsNullOrEmpty(network.MnemonicCipher))
+            {
+                throw new BusinessException(CollectionErrorCodes.DepositNotOpen);
+            }
+
+            using var mnemonic = HdKeyService.Unprotect(network.MnemonicCipher, masterKey, _encryptor);
+            sender = HdKeyService.DeriveAddress(mnemonic.Words, HdKeyService.GasAddressIndex).ToLowerInvariant();
+            privateKey = HdKeyService.DerivePrivateKey(mnemonic.Words, HdKeyService.GasAddressIndex);
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(network.WithdrawVaultAddress) || string.IsNullOrEmpty(network.WithdrawVaultKeyCipher))
+            {
+                throw new BusinessException(CollectionErrorCodes.HotWalletNotConfigured);
+            }
+
+            sender = network.WithdrawVaultAddress.ToLowerInvariant();
+            privateKey = HdKeyService.UnprotectPlain(network.WithdrawVaultKeyCipher, masterKey, _encryptor)
+                         ?? throw new BusinessException(CollectionErrorCodes.HotWalletNotConfigured);
+        }
+
+        var (codeConfirmed, _, _) = await gateway.VerifyDeployedCodeAsync(sender);
+        if (codeConfirmed)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidAddress)
+                .WithData("Reason", "目标地址检测到非空字节码（EIP-7702/合约），禁止自动发送清理交易");
+        }
+
+        var latestNonce = await gateway.GetTransactionCountLatestAsync(sender);
+        var pendingNonce = await gateway.GetTransactionCountAsync(sender);
+        if (input.Nonce != latestNonce || pendingNonce <= latestNonce)
+        {
+            throw new BusinessException(CollectionErrorCodes.WithdrawInvalidStatus)
+                .WithData("Reason", $"仅支持清理卡池队头（要求 Nonce={latestNonce} 且 Pending({pendingNonce}) > Latest({latestNonce})）");
+        }
+
+        var networkGasWei = await gateway.GetGasPriceWeiAsync();
+        var floorGasWei = BscGasPricePolicy.ReplacementGasWei(
+            BscGasPricePolicy.ApplyBump(networkGasWei, 2), networkGasWei);
+        var minGasWei = input.MinGasPriceGwei is > 0m and var minGwei
+            ? BscGasPricePolicy.GweiToWei(minGwei)
+            : BigInteger.Zero;
+        var gasWei = floorGasWei >= minGasWei ? floorGasWei : minGasWei;
+
+        var signed = await gateway.PrepareTransactionAsync(
+            privateKey, sender, "", "0x0", network.ChainId, input.Nonce, gasWei);
+        var txHash = signed.Hash.ToLowerInvariant();
+        var now = Clock.Now;
+
+        using (var uow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
+        {
+            var dbContext = await _dbContextProvider.GetDbContextAsync();
+            await ChainTxSlotCoordinator.LockAccountSlotAsync(dbContext, network.Id, sender, System.Threading.CancellationToken.None);
+
+            if (input.Target == "WithdrawHotWallet")
+            {
+                var activeOrder = await dbContext.WithdrawOrders.AsNoTracking()
+                    .Where(o => o.NetworkName == network.Name
+                                && o.Status == WithdrawStatus.Broadcasting
+                                && o.BroadcastSenderAddress == sender
+                                && o.NonceUsed == input.Nonce)
+                    .Select(o => new { o.Id })
+                    .FirstOrDefaultAsync();
+                if (activeOrder != null)
+                {
+                    var isHalted = await _settings.IsTrueAsync(CollectionSettings.Withdraw.Halt);
+                    if (!isHalted || !input.ForceOverrideActiveOwner)
+                    {
+                        throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
+                            .WithData("Reason", $"提现单 {activeOrder.Id} 正持有热钱包队头 nonce={input.Nonce}，请先拉响 Halt 并显式启用强制覆盖");
+                    }
+                }
+            }
+            else
+            {
+                var activeFuel = await dbContext.SweepTasks.AsNoTracking()
+                    .Where(t => t.NetworkId == network.Id
+                                && t.Status == SweepTaskStatus.Fueling
+                                && t.GasNonceUsed == input.Nonce)
+                    .Select(t => new { t.Id })
+                    .FirstOrDefaultAsync();
+                if (activeFuel != null && !input.ForceOverrideActiveOwner)
+                {
+                    throw new BusinessException(CollectionErrorCodes.WithdrawPendingOutbound)
+                        .WithData("Reason", $"归集打油任务 {activeFuel.Id} 正持有 Gas Sponsor 队头 nonce={input.Nonce}，如需强制顶替请启用 ForceOverrideActiveOwner");
+                }
+            }
+
+            if (!await dbContext.ChainTxAttempts.AsNoTracking().AnyAsync(a => a.NetworkId == network.Id && a.TxHash == txHash))
+            {
+                dbContext.ChainTxAttempts.Add(new ColChainTxAttempt(GuidGenerator.Create())
+                {
+                    NetworkId = network.Id,
+                    Purpose = ChainTxPurpose.SponsorHeadSelfTransfer,
+                    RefId = null,
+                    SenderAddress = sender,
+                    ToAddress = sender,
+                    Nonce = input.Nonce,
+                    AttemptNo = 1,
+                    TxHash = txHash,
+                    GasPriceWei = gasWei.ToString(CultureInfo.InvariantCulture),
+                    GasLimit = BscGasPricePolicy.NativeTransferGasLimit,
+                    RawSignedTx = signed.RawHex,
+                    Status = ChainTxAttemptStatus.Signed,
+                    BroadcastAt = now,
+                    CreationTime = now,
+                });
+                await dbContext.SaveChangesAsync();
+            }
+
+            await uow.CompleteAsync();
+        }
+
+        try
+        {
+            await gateway.BroadcastTransactionAsync(signed);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (ChainTxSlotCoordinator.IsDeterministicTxRejection(ex))
+            {
+                using var rejectUow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+                var rejectDb = await _dbContextProvider.GetDbContextAsync();
+                await rejectDb.ChainTxAttempts
+                    .Where(a => a.NetworkId == network.Id && a.TxHash == txHash)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(a => a.Status, ChainTxAttemptStatus.Rejected)
+                        .SetProperty(a => a.RawSignedTx, (string?)null));
+                await rejectUow.CompleteAsync();
+            }
+
+            throw;
+        }
+
+        using (var updateUow = UnitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
+        {
+            var updateDb = await _dbContextProvider.GetDbContextAsync();
+            await updateDb.ChainTxAttempts
+                .Where(a => a.NetworkId == network.Id && a.TxHash == txHash)
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, ChainTxAttemptStatus.Broadcasted));
+            await updateUow.CompleteAsync();
+        }
+
+        if (_alerts != null)
+        {
+            await _alerts.RaiseAsync(CollectionConsts.AlertPrefixWithdrawHotWallet,
+                $"管理员清理卡死 Nonce（{input.Target}）",
+                $"操作人 {CurrentUser.UserName ?? "system"} 对 {input.Target}({sender}) nonce={input.Nonce} 发送 0-BNB 自转（Tx={txHash}, GasWei={gasWei}），原因：{input.Reason.Trim()}。");
+        }
+
+        return new PurgeStuckNonceResultDto
+        {
+            Target = input.Target,
+            SenderAddress = sender,
+            Nonce = input.Nonce,
+            GasPriceWei = gasWei.ToString(CultureInfo.InvariantCulture),
+            TxHash = txHash,
+        };
+    }
+
+    private static async Task<WalletNonceInfoDto> BuildNonceInfoAsync(
+        CollectionDbContext dbContext, Guid networkId, IBscChainGateway gateway, string? address)
+    {
+        if (string.IsNullOrEmpty(address))
+        {
+            return new WalletNonceInfoDto { Configured = false };
+        }
+
+        var normalized = address.ToLowerInvariant();
+        var latest = await gateway.GetTransactionCountLatestAsync(normalized);
+        var pending = await gateway.GetTransactionCountAsync(normalized);
+        var code = await gateway.GetCodeAsync(normalized);
+        var attempts = await dbContext.ChainTxAttempts.AsNoTracking()
+            .Where(a => a.NetworkId == networkId && a.SenderAddress == normalized)
+            .OrderByDescending(a => a.CreationTime)
+            .Take(10)
+            .Select(a => new ChainTxAttemptSummaryDto
+            {
+                Purpose = a.Purpose.ToString(),
+                RefId = a.RefId,
+                Nonce = a.Nonce,
+                AttemptNo = a.AttemptNo,
+                TxHash = a.TxHash,
+                GasPriceWei = a.GasPriceWei,
+                Status = a.Status.ToString(),
+                BroadcastAt = a.BroadcastAt,
+            })
+            .ToListAsync();
+
+        return new WalletNonceInfoDto
+        {
+            Configured = true,
+            Address = normalized,
+            LatestNonce = latest,
+            PendingNonce = pending,
+            HasPendingGap = pending > latest,
+            IsDelegated = BscGasPricePolicy.HasDeployedCode(code),
+            RecentAttempts = attempts,
+        };
+    }
+
+    /// <summary>重试广播失败单（有哈希先验回执；无哈希须具备原发送方同 nonce 已被另一笔已完结提现占用的链上证据）。</summary>
     public virtual async Task RetryAsync(Guid id)
     {
         AssertHost();

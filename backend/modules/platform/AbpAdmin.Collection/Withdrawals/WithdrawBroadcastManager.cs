@@ -1,6 +1,7 @@
 using AbpAdmin.Collection.Ledger;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,14 +23,18 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Withdrawals;
 
 /// <summary>
-/// 每轮先查在途交易，再处理小额自动审核和待广播订单。发送前保存原发送地址和 nonce。
-/// 有哈希的订单每轮查回执，无哈希的订单超时后按原发送方与 nonce 核对。
-/// 只有失败回执或另一笔已完结提现占用同一发送方的 nonce，才自动重试或退款。
+/// 提现广播与卡单恢复管理器：每轮依次执行回执确认/卡单仲裁、小额自动审与待广播出款。
+/// 发送前在 AccountSlot 锁内通过 AllocateSerialNonceAsync 单调分配 nonce 并预落库 ColChainTxAttempts，
+/// 按 RetryCount 抬价（热钱包 BNB 不足拒绝静默压价）；Broadcasting 阶段全候选查回执并支持同 nonce
+/// 3 分钟卡死队头加价替换（allowSiblingAttemptHash）；无哈希超时先查本地签名尝试，再按原发送方与 nonce 仲裁。
 /// </summary>
 public class WithdrawBroadcastManager : DomainService
 {
     /// <summary>签名临界区（进程内串行；跨实例由 worker 的 Redis 轮锁兜底）。</summary>
     private static readonly SemaphoreSlim SignGate = new(1, 1);
+
+    /// <summary>提现队头未出块时同 nonce 抬价替换等待期。</summary>
+    internal static readonly TimeSpan WithdrawHeadReplaceAfter = TimeSpan.FromMinutes(3);
 
     private readonly IDbContextProvider<CollectionDbContext> _dbContextProvider;
     private readonly ISettingProvider _settings;
@@ -134,7 +139,7 @@ public class WithdrawBroadcastManager : DomainService
 
         var tokenCache = new Dictionary<CollectionCurrency, ColToken>();
 
-        // ① 有哈希的 Broadcasting：每轮查回执（正常完结路径就在这，不等超时）
+        // ① 有哈希的 Broadcasting：每轮全候选查回执；长期未出块则对热钱包队头同 nonce 抬价替换
         var withHash = await dbContext.WithdrawOrders.AsNoTracking()
             .Where(o => o.Status == WithdrawStatus.Broadcasting && o.TxHash != null && o.NetworkName == network.Name)
             .OrderBy(o => o.StatusChangedAt)
@@ -145,30 +150,101 @@ public class WithdrawBroadcastManager : DomainService
         {
             try
             {
-                var receipt = await gateway.GetTransactionReceiptAsync(order.TxHash!, ct);
-                if (receipt.Status is not (0 or 1))
+                var attempts = order.NonceUsed is long usedNonce && WithdrawManager.HasBroadcastSender(order)
+                    ? await ChainTxSlotCoordinator.LoadSlotAttemptsAsync(
+                        dbContext, network.Id, ChainTxPurpose.WithdrawPayout, order.Id, usedNonce, ct)
+                    : new List<ColChainTxAttempt>();
+
+                var candidates = new List<string>();
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (seen.Add(order.TxHash!))
+                {
+                    candidates.Add(order.TxHash!);
+                }
+
+                foreach (var a in attempts)
+                {
+                    if (!string.IsNullOrEmpty(a.TxHash) && seen.Add(a.TxHash))
+                    {
+                        candidates.Add(a.TxHash);
+                    }
+                }
+
+                string? winningHash = null;
+                TransactionReceipt? winningReceipt = null;
+                foreach (var candidateHash in candidates)
+                {
+                    var candReceipt = await gateway.GetTransactionReceiptAsync(candidateHash, ct);
+                    if (candReceipt.Status is 0 or 1)
+                    {
+                        winningHash = candidateHash.ToLowerInvariant();
+                        winningReceipt = candReceipt;
+                        break;
+                    }
+                }
+
+                if (winningReceipt == null || winningHash == null)
                 {
                     if (_clock.Now - order.StatusChangedAt > TimeSpan.FromMinutes(timeoutMinutes * 3))
                     {
                         await MarkFailedAsync(order, WithdrawStatus.Broadcasting, "已记录交易哈希但长期未获取回执，需核实链上结果");
+                        continue;
                     }
 
+                    await TryReplaceStuckWithdrawHeadAsync(network, gateway, order, attempts, tokenCache, ct);
                     continue;
                 }
 
-                if (receipt.Status == 1)
+                var winningAttempt = attempts.FirstOrDefault(a =>
+                    string.Equals(a.TxHash, winningHash, StringComparison.OrdinalIgnoreCase));
+                var fallbackGasWei = winningAttempt?.GasPriceWei;
+
+                if (winningReceipt.Status == 1)
                 {
-                    await CompleteFromReceiptAsync(order.Id, order.TxHash!, order);
-                }
-                else if (order.RetryCount + 1 >= maxRetries)
-                {
-                    // 回执失败（revert）= 链上可证未出款：自动退款终态，不等人
-                    await AutoRefundAsync(order, WithdrawStatus.Broadcasting,
-                        $"链上回执失败且重试次数用尽（RetryCount={order.RetryCount}），自动退款");
+                    using (var settleUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
+                    {
+                        var settleDb = await _dbContextProvider.GetDbContextAsync();
+                        await ChainTxSlotCoordinator.MarkSlotSettledAsync(
+                            settleDb, network.Id, ChainTxPurpose.WithdrawPayout, order.Id,
+                            order.NonceUsed, winningHash, ChainTxAttemptStatus.Confirmed, ct);
+                        await settleUow.CompleteAsync(ct);
+                    }
+
+                    await ChainGasFeeRecorder.TryRecordAsync(
+                        _unitOfWorkManager, _dbContextProvider, _clock,
+                        network.Id, ChainTxPurpose.WithdrawPayout, order.Id,
+                        winningHash, winningReceipt, fallbackGasPriceWei: fallbackGasWei,
+                        fallbackSenderAddress: order.BroadcastSenderAddress, ct);
+                    var isSiblingHash = !string.Equals(winningHash, order.TxHash, StringComparison.OrdinalIgnoreCase);
+                    await CompleteFromReceiptAsync(order.Id, winningHash, order, allowSiblingAttemptHash: isSiblingHash);
                 }
                 else
                 {
-                    await RequeueToProcessingAsync(order, WithdrawStatus.Broadcasting, "链上回执失败，重试", ct);
+                    using (var settleUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
+                    {
+                        var settleDb = await _dbContextProvider.GetDbContextAsync();
+                        await ChainTxSlotCoordinator.MarkSlotSettledAsync(
+                            settleDb, network.Id, ChainTxPurpose.WithdrawPayout, order.Id,
+                            order.NonceUsed, winningHash, ChainTxAttemptStatus.Reverted, ct);
+                        await settleUow.CompleteAsync(ct);
+                    }
+
+                    await ChainGasFeeRecorder.TryRecordAsync(
+                        _unitOfWorkManager, _dbContextProvider, _clock,
+                        network.Id, ChainTxPurpose.WithdrawPayout, order.Id,
+                        winningHash, winningReceipt, fallbackGasPriceWei: fallbackGasWei,
+                        fallbackSenderAddress: order.BroadcastSenderAddress, ct);
+
+                    if (order.RetryCount + 1 >= maxRetries)
+                    {
+                        // 回执失败（revert）= 链上可证未出款：自动退款终态，不等人
+                        await AutoRefundAsync(order, WithdrawStatus.Broadcasting,
+                            $"链上回执失败且重试次数用尽（RetryCount={order.RetryCount}），自动退款");
+                    }
+                    else
+                    {
+                        await RequeueToProcessingAsync(order, WithdrawStatus.Broadcasting, "链上回执失败，重试", ct);
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -256,6 +332,29 @@ public class WithdrawBroadcastManager : DomainService
         ColWithdrawOrder order, ColToken token, string sender,
         IBscChainGateway gateway, CancellationToken ct)
     {
+        // 先核对广播前落库的 ColChainTxAttempts（无需外部浏览器即可认领原尝试）
+        if (order.NonceUsed is long usedNonce)
+        {
+            var dbContext = await _dbContextProvider.GetDbContextAsync();
+            var attempts = await dbContext.ChainTxAttempts.AsNoTracking()
+                .Where(a => a.Purpose == ChainTxPurpose.WithdrawPayout
+                            && a.RefId == order.Id
+                            && a.Nonce == usedNonce
+                            && a.SenderAddress == sender.ToLowerInvariant())
+                .OrderByDescending(a => a.AttemptNo)
+                .ToListAsync(ct);
+            foreach (var attempt in attempts)
+            {
+                var attemptReceipt = await gateway.GetTransactionReceiptAsync(attempt.TxHash, ct);
+                if (attemptReceipt.Status is 0 or 1 && await TryWriteBroadcastHashAsync(order, attempt.TxHash, ct))
+                {
+                    Logger.LogInformation("提现单 {OrderId} 凭本地签名尝试认领哈希（nonce {Nonce} → {TxHash}）",
+                        order.Id, usedNonce, attempt.TxHash);
+                    return AdoptResult.Adopted;
+                }
+            }
+        }
+
         var head = await gateway.GetLatestBlockNumberAsync(ct);
         var fromBlock = Math.Max(0, head - 43_200); // 超出查找窗口的订单保留人工核对路径。
         var page = 1;
@@ -368,7 +467,8 @@ public class WithdrawBroadcastManager : DomainService
 
     /// <summary>交易核对通过后同事务完结订单和出款账本，重复提交相同完结哈希直接返回。</summary>
     public virtual async Task CompleteFromReceiptAsync(
-        Guid orderId, string txHash, ColWithdrawOrder? verifiedAttempt = null, bool attachVerifiedHash = false)
+        Guid orderId, string txHash, ColWithdrawOrder? verifiedAttempt = null,
+        bool attachVerifiedHash = false, bool allowSiblingAttemptHash = false)
     {
         if (attachVerifiedHash && (verifiedAttempt?.Id != orderId || verifiedAttempt.TxHash != null))
         {
@@ -393,7 +493,28 @@ public class WithdrawBroadcastManager : DomainService
             return;
         }
 
-        var expectedHash = attachVerifiedHash ? null : txHash;
+        string? expectedHash = attachVerifiedHash ? null : txHash;
+        if (allowSiblingAttemptHash && verifiedAttempt != null && verifiedAttempt.TxHash != null
+            && !string.Equals(verifiedAttempt.TxHash, txHash, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!verifiedAttempt.NonceUsed.HasValue)
+            {
+                throw new BusinessException(CollectionErrorCodes.WithdrawReceiptMismatch);
+            }
+
+            var siblingValid = await dbContext.ChainTxAttempts.AsNoTracking().AnyAsync(a =>
+                a.Purpose == ChainTxPurpose.WithdrawPayout
+                && a.RefId == orderId
+                && a.Nonce == verifiedAttempt.NonceUsed.Value
+                && a.TxHash == txHash);
+            if (!siblingValid)
+            {
+                throw new BusinessException(CollectionErrorCodes.WithdrawReceiptMismatch);
+            }
+
+            expectedHash = verifiedAttempt.TxHash;
+        }
+
         var eligible = dbContext.WithdrawOrders.Where(o => o.Id == orderId && o.TxHash == expectedHash
             && (o.Status == WithdrawStatus.Broadcasting || o.Status == WithdrawStatus.BroadcastFailed));
         if (verifiedAttempt != null)
@@ -609,15 +730,92 @@ public class WithdrawBroadcastManager : DomainService
                     .WithData("Reason", "提现钱包地址与签名密钥不匹配");
             }
 
-            var nonce = await gateway.GetTransactionCountAsync(sender, ct);
-            if (!await ClaimBroadcastAttemptAsync(order, sender, nonce, ct))
+            var latestNonce = await gateway.GetTransactionCountLatestAsync(sender, ct);
+            var pendingNonce = await gateway.GetTransactionCountAsync(sender, ct);
+            var networkGasWei = await gateway.GetGasPriceWeiAsync(ct);
+            var desiredGasWei = BscGasPricePolicy.ApplyBump(networkGasWei, order.RetryCount);
+            var hotBnbWei = BscGasPricePolicy.EtherToWei(await gateway.GetBnbBalanceAsync(sender, ct));
+            var affordableGasWei = BscGasPricePolicy.CapToAffordable(
+                desiredGasWei, hotBnbWei, BscGasPricePolicy.Erc20TransferGasLimit);
+            if (affordableGasWei <= 0 || desiredGasWei > affordableGasWei)
             {
-                return;
+                await _alerts.RaiseAsync(null, "提现热钱包 BNB 不足",
+                    $"热钱包 {sender} 当前 BNB 不足以按期望 gasPrice={desiredGasWei} wei 广播提现单 {order.Id}（RetryCount={order.RetryCount}），已停止广播（拒绝静默压价）。");
+                throw new BusinessException(CollectionErrorCodes.HotWalletGasShort)
+                    .WithData("DesiredGasPriceWei", desiredGasWei.ToString(CultureInfo.InvariantCulture))
+                    .WithData("AffordableGasPriceWei", affordableGasWei.ToString(CultureInfo.InvariantCulture));
             }
 
             var dataHex = SweepManager.BuildErc20TransferData(order.ToAddress, order.ActualAmount, token.Decimals);
-            var txHash = (await gateway.SendTransactionAsync(
-                privateKey, token.ContractAddress, dataHex, "0x0", network.ChainId, nonce, ct)).ToLowerInvariant();
+            long nonce;
+            SignedChainTransaction signed;
+            string txHash;
+            using (var claimUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
+            {
+                var claimDb = await _dbContextProvider.GetDbContextAsync();
+                await ChainTxSlotCoordinator.LockAccountSlotAsync(claimDb, token.NetworkId, sender, ct);
+                nonce = await ChainTxSlotCoordinator.AllocateSerialNonceAsync(
+                    claimDb, token.NetworkId, network.Name, sender, latestNonce, pendingNonce, ct);
+
+                var claimNow = _clock.Now;
+                var queued = claimDb.WithdrawOrders.Where(o => o.Status == WithdrawStatus.Processing);
+                var claimed = await WithdrawManager.MatchBroadcastAttempt(queued, order)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(o => o.Status, WithdrawStatus.Broadcasting)
+                        .SetProperty(o => o.StatusChangedAt, claimNow)
+                        .SetProperty(o => o.NonceUsed, nonce)
+                        .SetProperty(o => o.BroadcastSenderAddress, sender)
+                        .SetProperty(o => o.BroadcastAt, claimNow)
+                        .SetProperty(o => o.FailReason, (string?)null), ct);
+                if (claimed == 0)
+                {
+                    return;
+                }
+
+                signed = await gateway.PrepareTransactionAsync(
+                    privateKey, token.ContractAddress, dataHex, "0x0", network.ChainId, nonce, desiredGasWei, ct);
+                txHash = signed.Hash.ToLowerInvariant();
+                if (!await claimDb.ChainTxAttempts.AsNoTracking().AnyAsync(a => a.NetworkId == token.NetworkId && a.TxHash == txHash, ct))
+                {
+                    var attemptId = LazyServiceProvider != null ? GuidGenerator.Create() : Guid.NewGuid();
+                    claimDb.ChainTxAttempts.Add(new ColChainTxAttempt(attemptId)
+                    {
+                        NetworkId = token.NetworkId,
+                        Purpose = ChainTxPurpose.WithdrawPayout,
+                        RefId = order.Id,
+                        SenderAddress = sender,
+                        ToAddress = token.ContractAddress.ToLowerInvariant(),
+                        Nonce = nonce,
+                        AttemptNo = order.RetryCount + 1,
+                        TxHash = txHash,
+                        GasPriceWei = desiredGasWei.ToString(CultureInfo.InvariantCulture),
+                        GasLimit = BscGasPricePolicy.Erc20TransferGasLimit,
+                        RawSignedTx = signed.RawHex,
+                        Status = ChainTxAttemptStatus.Signed,
+                        BroadcastAt = claimNow,
+                        CreationTime = claimNow,
+                    });
+                    await claimDb.SaveChangesAsync(ct);
+                }
+
+                await claimUow.CompleteAsync(ct);
+            }
+
+            try
+            {
+                await gateway.BroadcastTransactionAsync(signed, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (ChainTxSlotCoordinator.IsDeterministicTxRejection(ex))
+                {
+                    await MarkWithdrawAttemptStatusAsync(token.NetworkId, txHash, ChainTxAttemptStatus.Rejected, ct);
+                }
+
+                throw;
+            }
+
+            await MarkWithdrawAttemptStatusAsync(token.NetworkId, txHash, ChainTxAttemptStatus.Broadcasted, ct);
             order.NonceUsed = nonce;
             order.BroadcastSenderAddress = sender;
             if (!await TryWriteBroadcastHashAsync(order, txHash, ct))
@@ -627,8 +825,8 @@ public class WithdrawBroadcastManager : DomainService
                 return;
             }
 
-            Logger.LogInformation("提现单 {OrderId} 已广播 {Actual} {Currency} → {To}（{TxHash}）",
-                order.Id, order.ActualAmount, order.Currency, order.ToAddress, txHash);
+            Logger.LogInformation("提现单 {OrderId} 已广播 {Actual} {Currency} → {To}（{TxHash}, Nonce={Nonce}, RetryCount={Retry}, GasWei={GasWei}）",
+                order.Id, order.ActualAmount, order.Currency, order.ToAddress, txHash, nonce, order.RetryCount, desiredGasWei);
         }
         finally
         {
@@ -636,23 +834,195 @@ public class WithdrawBroadcastManager : DomainService
         }
     }
 
-    private async Task<bool> ClaimBroadcastAttemptAsync(ColWithdrawOrder order, string sender, long nonce, CancellationToken ct)
+    private async Task TryReplaceStuckWithdrawHeadAsync(
+        ColNetwork network, IBscChainGateway gateway, ColWithdrawOrder order,
+        List<ColChainTxAttempt> attempts, Dictionary<CollectionCurrency, ColToken> tokenCache, CancellationToken ct)
     {
-        // 发送结果可能未知，必须先提交发送地址和 nonce，才能在恢复时识别原尝试。
-        using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
-        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        if (await IsHaltedAsync()
+            || !WithdrawManager.HasBroadcastSender(order)
+            || !order.BroadcastAt.HasValue)
+        {
+            return;
+        }
+
         var now = _clock.Now;
-        var queued = dbContext.WithdrawOrders.Where(o => o.Status == WithdrawStatus.Processing);
-        var rows = await WithdrawManager.MatchBroadcastAttempt(queued, order)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(o => o.Status, WithdrawStatus.Broadcasting)
-                .SetProperty(o => o.StatusChangedAt, now)
-                .SetProperty(o => o.NonceUsed, nonce)
-                .SetProperty(o => o.BroadcastSenderAddress, sender)
-                .SetProperty(o => o.BroadcastAt, now)
-                .SetProperty(o => o.FailReason, (string?)null), ct);
-        await uow.CompleteAsync(ct);
-        return rows > 0;
+        var lastActiveAttemptAt = attempts
+            .Where(a => a.Status != ChainTxAttemptStatus.Rejected)
+            .Select(a => (DateTime?)a.BroadcastAt)
+            .FirstOrDefault() ?? order.BroadcastAt.Value;
+        var lastWasRejected = attempts.Count > 0 && attempts[0].Status == ChainTxAttemptStatus.Rejected;
+        if (!lastWasRejected && now - lastActiveAttemptAt < WithdrawHeadReplaceAfter)
+        {
+            return;
+        }
+        if (now - order.BroadcastAt.Value < WithdrawHeadReplaceAfter)
+        {
+            return;
+        }
+
+        if (attempts.Count >= BscGasPricePolicy.MaxBumpSteps + 1)
+        {
+            return;
+        }
+
+        var wallet = await _guard.LoadAsync(ct);
+        var sender = order.BroadcastSenderAddress!;
+        if (wallet == null || !string.Equals(wallet.Address, sender, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var nonce = order.NonceUsed!.Value;
+        var latestNonce = await gateway.GetTransactionCountLatestAsync(sender, ct);
+        if (latestNonce != nonce)
+        {
+            return;
+        }
+
+        if (!tokenCache.TryGetValue(order.Currency, out var token))
+        {
+            var dbContext = await _dbContextProvider.GetDbContextAsync();
+            tokenCache[order.Currency] = token = await FindTokenAsync(dbContext, network, order.Currency, ct);
+        }
+
+        await SignGate.WaitAsync(ct);
+        try
+        {
+            if (await IsHaltedAsync())
+            {
+                return;
+            }
+
+            var masterKey = await _chainKeyProvider.GetAsync();
+            if (masterKey == null)
+            {
+                return;
+            }
+
+            var privateKey = wallet.DecryptKey(masterKey, _encryptor);
+            var derived = new Nethereum.Signer.EthECKey(privateKey).GetPublicAddress();
+            if (!string.Equals(derived, sender, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var networkGasWei = await gateway.GetGasPriceWeiAsync(ct);
+            var maxAttemptNo = attempts.Count > 0 ? attempts.Max(a => a.AttemptNo) : Math.Max(1, order.RetryCount + 1);
+            var bumpSteps = Math.Min(BscGasPricePolicy.MaxBumpSteps, Math.Max(1, maxAttemptNo));
+            var prevGasWei = (await gateway.GetTransactionGasPriceWeiAsync(order.TxHash!, ct)) ?? System.Numerics.BigInteger.Zero;
+            foreach (var a in attempts)
+            {
+                var aWei = BscGasPricePolicy.ParseWeiOrZero(a.GasPriceWei);
+                if (aWei > prevGasWei)
+                {
+                    prevGasWei = aWei;
+                }
+            }
+
+            var desiredGasWei = BscGasPricePolicy.ReplacementGasWei(
+                BscGasPricePolicy.ApplyBump(networkGasWei, bumpSteps), prevGasWei);
+            var hotBnbWei = BscGasPricePolicy.EtherToWei(await gateway.GetBnbBalanceAsync(sender, ct));
+            var affordableGasWei = BscGasPricePolicy.CapToAffordable(
+                desiredGasWei, hotBnbWei, BscGasPricePolicy.Erc20TransferGasLimit);
+            if (affordableGasWei <= 0 || desiredGasWei > affordableGasWei)
+            {
+                await _alerts.RaiseAsync(null, "提现热钱包 BNB 不足无法加速",
+                    $"热钱包 {sender} 当前 BNB 不足以对提现单 {order.Id}（nonce={nonce}）按 {desiredGasWei} wei 同 nonce 加速，请补充 BNB。");
+                return;
+            }
+
+            var dataHex = SweepManager.BuildErc20TransferData(order.ToAddress, order.ActualAmount, token.Decimals);
+            SignedChainTransaction replacement;
+            string replaceHash;
+            var oldHash = order.TxHash!;
+            bool reserved;
+            using (var replaceUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true))
+            {
+                var replaceDb = await _dbContextProvider.GetDbContextAsync();
+                await ChainTxSlotCoordinator.LockAccountSlotAsync(replaceDb, token.NetworkId, sender, ct);
+                var stillBroadcasting = await WithdrawManager.MatchBroadcastAttempt(
+                        replaceDb.WithdrawOrders.Where(o => o.Status == WithdrawStatus.Broadcasting), order)
+                    .AnyAsync(ct);
+                if (!stillBroadcasting)
+                {
+                    return;
+                }
+
+                replacement = await gateway.PrepareTransactionAsync(
+                    privateKey, token.ContractAddress, dataHex, "0x0", network.ChainId, nonce, desiredGasWei, ct);
+                replaceHash = replacement.Hash.ToLowerInvariant();
+                if (!await replaceDb.ChainTxAttempts.AsNoTracking().AnyAsync(a => a.NetworkId == token.NetworkId && a.TxHash == replaceHash, ct))
+                {
+                    var attemptId = LazyServiceProvider != null ? GuidGenerator.Create() : Guid.NewGuid();
+                    replaceDb.ChainTxAttempts.Add(new ColChainTxAttempt(attemptId)
+                    {
+                        NetworkId = token.NetworkId,
+                        Purpose = ChainTxPurpose.WithdrawPayout,
+                        RefId = order.Id,
+                        SenderAddress = sender,
+                        ToAddress = token.ContractAddress.ToLowerInvariant(),
+                        Nonce = nonce,
+                        AttemptNo = maxAttemptNo + 1,
+                        TxHash = replaceHash,
+                        GasPriceWei = desiredGasWei.ToString(CultureInfo.InvariantCulture),
+                        GasLimit = BscGasPricePolicy.Erc20TransferGasLimit,
+                        RawSignedTx = replacement.RawHex,
+                        Status = ChainTxAttemptStatus.Signed,
+                        BroadcastAt = now,
+                        CreationTime = now,
+                    });
+                    await replaceDb.SaveChangesAsync(ct);
+                }
+
+                reserved = true;
+                await replaceUow.CompleteAsync(ct);
+            }
+
+            if (!reserved)
+            {
+                return;
+            }
+
+            try
+            {
+                await gateway.BroadcastTransactionAsync(replacement, ct);
+                using var commitUow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+                var commitDb = await _dbContextProvider.GetDbContextAsync();
+                await ChainTxSlotCoordinator.LockAccountSlotAsync(commitDb, token.NetworkId, sender, ct);
+                var updated = await WithdrawManager.MatchBroadcastAttempt(
+                        commitDb.WithdrawOrders.Where(o => o.Status == WithdrawStatus.Broadcasting), order)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(o => o.TxHash, replaceHash)
+                        .SetProperty(o => o.BroadcastAt, now), ct);
+                if (updated > 0)
+                {
+                    await commitDb.ChainTxAttempts
+                        .Where(a => a.NetworkId == token.NetworkId && a.TxHash == replaceHash)
+                        .ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, ChainTxAttemptStatus.Broadcasted), ct);
+                    await commitDb.ChainTxAttempts
+                        .Where(a => a.NetworkId == token.NetworkId && a.TxHash == oldHash)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(a => a.Status, ChainTxAttemptStatus.Replaced)
+                            .SetProperty(a => a.RawSignedTx, (string?)null), ct);
+                }
+                await commitUow.CompleteAsync(ct);
+                Logger.LogWarning(
+                    "提现单 {OrderId} 队头超时，已同 nonce={Nonce} 抬价替换（{OldHash} -> {NewHash}, GasWei={GasWei}）",
+                    order.Id, nonce, oldHash, replaceHash, desiredGasWei);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (ChainTxSlotCoordinator.IsDeterministicTxRejection(ex))
+                {
+                    await MarkWithdrawAttemptStatusAsync(token.NetworkId, replaceHash, ChainTxAttemptStatus.Rejected, ct);
+                }
+                Logger.LogWarning(ex, "提现单 {OrderId} 同 nonce 加速广播异常（{Hash}），保留原单待下轮重抬档", order.Id, replaceHash);
+            }
+        }
+        finally
+        {
+            SignGate.Release();
+        }
     }
 
     // ── 管理端补救路径（BroadcastFailed 单）─────────────────────────────────────────────
@@ -764,6 +1134,28 @@ public class WithdrawBroadcastManager : DomainService
     private async Task<bool> IsHaltedAsync()
     {
         return await _settings.IsTrueAsync(CollectionSettings.Withdraw.Halt);
+    }
+
+    private async Task MarkWithdrawAttemptStatusAsync(
+        Guid networkId, string txHash, ChainTxAttemptStatus status, CancellationToken ct)
+    {
+        using var uow = _unitOfWorkManager.Begin(requiresNew: true, isTransactional: true);
+        var dbContext = await _dbContextProvider.GetDbContextAsync();
+        var normalizedHash = txHash.ToLowerInvariant();
+        var clearRaw = status is ChainTxAttemptStatus.Confirmed or ChainTxAttemptStatus.Reverted or ChainTxAttemptStatus.Replaced or ChainTxAttemptStatus.Rejected;
+        var query = dbContext.ChainTxAttempts.Where(a => a.NetworkId == networkId && a.TxHash == normalizedHash);
+        if (clearRaw)
+        {
+            await query.ExecuteUpdateAsync(s => s
+                .SetProperty(a => a.Status, status)
+                .SetProperty(a => a.RawSignedTx, (string?)null), ct);
+        }
+        else
+        {
+            await query.ExecuteUpdateAsync(s => s.SetProperty(a => a.Status, status), ct);
+        }
+
+        await uow.CompleteAsync(ct);
     }
 
 }
