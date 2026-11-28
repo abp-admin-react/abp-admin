@@ -190,6 +190,15 @@ public class SweepWorker : CollectionChainWorkerBase
         var gasAlertThreshold = await settings.GetDecimalAsync(
             CollectionSettings.Chain.GasBnbAlertThreshold, ChainDefaults.GasBnbAlertThreshold);
 
+        try
+        {
+            await sweepManager.RunSponsorHeadWatchdogAsync(network, gateway, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "Gas Sponsor 队头看门狗执行异常，继续执行各代币归集");
+        }
+
         foreach (var token in tokens)
         {
             ct.ThrowIfCancellationRequested();
