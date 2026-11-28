@@ -75,7 +75,7 @@ public static class CollectionSettings
         /// <summary>归集每轮每阶段最多处理的任务数，超过安全上限时钳制。</summary>
         public const string SweepTaskBatchSize = Prefix + ".Chain.SweepTaskBatchSize";
 
-        /// <summary>打油单笔 BNB 上限（超过按仅人工失败，防配置错误烧币）。</summary>
+        /// <summary>打油单笔 BNB 上限（超过时保持 Fueling 延后并告警，待 gas 回落后自动恢复）。</summary>
         public const string FuelBnbLimit = Prefix + ".Chain.FuelBnbLimit";
 
         /// <summary>Gas 地址 BNB 告警阈值。</summary>
@@ -162,6 +162,9 @@ public static class CollectionSettings
 
         /// <summary>提现总闸（true = 紧急停机：拒绝提交与全部审批）。默认 false。</summary>
         public const string Halt = Prefix + ".Withdraw.Halt";
+
+        /// <summary>热钱包监控检测到已确认未匹配出账或安全块余额核对缺口时自动触发停机总闸（未确认区仅预警不拉闸；默认 false）。</summary>
+        public const string AutoHaltOnAnomaly = Prefix + ".Withdraw.AutoHaltOnAnomaly";
 
         /// <summary>广播超时（分钟）：Broadcasting 超时进卡单恢复。默认 30。</summary>
         public const string BroadcastTimeoutMinutes = Prefix + ".Withdraw.BroadcastTimeoutMinutes";

@@ -101,5 +101,21 @@ public class ColNetwork : BasicAggregateRoot<Guid>
 
     public DateTime? SweepStuckAlertedAt { get; set; }
 
+    // ── Gas Sponsor 无主卡池队头看门狗持久化状态（跨 Pod / 重启共享时间线）──────────
+
+    public long? SponsorWatchHeadNonce { get; set; }
+
+    public DateTime? SponsorWatchStuckSince { get; set; }
+
+    public DateTime? SponsorWatchLastSeenPendingAt { get; set; }
+
+    public DateTime? SponsorWatchLastReplaceAt { get; set; }
+
+    public int SponsorWatchReplaceAttempts { get; set; }
+
+    public bool SponsorWatchGaveUp { get; set; }
+
+    public DateTime? SponsorWatchGaveUpAt { get; set; }
+
     public DateTime CreationTime { get; set; }
 }

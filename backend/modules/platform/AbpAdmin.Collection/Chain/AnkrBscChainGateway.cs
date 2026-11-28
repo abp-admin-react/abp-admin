@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -89,15 +90,21 @@ public class AnkrBscChainGateway : IBscChainGateway
         return Convert.ToInt64(result!.Value.GetString()!, 16);
     }
 
-    public async Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> GetTransferLogsAsync(
+    public Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> GetTransferLogsAsync(
         string contractAddress, long fromBlock, long toBlock, CancellationToken ct = default)
+        => GetFilteredTransferLogsAsync(contractAddress, null, null, fromBlock, toBlock, ct);
+
+    public async Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> GetFilteredTransferLogsAsync(
+        string contractAddress, string? fromAddress, string? toAddress, long fromBlock, long toBlock,
+        CancellationToken ct = default)
     {
+        var topics = BuildTransferTopics(fromAddress, toAddress);
         var parameters = new Dictionary<string, object>
         {
             ["fromBlock"] = ToHex(fromBlock),
             ["toBlock"] = ToHex(toBlock),
             ["address"] = contractAddress,
-            ["topics"] = new object[] { TransferTopic },
+            ["topics"] = topics,
         };
 
         JsonElement result;
@@ -123,6 +130,14 @@ public class AnkrBscChainGateway : IBscChainGateway
             var blockNumber = Convert.ToInt64(log.GetProperty("blockNumber").GetString()![2..], 16);
             if (ParseRpcTransfer(log, txHash, blockNumber) is { } transfer)
             {
+                if (fromAddress != null && !string.Equals(transfer.From, fromAddress, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                if (toAddress != null && !string.Equals(transfer.To, toAddress, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 logs.Add(transfer);
             }
         }
@@ -137,6 +152,25 @@ public class AnkrBscChainGateway : IBscChainGateway
         }
 
         return (logs, complete);
+    }
+
+    private static object?[] BuildTransferTopics(string? fromAddress, string? toAddress)
+    {
+        var fromTopic = string.IsNullOrWhiteSpace(fromAddress)
+            ? null
+            : "0x" + fromAddress.Trim().ToLowerInvariant().TrimStart('0', 'x').PadLeft(64, '0');
+        var toTopic = string.IsNullOrWhiteSpace(toAddress)
+            ? null
+            : "0x" + toAddress.Trim().ToLowerInvariant().TrimStart('0', 'x').PadLeft(64, '0');
+        if (toTopic != null)
+        {
+            return [TransferTopic, fromTopic, toTopic];
+        }
+        if (fromTopic != null)
+        {
+            return [TransferTopic, fromTopic];
+        }
+        return [TransferTopic];
     }
 
     public async Task<AddressTransferPage> GetTransfersForAddressAsync(
@@ -370,6 +404,12 @@ public class AnkrBscChainGateway : IBscChainGateway
         return Convert.ToInt64(result!.Value.GetString()!, 16);
     }
 
+    public async Task<long> GetTransactionCountLatestAsync(string address, CancellationToken ct = default)
+    {
+        var result = await RpcAsync("eth_getTransactionCount", new object[] { address, "latest" }, ct);
+        return Convert.ToInt64(result!.Value.GetString()!, 16);
+    }
+
     public async Task<long?> GetTransactionCountAtBlockAsync(string address, long block, CancellationToken ct = default)
     {
         var result = await RpcAsync("eth_getTransactionCount", new object[] { address, $"0x{block:x}" }, ct);
@@ -403,7 +443,26 @@ public class AnkrBscChainGateway : IBscChainGateway
             throw new ChainRpcException("节点返回的交易回执缺少有效的哈希、区块号或状态。");
         }
 
-        return new TransactionReceipt(txHash, block, (int)status);
+        var gasUsed = TryReadOptionalHexBigInteger(value, "gasUsed");
+        var effectivePrice = TryReadOptionalHexBigInteger(value, "effectiveGasPrice")
+                             ?? TryReadOptionalHexBigInteger(value, "gasPrice");
+        return new TransactionReceipt(txHash, block, (int)status, gasUsed, effectivePrice);
+    }
+
+    private static BigInteger? TryReadOptionalHexBigInteger(JsonElement obj, string field)
+    {
+        if (!obj.TryGetProperty(field, out var prop) || prop.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var text = prop.GetString();
+        if (string.IsNullOrWhiteSpace(text) || !text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return HexStringToBigInteger(text);
     }
 
     private static bool TryReadReceiptQuantity(JsonElement receipt, string field, out long quantity)
@@ -423,6 +482,59 @@ public class AnkrBscChainGateway : IBscChainGateway
     public Task<long?> GetTransactionNonceForSenderAsync(string txHash, string sender, CancellationToken ct = default)
         => ReadTransactionNonceAsync(txHash, sender, ct);
 
+    public async Task<BigInteger?> GetTransactionGasPriceWeiAsync(string txHash, CancellationToken ct = default)
+    {
+        var result = await RpcAsync("eth_getTransactionByHash", new object[] { txHash }, ct);
+        if (result is null || result.Value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var priceHex = result.Value.TryGetProperty("gasPrice", out var price) && price.ValueKind == JsonValueKind.String
+            ? price.GetString()
+            : null;
+        return string.IsNullOrWhiteSpace(priceHex) ? null : HexStringToBigInteger(priceHex);
+    }
+
+    public async Task<ChainCallSimulationResult> SimulateCallAsync(
+        string from, string to, string dataHex, CancellationToken ct = default)
+    {
+        try
+        {
+            var result = await RpcAsync(
+                "eth_call",
+                new object[] { new Dictionary<string, string> { ["from"] = from, ["to"] = to, ["data"] = dataHex }, "latest" },
+                ct);
+            if (result is not { ValueKind: JsonValueKind.String } value || value.GetString() is not { } hex)
+            {
+                return ChainCallSimulationResult.Indeterminate("eth_call returned non-string result.");
+            }
+
+            if (hex is "" or "0x")
+            {
+                return ChainCallSimulationResult.Succeeded;
+            }
+
+            if (hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase) && hex.Length >= 66)
+            {
+                var decoded = HexStringToBigInteger(hex);
+                return decoded.IsZero
+                    ? ChainCallSimulationResult.Revert("ERC20 transfer returned false.")
+                    : ChainCallSimulationResult.Succeeded;
+            }
+
+            return ChainCallSimulationResult.Succeeded;
+        }
+        catch (ChainRpcException ex) when (IsExecutionRevert(ex))
+        {
+            return ChainCallSimulationResult.Revert(ex.RpcErrorMessage ?? ex.Message);
+        }
+        catch (Exception ex) when (ex is ChainRpcException or HttpRequestException or JsonException)
+        {
+            return ChainCallSimulationResult.Indeterminate(ex.Message);
+        }
+    }
+
     private async Task<long?> ReadTransactionNonceAsync(string txHash, string? expectedSender, CancellationToken ct)
     {
         var result = await RpcAsync("eth_getTransactionByHash", new object[] { txHash }, ct);
@@ -441,46 +553,65 @@ public class AnkrBscChainGateway : IBscChainGateway
         return nonceHex is null ? null : Convert.ToInt64(nonceHex.Substring(2), 16);
     }
 
-    public async Task<string> SendTransactionAsync(
+    public Task<string> SendTransactionAsync(
         string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
         CancellationToken ct = default)
+        => SendTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, gasPriceWei: null, ct);
+
+    public async Task<string> SendTransactionAsync(
+        string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
+        BigInteger? gasPriceWei, CancellationToken ct = default)
     {
-        var transaction = await PrepareTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, ct);
+        var transaction = await PrepareTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, gasPriceWei, ct);
         await BroadcastTransactionAsync(transaction, ct);
         return transaction.Hash;
     }
 
-    public async Task<SignedChainTransaction> PrepareTransactionAsync(
+    public Task<SignedChainTransaction> PrepareTransactionAsync(
         string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
         CancellationToken ct = default)
-    {
-        var gasPriceHex = (await RpcAsync("eth_gasPrice", Array.Empty<object>(), ct))!.Value.GetString()!;
+        => PrepareTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, gasPriceWei: null, ct);
 
-        // 原生转账使用 21,000 gas，带调用数据的代币交易预留 100,000 gas。
+    public async Task<SignedChainTransaction> PrepareTransactionAsync(
+        string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
+        BigInteger? gasPriceWei, CancellationToken ct = default)
+    {
+        var effectiveGasWei = gasPriceWei ?? await GetGasPriceWeiAsync(ct);
+        var gasLimit = string.IsNullOrEmpty(dataHex)
+            ? BscGasPricePolicy.NativeTransferGasLimit
+            : BscGasPricePolicy.Erc20TransferGasLimit;
+
         var signer = new Nethereum.Signer.LegacyTransactionSigner();
         var keyBytes = new Nethereum.Signer.EthECKey(privateKey).GetPrivateKeyAsBytes();
         var raw = signer.SignTransaction(
             keyBytes,
-            new System.Numerics.BigInteger(chainId),
+            new BigInteger(chainId),
             to,
             HexStringToBigInteger(valueWei),
-            new System.Numerics.BigInteger(nonce),
-            HexStringToBigInteger(gasPriceHex),
-            HexStringToBigInteger(string.IsNullOrEmpty(dataHex) ? "0x5208" : "0x186A0"),
+            new BigInteger(nonce),
+            effectiveGasWei,
+            new BigInteger(gasLimit),
             dataHex ?? "");
 
         var rawHex = raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? raw[2..] : raw;
         var hash = Nethereum.Util.Sha3Keccack.Current.CalculateHash(Convert.FromHexString(rawHex));
-        return new SignedChainTransaction("0x" + Convert.ToHexStringLower(hash), "0x" + rawHex);
+        return new SignedChainTransaction("0x" + Convert.ToHexStringLower(hash), "0x" + rawHex, effectiveGasWei, gasLimit);
     }
 
     public async Task BroadcastTransactionAsync(SignedChainTransaction transaction, CancellationToken ct = default)
     {
-        var result = await RpcAsync("eth_sendRawTransaction", new object[] { transaction.RawHex }, ct);
-        if (result is not { ValueKind: JsonValueKind.String } hash
-            || !string.Equals(hash.GetString(), transaction.Hash, StringComparison.OrdinalIgnoreCase))
+        try
         {
-            throw new ChainRpcException("节点未确认已签名交易的哈希，发送结果需通过回执核对。");
+            var result = await RpcAsync("eth_sendRawTransaction", new object[] { transaction.RawHex }, ct);
+            if (result is not { ValueKind: JsonValueKind.String } hash
+                || !string.Equals(hash.GetString(), transaction.Hash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ChainRpcException("节点未确认已签名交易的哈希，发送结果需通过回执核对。");
+            }
+        }
+        catch (ChainRpcException ex) when (IsTxAlreadyKnown(ex))
+        {
+            _logger.LogDebug("节点反馈交易已在内存池中（{Hash}）：{Message}", transaction.Hash, ex.RpcErrorMessage);
         }
     }
 
@@ -488,6 +619,76 @@ public class AnkrBscChainGateway : IBscChainGateway
     {
         var result = await RpcAsync("eth_gasPrice", Array.Empty<object>(), ct);
         return HexWeiToEther(result!.Value.GetString()!) * 1_000_000_000m;
+    }
+
+    public async Task<BigInteger> GetGasPriceWeiAsync(CancellationToken ct = default)
+    {
+        var result = await RpcAsync("eth_gasPrice", Array.Empty<object>(), ct);
+        return HexStringToBigInteger(result!.Value.GetString()!);
+    }
+
+    public async Task<string> GetCodeAsync(string address, CancellationToken ct = default)
+    {
+        var result = await RpcAsync("eth_getCode", new object[] { address, "latest" }, ct);
+        return result?.ValueKind == JsonValueKind.String ? (result.Value.GetString() ?? "0x") : "0x";
+    }
+
+    public async Task<(bool Confirmed, string Code, bool Disagreement)> VerifyDeployedCodeAsync(
+        string address, CancellationToken ct = default)
+    {
+        var (primaryIdx, firstCode) = await GetCodeFromFirstHealthyEndpointAsync(address, ct);
+        if (!BscGasPricePolicy.HasDeployedCode(firstCode))
+        {
+            return (false, firstCode, false);
+        }
+
+        if (_rpcEndpoints.Length >= 2)
+        {
+            for (var offset = 1; offset < _rpcEndpoints.Length; offset++)
+            {
+                var idx = (primaryIdx + offset) % _rpcEndpoints.Length;
+                try
+                {
+                    var second = await RpcOnceAsync(_rpcEndpoints[idx], "eth_getCode", new object[] { address, "latest" }, ct);
+                    var secondCode = second?.ValueKind == JsonValueKind.String ? (second.Value.GetString() ?? "0x") : "0x";
+                    return BscGasPricePolicy.HasDeployedCode(secondCode)
+                        ? (true, firstCode, false)
+                        : (false, firstCode, true);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "eth_getCode 备用节点 #{Idx} 复核失败，尝试下一节点", idx);
+                }
+            }
+        }
+
+        // 仅单节点可用时，执行第二次独立 eth_getCode 复核，避免单次畸形/抖动响应误拉闸
+        var retryResult = await RpcOnceAsync(_rpcEndpoints[primaryIdx], "eth_getCode", new object[] { address, "latest" }, ct);
+        var retryCode = retryResult?.ValueKind == JsonValueKind.String ? (retryResult.Value.GetString() ?? "0x") : "0x";
+        return BscGasPricePolicy.HasDeployedCode(retryCode)
+            ? (true, firstCode, false)
+            : (false, firstCode, true);
+    }
+
+    private async Task<(int EndpointIdx, string Code)> GetCodeFromFirstHealthyEndpointAsync(
+        string address, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < _rpcEndpoints.Length; attempt++)
+        {
+            var idx = (_rpcStart + attempt) % _rpcEndpoints.Length;
+            try
+            {
+                var result = await RpcOnceAsync(_rpcEndpoints[idx], "eth_getCode", new object[] { address, "latest" }, ct);
+                var code = result?.ValueKind == JsonValueKind.String ? (result.Value.GetString() ?? "0x") : "0x";
+                return (idx, code);
+            }
+            catch (Exception ex) when (IsKeyWorthRotating(ex) && attempt < _rpcEndpoints.Length - 1)
+            {
+                _logger.LogWarning("RPC key#{Idx} 调 eth_getCode 时额度不足或认证失败，切下一把", idx);
+            }
+        }
+
+        throw new InvalidOperationException("unreachable: eth_getCode 端点轮换循环必然 return 或上抛");
     }
 
     // ── JSON-RPC 通道（多 key 轮换）───────────────────────────────────────────────────────
@@ -535,13 +736,16 @@ public class AnkrBscChainGateway : IBscChainGateway
         var root = doc.RootElement;
         if (root.TryGetProperty("error", out var error))
         {
-            var isKeyError = error.ValueKind == JsonValueKind.Object
+            var errMessage = error.ValueKind == JsonValueKind.Object
                 && error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String
-                && IsQuotaOrAuthMessage(message.GetString());
-            var code = error.ValueKind == JsonValueKind.Object
+                ? message.GetString()
+                : null;
+            var isKeyError = IsQuotaOrAuthMessage(errMessage);
+            int? errCode = error.ValueKind == JsonValueKind.Object
                 && error.TryGetProperty("code", out var value) && value.ValueKind == JsonValueKind.Number
-                && value.TryGetInt32(out var number) ? number.ToString(System.Globalization.CultureInfo.InvariantCulture) : "未知";
-            throw new ChainRpcException($"{method}: 节点拒绝请求（错误码 {code}）。", isKeyError);
+                && value.TryGetInt32(out var number) ? number : null;
+            var codeLabel = errCode?.ToString(CultureInfo.InvariantCulture) ?? "未知";
+            throw new ChainRpcException($"{method}: 节点拒绝请求（错误码 {codeLabel}）。", isKeyError, errCode, errMessage);
         }
 
         // 返回值需要独立于即将释放的 JsonDocument。
@@ -583,6 +787,34 @@ public class AnkrBscChainGateway : IBscChainGateway
                || message.Contains("missing api key", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool IsTxAlreadyKnown(Exception ex)
+    {
+        var msg = ex is ChainRpcException cre ? cre.RpcErrorMessage ?? cre.Message : ex.Message;
+        return msg.Contains("already known", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("known transaction", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsReplacementUnderpriced(Exception ex)
+    {
+        var msg = ex is ChainRpcException cre ? cre.RpcErrorMessage ?? cre.Message : ex.Message;
+        return msg.Contains("underpriced", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsExecutionRevert(ChainRpcException ex)
+    {
+        if (ex.RpcErrorCode == 3)
+        {
+            return true;
+        }
+
+        var msg = ex.RpcErrorMessage ?? ex.Message;
+        return msg.Contains("revert", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("insufficient balance", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("exceeds balance", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("paused", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("blacklist", StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── 规整工具 ─────────────────────────────────────────────────────────────────────────
 
     internal static string ToHex(long value) => "0x" + value.ToString("x");
@@ -616,14 +848,19 @@ public class AnkrBscChainGateway : IBscChainGateway
 /// <summary>节点报错（getLogs 限流/超时等）——按游标纪律当「没读完」处理。</summary>
 public class ChainRpcException : Exception
 {
-    public ChainRpcException(string message) : this(message, isKeyError: false)
+    public ChainRpcException(string message) : this(message, isKeyError: false, rpcErrorCode: null, rpcErrorMessage: null)
     {
     }
 
-    internal ChainRpcException(string message, bool isKeyError) : base(message)
+    internal ChainRpcException(string message, bool isKeyError, int? rpcErrorCode = null, string? rpcErrorMessage = null)
+        : base(message)
     {
         IsKeyError = isKeyError;
+        RpcErrorCode = rpcErrorCode;
+        RpcErrorMessage = rpcErrorMessage;
     }
 
     internal bool IsKeyError { get; }
+    internal int? RpcErrorCode { get; }
+    internal string? RpcErrorMessage { get; }
 }

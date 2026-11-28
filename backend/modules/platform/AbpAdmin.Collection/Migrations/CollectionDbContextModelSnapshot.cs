@@ -278,6 +278,73 @@ namespace AbpAdmin.Collection.Migrations
                     b.ToTable("ColChainApiKeys", (string)null);
                 });
 
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColChainTxAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptNo")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("BroadcastAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("CreationTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("GasLimit")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("GasPriceWei")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<Guid>("NetworkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Nonce")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Purpose")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RawSignedTx")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("RefId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SenderAddress")
+                        .IsRequired()
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ToAddress")
+                        .IsRequired()
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
+
+                    b.Property<string>("TxHash")
+                        .IsRequired()
+                        .HasMaxLength(66)
+                        .HasColumnType("character varying(66)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NetworkId", "TxHash")
+                        .IsUnique();
+
+                    b.HasIndex("NetworkId", "SenderAddress", "Nonce");
+
+                    b.HasIndex("Purpose", "RefId", "AttemptNo");
+
+                    b.ToTable("ColChainTxAttempts", (string)null);
+                });
+
             modelBuilder.Entity("AbpAdmin.Collection.Entities.ColCollection", b =>
                 {
                     b.Property<Guid>("Id")
@@ -592,6 +659,60 @@ namespace AbpAdmin.Collection.Migrations
                     b.ToTable("ColDepositOrders", (string)null);
                 });
 
+            modelBuilder.Entity("AbpAdmin.Collection.Entities.ColGasFeeLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("BlockNumber")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreationTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("EffectiveGasPriceWei")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<decimal>("FeeBnb")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<long>("GasUsed")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("NetworkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Purpose")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("RefId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SenderAddress")
+                        .IsRequired()
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
+
+                    b.Property<string>("TxHash")
+                        .IsRequired()
+                        .HasMaxLength(66)
+                        .HasColumnType("character varying(66)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NetworkId", "CreationTime");
+
+                    b.HasIndex("NetworkId", "TxHash")
+                        .IsUnique();
+
+                    b.HasIndex("Purpose", "CreationTime");
+
+                    b.ToTable("ColGasFeeLogs", (string)null);
+                });
+
             modelBuilder.Entity("AbpAdmin.Collection.Entities.ColHotWalletTxn", b =>
                 {
                     b.Property<Guid>("Id")
@@ -682,6 +803,20 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.Property<DateTime>("CreationTime")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("LastCheckpointAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastCheckpointBalanceRaw")
+                        .HasMaxLength(96)
+                        .HasColumnType("character varying(96)");
+
+                    b.Property<long?>("LastCheckpointBlock")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("LastCheckpointWalletAddress")
+                        .HasMaxLength(42)
+                        .HasColumnType("character varying(42)");
 
                     b.Property<string>("LastError")
                         .HasMaxLength(512)
@@ -778,6 +913,27 @@ namespace AbpAdmin.Collection.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<DateTime?>("ScanHeartbeatAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("SponsorWatchGaveUp")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("SponsorWatchGaveUpAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<long?>("SponsorWatchHeadNonce")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("SponsorWatchLastReplaceAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("SponsorWatchLastSeenPendingAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("SponsorWatchReplaceAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SponsorWatchStuckSince")
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<DateTime?>("SweepHeartbeatAt")
@@ -889,15 +1045,31 @@ namespace AbpAdmin.Collection.Migrations
                     b.Property<DateTime>("CreationTime")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<long?>("DiscoverCursorBlock")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("FailReason")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
+
+                    b.Property<int>("FuelBumpSteps")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("GasBroadcastAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("GasBumpSteps")
+                        .HasColumnType("integer");
 
                     b.Property<long?>("GasNonceUsed")
                         .HasColumnType("bigint");
 
                     b.Property<string>("GasSignedTransaction")
                         .HasColumnType("text");
+
+                    b.Property<string>("GasTxGasPriceWei")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("GasTxHash")
                         .HasMaxLength(66)
@@ -911,6 +1083,9 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.Property<long?>("NonceUsed")
                         .HasColumnType("bigint");
+
+                    b.Property<int>("PreflightDeficitCount")
+                        .HasColumnType("integer");
 
                     b.PrimitiveCollection<string[]>("PreviousTxHashes")
                         .HasColumnType("text[]");
@@ -926,6 +1101,10 @@ namespace AbpAdmin.Collection.Migrations
 
                     b.Property<DateTime>("StatusChangedAt")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("SweepTxGasPriceWei")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<Guid>("TokenId")
                         .HasColumnType("uuid");
@@ -949,6 +1128,9 @@ namespace AbpAdmin.Collection.Migrations
                     b.HasIndex("AddressId", "TokenId")
                         .IsUnique()
                         .HasFilter("\"Status\" IN (1, 2)");
+
+                    b.HasIndex("NetworkId", "Status")
+                        .HasFilter("\"Status\" = 1 AND \"GasTxHash\" IS NOT NULL");
 
                     b.HasIndex("Status", "StatusChangedAt");
 

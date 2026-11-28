@@ -41,7 +41,7 @@ public class ColSweepTask : BasicAggregateRoot<Guid>
 
     public SweepTaskStatus Status { get; set; }
 
-    /// <summary>Failed 时：可再试（冷却后自动拉回）或仅人工（打油超上限、换算失败）。</summary>
+    /// <summary>Failed 时：true = 冷却后自动回 Queued 重试；false = 仅人工核查（模拟 revert、连续多轮代币不足、换算溢出或单据金额失配）。</summary>
     public bool Retryable { get; set; }
 
     public string? FailReason { get; set; }
@@ -61,7 +61,7 @@ public class ColSweepTask : BasicAggregateRoot<Guid>
     /// <summary>归集交易所在块（确认数计算基准）。</summary>
     public long? TxBlockNumber { get; set; }
 
-    /// <summary>打油的 BNB 交易哈希（排障用）。</summary>
+    /// <summary>当前在途或已确认胜出的打油 BNB 交易哈希。</summary>
     public string? GasTxHash { get; set; }
 
     /// <summary>已签名的 BNB 转账，在确认前可原样重播，不包含签名私钥。</summary>
@@ -72,6 +72,27 @@ public class ColSweepTask : BasicAggregateRoot<Guid>
 
     /// <summary>在发送打油交易前保存 nonce，响应丢失时使用原 nonce。</summary>
     public long? GasNonceUsed { get; set; }
+
+    /// <summary>已签名的归集重签抬价档位（0 = 首笔跟节点价；每次同 nonce 替换签名时 +1）。</summary>
+    public int GasBumpSteps { get; set; }
+
+    /// <summary>打油重签/替换抬价档位。</summary>
+    public int FuelBumpSteps { get; set; }
+
+    /// <summary>当前打油交易的广播时间（用于判断 3 分钟队头替换）。</summary>
+    public DateTime? GasBroadcastAt { get; set; }
+
+    /// <summary>当前打油交易的 gasPrice（wei 十进制串，替换时用于保证至少 +10%+1 wei）。</summary>
+    public string? GasTxGasPriceWei { get; set; }
+
+    /// <summary>当前归集交易的 gasPrice（wei 十进制串，替换时用于保证至少 +10%+1 wei）。</summary>
+    public string? SweepTxGasPriceWei { get; set; }
+
+    /// <summary>链上归集发现（discover）分页断点区块。</summary>
+    public long? DiscoverCursorBlock { get; set; }
+
+    /// <summary>连续安全块预检代币余额不足次数（达阈值才转人工失败，防负载节点视图滞后误判）。</summary>
+    public int PreflightDeficitCount { get; set; }
 
     /// <summary>
     /// 当前签名尝试的提交时刻，在调用广播前保存。用于计算重签宽限期。

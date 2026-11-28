@@ -55,6 +55,10 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
     public DbSet<ColHotWalletWatchState> HotWalletWatchStates { get; set; } = default!;
 
+    public DbSet<ColChainTxAttempt> ChainTxAttempts { get; set; } = default!;
+
+    public DbSet<ColGasFeeLog> GasFeeLogs { get; set; } = default!;
+
     public CollectionDbContext(DbContextOptions<CollectionDbContext> options)
         : base(options)
     {
@@ -244,6 +248,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
             b.Property(x => x.TxHash).HasMaxLength(66);
             b.Property(x => x.BroadcastVaultAddress).HasMaxLength(42);
             b.Property(x => x.GasTxHash).HasMaxLength(66);
+            b.Property(x => x.GasTxGasPriceWei).HasMaxLength(40);
+            b.Property(x => x.SweepTxGasPriceWei).HasMaxLength(40);
             b.Property(x => x.FailReason).HasMaxLength(CollectionConsts.MaxNoteLength);
 
             // 同址同币同时最多一个未完成任务（Queued 的可合并；这里锁的是「激活后」的独占，
@@ -256,6 +262,8 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
                 .HasFilter("\"Status\" IN (1, 2)");
             b.HasIndex(x => new { x.Status, x.StatusChangedAt });
             b.HasIndex(x => new { x.TokenId, x.Status, x.LastProcessedAt });
+            b.HasIndex(x => new { x.NetworkId, x.Status })
+                .HasFilter("\"Status\" = 1 AND \"GasTxHash\" IS NOT NULL");
         });
 
         builder.Entity<ColVaultCheck>(b =>
@@ -367,8 +375,40 @@ public class CollectionDbContext : AbpDbContext<CollectionDbContext>
 
             b.Property(x => x.Symbol).IsRequired().HasMaxLength(16);
             b.Property(x => x.LastError).HasMaxLength(CollectionConsts.MaxNoteLength);
+            b.Property(x => x.LastCheckpointWalletAddress).HasMaxLength(42);
+            b.Property(x => x.LastCheckpointBalanceRaw).HasMaxLength(96);
 
             b.HasIndex(x => x.TokenId).IsUnique();
+        });
+
+        builder.Entity<ColChainTxAttempt>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "ChainTxAttempts");
+            b.ConfigureByConvention();
+
+            b.Property(x => x.SenderAddress).IsRequired().HasMaxLength(42);
+            b.Property(x => x.ToAddress).IsRequired().HasMaxLength(42);
+            b.Property(x => x.TxHash).IsRequired().HasMaxLength(66);
+            b.Property(x => x.GasPriceWei).IsRequired().HasMaxLength(40);
+
+            b.HasIndex(x => new { x.NetworkId, x.TxHash }).IsUnique();
+            b.HasIndex(x => new { x.Purpose, x.RefId, x.AttemptNo });
+            b.HasIndex(x => new { x.NetworkId, x.SenderAddress, x.Nonce });
+        });
+
+        builder.Entity<ColGasFeeLog>(b =>
+        {
+            b.ToTable(CollectionConsts.DbTablePrefix + "GasFeeLogs");
+            b.ConfigureByConvention();
+
+            b.Property(x => x.TxHash).IsRequired().HasMaxLength(66);
+            b.Property(x => x.SenderAddress).IsRequired().HasMaxLength(42);
+            b.Property(x => x.EffectiveGasPriceWei).IsRequired().HasMaxLength(40);
+            b.Property(x => x.FeeBnb).HasPrecision(28, 18);
+
+            b.HasIndex(x => new { x.NetworkId, x.TxHash }).IsUnique();
+            b.HasIndex(x => new { x.Purpose, x.CreationTime });
+            b.HasIndex(x => new { x.NetworkId, x.CreationTime });
         });
     }
 }

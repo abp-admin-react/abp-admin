@@ -60,17 +60,17 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
             W(CollectionSettings.Withdraw.MaxDailyCount, DefMaxDailyCount),
             W(CollectionSettings.Withdraw.AutoApproveMaxAmount, DefAutoApproveMaxAmount),
             S(CollectionSettings.Withdraw.Halt),
+            S(CollectionSettings.Withdraw.AutoHaltOnAnomaly),
             W(CollectionSettings.Withdraw.BroadcastTimeoutMinutes, DefBroadcastTimeoutMinutes),
             W(CollectionSettings.Withdraw.MaxRetries, DefMaxRetries),
             W(CollectionSettings.Withdraw.HotWalletUsdtFloor, DefHotWalletUsdtFloor),
             W(CollectionSettings.Withdraw.MinHotWalletBnb, DefMinHotWalletBnb),
 
             // 链上 worker 参数热改（宿主配置迁移）：数值/阈值参数在设置页管理（热改免重启）；
-            // 资金面开关族（扫链/归集/热钱包监控/提现总开关/提现总闸 Halt）不进设置页——
-            // 高危杠杆改由域权限端点把守（Halt 与 Enabled 同拦一条付币管线，同权限位治理；
-            // 布尔闸门渲染成自由文本框还有敲 "True" 静默不拉闸的 fail-open 面）
-            //（SetChainSwitchesAsync=Network.Admin / SetWithdrawEnabledAsync=WithdrawAdmin——
-            // 通用 AbpAdmin.SettingUi.Update 挡不住烧 Gas/付币开关），worker 照旧每轮热读。
+            // 资金面开关族（扫链/归集/热钱包监控/提现总开关/停机总闸 Halt/异常自动停机 AutoHaltOnAnomaly）不进设置页——
+            // 高危杠杆改由域权限端点把守（SetChainSwitchesAsync=Network.Admin；
+            // SetWithdrawEnabledAsync/SetWithdrawHaltAsync/SetWithdrawAutoHaltOnAnomalyAsync=WithdrawAdmin——
+            // 避免通用 AbpAdmin.SettingUi.Update 改写或文本输入产生 fail-open 风险），worker 照旧每轮热读。
             W(CollectionSettings.Withdraw.BroadcastIntervalSeconds, DefBroadcastIntervalSeconds),
             W(CollectionSettings.Withdraw.BroadcastBatchSize, DefBroadcastBatchSize),
             W(CollectionSettings.Withdraw.AutoApproveBatchSize, DefAutoApproveBatchSize),
@@ -161,8 +161,7 @@ public class CollectionSettingDefinitionProvider : SettingDefinitionProvider
     /// <summary>
     /// 布尔资金闸门定义（无 UI——不进设置页）：默认 "false"（fail-closed，垃圾值解析为关），
     /// 读侧 worker/提交闸每轮热读；写侧走域权限管理端点（SetChainSwitchesAsync=Network.Admin；
-    /// SetWithdrawEnabledAsync/SetWithdrawHaltAsync=WithdrawAdmin——资金面高危杠杆
-    /// 不交给通用 AbpAdmin.SettingUi.Update 权限）。
+    /// SetWithdrawEnabledAsync/SetWithdrawHaltAsync/SetWithdrawAutoHaltOnAnomalyAsync=WithdrawAdmin）。
     /// </summary>
     private static SettingDefinition S(string key)
     {
