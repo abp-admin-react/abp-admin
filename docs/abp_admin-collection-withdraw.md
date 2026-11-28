@@ -14,21 +14,20 @@ Cancelled(6)                                    │              回执失败(�
 Pending ──拒绝──→ Rejected(4)                    └── 发送异常（结果未知）──→ 保持 Broadcasting 无哈希
 BroadcastFailed ──重试(验回执/双花门)──→ Processing
 BroadcastFailed ──退款拒绝──→ Rejected（净额+手续费退回可用）
-无哈希超时 ──pending nonce ≤ NonceUsed（可证未出款）──→ 自动回 Processing 重播 / 超限自动退款→ Rejected
-无哈希超时 ──pending nonce > NonceUsed（在途/已挖）──→ Etherscan 认领哈希 → 回执路径完结
+无哈希超时 ──其他已完结提现占用同 sender nonce（可证未出款）──→ 自动回 Processing 重播（RetryCount+1）/ 超限自动退款→ Rejected
+无哈希超时 ──本地 ColChainTxAttempts / Etherscan 核实 nonce（在途/已挖）──→ 认领哈希 → 回执路径完结
 ```
 
 - 所有迁移 CAS 条件 UPDATE，0 行 = `WithdrawInvalidStatus`。
-- **无人工的自动仲裁（无哈希超时）**：nonce 在发送**前**落库（NonceUsed）——发送结果未知时，
-  用「热钱包 pending nonce vs NonceUsed」可证明地判定钱是否出去：
-  - `pending ≤ NonceUsed` → 交易从未进 mempool（或已被节点丢弃）＝**可证未出款**：
-    未超重试上限自动回 Processing 重播（新 nonce）；超限**自动退款**终态（净额+手续费回可用，告警留痕）。
-  - `pending > NonceUsed` → 交易在途/已挖：按热钱包出站转账（from/to/金额）从 Etherscan 扫回
-    哈希**认领**，交给正常回执路径完结；挖出会被扫到、被丢弃则 pending 回落进上一分支——自动收敛。
+- **无人工的自动仲裁（无哈希超时）**：发送**前**在 `ColWithdrawOrders` 提交 `BroadcastSenderAddress` + `NonceUsed` 并在 `ColChainTxAttempts` 落库签名尝试（`GasPriceWei`/`RawSignedTx`）：
+  - 若同发送方同一 `NonceUsed` 已被**另一笔已完结（`Completed`）提现**占用＝**可证未出款**：
+    未超重试上限自动回 Processing 重播（新 nonce，并按 `RetryCount` 抬升 gas）；超限**自动退款**终态（净额+手续费回可用，告警留痕）。
+  - 优先核对本地 `ColChainTxAttempts` 回执，未命中再通过 Etherscan/地址扫描按 `(from, to, ActualAmount, NonceUsed)` 核验并认领哈希，交给正常回执路径完结（绝不仅凭模糊 `pending <= NonceUsed` 重播或退款，防止负载漂移误伤）。
   - 回执失败（revert＝可证未出款）+ 重试用尽 → 同样自动退款。
-  （参考项目 exchange 在此角落是转人工「需人工核查」——本实现用 nonce 判据把人工去掉。）
-- **双花防线**：重试/重播只在「可证未出款」时发生（nonce 未占用或回执 revert）；
-  管理端重试另有「近期已向该地址付款」双花门；nonce 每次广播取热钱包 pending nonce，不复用缓存。
+- **双花与卡池防线**：
+  - 归集打油（`ChainTxSlotCoordinator` 同网 `AccountSlot` 串行 + 3 分钟队头同 nonce +10%+1 wei 加价替换 + `ColNetwork.SponsorWatch*` 持久化 5 分钟无主队头看门狗 + 差额预算超限延后等待回落）、归集转账（超时重签按 `RequiredSweepGasWei` 抬价 + 地址 BNB 不足退回补油绝不静默压价 + 打油前安全块 `balanceOf` / `eth_call` 预模拟与有界链上 `discover` + 连续 3 轮不足才转人工）、提现广播（`AccountSlot` 锁内 `AllocateSerialNonceAsync` 单调分配 + 按 `RetryCount` 抬价 + 3 分钟卡死队头同 nonce 加价替换 + 全候选回执解析与热钱包 BNB 不足拒发）全链路落库 `ColChainTxAttempts` 审计。
+  - 扫链 RPC `eth_getLogs` 对齐 Ankr BSC 硬限制（单块兜底 `topic2` 按 32 地址分批 + 单块内连续 2 次不明确 `-32000` 熔断故障转移；区间限制触发半窗口降载 + AIMD 自适应块窗）。
+  - 管理端重试另有 `HasOtherCompletedAttemptAsync` 证据门；nonce 取值区分单调提现串口（`AccountSlot` + `max(latest, pending, openAttempts)`）与串行打油（`latest` 防负载节点 `pending` 视图漂移）。
 
 ## 余额两桶（ColBalances，M1）
 
@@ -101,6 +100,10 @@ BroadcastFailed ──退款拒绝──→ Rejected（净额+手续费退回可
 
 ## 已知边界（后续里程碑）
 
-- 人工完结只核对哈希+回执状态，金额级核对依赖人工（回执日志不含金额解析）。
-- 三方对账（链上 vs ColBalance vs Fin 投影）归 P1（VaultAudit/BalanceAudit 扩展）。
+- 人工完结优先核对原发送方 `BroadcastSenderAddress`、`NonceUsed` 与链上 ERC20 `Transfer` 金额（未达标拒绝完结）。
+- **Phase 2 + 第一性原理安全加固已落地**：
+  - `HotWalletWatchManager`：入口经 `VerifyDeployedCodeAsync` 多节点/双次复核检查热钱包字节码（防 EIP-7702 委托），确认非空立即触发 `Collection.Withdraw.Halt=true`（节点不一致仅告警不误熔断）；主扫描优先走 RPC `eth_getLogs`、失败或截断回退 Etherscan；支持结合 `ColChainTxAttempts` 自动把迟到回填的 `Anomaly` 流水晋升为 `Matched`；`Self` 自转按净额 0 处理；扫描 `(safeHead, head]` 未确认出站实时预警（仅告警不拉闸）；每 5 分钟在安全块按 `LastCheckpointWalletAddress` 隔离做一次余额 Checkpoint 对账（发现未解释减少即告警）；可选 `Collection.Withdraw.AutoHaltOnAnomaly`（命中已确认未匹配出账或余额缺口自动拉响总闸）。
+  - `SweepManager.RunSponsorHeadWatchdogAsync`：同样经 `VerifyDeployedCodeAsync` 复核 Gas Sponsor 字节码，确认非空或读数不一致均暂停签署自转交易。
+  - `ColGasFeeLogs`：按 `(NetworkId, TxHash)` 幂等记录确认/revert 交易实际消耗的 `GasUsed × EffectiveGasPriceWei` 与 `FeeBnb`（覆盖打油、归集、提现）。
+  - `SetWithdrawVaultAsync` 增加 `ConfirmAddress` 校验、在途 `Broadcasting` 提现拦截、充值地址冲突拦截与 `eth_getCode` 防委托预检；新增 `GetWalletNonceStatusAsync` 与 `PurgeStuckNonceAsync` 管理端卡死队头自转清理逃生舱（按目标取分布式锁、经 `VerifyDeployedCodeAsync` 复核，并默认拒绝顶替活跃 `Fueling`/`Broadcasting` 单，强制覆盖需 `ForceOverrideActiveOwner`，热钱包还须先拉响 `Halt`）。
 - 提现侧用户 API 已备（/api/app/collection-withdraw），用户端 H5 未在本仓库。

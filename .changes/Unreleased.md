@@ -7,6 +7,8 @@
 - **[破坏性]** 角色功能权限改用 `GET/PUT /api/identity/roles/{id}/permissions`。调用方传入打开编辑器时的 `expectedRoleName`，提交增撤差集。旧接口按角色名写入返回 400。
 - 收款与订单核对保留渠道和商户归属，订单作业记录分页位置并独立重扫近七天的充值。资金推送发布时读取已提交授权。升级时轮换所有资金发布与 Hub 节点，使旧会话重新连接。
 - 储备核对保留原始差额，并记录确认区块、核对地址和归集记账时差。既有记录标为“历史记录”。
+- **BSC 热钱包监控 v2 + 防 EIP-7702 委托 + Gas 成本台账（Phase 2 + 加固）**：`HotWalletWatchManager` 升级为 RPC `eth_getLogs` 优先、Etherscan 回退，增加热钱包/Gas Sponsor 多节点复核 `VerifyDeployedCodeAsync` 防 EIP-7702 委托检测（确认命中立即触发 `Withdraw.Halt`，节点不一致告警不误拉闸）、`(safeHead, head]` 未确认出站实时预警、`Self` 自转净额 0 归因、按绑定钱包地址隔离的 5 分钟安全块余额 Checkpoint 对账、迟到 `TxHash` 自动晋升 `Matched` 及可选 `Withdraw.AutoHaltOnAnomaly`；新增 `ColGasFeeLogs` 实耗 Gas 台账；加固 `SetWithdrawVaultAsync`（在途提现/充值地址/合约代码拦截）并新增管理端 `GetWalletNonceStatusAsync` / `PurgeStuckNonceAsync`（带目标锁、复核与在途占位保护）。
+- **BSC 扫链/打油/归集/提现稳定性加固（Phase 1 + 第一性原理槽位协调）**：引入 `ChainTxSlotCoordinator` 账户槽位锁与单调串行 Nonce 分配、`BscGasPricePolicy`（低 gas 下严格递增 + `+10%+1 wei` 同 nonce 替换与 `RequiredSweepGasWei`/`ComputeDeltaFuelWei` 差额打油）、`ColChainTxAttempts` 广播前尝试审计表（全候选回执解析 + `allowSiblingAttemptHash` 完结）；Gas Sponsor 同网串行打油 + 3 分钟队头加价替换 + `ColNetwork.SponsorWatch*` 持久化 5 分钟无主队头看门狗（超限延后等待恢复）；提现队列同 nonce 3 分钟卡死队头加价替换；打油前安全块余额（连续 3 轮缺失才转失败）+ `eth_call` 模拟 + 有界链上 `discover`；以及 Ankr BSC `eth_getLogs` 32 地址分批上限、单块 `-32000` 2 次熔断与 AIMD 自适应扫链窗口。
 
 - 依赖升级：ABP `10.7.0` → `10.7.1`（`Directory.Packages.props` 的 `AbpVersion`），LeptonXLite `5.7.0` → `5.7.1`（主题依赖 `Volo.Abp.* >= 10.7.1`，必须同升）。管理前端 antd lock `6.6.6` → `6.7.0`，`@ant-design/cli` 跟随；`@ant-design/pro-components` 仍钉 `3.1.14-7`。
 
@@ -67,6 +69,9 @@
 | --- | --- | --- |
 | AbpAdmin.Collection | `20261127061041_PersistSweepRecovery` | 保存归集恢复和追扫进度。 |
 | AbpAdmin.Collection | `20261127130322_ReconcileVaultAtConfirmedBlock` | 保存确认区块、金库地址和核对结论。 |
+| AbpAdmin.Collection | `20261128005318_AddChainTxAttemptsAndGasBump` | 新增 `ColChainTxAttempts` 链上尝试轨迹表与 `ColSweepTasks` 抬价/打油时钟/发现断点列。 |
+| AbpAdmin.Collection | `20261128012608_AddGasFeeLogsAndHotWalletCheckpoints` | 新增 `ColGasFeeLogs` Gas 实耗台账表与 `ColHotWalletWatchStates` 5 分钟余额 Checkpoint 列。 |
+| AbpAdmin.Collection | `20261128052938_AddFirstPrinciplesChainHardening` | 新增 `ColNetworks` 看门狗持久化列、`ColSweepTasks` 预检计数列及 `ColHotWalletWatchStates` 核对钱包地址列。 |
 | AbpAdmin.Ordering | `20261127060834_AddCreditRescanBeforeSeq` | 保存订单核对分页和充值重扫位置。 |
 
 ## 配置变更
