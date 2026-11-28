@@ -19,8 +19,9 @@ using Volo.Abp.Uow;
 namespace AbpAdmin.Collection.Chain;
 
 /// <summary>
-/// 每个代币维护自己的游标，初始位置为链头减确认数。完整读取区间后才推进，
-/// 单个区块仍读不全时按地址补查。低于最低金额或超出存储精度的进款记录为终态，不参与归集入账。
+/// 每个代币维护独立游标，初始位置为链头减确认数。完整读取区间后推进游标；
+/// 区间过宽时通过按 (TokenId, ProviderId) 隔离的 AIMD 自适应窗口缩半自愈，单块仍读不全时按地址分批兜底。
+/// 低于最低金额或超出存储精度的进款记录为终态，不参与归集入账。
 /// </summary>
 public class DepositScanManager : DomainService
 {
@@ -38,6 +39,7 @@ public class DepositScanManager : DomainService
     private static readonly Dictionary<Guid, DateTime> SkipRatioAlertedAt = new();
     private static readonly Dictionary<Guid, DateTime> FallbackAlertedAt = new();
     private static readonly ConcurrentDictionary<Guid, DateTime> AllProvidersFailedAlertedAt = new();
+    internal static readonly DepositScanWindowController AdaptiveWindows = new();
 
     public DepositScanManager(
         IDbContextProvider<CollectionDbContext> dbContextProvider,
@@ -197,7 +199,10 @@ public class DepositScanManager : DomainService
                     throw new DepositScanReadException(DepositScanFailure.Stale);
                 }
                 from = cursor + 1;
-                end = Math.Min(safeHead, from + blockRange - 1);
+                var effectiveWindow = AdaptiveWindows.GetWindow(token.Id, provider.Id, blockRange);
+                end = Math.Min(safeHead, from + effectiveWindow - 1);
+                var requestedEnd = end;
+                var requestedWindow = (int)Math.Max(0, requestedEnd - from + 1);
                 readLogs = end >= from;
                 if (!readLogs && safeHead > 0 && (replacingLegacy || failure != null
                     || token.LastScanFailure != null || token.LastScanProvider == null))
@@ -209,6 +214,18 @@ public class DepositScanManager : DomainService
                 }
                 (end, logs) = await ReadProviderWindowAsync(source, token.ContractAddress, watched, from, end,
                     providerBudget.Token);
+                if (readLogs && requestedWindow > 0)
+                {
+                    if (end < requestedEnd)
+                    {
+                        AdaptiveWindows.RecordIncomplete(token.Id, provider.Id, requestedWindow, blockRange);
+                    }
+                    else
+                    {
+                        var completedWindow = (int)(end - from + 1);
+                        AdaptiveWindows.RecordComplete(token.Id, provider.Id, completedWindow, effectiveWindow, blockRange);
+                    }
+                }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
@@ -257,7 +274,10 @@ public class DepositScanManager : DomainService
                     : source;
                 if (replaySource != null)
                 {
-                    await ReplayProviderWindowAsync(replaySource, network, token, dbContext, byAddress, watched, replayFrom,
+                    var replayProviderId = providers.SkipWhile(candidate => candidate.Id != provider.Id).Skip(1)
+                        .FirstOrDefault(candidate => !source.RequiresReconciliation || candidate.Source == replaySource)?.Id
+                        ?? provider.Id;
+                    await ReplayProviderWindowAsync(replaySource, replayProviderId, network, token, dbContext, byAddress, watched, replayFrom,
                         replayTo, blockRange, source.RequiresReconciliation ? confirmations : null, changes, ct);
                 }
             }
@@ -280,7 +300,7 @@ public class DepositScanManager : DomainService
     }
 
     /// <summary>Commits replay progress only after a trusted RPC returns a complete confirmed block range.</summary>
-    private async Task ReplayProviderWindowAsync(IBscDepositScanSource source, ColNetwork network, ColToken token,
+    private async Task ReplayProviderWindowAsync(IBscDepositScanSource source, Guid providerId, ColNetwork network, ColToken token,
         CollectionDbContext dbContext, Dictionary<string, (Guid Id, Guid UserId, int AddressIndex)> byAddress,
         IReadOnlySet<string> watched, long from, long to, int blockRange, int? verifyConfirmations, ChainRecordChanges changes, CancellationToken ct)
     {
@@ -290,7 +310,8 @@ public class DepositScanManager : DomainService
         IReadOnlyList<TokenTransferLog> logs;
         try
         {
-            var target = Math.Min(to, from + blockRange - 1);
+            var effectiveWindow = AdaptiveWindows.GetWindow(token.Id, providerId, blockRange);
+            var target = Math.Min(to, from + effectiveWindow - 1);
             if (verifyConfirmations is int confirmations)
             {
                 var head = await source.GetHeadAsync(replayBudget.Token);
@@ -302,6 +323,14 @@ public class DepositScanManager : DomainService
             }
             (end, logs) = await ReadProviderWindowAsync(source, token.ContractAddress, watched, from,
                 target, replayBudget.Token);
+            if (end < target)
+            {
+                AdaptiveWindows.RecordIncomplete(token.Id, providerId, (int)(target - from + 1), blockRange);
+            }
+            else if (target >= from)
+            {
+                AdaptiveWindows.RecordComplete(token.Id, providerId, (int)(end - from + 1), effectiveWindow, blockRange);
+            }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

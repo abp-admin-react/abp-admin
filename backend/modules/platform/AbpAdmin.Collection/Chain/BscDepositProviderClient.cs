@@ -25,6 +25,9 @@ public sealed class BscDepositProviderClient(IHttpRemoteService http) : ITransie
     private const int MaxPages = 10;
     private const int ReceiptBatchLimit = 16;
 
+    /// <summary>Ankr BSC eth_getLogs topic 数组过滤单次最多 32 个接收地址。</summary>
+    internal const int MaxRpcRecipientBatchSize = 32;
+
     internal async Task<string> ProbeAsync(ChainApiKeyProvider provider, string key, CancellationToken ct)
     {
         try
@@ -118,7 +121,7 @@ public sealed class BscDepositProviderClient(IHttpRemoteService http) : ITransie
         }
         if (Contains(reason, "block range") || Contains(reason, "response size")
             || Contains(reason, "query returned more than") || Contains(reason, "result window")
-            || Contains(reason, "smaller result dataset"))
+            || Contains(reason, "smaller result dataset") || Contains(reason, "request too complex"))
         {
             return DepositScanFailure.RangeIncomplete;
         }
@@ -128,28 +131,39 @@ public sealed class BscDepositProviderClient(IHttpRemoteService http) : ITransie
 
     private static bool Contains(string? value, string text) => value?.Contains(text, StringComparison.OrdinalIgnoreCase) == true;
 
-    private async Task<JsonElement> RpcAsync(string endpoint, string method, object[] parameters, CancellationToken ct)
+    private async Task<JsonElement> RpcAsync(
+        string endpoint, string method, object[] parameters, CancellationToken ct,
+        bool treatInternalErrorAsRangeIncomplete = false)
     {
         var request = PrivateChainEndpointHandler.Post(endpoint)
             .SetJsonContent(new { jsonrpc = "2.0", method, @params = parameters, id = 1 });
-        return RpcResult(await RequestAsync(request, ct));
+        return RpcResult(await RequestAsync(request, ct), treatInternalErrorAsRangeIncomplete);
     }
 
-    private static JsonElement RpcResult(JsonElement response)
+    private static JsonElement RpcResult(JsonElement response, bool treatInternalErrorAsRangeIncomplete = false)
     {
         if (response.TryGetProperty("error", out var error))
         {
             var number = error.ValueKind == JsonValueKind.Object && error.TryGetProperty("code", out var value)
                 && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var code) ? code : 0;
-            throw new DepositScanReadException(number switch
+            var message = ReadString(error, "message");
+            var mapped = number switch
             {
                 -32049 or -32050 or -32051 or -32052 or -32053 or -32054 or -32060 or -32079 or -32080 =>
                     ProviderCredentialStatus.Invalid,
                 -32067 or -32068 or -32069 or -32070 or -32077 or -32090 => DepositScanFailure.Quota,
                 -32062 => DepositScanFailure.RangeIncomplete,
                 -32071 => DepositScanFailure.Timeout,
-                _ => MessageFailure(ReadString(error, "message")),
-            });
+                _ => MessageFailure(message),
+            };
+            if (treatInternalErrorAsRangeIncomplete
+                && mapped == DepositScanFailure.Unavailable
+                && (number == -32000 || Contains(message, "internal server error")))
+            {
+                mapped = DepositScanFailure.RangeIncomplete;
+                throw new DepositScanReadException(mapped, isAmbiguousInternalError: true);
+            }
+            throw new DepositScanReadException(mapped);
         }
         if (ReadString(response, "status") == "0")
         {
@@ -222,6 +236,9 @@ public sealed class BscDepositProviderClient(IHttpRemoteService http) : ITransie
 
     private sealed class RpcSource(BscDepositProviderClient owner, string endpoint, int cap) : IBscDepositScanSource
     {
+        // 单块内连续两次不明确 -32000 熔断：交由上层故障转移到备用服务商，避免退化为 2N 次二分无效请求。
+        private const int MaxSingleBlockInternalErrors = 2;
+
         public bool RequiresReconciliation => false;
 
         public async Task<long> GetHeadAsync(CancellationToken ct)
@@ -239,44 +256,64 @@ public sealed class BscDepositProviderClient(IHttpRemoteService http) : ITransie
         {
             try
             {
-                var logs = await QueryAsync(contract, from, to, [AnkrBscChainGateway.TransferTopic], ct);
+                var canSplit = from < to || watched.Count > 0;
+                var logs = await QueryAsync(contract, from, to, [AnkrBscChainGateway.TransferTopic], canSplit, ct);
                 return logs.Where(log => watched.Contains(log.To)).ToArray();
             }
             catch (DepositScanReadException ex) when (ex.Code == DepositScanFailure.RangeIncomplete && from == to && watched.Count > 0)
             {
                 // A busy single block can still be read completely by querying batches of watched recipients.
                 var matches = new List<TokenTransferLog>();
-                foreach (var addresses in watched.Chunk(64))
+                var internalErrors = new int[1];
+                foreach (var addresses in watched.Chunk(MaxRpcRecipientBatchSize))
                 {
-                    await QueryWatchedBatchAsync(contract, from, addresses, matches, ct);
+                    await QueryWatchedBatchAsync(contract, from, addresses, matches, internalErrors, ct);
                 }
                 return matches;
             }
         }
 
         private async Task QueryWatchedBatchAsync(string contract, long block, string[] addresses,
-            List<TokenTransferLog> matches, CancellationToken ct)
+            List<TokenTransferLog> matches, int[] internalErrors, CancellationToken ct)
         {
             var recipients = addresses.Select(address => "0x" + address[2..].ToLowerInvariant().PadLeft(64, '0')).ToArray();
             try
             {
-                var logs = await QueryAsync(contract, block, block, [AnkrBscChainGateway.TransferTopic, null, recipients], ct);
+                var logs = await QueryAsync(
+                    contract, block, block, [AnkrBscChainGateway.TransferTopic, null, recipients],
+                    treatInternalErrorAsRangeIncomplete: addresses.Length > 1, ct);
                 if (logs.Any(log => !addresses.Contains(log.To, StringComparer.OrdinalIgnoreCase)))
                 {
                     throw new DepositScanReadException(DepositScanFailure.EvidenceInvalid);
                 }
+                internalErrors[0] = 0;
                 matches.AddRange(logs);
             }
-            catch (DepositScanReadException ex) when (ex.Code == DepositScanFailure.RangeIncomplete && addresses.Length > 1)
+            catch (DepositScanReadException ex) when (ex.Code == DepositScanFailure.RangeIncomplete)
             {
-                var middle = addresses.Length / 2;
-                await QueryWatchedBatchAsync(contract, block, addresses[..middle], matches, ct);
-                await QueryWatchedBatchAsync(contract, block, addresses[middle..], matches, ct);
+                if (ex.IsAmbiguousInternalError)
+                {
+                    internalErrors[0]++;
+                    if (addresses.Length <= 1 || internalErrors[0] >= MaxSingleBlockInternalErrors)
+                    {
+                        throw new DepositScanReadException(DepositScanFailure.Unavailable);
+                    }
+                }
+
+                if (addresses.Length > 1)
+                {
+                    var middle = addresses.Length / 2;
+                    await QueryWatchedBatchAsync(contract, block, addresses[..middle], matches, internalErrors, ct);
+                    await QueryWatchedBatchAsync(contract, block, addresses[middle..], matches, internalErrors, ct);
+                    return;
+                }
+
+                throw new DepositScanReadException(DepositScanFailure.Unavailable);
             }
         }
 
         private async Task<TokenTransferLog[]> QueryAsync(string contract, long from, long to, object?[] topics,
-            CancellationToken ct)
+            bool treatInternalErrorAsRangeIncomplete, CancellationToken ct)
         {
             var parameters = new Dictionary<string, object>
             {
@@ -285,7 +322,7 @@ public sealed class BscDepositProviderClient(IHttpRemoteService http) : ITransie
                 ["address"] = contract,
                 ["topics"] = topics,
             };
-            var result = await owner.RpcAsync(endpoint, "eth_getLogs", [parameters], ct);
+            var result = await owner.RpcAsync(endpoint, "eth_getLogs", [parameters], ct, treatInternalErrorAsRangeIncomplete);
             if (result.ValueKind != JsonValueKind.Array)
             {
                 throw new DepositScanReadException(DepositScanFailure.Unavailable);
@@ -424,7 +461,8 @@ internal static class DepositScanFailure
     public const string Stale = "stale";
 }
 
-internal sealed class DepositScanReadException(string code) : Exception(code)
+internal sealed class DepositScanReadException(string code, bool isAmbiguousInternalError = false) : Exception(code)
 {
     public string Code { get; } = code;
+    public bool IsAmbiguousInternalError { get; } = isAmbiguousInternalError;
 }
