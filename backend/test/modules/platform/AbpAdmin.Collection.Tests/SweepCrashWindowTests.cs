@@ -113,6 +113,7 @@ public class SweepCrashWindowTests : CollectionTestBase
         // 任务金额 10 只覆盖第一笔，金额 5 的第二笔应保持 Confirmed。
         var (network, token, addressId, watched) = await SeedAsync();
         var gateway = new FakeChainGateway(head: 500) { HasReceipt = true, ReceiptConfirmationsMet = true };
+        gateway.SeedTokenBalance(token, watched, 15m);
 
         Guid taskId;
         using (var uow = GetRequiredService<IUnitOfWorkManager>().Begin())
@@ -145,6 +146,7 @@ public class SweepCrashWindowTests : CollectionTestBase
         // 链上只转了 10，待结算的进款却合计 15；两笔都应留待人工核对。
         var (network, token, addressId, watched) = await SeedAsync();
         var gateway = new FakeChainGateway(head: 500) { HasReceipt = true, ReceiptConfirmationsMet = true };
+        gateway.SeedTokenBalance(token, watched, 15m);
         gateway.Logs[token.ContractAddress] = new()
         {
             new TokenTransferLog("0xpoisoned", 0, watched, token.VaultAddress!, "10000000000000000000", 400),

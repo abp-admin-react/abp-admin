@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using AbpAdmin.Collection.Balances;
@@ -239,6 +240,8 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         usdt.VaultAddress = "0xvault";
         usdc.VaultAddress = "0xvault";
         var gateway = new FakeChainGateway(head: 500);
+        gateway.SeedTokenBalance(usdt, watched, 20m);
+        gateway.SeedTokenBalance(usdc, watched, 30m);
         gateway.HasReceipt = true; // 广播即有回执（深度不够先不确认）
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
@@ -302,6 +305,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
             ReceiptConfirmationsMet = true,
             SimulatedSweepSender = watched,
         };
+        gateway.SeedTokenBalance(usdt, watched, 50m);
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
         // 直接种 Confirmed 单（绕过多轮次序依赖，只测激活→上限截取→确认入账的金额正确性）
@@ -354,6 +358,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         var first = await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId, status: DepositOrderStatus.Confirmed);
         var tail = await SeedOrderAsync(network.Id, usdt, watched, 100m, addressId, status: DepositOrderStatus.Confirmed);
         var gateway = new FakeChainGateway(head: 500);
+        gateway.SeedTokenBalance(usdt, watched, 120m);
         var scanner = NewScanManager();
         await scanner.RunTokenRoundAsync(network, usdt, gateway, 12, 50, 1440,
             TimeSpan.FromMinutes(1440), 0.9m, CancellationToken.None);
@@ -388,6 +393,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
             ReceiptConfirmationsMet = true,
             SimulatedSweepSender = watched,
         };
+        gateway.SeedTokenBalance(usdt, watched, 50m);
 
         var addressId = await SeedWatchedAddressAsync(await DbAsync(), network.Id, watched);
         var orderId = await SeedOrderAsync(network.Id, usdt, watched, 20m, addressId, userId: healUser);
@@ -1677,6 +1683,7 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
         await admin.ApproveLargeDepositAsync(firstId);
         var taskId = (await ReadOrderAsync(firstId)).SweepTaskId!.Value;
         var gateway = new FakeChainGateway(head: 500);
+        gateway.SeedTokenBalance(token, watched, 45m);
 
         Task RunSweep(IServiceProvider services) => services.GetRequiredService<SweepManager>().WithMasterKey("test-master-key")
             .RunTokenRoundAsync(network, token, gateway, 12, null, 0.005m,
@@ -1889,6 +1896,12 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
     /// <summary>把 PendingConfirm 单推进到 Sweeping（扫链确认→建任务→激活→广播）。</summary>
     private async Task<Guid> ActivateAsync(ColNetwork network, ColToken token, FakeChainGateway gateway, Guid orderId)
     {
+        var order = await ReadOrderAsync(orderId);
+        if (!gateway.TokenBalances.ContainsKey(token.ContractAddress + ":" + order.ToAddress))
+        {
+            gateway.SeedTokenBalance(token, order.ToAddress, order.Amount ?? 0m);
+        }
+
         await NewScanManager().RunTokenRoundAsync(network, token, gateway, 12, 50, 2000,
             TimeSpan.FromMinutes(10), 0.9m, CancellationToken.None);
         var manager = NewSweepManager();
@@ -1941,12 +1954,30 @@ public class ChainAcceptanceTests : CollectionTestBase, IDisposable
 /// </summary>
 public class FakeChainGateway : IBscChainGateway
 {
-    private readonly Dictionary<string, (string To, string DataHex, long Nonce)> _prepared = new();
+    private readonly Dictionary<string, (string To, string DataHex, long Nonce, BigInteger GasPriceWei)> _prepared = new();
     private int _nextTransactionNumber;
 
     public Dictionary<string, List<TokenTransferLog>> Logs { get; } = new();
     public Func<string, string, long, Task>? AfterBroadcast { get; set; }
     public string? SimulatedSweepSender { get; set; }
+
+    public decimal GasPriceGwei { get; set; } = 1m;
+    public long? LatestTxCountSeed { get; set; }
+    public Dictionary<string, BigInteger> TxGasPrices { get; } = new();
+    public Dictionary<string, BigInteger> BroadcastGasPrices { get; } = new();
+    public Func<string, string, string, ChainCallSimulationResult>? OnSimulateCall { get; set; }
+    public Dictionary<string, string> AddressCodes { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public BigInteger? ReceiptGasUsed { get; set; }
+    public BigInteger? ReceiptEffectiveGasPriceWei { get; set; }
+
+    public void SeedTokenBalance(ColToken token, string address, decimal amount)
+    {
+        var raw = string.IsNullOrEmpty(SweepManager.ToRawHex(amount, token.Decimals))
+            ? "0"
+            : BigInteger.Parse("0" + SweepManager.ToRawHex(amount, token.Decimals), System.Globalization.NumberStyles.HexNumber)
+                .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        TokenBalances[token.ContractAddress + ":" + address] = raw;
+    }
 
     public long Head { get; set; }
 
@@ -2051,6 +2082,24 @@ public class FakeChainGateway : IBscChainGateway
         return Task.FromResult(new AddressTransferPage(window, true));
     }
 
+    public async Task<(IReadOnlyList<TokenTransferLog> Logs, bool Complete)> GetFilteredTransferLogsAsync(
+        string contractAddress, string? fromAddress, string? toAddress, long fromBlock, long toBlock,
+        CancellationToken ct = default)
+    {
+        // PageSizeOverlap 用例专门验证 Etherscan tokentx 分页边界重叠与批内去重
+        if (PageSizeOverlap)
+        {
+            return (Array.Empty<TokenTransferLog>(), false);
+        }
+
+        var (logs, complete) = await GetTransferLogsAsync(contractAddress, fromBlock, toBlock, ct);
+        var filtered = logs.Where(l =>
+                (fromAddress == null || string.Equals(l.From, fromAddress, StringComparison.OrdinalIgnoreCase))
+                && (toAddress == null || string.Equals(l.To, toAddress, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        return (filtered, complete);
+    }
+
     /// <summary>地址通道按页重叠一条返回（监控批内去重用例的开关）。</summary>
     public bool PageSizeOverlap { get; set; }
 
@@ -2079,6 +2128,16 @@ public class FakeChainGateway : IBscChainGateway
     public Task<long> GetTransactionCountAsync(string address, CancellationToken ct = default)
         => Task.FromResult(TxCountSeed);
 
+    public Task<long> GetTransactionCountLatestAsync(string address, CancellationToken ct = default)
+        => Task.FromResult(LatestTxCountSeed ?? TxCountSeed);
+
+    public Task<BigInteger?> GetTransactionGasPriceWeiAsync(string txHash, CancellationToken ct = default)
+        => Task.FromResult(TxGasPrices.TryGetValue(txHash, out var wei) ? wei : (BigInteger?)null);
+
+    public Task<ChainCallSimulationResult> SimulateCallAsync(
+        string from, string to, string dataHex, CancellationToken ct = default)
+        => Task.FromResult(OnSimulateCall?.Invoke(from, to, dataHex) ?? ChainCallSimulationResult.Succeeded);
+
     public async Task<TransactionReceipt> GetTransactionReceiptAsync(string txHash, CancellationToken ct = default)
     {
         if (BeforeReceiptRead != null)
@@ -2092,7 +2151,7 @@ public class FakeChainGateway : IBscChainGateway
         }
 
         return HasReceipt && (ReceiptHashes == null || ReceiptHashes.Contains(txHash))
-            ? new TransactionReceipt(txHash, ReceiptBlock(txHash), ReceiptStatusOverride ?? 1)
+            ? new TransactionReceipt(txHash, ReceiptBlock(txHash), ReceiptStatusOverride ?? 1, ReceiptGasUsed, ReceiptEffectiveGasPriceWei)
             : new TransactionReceipt(txHash, null, null);
     }
 
@@ -2114,10 +2173,18 @@ public class FakeChainGateway : IBscChainGateway
     public Task<SignedChainTransaction> PrepareTransactionAsync(
         string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
         CancellationToken ct = default)
+        => PrepareTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, gasPriceWei: null, ct);
+
+    public Task<SignedChainTransaction> PrepareTransactionAsync(
+        string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
+        BigInteger? gasPriceWei, CancellationToken ct = default)
     {
         var hash = "0xfake-" + ++_nextTransactionNumber;
-        _prepared.Add(hash, (to, dataHex, nonce));
-        return Task.FromResult(new SignedChainTransaction(hash, RawHex: hash));
+        var effectiveGasWei = gasPriceWei ?? BscGasPricePolicy.GweiToWei(GasPriceGwei);
+        _prepared.Add(hash, (to, dataHex, nonce, effectiveGasWei));
+        TxGasPrices[hash] = effectiveGasWei;
+        return Task.FromResult(new SignedChainTransaction(hash, RawHex: hash, GasPriceWei: effectiveGasWei,
+            GasLimit: string.IsNullOrEmpty(dataHex) ? BscGasPricePolicy.NativeTransferGasLimit : BscGasPricePolicy.Erc20TransferGasLimit));
     }
 
     public async Task BroadcastTransactionAsync(SignedChainTransaction transaction, CancellationToken ct = default)
@@ -2127,9 +2194,10 @@ public class FakeChainGateway : IBscChainGateway
             await BeforeSend();
         }
 
-        var (to, dataHex, nonce) = _prepared[transaction.Hash];
+        var (to, dataHex, nonce, gasPriceWei) = _prepared[transaction.Hash];
         BroadcastCount++;
         Broadcasts.Add((to, dataHex, nonce, transaction.Hash));
+        BroadcastGasPrices[transaction.Hash] = gasPriceWei;
         if (AfterBroadcast != null)
         {
             await AfterBroadcast(to, dataHex, nonce);
@@ -2139,13 +2207,24 @@ public class FakeChainGateway : IBscChainGateway
     public async Task<string> SendTransactionAsync(
         string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
         CancellationToken ct = default)
+        => await SendTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, gasPriceWei: null, ct);
+
+    public async Task<string> SendTransactionAsync(
+        string privateKey, string to, string dataHex, string valueWei, long chainId, long nonce,
+        BigInteger? gasPriceWei, CancellationToken ct = default)
     {
-        var signed = await PrepareTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, ct);
+        var signed = await PrepareTransactionAsync(privateKey, to, dataHex, valueWei, chainId, nonce, gasPriceWei, ct);
         await BroadcastTransactionAsync(signed, ct);
         return signed.Hash;
     }
 
-    public Task<decimal> GetGasPriceGweiAsync(CancellationToken ct = default) => Task.FromResult(1m);
+    public Task<decimal> GetGasPriceGweiAsync(CancellationToken ct = default) => Task.FromResult(GasPriceGwei);
+
+    public Task<BigInteger> GetGasPriceWeiAsync(CancellationToken ct = default)
+        => Task.FromResult(BscGasPricePolicy.GweiToWei(GasPriceGwei));
+
+    public Task<string> GetCodeAsync(string address, CancellationToken ct = default)
+        => Task.FromResult(AddressCodes.TryGetValue(address, out var code) ? code : "0x");
 
     /// <summary>按哈希的交易 nonce（提现认领校验用；缺省 null = 节点不认识该交易）。</summary>
     public System.Collections.Generic.Dictionary<string, long> TxNonces { get; } = new();

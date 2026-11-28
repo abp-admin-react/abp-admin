@@ -150,6 +150,55 @@ public class BscDepositProviderClientTests
         count.ShouldBe(2);
     }
 
+    [Fact]
+    public async Task Busy_Single_Block_Chunks_Watched_Addresses_By_32_And_Handles_Internal_Server_Error()
+    {
+        var topic2Sizes = new List<int>();
+        var addresses = Enumerable.Range(1, 40)
+            .Select(i => "0x" + i.ToString("x40"))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        using var handler = new Handler(request =>
+        {
+            using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var topics = body.RootElement.GetProperty("params")[0].GetProperty("topics");
+            if (topics.GetArrayLength() == 1)
+            {
+                return Json(new { error = new { code = -32000, message = "internal server error: request too complex" } });
+            }
+
+            topic2Sizes.Add(topics[2].GetArrayLength());
+            return Json(new { result = Array.Empty<object>() });
+        });
+
+        await using var services = CreateServices(handler);
+        var source = new BscDepositProviderClient(services.GetRequiredService<IHttpRemoteService>())
+            .Create(ChainApiKeyProvider.RpcBsc, "key", 1000);
+
+        var logs = await source.ReadLogsAsync(Token, 101, 101, addresses, CancellationToken.None);
+        logs.ShouldBeEmpty();
+        topic2Sizes.ShouldBe(new[] { 32, 8 });
+    }
+
+    [Theory]
+    [InlineData(101, 105, false, DepositScanFailure.RangeIncomplete)]
+    [InlineData(101, 101, false, DepositScanFailure.Unavailable)]
+    [InlineData(101, 101, true, DepositScanFailure.Unavailable)]
+    public async Task Internal_Server_Error_Maps_To_RangeIncomplete_Only_When_Splittable(
+        long from, long to, bool withWatched, string expectedCode)
+    {
+        using var handler = new Handler(_ =>
+            Json(new { error = new { code = -32000, message = "internal server error" } }));
+        await using var services = CreateServices(handler);
+        var source = new BscDepositProviderClient(services.GetRequiredService<IHttpRemoteService>())
+            .Create(ChainApiKeyProvider.RpcBsc, "key", 1000);
+        var watched = withWatched ? new HashSet<string> { Recipient } : new HashSet<string>();
+
+        var ex = await Should.ThrowAsync<DepositScanReadException>(() =>
+            source.ReadLogsAsync(Token, from, to, watched, CancellationToken.None));
+        ex.Code.ShouldBe(expectedCode);
+    }
+
     private static object Log(string hash, string to, int index, int amount) => new
     {
         address = Token,
